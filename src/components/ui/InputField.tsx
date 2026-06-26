@@ -1,0 +1,46 @@
+import { Feather } from "@expo/vector-icons";
+import { ReactNode } from "react";
+import { Text, TextInput, TextInputProps, View } from "react-native";
+
+type InputFieldProps = TextInputProps & {
+  label: string;
+  icon?: keyof typeof Feather.glyphMap;
+  error?: string;
+  rightAccessory?: ReactNode;
+  containerClassName?: string;
+};
+
+export function InputField({
+  label,
+  icon,
+  error,
+  rightAccessory,
+  containerClassName,
+  ...inputProps
+}: InputFieldProps) {
+  return (
+    <View className={containerClassName}>
+      <Text className="mb-2 text-sm font-medium text-gray-700">{label}</Text>
+
+      <View
+        className={`h-14 flex-row items-center rounded-full border bg-white px-5 ${
+          error ? "border-red-400" : "border-gray-200"
+        }`}
+      >
+        {icon ? <Feather name={icon} size={18} color="#9CA3AF" /> : null}
+
+        <TextInput
+          className="ml-3 flex-1 py-0 text-base text-gray-900"
+          placeholderTextColor="#9CA3AF"
+          {...inputProps}
+        />
+
+        {rightAccessory}
+      </View>
+
+      {error ? (
+        <Text className="ml-4 mt-1.5 text-xs text-red-500">{error}</Text>
+      ) : null}
+    </View>
+  );
+}
