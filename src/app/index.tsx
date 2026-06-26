@@ -1,7 +1,13 @@
-import { Link } from "expo-router";
-import { Image, Pressable, View , Text} from "react-native";
+import { Link, Redirect } from "expo-router";
+import { Image, Pressable, Text, View } from "react-native";
+
+import { hasPlayedSplash } from "../lib/splashState";
 
 export default function HomeScreen() {
+  if (!hasPlayedSplash()) {
+    return <Redirect href="/splash" />;
+  }
+
   return (
     <View className="flex-1 items-center justify-center">
       <Image
@@ -12,7 +18,7 @@ export default function HomeScreen() {
 
       <Link href="/home" asChild>
         <Pressable>
-            <Text className="text-2xl font-bold text-blue-500">Go to Home</Text>
+          <Text className="text-2xl font-bold text-blue-500">Go to Home</Text>
         </Pressable>
       </Link>
     </View>

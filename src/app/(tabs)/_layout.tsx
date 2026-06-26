@@ -1,8 +1,7 @@
-import { useRef, useEffect } from "react";
-import { Animated, ImageSourcePropType } from "react-native";
-import { Tabs } from "expo-router";
 import { Image } from "expo-image";
-import { View, Pressable } from "react-native";
+import { Tabs } from "expo-router";
+import { useEffect, useRef } from "react";
+import { Animated, ImageSourcePropType, Pressable, View } from "react-native";
 
 const AnimatedImage = Animated.createAnimatedComponent(Image);
 
@@ -49,10 +48,10 @@ const TabLayout = () => {
     return (
       <AnimatedImage
         source={source}
-        style={{ 
-          width: 24, 
-          height: 24, 
-          tintColor: getColorValue(animValue) as any
+        style={{
+          width: 24,
+          height: 24,
+          tintColor: getColorValue(animValue) as any,
         }}
         contentFit="contain"
       />
@@ -67,10 +66,10 @@ const TabLayout = () => {
     return (
       <AnimatedImage
         source={source}
-        style={{ 
-          width: 18, 
-          height: 18, 
-          tintColor: getCenterIconColor(animValue) as any
+        style={{
+          width: 18,
+          height: 18,
+          tintColor: getCenterIconColor(animValue) as any,
         }}
         contentFit="contain"
       />
@@ -135,8 +134,7 @@ const TabLayout = () => {
             />
           ),
           tabBarLabel: () => null,
-          tabBarButton: (props) => (
-            
+          tabBarButton: (props: any) => (
             <Pressable
               {...props}
               style={props?.style}
