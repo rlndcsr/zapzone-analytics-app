@@ -46,7 +46,7 @@ export default function Splash() {
   const { width } = useWindowDimensions();
 
   // Responsive logo: ~half the screen width, capped so it never gets huge on tablets.
-  const logoSize = Math.min(width * 0.5, 240);
+  const logoSize = Math.min(width * 0.3, 170);
 
   // Layout of the "animation area": logo floats a gap above a fixed ground shadow.
   // The logo and shadow are separate, anchored elements; only the logo translates.

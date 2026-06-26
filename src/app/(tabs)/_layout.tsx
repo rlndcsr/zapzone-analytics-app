@@ -43,7 +43,7 @@ const TabLayout = () => {
   const TabIcon = ({ source, animValue, focused }: TabIconProps) => {
     useEffect(() => {
       animateTabColor(animValue, focused);
-    }, [focused]);
+    }, [animValue, focused]);
 
     return (
       <AnimatedImage
@@ -61,7 +61,7 @@ const TabLayout = () => {
   const CenterTabIcon = ({ source, animValue, focused }: TabIconProps) => {
     useEffect(() => {
       animateTabColor(animValue, focused);
-    }, [focused]);
+    }, [animValue, focused]);
 
     return (
       <AnimatedImage
