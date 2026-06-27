@@ -61,6 +61,7 @@ const Home = () => {
       'add-user.png': require("../../../assets/zapzone-assests/icon/add-user.png"),
       'checked.png': require("../../../assets/zapzone-assests/icon/checked.png"),
       'party.png': require("../../../assets/zapzone-assests/icon/party-popper.png"),
+      'zapzone.png': require("../../../assets/zapzone-assests/zapzone.png"),
     }
     return iconMap[iconName] || null
   }
@@ -226,7 +227,7 @@ const Home = () => {
   return (
     <View className='flex-1 bg-background'>
       {/* Blue Header Bar */}
-      <View className='bg-blue-600 h-[37px] w-full mb-2' />
+      <View className='bg-[#0644C7] h-[37px] w-full mb-2' />
       
       <ScrollView className='flex-1' showsVerticalScrollIndicator={false}>
         <View className='px-5'>
@@ -235,30 +236,42 @@ const Home = () => {
           <View className='flex-row items-center justify-between mb-6'>
             <Pressable className='mt-2'>
               <Image 
-                source={require("../../../assets/zapzone-assests/icon/more.png")}
-                style={{ width: 24, height: 24 }}
+                source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
+                style={{ width: 60, height: 24 }}
                 contentFit="contain"
               />
             </Pressable>
-            <Pressable onPress={() => router.push('/notification/notification')} className="relative">
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/bell.png")}
-                style={{ width: 24, height: 24 }}
-                contentFit="contain"
-              />
+            
+            <View className='flex-row items-center gap-3'>
               {unreadNotificationsCount > 0 && (
-                <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-4 h-4 items-center justify-center">
-                  <Text className="text-white text-[7px] font-bold">
-                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                <Pressable 
+                  onPress={() => router.push('/notification/notification')}
+                  className="bg-gray-200 rounded-full px-4 py-2 flex-row items-center gap-2"
+                >
+                  <Image
+                    source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
+                    style={{ width: 15, height: 15 }}
+                    contentFit="contain"
+                  />
+                  <Text className="text-gray-800 text-md ">
+                    {unreadNotificationsCount > 99 ? '99' : unreadNotificationsCount}
                   </Text>
-                </View>
+                </Pressable>
               )}
-            </Pressable>
+              
+              <Pressable onPress={() => router.push('/settings/settings')}>
+                <Image
+                  source={require("../../../assets/zapzone-assests/icon/settings.png")}
+                  style={{ width: 24, height: 24 }}
+                  contentFit="contain"
+                />
+              </Pressable>
+            </View>
           </View>
 
           {/* Title Section */}
           <View className='mb-6'>
-            <Text className='text-3xl font-bold text-gray-900 mb-2'>Dashboard</Text>
+            <Text className='text-lg font-bold text-gray-900 '>Dashboard / <Text className='font-medium'>Overview</Text></Text>
             <Text className='text-sm text-gray-500'>Real-time venue performance overview.</Text>
           </View>
 
