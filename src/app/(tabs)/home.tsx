@@ -1,9 +1,10 @@
-import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator } from 'react-native'
-import React, { useState } from 'react'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator, Animated, Dimensions } from 'react-native'
+import React, { useState, useRef } from 'react'
 import { Image } from 'expo-image'
 import { BlurView } from 'expo-blur'
 import { useDashboardMetrics } from '../../lib/hooks/useDashboardMetrics'
+import { useNotifications } from '../../lib/hooks/useNotifications'
+import { router } from 'expo-router'
 
 type DateFilterType = 'today' | 'last_24h' | 'last_7d' | 'last_30d' | 'all_time' | 'custom'
 
@@ -13,8 +14,31 @@ const Home = () => {
   const [showDateDropdown, setShowDateDropdown] = useState(false)
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
-  
+
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current
+
+  const openModal = (id: number) => {
+    setSelectedMetric(id)
+    slideAnim.setValue(Dimensions.get('window').height)
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start()
+  }
+
+  const closeModal = () => {
+    Animated.timing(slideAnim, {
+      toValue: Dimensions.get('window').height,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      setSelectedMetric(null)
+    })
+  }
+
   const { metrics, loading, error } = useDashboardMetrics(dateFilter, customStartDate, customEndDate)
+  const { totalCount: unreadNotificationsCount } = useNotifications('unread')
 
   const dateFilterOptions = [
     { label: 'Today', value: 'today' as DateFilterType },
@@ -48,8 +72,8 @@ const Home = () => {
     const R = (num >> 16) - amt
     const G = (num >> 8 & 0x00FF) - amt
     const B = (num & 0x0000FF) - amt
-    return "#" + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 +
-      (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255))
+    return "#" + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
+      (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 1 ? 0 : B : 255))
       .toString(16).slice(1)
   }
 
@@ -159,10 +183,10 @@ const Home = () => {
 
   const MetricCard = ({ metric }: { metric: typeof metricDefinitions[0] }) => {
     const value = metrics ? String(metrics[metric.key] ?? 0) : '0'
-    
+
     return (
       <Pressable
-        onPress={() => setSelectedMetric(metric.id)}
+        onPress={() => openModal(metric.id)}
         className='flex-1 bg-white rounded-xl p-4 m-1'
       >
         <View className='flex-row items-center justify-between mb-3'>
@@ -172,15 +196,15 @@ const Home = () => {
             </Text>
             <Image
               source={require("../../../assets/zapzone-assests/icon/info.png")}
-              style={{width: 14, height: 14}}
+              style={{ width: 14, height: 14 }}
               contentFit="contain"
             />
           </View>
           <View className={`${metric.iconBg} p-2.5 rounded-lg`}>
             <Image
               source={getIcon(metric.icon)}
-              style={{ 
-                width: 22, 
+              style={{
+                width: 22,
                 height: 22,
                 tintColor: darkenColor(metric.color, 20)
               }}
@@ -195,26 +219,40 @@ const Home = () => {
   }
 
   const currentMetric = metricDefinitions.find(m => m.id === selectedMetric)
+  
+  // Check if breakdown is empty (all zeros)
+  const isBreakdownEmpty = currentMetric?.breakdown.every(item => item.percentage === '0%') ?? false
 
   return (
-    <SafeAreaView className='flex-1 bg-background'> 
+    <View className='flex-1 bg-background'>
+      {/* Blue Header Bar */}
+      <View className='bg-blue-600 h-[37px] w-full mb-2' />
+      
       <ScrollView className='flex-1' showsVerticalScrollIndicator={false}>
         <View className='px-5'>
+          
           {/* Header */}
           <View className='flex-row items-center justify-between mb-6'>
-            <Pressable>
-              <Image
+            <Pressable className='mt-2'>
+              <Image 
                 source={require("../../../assets/zapzone-assests/icon/more.png")}
                 style={{ width: 24, height: 24 }}
                 contentFit="contain"
               />
             </Pressable>
-            <Pressable>
+            <Pressable onPress={() => router.push('/notification/notification')} className="relative">
               <Image
                 source={require("../../../assets/zapzone-assests/icon/bell.png")}
                 style={{ width: 24, height: 24 }}
                 contentFit="contain"
               />
+              {unreadNotificationsCount > 0 && (
+                <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-4 h-4 items-center justify-center">
+                  <Text className="text-white text-[7px] font-bold">
+                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
           </View>
 
@@ -227,7 +265,7 @@ const Home = () => {
           {/* Filter Section */}
           <View className='flex-row items-center justify-between mb-6 relative'>
             <View className='flex-1 mr-2'>
-              <Pressable 
+              <Pressable
                 onPress={() => setShowDateDropdown(!showDateDropdown)}
                 className='flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200'
               >
@@ -254,13 +292,11 @@ const Home = () => {
                         setDateFilter(option.value)
                         setShowDateDropdown(false)
                       }}
-                      className={`px-4 py-3 ${index !== dateFilterOptions.length - 1 ? 'border-b border-gray-100' : ''} ${
-                        dateFilter === option.value ? 'bg-blue-50' : ''
-                      }`}
+                      className={`px-4 py-3 ${index !== dateFilterOptions.length - 1 ? 'border-b border-gray-100' : ''} ${dateFilter === option.value ? 'bg-blue-50' : ''
+                        }`}
                     >
-                      <Text className={`text-sm font-medium ${
-                        dateFilter === option.value ? 'text-blue-700' : 'text-gray-700'
-                      }`}>
+                      <Text className={`text-sm font-medium ${dateFilter === option.value ? 'text-blue-700' : 'text-gray-700'
+                        }`}>
                         {option.label}
                       </Text>
                     </Pressable>
@@ -268,7 +304,7 @@ const Home = () => {
                 </View>
               )}
             </View>
-            
+
             <Pressable className='bg-white p-3 rounded-lg border border-gray-200'>
               <Image
                 source={require("../../../assets/zapzone-assests/icon/scanner.png")}
@@ -307,69 +343,80 @@ const Home = () => {
         </View>
       </ScrollView>
 
-      {/* Breakdown Modal */}
+      {/* Breakdown Modal - Bottom Sheet Style */}
       <Modal
         visible={selectedMetric !== null}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setSelectedMetric(null)}
+        onRequestClose={closeModal}
       >
-        <View className='flex-1 bg-black/50 justify-center items-center p-5'>
+        <View className='absolute inset-0 bg-black/50' />
+        
+        <View className='flex-1 justify-end'>
           <Pressable
-            className='flex-1 justify-center items-center'
-            onPress={() => setSelectedMetric(null)}
+            className='flex-1'
+            onPress={closeModal}
+          />
+          
+          <Animated.View 
+            className='bg-white rounded-t-3xl p-6 w-full'
+            style={{ transform: [{ translateY: slideAnim }] }}
           >
-            <Pressable
-              className='bg-white rounded-2xl p-6 w-full max-w-sm'
-              onPress={(e) => e.stopPropagation()}
-            >
-              {currentMetric && (
-                <>
-                  {/* Modal Header */}
-                  <View className='flex-row items-center justify-between mb-6'>
-                    <View className='flex-row items-center gap-3'>
-                      <View style={{ backgroundColor: currentMetric.color }} className='p-2 rounded-lg'>
-                        <Image
-                          source={getIcon(currentMetric.icon)}
-                          style={{ width: 20, height: 20 }}
-                          contentFit="contain"
-                          tintColor="#FFFFFF"
-                        />
-                      </View>
-                      <Text className='text-lg font-bold text-gray-900'>{currentMetric.title} Breakdown</Text>
+            {currentMetric && (
+              <>
+                {/* Modal Header */}
+                <View className='flex-row items-center justify-between mb-6'>
+                  <View className='flex-row items-center gap-3'>
+                    <View style={{ backgroundColor: currentMetric.color }} className='p-2 rounded-lg'>
+                      <Image
+                        source={getIcon(currentMetric.icon)}
+                        style={{ width: 20, height: 20 }}
+                        contentFit="contain"
+                        tintColor="#FFFFFF"
+                      />
                     </View>
-                    <Pressable
-                      onPress={() => setSelectedMetric(null)}
-                      className='p-1'
-                    >
-                      <Text className='text-xl text-gray-500'>✕</Text>
-                    </Pressable>
+                    <Text className='text-lg font-bold text-gray-900'>{currentMetric.title} Breakdown</Text>
                   </View>
+                  <Pressable
+                    onPress={closeModal}
+                    className='p-1'
+                  >
+                    <Text className='text-xl text-gray-500'>✕</Text>
+                  </Pressable>
+                </View>
 
-                  {/* Breakdown Items */}
-                  <View className='space-y-2 mb-4'>
-                    {currentMetric.breakdown.map((item, index) => (
-                      <View key={index} className='flex-row items-center justify-between py-2 border-b border-gray-100'>
-                        <Text className='text-sm text-gray-700'>{item.label}</Text>
-                        <Text className='text-xs text-gray-500'>{item.percentage}</Text>
-                      </View>
-                    ))}
+                {/* Check if Breakdown is Empty */}
+                {isBreakdownEmpty ? (
+                  <View className='justify-center items-center py-12'>
+                    <Text className='text-gray-500 text-base font-medium'>No Breakdown available</Text>
                   </View>
+                ) : (
+                  <>
+                    {/* Breakdown Items */}
+                    <View className='space-y-2 mb-4'>
+                      {currentMetric.breakdown.map((item, index) => (
+                        <View key={index} className='flex-row items-center justify-between py-2 border-b border-gray-100'>
+                          <Text className='text-sm text-gray-700'>{item.label}</Text>
+                          <Text className='text-xs text-gray-500'>{item.percentage}</Text>
+                        </View>
+                      ))}
+                    </View>
 
-                  {/* Total */}
-                  <View className='flex-row items-center justify-between pt-4 border-t border-gray-200'>
-                    <Text className='text-sm font-semibold text-gray-900'>Total</Text>
-                    <Text className='text-lg font-bold text-gray-900'>
-                      {metrics ? metrics[currentMetric.key] ?? 0 : 0}
-                    </Text>
-                  </View>
-                </>
-              )}
-            </Pressable>
-          </Pressable>
+                    {/* Total */}
+                    <View className='flex-row items-center justify-between pt-4 border-t border-gray-200'>
+                      <Text className='text-sm font-semibold text-gray-900'>Total</Text>
+                      <Text className='text-lg font-bold text-gray-900'>
+                        {metrics ? metrics[currentMetric.key] ?? 0 : 0}
+                      </Text>
+                    </View>
+                  </>
+                )}
+              </>
+            )}
+          </Animated.View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   )
 }
 

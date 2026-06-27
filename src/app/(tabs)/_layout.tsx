@@ -1,75 +1,35 @@
 import { Image } from "expo-image";
 import { Tabs } from "expo-router";
-import { useEffect, useRef } from "react";
-import { Animated, ImageSourcePropType, Pressable, View } from "react-native";
-
-const AnimatedImage = Animated.createAnimatedComponent(Image);
+import { ImageSourcePropType, Pressable, View } from "react-native";
 
 const TabLayout = () => {
-  const homeColorAnim = useRef(new Animated.Value(0)).current;
-  const locationColorAnim = useRef(new Animated.Value(0)).current;
-  const navigationColorAnim = useRef(new Animated.Value(0)).current;
-  const calendarColorAnim = useRef(new Animated.Value(0)).current;
-  const profileColorAnim = useRef(new Animated.Value(0)).current;
-
-  const animateTabColor = (animValue: Animated.Value, focused: boolean) => {
-    Animated.timing(animValue, {
-      toValue: focused ? 1 : 0,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-  };
-
-  const getColorValue = (animValue: Animated.Value) => {
-    return animValue.interpolate({
-      inputRange: [0, 1],
-      outputRange: ["#999999", "#0644C7"],
-    });
-  };
-
-  const getCenterIconColor = (animValue: Animated.Value) => {
-    return animValue.interpolate({
-      inputRange: [0, 1],
-      outputRange: ["#999999", "#FFFFFF"],
-    });
-  };
-
   type TabIconProps = {
     source: ImageSourcePropType;
-    animValue: Animated.Value;
     focused: boolean;
   };
 
-  const TabIcon = ({ source, animValue, focused }: TabIconProps) => {
-    useEffect(() => {
-      animateTabColor(animValue, focused);
-    }, [animValue, focused]);
-
+  const TabIcon = ({ source, focused }: TabIconProps) => {
     return (
-      <AnimatedImage
+      <Image
         source={source}
         style={{
-          width: 24,
-          height: 24,
-          tintColor: getColorValue(animValue) as any,
+          width: 18,
+          height: 18,
+          tintColor: focused ? "#0644C7" : "#999999",
         }}
         contentFit="contain"
       />
     );
   };
 
-  const CenterTabIcon = ({ source, animValue, focused }: TabIconProps) => {
-    useEffect(() => {
-      animateTabColor(animValue, focused);
-    }, [animValue, focused]);
-
+  const CenterTabIcon = ({ source, focused }: TabIconProps) => {
     return (
-      <AnimatedImage
+      <Image
         source={source}
         style={{
           width: 18,
           height: 18,
-          tintColor: getCenterIconColor(animValue) as any,
+          tintColor: "#FFFFFF",
         }}
         contentFit="contain"
       />
@@ -85,7 +45,7 @@ const TabLayout = () => {
           backgroundColor: "#FFFFFF",
           borderTopColor: "#E0E0E0",
           borderTopWidth: 1,
-          height: 70,
+          height: 80,
           paddingBottom: 8,
           paddingTop: 8,
         },
@@ -103,7 +63,6 @@ const TabLayout = () => {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               source={require("../../../assets/zapzone-assests/icon/home.png")}
-              animValue={homeColorAnim}
               focused={focused}
             />
           ),
@@ -112,11 +71,10 @@ const TabLayout = () => {
       <Tabs.Screen
         name="location"
         options={{
-          title: "Store Location",
+          title: "Location",
           tabBarIcon: ({ focused }) => (
             <TabIcon
               source={require("../../../assets/zapzone-assests/icon/pin.png")}
-              animValue={locationColorAnim}
               focused={focused}
             />
           ),
@@ -129,21 +87,20 @@ const TabLayout = () => {
           tabBarIcon: ({ focused }) => (
             <CenterTabIcon
               source={require("../../../assets/zapzone-assests/icon/more.png")}
-              animValue={navigationColorAnim}
               focused={focused}
             />
           ),
           tabBarLabel: () => null,
           tabBarButton: (props: any) => (
-            <Pressable
-              {...props}
-              style={props?.style}
-              className="flex-1 justify-center items-center"
-            >
-              <View className="w-15 h-15 rounded-full bg-blue-600 justify-center items-center shadow-lg">
+            <View style={{ top: -15, justifyContent: 'center', alignItems: 'center', ...props.style }}>
+              <Pressable
+                {...props}
+                style={{}}
+                className="w-16 h-16 rounded-full bg-blue-700 justify-center items-center shadow-lg"
+              >
                 {props?.children}
-              </View>
-            </Pressable>
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -154,7 +111,6 @@ const TabLayout = () => {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               source={require("../../../assets/zapzone-assests/icon/calendar.png")}
-              animValue={calendarColorAnim}
               focused={focused}
             />
           ),
@@ -167,7 +123,6 @@ const TabLayout = () => {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               source={require("../../../assets/zapzone-assests/icon/user.png")}
-              animValue={profileColorAnim}
               focused={focused}
             />
           ),
