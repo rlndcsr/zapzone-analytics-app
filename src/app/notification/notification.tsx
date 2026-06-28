@@ -6,13 +6,13 @@ import { useNotifications } from '../../lib/hooks/useNotifications'
 import { AppNotification, NotificationFilterType } from '../../services/notificationService'
 
 const Notification = () => {
-  const { 
-    notifications, 
-    loading, 
-    error, 
-    filter, 
-    updateFilter, 
-    markAllAsRead, 
+  const {
+    notifications,
+    loading,
+    error,
+    filter,
+    updateFilter,
+    markAllAsRead,
     clearAll,
     actionLoading,
     page,
@@ -40,8 +40,8 @@ const Notification = () => {
   }
 
   const renderNotification = (item: AppNotification) => (
-    <Pressable 
-      key={item.id} 
+    <Pressable
+      key={item.id}
       onPress={() => handleNotificationPress(item)}
       className={`bg-white p-4 rounded-xl mb-3 border ${item.status === 'unread' ? 'border-blue-200 bg-blue-50/50' : 'border-gray-100'} active:bg-gray-50`}
     >
@@ -88,14 +88,14 @@ const Notification = () => {
       <View className="bg-blue-600 h-[37px] w-full mb-2" />
       <View className="px-5 py-4 flex-row items-center justify-between border-b border-gray-100 bg-white">
         <View className="flex-row items-center">
-          <Pressable 
-            onPress={() => router.back()} 
+          <Pressable
+            onPress={() => router.back()}
             className="mr-4 h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-gray-50 active:bg-gray-100"
           >
-            <Image 
-              source={require('../../../assets/zapzone-assests/icon/left.png')} 
+            <Image
+              source={require('../../../assets/zapzone-assests/icon/left.png')}
               style={{ width: 14, height: 14, tintColor: '#1F2937' }}
-              contentFit="contain" 
+              contentFit="contain"
             />
           </Pressable>
           <Text className="text-2xl font-bold text-gray-900">Notifications</Text>
@@ -109,29 +109,27 @@ const Notification = () => {
       <View className="bg-white border-b border-gray-100 px-5 py-3">
         <View className="flex-row items-center justify-between mb-3">
           <Text className="text-sm font-semibold text-gray-700">Filter By:</Text>
-          <Pressable 
-            onPress={markAllAsRead} 
+          <Pressable
+            onPress={markAllAsRead}
             disabled={actionLoading}
             className="bg-gray-100 px-3 py-1.5 rounded-lg active:bg-gray-200"
           >
             <Text className="text-blue-600 font-medium text-sm">Mark all read</Text>
           </Pressable>
         </View>
-        
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
           {filterOptions.map((opt) => (
             <Pressable
               key={opt.value}
               onPress={() => updateFilter(opt.value)}
-              className={`mr-2 px-4 py-2 rounded-full border ${
-                filter === opt.value 
-                  ? 'bg-blue-600 border-blue-600' 
+              className={`mr-2 px-4 py-2 rounded-full border ${filter === opt.value
+                  ? 'bg-blue-600 border-blue-600'
                   : 'bg-white border-gray-300'
-              }`}
+                }`}
             >
-              <Text className={`text-sm font-medium ${
-                filter === opt.value ? 'text-white' : 'text-gray-700'
-              }`}>
+              <Text className={`text-sm font-medium ${filter === opt.value ? 'text-white' : 'text-gray-700'
+                }`}>
                 {opt.label}
               </Text>
             </Pressable>
@@ -163,7 +161,7 @@ const Notification = () => {
         )}
 
         {!loading && !actionLoading && !error && notifications.map(renderNotification)}
-        
+
         {/* Pagination UI */}
         {!loading && !actionLoading && !error && totalCount > 0 && (
           <View className="mt-4 mb-10 pb-10">
@@ -174,13 +172,11 @@ const Notification = () => {
                   <Pressable
                     key={option}
                     onPress={() => updatePerPage(option)}
-                    className={`ml-2 px-3 py-1.5 rounded-lg border ${
-                      perPage === option ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'
-                    }`}
+                    className={`ml-2 px-3 py-1.5 rounded-lg border ${perPage === option ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'
+                      }`}
                   >
-                    <Text className={`text-sm font-medium ${
-                      perPage === option ? 'text-blue-700' : 'text-gray-600'
-                    }`}>{option}</Text>
+                    <Text className={`text-sm font-medium ${perPage === option ? 'text-blue-700' : 'text-gray-600'
+                      }`}>{option}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -190,13 +186,11 @@ const Notification = () => {
               <Pressable
                 onPress={() => setPage(page - 1)}
                 disabled={page === 1}
-                className={`px-4 py-2 rounded-lg border ${
-                  page === 1 ? 'bg-gray-100 border-gray-200 opacity-50' : 'bg-white border-gray-300 active:bg-gray-50'
-                }`}
+                className={`px-4 py-2 rounded-lg border ${page === 1 ? 'bg-gray-100 border-gray-200 opacity-50' : 'bg-white border-gray-300 active:bg-gray-50'
+                  }`}
               >
-                <Text className={`text-sm font-semibold ${
-                  page === 1 ? 'text-gray-400' : 'text-gray-700'
-                }`}>Previous</Text>
+                <Text className={`text-sm font-semibold ${page === 1 ? 'text-gray-400' : 'text-gray-700'
+                  }`}>Previous</Text>
               </Pressable>
 
               <Text className="text-sm text-gray-500 font-medium">
@@ -206,13 +200,11 @@ const Notification = () => {
               <Pressable
                 onPress={() => setPage(page + 1)}
                 disabled={page >= lastPage}
-                className={`px-4 py-2 rounded-lg border ${
-                  page >= lastPage ? 'bg-gray-100 border-gray-200 opacity-50' : 'bg-white border-gray-300 active:bg-gray-50'
-                }`}
+                className={`px-4 py-2 rounded-lg border ${page >= lastPage ? 'bg-gray-100 border-gray-200 opacity-50' : 'bg-white border-gray-300 active:bg-gray-50'
+                  }`}
               >
-                <Text className={`text-sm font-semibold ${
-                  page >= lastPage ? 'text-gray-400' : 'text-gray-700'
-                }`}>Next</Text>
+                <Text className={`text-sm font-semibold ${page >= lastPage ? 'text-gray-400' : 'text-gray-700'
+                  }`}>Next</Text>
               </Pressable>
             </View>
           </View>

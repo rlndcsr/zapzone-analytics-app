@@ -43,7 +43,7 @@ export async function fetchNotifications(
   } else if (filterType === 'payment') {
     params.append('type', 'payment'); // For 'Purchase' filter
   }
-  
+
   params.append('page', page.toString());
   params.append('per_page', perPage.toString());
 
