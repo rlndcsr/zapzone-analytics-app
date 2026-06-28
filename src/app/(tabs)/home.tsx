@@ -2,7 +2,6 @@ import { Image } from "expo-image";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Animated,
   Dimensions,
   Modal,
@@ -11,10 +10,12 @@ import {
   Text,
   View,
 } from "react-native";
+import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import type {
   BreakdownKey,
+  DashboardData,
   DashboardTotals,
 } from "../../services/metricsService";
 
@@ -25,6 +26,112 @@ type DateFilterType =
   | "last_30d"
   | "all_time"
   | "custom";
+
+type MetricDefinition = {
+  id: number;
+  label: string;
+  title: string;
+  breakdownKey: BreakdownKey;
+  /** Scalar from `metrics` shown as the big number (use the API value, never computed). */
+  valueField?: keyof DashboardTotals;
+  /** Optional secondary line under the number, e.g. "N confirmed". */
+  subtitle?: (metrics: DashboardTotals) => string;
+  icon: string;
+  iconBg: string;
+  color: string;
+  /** Only enabled cards pull real data; others stay blank until wired. */
+  enabled: boolean;
+};
+
+// The icon map, helpers, and MetricCard live at module scope so their identity
+// is stable across renders. Defined inside Home, MetricCard would be a new
+// component type every render, remounting the cards and flickering the icons.
+const ICON_MAP: { [key: string]: any } = {
+  "group.png": require("../../../assets/zapzone-assests/icon/group.png"),
+  "ticket.png": require("../../../assets/zapzone-assests/icon/ticket.png"),
+  "shopping-cart.png": require("../../../assets/zapzone-assests/icon/shopping-cart.png"),
+  "membership.png": require("../../../assets/zapzone-assests/icon/membership.png"),
+  "add-user.png": require("../../../assets/zapzone-assests/icon/add-user.png"),
+  "checked.png": require("../../../assets/zapzone-assests/icon/checked.png"),
+  "party.png": require("../../../assets/zapzone-assests/icon/party-popper.png"),
+  "zapzone.png": require("../../../assets/zapzone-assests/zapzone.png"),
+};
+
+const getIcon = (iconName: string) => ICON_MAP[iconName] || null;
+
+const darkenColor = (color: string, percent: number = 30) => {
+  const num = parseInt(color.replace("#", ""), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = (num >> 16) - amt;
+  const G = ((num >> 8) & 0x00ff) - amt;
+  const B = (num & 0x0000ff) - amt;
+  return (
+    "#" +
+    (
+      0x1000000 +
+      (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
+      (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+      (B < 255 ? (B < 1 ? 0 : B) : 255)
+    )
+      .toString(16)
+      .slice(1)
+  );
+};
+
+const MetricCard = ({
+  metric,
+  data,
+  onPress,
+}: {
+  metric: MetricDefinition;
+  data: DashboardData | null;
+  onPress: (id: number) => void;
+}) => {
+  const active = metric.enabled && data != null;
+  const value =
+    active && metric.valueField
+      ? String(data.metrics[metric.valueField] ?? 0)
+      : "—";
+  const subtitle =
+    active && metric.subtitle ? metric.subtitle(data.metrics) : null;
+  const pill = active ? data.timeframe.description : metric.label;
+
+  return (
+    <Pressable
+      onPress={() => onPress(metric.id)}
+      className="flex-1 bg-white rounded-xl p-4 m-1"
+    >
+      <View className="flex-row items-center justify-between mb-3">
+        <View className="flex-row items-center gap-1">
+          <Text className="text-xs font-medium text-gray-600">{pill}</Text>
+          <Image
+            source={require("../../../assets/zapzone-assests/icon/info.png")}
+            style={{ width: 14, height: 14 }}
+            contentFit="contain"
+          />
+        </View>
+        <View className={`${metric.iconBg} p-2.5 rounded-lg`}>
+          <Image
+            source={getIcon(metric.icon)}
+            style={{
+              width: 22,
+              height: 22,
+              tintColor: darkenColor(metric.color, 20),
+            }}
+            contentFit="contain"
+          />
+        </View>
+      </View>
+      <Text className="text-base font-semibold text-gray-700 mb-3">
+        {metric.title}
+      </Text>
+      <Text className="text-4xl font-bold text-gray-900">{value}</Text>
+      {subtitle && (
+        <Text className="text-xs text-gray-500 mt-1">{subtitle}</Text>
+      )}
+    </Pressable>
+  );
+};
 
 const Home = () => {
   const [selectedMetric, setSelectedMetric] = useState<number | null>(null);
@@ -110,56 +217,7 @@ const Home = () => {
   const currentDateLabel =
     dateFilterOptions.find((opt) => opt.value === dateFilter)?.label || "Today";
 
-  // Icon mapping
-  const getIcon = (iconName: string) => {
-    const iconMap: { [key: string]: any } = {
-      "group.png": require("../../../assets/zapzone-assests/icon/group.png"),
-      "ticket.png": require("../../../assets/zapzone-assests/icon/ticket.png"),
-      "shopping-cart.png": require("../../../assets/zapzone-assests/icon/shopping-cart.png"),
-      "membership.png": require("../../../assets/zapzone-assests/icon/membership.png"),
-      "add-user.png": require("../../../assets/zapzone-assests/icon/add-user.png"),
-      "checked.png": require("../../../assets/zapzone-assests/icon/checked.png"),
-      "party.png": require("../../../assets/zapzone-assests/icon/party-popper.png"),
-      "zapzone.png": require("../../../assets/zapzone-assests/zapzone.png"),
-    };
-    return iconMap[iconName] || null;
-  };
-
-  // Darken color function
-  const darkenColor = (color: string, percent: number = 30) => {
-    const num = parseInt(color.replace("#", ""), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) - amt;
-    const G = ((num >> 8) & 0x00ff) - amt;
-    const B = (num & 0x0000ff) - amt;
-    return (
-      "#" +
-      (
-        0x1000000 +
-        (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-        (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
-        (B < 255 ? (B < 1 ? 0 : B) : 255)
-      )
-        .toString(16)
-        .slice(1)
-    );
-  };
-
-  const metricDefinitions: {
-    id: number;
-    label: string;
-    title: string;
-    breakdownKey: BreakdownKey;
-    /** Scalar from `metrics` shown as the big number (use the API value, never computed). */
-    valueField?: keyof DashboardTotals;
-    /** Optional secondary line under the number, e.g. "N confirmed". */
-    subtitle?: (metrics: DashboardTotals) => string;
-    icon: string;
-    iconBg: string;
-    color: string;
-    /** Only enabled cards pull real data; others stay blank until wired. */
-    enabled: boolean;
-  }[] = [
+  const metricDefinitions: MetricDefinition[] = [
     {
       id: 1,
       label: "Today",
@@ -233,57 +291,6 @@ const Home = () => {
       enabled: false,
     },
   ];
-
-  const MetricCard = ({
-    metric,
-  }: {
-    metric: (typeof metricDefinitions)[0];
-  }) => {
-    const active = metric.enabled && data != null;
-    const value =
-      active && metric.valueField
-        ? String(data.metrics[metric.valueField] ?? 0)
-        : "—";
-    const subtitle =
-      active && metric.subtitle ? metric.subtitle(data.metrics) : null;
-    const pill = active ? data.timeframe.description : metric.label;
-
-    return (
-      <Pressable
-        onPress={() => openModal(metric.id)}
-        className="flex-1 bg-white rounded-xl p-4 m-1"
-      >
-        <View className="flex-row items-center justify-between mb-3">
-          <View className="flex-row items-center gap-1">
-            <Text className="text-xs font-medium text-gray-600">{pill}</Text>
-            <Image
-              source={require("../../../assets/zapzone-assests/icon/info.png")}
-              style={{ width: 14, height: 14 }}
-              contentFit="contain"
-            />
-          </View>
-          <View className={`${metric.iconBg} p-2.5 rounded-lg`}>
-            <Image
-              source={getIcon(metric.icon)}
-              style={{
-                width: 22,
-                height: 22,
-                tintColor: darkenColor(metric.color, 20),
-              }}
-              contentFit="contain"
-            />
-          </View>
-        </View>
-        <Text className="text-base font-semibold text-gray-700 mb-3">
-          {metric.title}
-        </Text>
-        <Text className="text-4xl font-bold text-gray-900">{value}</Text>
-        {subtitle && (
-          <Text className="text-xs text-gray-500 mt-1">{subtitle}</Text>
-        )}
-      </Pressable>
-    );
-  };
 
   const currentMetric = metricDefinitions.find((m) => m.id === selectedMetric);
   const currentBreakdown = currentMetric?.enabled
@@ -430,16 +437,11 @@ const Home = () => {
             </Pressable>
           </View>
 
-          {/* Loading State */}
-          {loading && (
-            <View className="flex-1 justify-center items-center py-20">
-              <ActivityIndicator size="large" color="#0644C7" />
-              <Text className="text-gray-500 mt-3">Loading metrics...</Text>
-            </View>
-          )}
+          {/* Loading State — animated skeleton matching the cards */}
+          {loading && <MetricCardsSkeleton />}
 
           {/* Error State */}
-          {error && (
+          {!loading && error && (
             <View className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
               <Text className="text-red-700 font-semibold">Error</Text>
               <Text className="text-red-600 text-sm">{error}</Text>
@@ -451,7 +453,11 @@ const Home = () => {
             <View className="flex-row flex-wrap">
               {metricDefinitions.map((metric) => (
                 <View key={metric.id} className="w-1/2">
-                  <MetricCard metric={metric} />
+                  <MetricCard
+                    metric={metric}
+                    data={data}
+                    onPress={openModal}
+                  />
                 </View>
               ))}
             </View>
