@@ -13,11 +13,6 @@ import Animated, {
 // causes no layout shift.
 const CARD_COUNT = 7;
 
-/**
- * A single shimmer block: an animated opacity wrapper (Reanimated) around a
- * static NativeWind-styled bar, so the pulse runs on the UI thread while the
- * block's look stays in className.
- */
 function SkeletonBlock({
   pulse,
   className,
@@ -43,27 +38,23 @@ function MetricCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
         <SkeletonBlock pulse={pulse} className="w-10 h-10 rounded-lg" />
       </View>
 
-      {/* Title */}
       <View className="mb-3">
         <SkeletonBlock pulse={pulse} className="w-24 h-4" />
       </View>
 
-      {/* Big number */}
       <SkeletonBlock pulse={pulse} className="w-16 h-8" />
     </View>
   );
 }
 
-/** Animated placeholder grid shown while dashboard metrics load or refresh. */
 export function MetricCardsSkeleton() {
-  // One shared value drives every block so they pulse in unison.
   const pulse = useSharedValue(0.5);
 
   useEffect(() => {
     pulse.value = withRepeat(
       withTiming(1, { duration: 850, easing: Easing.inOut(Easing.ease) }),
-      -1, // repeat forever
-      true, // reverse each cycle -> smooth fade in/out
+      -1,
+      true,
     );
   }, [pulse]);
 

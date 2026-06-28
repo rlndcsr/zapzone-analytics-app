@@ -57,11 +57,6 @@ export type DashboardTotals = {
   [key: string]: number;
 };
 
-/**
- * Per-location aggregates keyed by location id. Used to populate the location
- * filter without calling the heavy /locations endpoint (which is too large for
- * mobile). Only `name` is needed here; the numeric stats are ignored.
- */
 export type LocationStat = {
   name: string;
   [key: string]: unknown;

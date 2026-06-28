@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { BottomSheet } from "../../components/ui/BottomSheet";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
@@ -205,6 +206,11 @@ const Home = () => {
     setShowLocationDropdown(false);
   };
 
+  const handleSelectDate = (value: DateFilterType) => {
+    setDateFilter(value);
+    setShowDateDropdown(false);
+  };
+
   const dateFilterOptions = [
     { label: "Today", value: "today" as DateFilterType },
     { label: "Last 24 Hours", value: "last_24h" as DateFilterType },
@@ -378,10 +384,10 @@ const Home = () => {
           </Pressable>
 
           {/* Filter Section */}
-          <View className="flex-row items-center justify-between mb-6 relative">
+          <View className="flex-row items-center justify-between mb-6">
             <View className="flex-1 mr-2">
               <Pressable
-                onPress={() => setShowDateDropdown(!showDateDropdown)}
+                onPress={() => setShowDateDropdown(true)}
                 className="flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200"
               >
                 <Image
@@ -398,34 +404,6 @@ const Home = () => {
                   contentFit="contain"
                 />
               </Pressable>
-
-              {/* Dropdown Menu */}
-              {showDateDropdown && (
-                <View className="absolute top-14 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-                  {dateFilterOptions.map((option, index) => (
-                    <Pressable
-                      key={option.value}
-                      onPress={() => {
-                        setDateFilter(option.value);
-                        setShowDateDropdown(false);
-                      }}
-                      className={`px-4 py-3 ${index !== dateFilterOptions.length - 1 ? "border-b border-gray-100" : ""} ${
-                        dateFilter === option.value ? "bg-blue-50" : ""
-                      }`}
-                    >
-                      <Text
-                        className={`text-sm font-medium ${
-                          dateFilter === option.value
-                            ? "text-blue-700"
-                            : "text-gray-700"
-                        }`}
-                      >
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
             </View>
 
             <Pressable className="bg-white p-3 rounded-lg border border-gray-200">
@@ -551,53 +529,55 @@ const Home = () => {
         </View>
       </Modal>
 
-      {/* Location Picker Modal */}
-      <Modal
+      {/* Location Picker */}
+      <BottomSheet
         visible={showLocationDropdown}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowLocationDropdown(false)}
+        onClose={() => setShowLocationDropdown(false)}
+        title="Select Location"
       >
-        <View className="absolute inset-0 bg-black/50" />
-
-        <View className="flex-1 justify-end">
+        <ScrollView className="px-4 pb-6">
+          {/* All Locations — only the label is hardcoded */}
           <Pressable
-            className="flex-1"
-            onPress={() => setShowLocationDropdown(false)}
-          />
+            onPress={() => handleSelectLocation("all")}
+            className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
+              selectedLocation === "all" ? "bg-blue-50" : ""
+            }`}
+          >
+            <Text
+              className={`text-base font-medium ${
+                selectedLocation === "all" ? "text-blue-700" : "text-gray-800"
+              }`}
+            >
+              All Locations
+            </Text>
+            {selectedLocation === "all" && (
+              <Image
+                source={require("../../../assets/zapzone-assests/icon/checked.png")}
+                style={{ width: 18, height: 18 }}
+                contentFit="contain"
+              />
+            )}
+          </Pressable>
 
-          <View className="bg-white rounded-t-3xl max-h-[70%]">
-            {/* Header */}
-            <View className="flex-row items-center justify-between p-6 pb-3">
-              <Text className="text-lg font-bold text-gray-900">
-                Select Location
-              </Text>
+          {locationOptions.map((loc) => {
+            const isSelected = selectedLocation === loc.id;
+            return (
               <Pressable
-                onPress={() => setShowLocationDropdown(false)}
-                className="p-1"
-              >
-                <Text className="text-xl text-gray-500">✕</Text>
-              </Pressable>
-            </View>
-
-            <ScrollView className="px-4 pb-6">
-              {/* All Locations — only the label is hardcoded */}
-              <Pressable
-                onPress={() => handleSelectLocation("all")}
+                key={loc.id}
+                onPress={() => handleSelectLocation(loc.id)}
                 className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                  selectedLocation === "all" ? "bg-blue-50" : ""
+                  isSelected ? "bg-blue-50" : ""
                 }`}
               >
                 <Text
-                  className={`text-base font-medium ${
-                    selectedLocation === "all"
-                      ? "text-blue-700"
-                      : "text-gray-800"
+                  className={`text-base font-medium flex-1 mr-2 ${
+                    isSelected ? "text-blue-700" : "text-gray-800"
                   }`}
+                  numberOfLines={1}
                 >
-                  All Locations
+                  {loc.name}
                 </Text>
-                {selectedLocation === "all" && (
+                {isSelected && (
                   <Image
                     source={require("../../../assets/zapzone-assests/icon/checked.png")}
                     style={{ width: 18, height: 18 }}
@@ -605,39 +585,47 @@ const Home = () => {
                   />
                 )}
               </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
 
-              {locationOptions.map((loc) => {
-                const isSelected = selectedLocation === loc.id;
-                return (
-                  <Pressable
-                    key={loc.id}
-                    onPress={() => handleSelectLocation(loc.id)}
-                    className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                      isSelected ? "bg-blue-50" : ""
-                    }`}
-                  >
-                    <Text
-                      className={`text-base font-medium flex-1 mr-2 ${
-                        isSelected ? "text-blue-700" : "text-gray-800"
-                      }`}
-                      numberOfLines={1}
-                    >
-                      {loc.name}
-                    </Text>
-                    {isSelected && (
-                      <Image
-                        source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                        style={{ width: 18, height: 18 }}
-                        contentFit="contain"
-                      />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      {/* Timeframe Picker */}
+      <BottomSheet
+        visible={showDateDropdown}
+        onClose={() => setShowDateDropdown(false)}
+        title="Select Timeframe"
+      >
+        <ScrollView className="px-4 pb-6">
+          {dateFilterOptions.map((option) => {
+            const isSelected = dateFilter === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => handleSelectDate(option.value)}
+                className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
+                  isSelected ? "bg-blue-50" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium ${
+                    isSelected ? "text-blue-700" : "text-gray-800"
+                  }`}
+                >
+                  {option.label}
+                </Text>
+                {isSelected && (
+                  <Image
+                    source={require("../../../assets/zapzone-assests/icon/checked.png")}
+                    style={{ width: 18, height: 18 }}
+                    contentFit="contain"
+                  />
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 };
