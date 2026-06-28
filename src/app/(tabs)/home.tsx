@@ -1,200 +1,261 @@
-import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator, Animated, Dimensions } from 'react-native'
-import React, { useState, useRef } from 'react'
-import { Image } from 'expo-image'
-import { BlurView } from 'expo-blur'
-import { useDashboardMetrics } from '../../lib/hooks/useDashboardMetrics'
-import { useNotifications } from '../../lib/hooks/useNotifications'
-import { router } from 'expo-router'
+import { Image } from "expo-image";
+import { router } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
+import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useNotifications } from "../../lib/hooks/useNotifications";
+import type {
+  BreakdownKey,
+  DashboardTotals,
+} from "../../services/metricsService";
 
-type DateFilterType = 'today' | 'last_24h' | 'last_7d' | 'last_30d' | 'all_time' | 'custom'
+type DateFilterType =
+  | "today"
+  | "last_24h"
+  | "last_7d"
+  | "last_30d"
+  | "all_time"
+  | "custom";
 
 const Home = () => {
-  const [selectedMetric, setSelectedMetric] = useState<number | null>(null)
-  const [dateFilter, setDateFilter] = useState<DateFilterType>('today')
-  const [showDateDropdown, setShowDateDropdown] = useState(false)
-  const [customStartDate, setCustomStartDate] = useState('')
-  const [customEndDate, setCustomEndDate] = useState('')
+  const [selectedMetric, setSelectedMetric] = useState<number | null>(null);
+  const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
+  const [showDateDropdown, setShowDateDropdown] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState<number | "all">(
+    "all",
+  );
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [locationOptions, setLocationOptions] = useState<
+    { id: number; name: string }[]
+  >([]);
 
-  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current
+  const slideAnim = useRef(
+    new Animated.Value(Dimensions.get("window").height),
+  ).current;
 
   const openModal = (id: number) => {
-    setSelectedMetric(id)
-    slideAnim.setValue(Dimensions.get('window').height)
+    setSelectedMetric(id);
+    slideAnim.setValue(Dimensions.get("window").height);
     Animated.timing(slideAnim, {
       toValue: 0,
       duration: 300,
       useNativeDriver: true,
-    }).start()
-  }
+    }).start();
+  };
 
   const closeModal = () => {
     Animated.timing(slideAnim, {
-      toValue: Dimensions.get('window').height,
+      toValue: Dimensions.get("window").height,
       duration: 250,
       useNativeDriver: true,
     }).start(() => {
-      setSelectedMetric(null)
-    })
-  }
+      setSelectedMetric(null);
+    });
+  };
 
-  const { metrics, loading, error } = useDashboardMetrics(dateFilter, customStartDate, customEndDate)
-  const { totalCount: unreadNotificationsCount } = useNotifications('unread')
+  const { data, loading, error } = useDashboardMetrics({
+    timeframe: dateFilter,
+    locationId: selectedLocation, // "all" → no location_id param sent
+    dateFrom: customStartDate,
+    dateTo: customEndDate,
+  });
+  const { totalCount: unreadNotificationsCount } = useNotifications("unread");
+
+  // Build the location filter from the metrics response itself (locationStats),
+  // mirroring the web admin — no separate /locations call (that payload is too
+  // large for mobile and crashes the app). Only refresh the list from an
+  // unfiltered ("all") response so all options stay available after selecting one.
+  useEffect(() => {
+    if (selectedLocation === "all" && data?.locationStats) {
+      setLocationOptions(
+        Object.entries(data.locationStats).map(([id, stats]) => ({
+          id: Number(id),
+          name: stats.name,
+        })),
+      );
+    }
+  }, [data, selectedLocation]);
+
+  const selectedLocationLabel =
+    selectedLocation === "all"
+      ? "All Locations"
+      : (locationOptions.find((loc) => loc.id === selectedLocation)?.name ??
+        "All Locations");
+
+  const handleSelectLocation = (id: number | "all") => {
+    setSelectedLocation(id);
+    setShowLocationDropdown(false);
+  };
 
   const dateFilterOptions = [
-    { label: 'Today', value: 'today' as DateFilterType },
-    { label: 'Last 24 Hours', value: 'last_24h' as DateFilterType },
-    { label: 'Last 7 Days', value: 'last_7d' as DateFilterType },
-    { label: 'Last 30 Days', value: 'last_30d' as DateFilterType },
-    { label: 'All Time', value: 'all_time' as DateFilterType },
-    { label: 'Custom Range', value: 'custom' as DateFilterType },
-  ]
+    { label: "Today", value: "today" as DateFilterType },
+    { label: "Last 24 Hours", value: "last_24h" as DateFilterType },
+    { label: "Last 7 Days", value: "last_7d" as DateFilterType },
+    { label: "Last 30 Days", value: "last_30d" as DateFilterType },
+    { label: "All Time", value: "all_time" as DateFilterType },
+    { label: "Custom Range", value: "custom" as DateFilterType },
+  ];
 
-  const currentDateLabel = dateFilterOptions.find(opt => opt.value === dateFilter)?.label || 'Today'
+  const currentDateLabel =
+    dateFilterOptions.find((opt) => opt.value === dateFilter)?.label || "Today";
 
   // Icon mapping
   const getIcon = (iconName: string) => {
     const iconMap: { [key: string]: any } = {
-      'group.png': require("../../../assets/zapzone-assests/icon/group.png"),
-      'ticket.png': require("../../../assets/zapzone-assests/icon/ticket.png"),
-      'shopping-cart.png': require("../../../assets/zapzone-assests/icon/shopping-cart.png"),
-      'membership.png': require("../../../assets/zapzone-assests/icon/membership.png"),
-      'add-user.png': require("../../../assets/zapzone-assests/icon/add-user.png"),
-      'checked.png': require("../../../assets/zapzone-assests/icon/checked.png"),
-      'party.png': require("../../../assets/zapzone-assests/icon/party-popper.png"),
-      'zapzone.png': require("../../../assets/zapzone-assests/zapzone.png"),
-    }
-    return iconMap[iconName] || null
-  }
+      "group.png": require("../../../assets/zapzone-assests/icon/group.png"),
+      "ticket.png": require("../../../assets/zapzone-assests/icon/ticket.png"),
+      "shopping-cart.png": require("../../../assets/zapzone-assests/icon/shopping-cart.png"),
+      "membership.png": require("../../../assets/zapzone-assests/icon/membership.png"),
+      "add-user.png": require("../../../assets/zapzone-assests/icon/add-user.png"),
+      "checked.png": require("../../../assets/zapzone-assests/icon/checked.png"),
+      "party.png": require("../../../assets/zapzone-assests/icon/party-popper.png"),
+      "zapzone.png": require("../../../assets/zapzone-assests/zapzone.png"),
+    };
+    return iconMap[iconName] || null;
+  };
 
   // Darken color function
   const darkenColor = (color: string, percent: number = 30) => {
-    const num = parseInt(color.replace("#", ""), 16)
-    const amt = Math.round(2.55 * percent)
-    const R = (num >> 16) - amt
-    const G = (num >> 8 & 0x00FF) - amt
-    const B = (num & 0x0000FF) - amt
-    return "#" + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
-      (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 1 ? 0 : B : 255))
-      .toString(16).slice(1)
-  }
+    const num = parseInt(color.replace("#", ""), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) - amt;
+    const G = ((num >> 8) & 0x00ff) - amt;
+    const B = (num & 0x0000ff) - amt;
+    return (
+      "#" +
+      (
+        0x1000000 +
+        (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
+        (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+        (B < 255 ? (B < 1 ? 0 : B) : 255)
+      )
+        .toString(16)
+        .slice(1)
+    );
+  };
 
-  const metricDefinitions = [
+  const metricDefinitions: {
+    id: number;
+    label: string;
+    title: string;
+    breakdownKey: BreakdownKey;
+    /** Scalar from `metrics` shown as the big number (use the API value, never computed). */
+    valueField?: keyof DashboardTotals;
+    /** Optional secondary line under the number, e.g. "N confirmed". */
+    subtitle?: (metrics: DashboardTotals) => string;
+    icon: string;
+    iconBg: string;
+    color: string;
+    /** Only enabled cards pull real data; others stay blank until wired. */
+    enabled: boolean;
+  }[] = [
     {
       id: 1,
-      label: 'Today',
-      title: 'Parties',
-      key: 'parties' as const,
-      icon: 'party.png',
-      iconBg: 'bg-blue-100',
-      color: '#5B7EFF',
-      breakdown: [
-        { label: 'Birthday Parties', percentage: '0%' },
-        { label: 'Private Parties', percentage: '0%' },
-        { label: 'Team Parties', percentage: '0%' },
-        { label: 'Group Parties', percentage: '0%' },
-        { label: 'Other', percentage: '0%' },
-      ]
+      label: "Today",
+      title: "Packages",
+      breakdownKey: "packageBreakdown",
+      valueField: "totalBookings",
+      subtitle: (metrics) => `${metrics.confirmedBookings} confirmed`,
+      icon: "party.png",
+      iconBg: "bg-blue-100",
+      color: "#5B7EFF",
+      enabled: true,
     },
     {
       id: 2,
-      label: 'Today',
-      title: 'Party Participants',
-      key: 'party_participants' as const,
-      icon: 'group.png',
-      iconBg: 'bg-purple-100',
-      color: '#A78BFA',
-      breakdown: [
-        { label: 'Children', percentage: '0%' },
-        { label: 'Adults', percentage: '0%' },
-      ]
+      label: "Today",
+      title: "Party Participants",
+      breakdownKey: "participantBreakdown",
+      icon: "group.png",
+      iconBg: "bg-purple-100",
+      color: "#A78BFA",
+      enabled: false,
     },
     {
       id: 3,
-      label: 'Today',
-      title: 'Attraction Sold',
-      key: 'attraction_sold' as const,
-      icon: 'ticket.png',
-      iconBg: 'bg-green-100',
-      color: '#10B981',
-      breakdown: [
-        { label: 'Laser Tag', percentage: '0%' },
-        { label: 'Ropes', percentage: '0%' },
-        { label: 'Arcade', percentage: '0%' },
-        { label: 'Other Attraction', percentage: '0%' },
-      ]
+      label: "Today",
+      title: "Attractions Sold",
+      breakdownKey: "attractionBreakdown",
+      icon: "ticket.png",
+      iconBg: "bg-green-100",
+      color: "#10B981",
+      enabled: false,
     },
     {
       id: 4,
-      label: 'Today',
-      title: 'Event Sold',
-      key: 'event_sold' as const,
-      icon: 'shopping-cart.png',
-      iconBg: 'bg-pink-100',
-      color: '#EC4899',
-      breakdown: [
-        { label: 'Open Jump', percentage: '0%' },
-        { label: 'Special Events', percentage: '0%' },
-        { label: 'Champs', percentage: '0%' },
-        { label: 'Other Events', percentage: '0%' },
-      ]
+      label: "Today",
+      title: "Events Sold",
+      breakdownKey: "eventBreakdown",
+      icon: "shopping-cart.png",
+      iconBg: "bg-pink-100",
+      color: "#EC4899",
+      enabled: false,
     },
     {
       id: 5,
-      label: 'Today',
-      title: 'Memberships',
-      key: 'memberships' as const,
-      icon: 'membership.png',
-      iconBg: 'bg-yellow-100',
-      color: '#F59E0B',
-      breakdown: [
-        { label: 'Basic', percentage: '0%' },
-        { label: 'Standard', percentage: '0%' },
-        { label: 'Premium', percentage: '0%' },
-        { label: 'Family', percentage: '0%' },
-      ]
+      label: "Today",
+      title: "Memberships",
+      breakdownKey: "membershipBreakdown",
+      icon: "membership.png",
+      iconBg: "bg-yellow-100",
+      color: "#F59E0B",
+      enabled: false,
     },
     {
       id: 6,
-      label: 'Today',
-      title: 'Unique Customers',
-      key: 'unique_customers' as const,
-      icon: 'add-user.png',
-      iconBg: 'bg-red-100',
-      color: '#EF4444',
-      breakdown: [
-        { label: 'New Customers', percentage: '0%' },
-        { label: 'Returning Customers', percentage: '0%' },
-      ]
+      label: "Today",
+      title: "Unique Customers",
+      breakdownKey: "customerBreakdown",
+      icon: "add-user.png",
+      iconBg: "bg-red-100",
+      color: "#EF4444",
+      enabled: false,
     },
     {
       id: 7,
-      label: 'Today',
-      title: 'Confirm Booking',
-      key: 'confirm_booking' as const,
-      icon: 'checked.png',
-      iconBg: 'bg-teal-100',
-      color: '#14B8A6',
-      breakdown: [
-        { label: 'Parties', percentage: '0%' },
-        { label: 'Events', percentage: '0%' },
-        { label: 'Attraction', percentage: '0%' },
-      ]
+      label: "Today",
+      title: "Confirmed Booking",
+      breakdownKey: "confirmedBreakdown",
+      icon: "checked.png",
+      iconBg: "bg-teal-100",
+      color: "#14B8A6",
+      enabled: false,
     },
-  ]
+  ];
 
-  const MetricCard = ({ metric }: { metric: typeof metricDefinitions[0] }) => {
-    const value = metrics ? String(metrics[metric.key] ?? 0) : '0'
+  const MetricCard = ({
+    metric,
+  }: {
+    metric: (typeof metricDefinitions)[0];
+  }) => {
+    const active = metric.enabled && data != null;
+    const value =
+      active && metric.valueField
+        ? String(data.metrics[metric.valueField] ?? 0)
+        : "—";
+    const subtitle =
+      active && metric.subtitle ? metric.subtitle(data.metrics) : null;
+    const pill = active ? data.timeframe.description : metric.label;
 
     return (
       <Pressable
         onPress={() => openModal(metric.id)}
-        className='flex-1 bg-white rounded-xl p-4 m-1'
+        className="flex-1 bg-white rounded-xl p-4 m-1"
       >
-        <View className='flex-row items-center justify-between mb-3'>
-          <View className='flex-row items-center gap-1'>
-            <Text className='text-xs font-medium text-gray-600'>
-              {metric.label}
-            </Text>
+        <View className="flex-row items-center justify-between mb-3">
+          <View className="flex-row items-center gap-1">
+            <Text className="text-xs font-medium text-gray-600">{pill}</Text>
             <Image
               source={require("../../../assets/zapzone-assests/icon/info.png")}
               style={{ width: 14, height: 14 }}
@@ -207,45 +268,50 @@ const Home = () => {
               style={{
                 width: 22,
                 height: 22,
-                tintColor: darkenColor(metric.color, 20)
+                tintColor: darkenColor(metric.color, 20),
               }}
               contentFit="contain"
             />
           </View>
         </View>
-        <Text className='text-base font-semibold text-gray-700 mb-3'>{metric.title}</Text>
-        <Text className='text-4xl font-bold text-gray-900'>{value}</Text>
+        <Text className="text-base font-semibold text-gray-700 mb-3">
+          {metric.title}
+        </Text>
+        <Text className="text-4xl font-bold text-gray-900">{value}</Text>
+        {subtitle && (
+          <Text className="text-xs text-gray-500 mt-1">{subtitle}</Text>
+        )}
       </Pressable>
-    )
-  }
+    );
+  };
 
-  const currentMetric = metricDefinitions.find(m => m.id === selectedMetric)
-  
-  // Check if breakdown is empty (all zeros)
-  const isBreakdownEmpty = currentMetric?.breakdown.every(item => item.percentage === '0%') ?? false
+  const currentMetric = metricDefinitions.find((m) => m.id === selectedMetric);
+  const currentBreakdown = currentMetric?.enabled
+    ? (data?.breakdowns?.[currentMetric.breakdownKey] ?? [])
+    : [];
+  const isBreakdownEmpty = currentBreakdown.length === 0;
 
   return (
-    <View className='flex-1 bg-background'>
+    <View className="flex-1 bg-background">
       {/* Blue Header Bar */}
-      <View className='bg-[#0644C7] h-[37px] w-full mb-2' />
-      
-      <ScrollView className='flex-1' showsVerticalScrollIndicator={false}>
-        <View className='px-5'>
-          
+      <View className="bg-[#0644C7] h-[37px] w-full mb-2" />
+
+      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+        <View className="px-5">
           {/* Header */}
-          <View className='flex-row items-center justify-between mb-6'>
-            <Pressable className='mt-2'>
-              <Image 
+          <View className="flex-row items-center justify-between mb-6">
+            <Pressable className="mt-2">
+              <Image
                 source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
                 style={{ width: 60, height: 24 }}
                 contentFit="contain"
               />
             </Pressable>
-            
-            <View className='flex-row items-center gap-3'>
+
+            <View className="flex-row items-center gap-3">
               {unreadNotificationsCount > 0 && (
-                <Pressable 
-                  onPress={() => router.push('/notification/notification')}
+                <Pressable
+                  onPress={() => router.push("/notification/notification")}
                   className="bg-gray-200 rounded-full px-4 py-2 flex-row items-center gap-2"
                 >
                   <Image
@@ -254,12 +320,14 @@ const Home = () => {
                     contentFit="contain"
                   />
                   <Text className="text-gray-800 text-md ">
-                    {unreadNotificationsCount > 99 ? '99' : unreadNotificationsCount}
+                    {unreadNotificationsCount > 99
+                      ? "99"
+                      : unreadNotificationsCount}
                   </Text>
                 </Pressable>
               )}
-              
-              <Pressable onPress={() => router.push('/settings/settings')}>
+
+              <Pressable onPress={() => router.push("/settings/settings")}>
                 <Image
                   source={require("../../../assets/zapzone-assests/icon/settings.png")}
                   style={{ width: 24, height: 24 }}
@@ -270,24 +338,53 @@ const Home = () => {
           </View>
 
           {/* Title Section */}
-          <View className='mb-6'>
-            <Text className='text-lg font-bold text-gray-900 '>Dashboard / <Text className='font-medium'>Overview</Text></Text>
-            <Text className='text-sm text-gray-500'>Real-time venue performance overview.</Text>
+          <View className="mb-6">
+            <Text className="text-lg font-bold text-gray-900 ">
+              Dashboard / <Text className="font-medium">Overview</Text>
+            </Text>
+            <Text className="text-sm text-gray-500">
+              Real-time venue performance overview.
+            </Text>
           </View>
 
+          {/* Location Filter */}
+          <Pressable
+            onPress={() => setShowLocationDropdown(true)}
+            className="flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200 mb-3"
+          >
+            <Image
+              source={require("../../../assets/zapzone-assests/icon/pin.png")}
+              style={{ width: 18, height: 18 }}
+              contentFit="contain"
+            />
+            <Text
+              className="text-sm font-medium text-gray-700 flex-1"
+              numberOfLines={1}
+            >
+              {selectedLocationLabel}
+            </Text>
+            <Image
+              source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
+              style={{ width: 8, height: 12 }}
+              contentFit="contain"
+            />
+          </Pressable>
+
           {/* Filter Section */}
-          <View className='flex-row items-center justify-between mb-6 relative'>
-            <View className='flex-1 mr-2'>
+          <View className="flex-row items-center justify-between mb-6 relative">
+            <View className="flex-1 mr-2">
               <Pressable
                 onPress={() => setShowDateDropdown(!showDateDropdown)}
-                className='flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200'
+                className="flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200"
               >
                 <Image
                   source={require("../../../assets/zapzone-assests/icon/calendar.png")}
                   style={{ width: 18, height: 18 }}
                   contentFit="contain"
                 />
-                <Text className='text-sm font-medium text-gray-700 flex-1'>{currentDateLabel}</Text>
+                <Text className="text-sm font-medium text-gray-700 flex-1">
+                  {currentDateLabel}
+                </Text>
                 <Image
                   source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
                   style={{ width: 8, height: 12 }}
@@ -297,19 +394,25 @@ const Home = () => {
 
               {/* Dropdown Menu */}
               {showDateDropdown && (
-                <View className='absolute top-14 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50'>
+                <View className="absolute top-14 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                   {dateFilterOptions.map((option, index) => (
                     <Pressable
                       key={option.value}
                       onPress={() => {
-                        setDateFilter(option.value)
-                        setShowDateDropdown(false)
+                        setDateFilter(option.value);
+                        setShowDateDropdown(false);
                       }}
-                      className={`px-4 py-3 ${index !== dateFilterOptions.length - 1 ? 'border-b border-gray-100' : ''} ${dateFilter === option.value ? 'bg-blue-50' : ''
-                        }`}
+                      className={`px-4 py-3 ${index !== dateFilterOptions.length - 1 ? "border-b border-gray-100" : ""} ${
+                        dateFilter === option.value ? "bg-blue-50" : ""
+                      }`}
                     >
-                      <Text className={`text-sm font-medium ${dateFilter === option.value ? 'text-blue-700' : 'text-gray-700'
-                        }`}>
+                      <Text
+                        className={`text-sm font-medium ${
+                          dateFilter === option.value
+                            ? "text-blue-700"
+                            : "text-gray-700"
+                        }`}
+                      >
                         {option.label}
                       </Text>
                     </Pressable>
@@ -318,7 +421,7 @@ const Home = () => {
               )}
             </View>
 
-            <Pressable className='bg-white p-3 rounded-lg border border-gray-200'>
+            <Pressable className="bg-white p-3 rounded-lg border border-gray-200">
               <Image
                 source={require("../../../assets/zapzone-assests/icon/scanner.png")}
                 style={{ width: 20, height: 20 }}
@@ -329,25 +432,25 @@ const Home = () => {
 
           {/* Loading State */}
           {loading && (
-            <View className='flex-1 justify-center items-center py-20'>
+            <View className="flex-1 justify-center items-center py-20">
               <ActivityIndicator size="large" color="#0644C7" />
-              <Text className='text-gray-500 mt-3'>Loading metrics...</Text>
+              <Text className="text-gray-500 mt-3">Loading metrics...</Text>
             </View>
           )}
 
           {/* Error State */}
           {error && (
-            <View className='bg-red-50 border border-red-200 rounded-lg p-4 mb-6'>
-              <Text className='text-red-700 font-semibold'>Error</Text>
-              <Text className='text-red-600 text-sm'>{error}</Text>
+            <View className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <Text className="text-red-700 font-semibold">Error</Text>
+              <Text className="text-red-600 text-sm">{error}</Text>
             </View>
           )}
 
           {/* Metrics Grid */}
           {!loading && !error && (
-            <View className='flex-row flex-wrap'>
+            <View className="flex-row flex-wrap">
               {metricDefinitions.map((metric) => (
-                <View key={metric.id} className='w-1/2'>
+                <View key={metric.id} className="w-1/2">
                   <MetricCard metric={metric} />
                 </View>
               ))}
@@ -363,24 +466,24 @@ const Home = () => {
         animationType="fade"
         onRequestClose={closeModal}
       >
-        <View className='absolute inset-0 bg-black/50' />
-        
-        <View className='flex-1 justify-end'>
-          <Pressable
-            className='flex-1'
-            onPress={closeModal}
-          />
-          
-          <Animated.View 
-            className='bg-white rounded-t-3xl p-6 w-full'
+        <View className="absolute inset-0 bg-black/50" />
+
+        <View className="flex-1 justify-end">
+          <Pressable className="flex-1" onPress={closeModal} />
+
+          <Animated.View
+            className="bg-white rounded-t-3xl p-6 w-full"
             style={{ transform: [{ translateY: slideAnim }] }}
           >
             {currentMetric && (
               <>
                 {/* Modal Header */}
-                <View className='flex-row items-center justify-between mb-6'>
-                  <View className='flex-row items-center gap-3'>
-                    <View style={{ backgroundColor: currentMetric.color }} className='p-2 rounded-lg'>
+                <View className="flex-row items-center justify-between mb-6">
+                  <View className="flex-row items-center gap-3">
+                    <View
+                      style={{ backgroundColor: currentMetric.color }}
+                      className="p-2 rounded-lg"
+                    >
                       <Image
                         source={getIcon(currentMetric.icon)}
                         style={{ width: 20, height: 20 }}
@@ -388,38 +491,50 @@ const Home = () => {
                         tintColor="#FFFFFF"
                       />
                     </View>
-                    <Text className='text-lg font-bold text-gray-900'>{currentMetric.title} Breakdown</Text>
+                    <Text className="text-lg font-bold text-gray-900">
+                      {currentMetric.title} Breakdown
+                    </Text>
                   </View>
-                  <Pressable
-                    onPress={closeModal}
-                    className='p-1'
-                  >
-                    <Text className='text-xl text-gray-500'>✕</Text>
+                  <Pressable onPress={closeModal} className="p-1">
+                    <Text className="text-xl text-gray-500">✕</Text>
                   </Pressable>
                 </View>
 
                 {/* Check if Breakdown is Empty */}
                 {isBreakdownEmpty ? (
-                  <View className='justify-center items-center py-12'>
-                    <Text className='text-gray-500 text-base font-medium'>No Breakdown available</Text>
+                  <View className="justify-center items-center py-12">
+                    <Text className="text-gray-500 text-base font-medium">
+                      No Breakdown available
+                    </Text>
                   </View>
                 ) : (
                   <>
                     {/* Breakdown Items */}
-                    <View className='space-y-2 mb-4'>
-                      {currentMetric.breakdown.map((item, index) => (
-                        <View key={index} className='flex-row items-center justify-between py-2 border-b border-gray-100'>
-                          <Text className='text-sm text-gray-700'>{item.label}</Text>
-                          <Text className='text-xs text-gray-500'>{item.percentage}</Text>
+                    <View className="space-y-2 mb-4">
+                      {currentBreakdown.map((item, index) => (
+                        <View
+                          key={index}
+                          className="flex-row items-center justify-between py-2 border-b border-gray-100"
+                        >
+                          <Text className="text-sm text-gray-700">
+                            {item.label}
+                          </Text>
+                          <Text className="text-xs text-gray-500">
+                            {item.count} ({item.percentage}%)
+                          </Text>
                         </View>
                       ))}
                     </View>
 
                     {/* Total */}
-                    <View className='flex-row items-center justify-between pt-4 border-t border-gray-200'>
-                      <Text className='text-sm font-semibold text-gray-900'>Total</Text>
-                      <Text className='text-lg font-bold text-gray-900'>
-                        {metrics ? metrics[currentMetric.key] ?? 0 : 0}
+                    <View className="flex-row items-center justify-between pt-4 border-t border-gray-200">
+                      <Text className="text-sm font-semibold text-gray-900">
+                        Total
+                      </Text>
+                      <Text className="text-lg font-bold text-gray-900">
+                        {currentMetric.enabled && currentMetric.valueField
+                          ? (data?.metrics[currentMetric.valueField] ?? 0)
+                          : 0}
                       </Text>
                     </View>
                   </>
@@ -429,8 +544,96 @@ const Home = () => {
           </Animated.View>
         </View>
       </Modal>
-    </View>
-  )
-}
 
-export default Home
+      {/* Location Picker Modal */}
+      <Modal
+        visible={showLocationDropdown}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLocationDropdown(false)}
+      >
+        <View className="absolute inset-0 bg-black/50" />
+
+        <View className="flex-1 justify-end">
+          <Pressable
+            className="flex-1"
+            onPress={() => setShowLocationDropdown(false)}
+          />
+
+          <View className="bg-white rounded-t-3xl max-h-[70%]">
+            {/* Header */}
+            <View className="flex-row items-center justify-between p-6 pb-3">
+              <Text className="text-lg font-bold text-gray-900">
+                Select Location
+              </Text>
+              <Pressable
+                onPress={() => setShowLocationDropdown(false)}
+                className="p-1"
+              >
+                <Text className="text-xl text-gray-500">✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView className="px-4 pb-6">
+              {/* All Locations — only the label is hardcoded */}
+              <Pressable
+                onPress={() => handleSelectLocation("all")}
+                className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
+                  selectedLocation === "all" ? "bg-blue-50" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium ${
+                    selectedLocation === "all"
+                      ? "text-blue-700"
+                      : "text-gray-800"
+                  }`}
+                >
+                  All Locations
+                </Text>
+                {selectedLocation === "all" && (
+                  <Image
+                    source={require("../../../assets/zapzone-assests/icon/checked.png")}
+                    style={{ width: 18, height: 18 }}
+                    contentFit="contain"
+                  />
+                )}
+              </Pressable>
+
+              {locationOptions.map((loc) => {
+                const isSelected = selectedLocation === loc.id;
+                return (
+                  <Pressable
+                    key={loc.id}
+                    onPress={() => handleSelectLocation(loc.id)}
+                    className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
+                      isSelected ? "bg-blue-50" : ""
+                    }`}
+                  >
+                    <Text
+                      className={`text-base font-medium flex-1 mr-2 ${
+                        isSelected ? "text-blue-700" : "text-gray-800"
+                      }`}
+                      numberOfLines={1}
+                    >
+                      {loc.name}
+                    </Text>
+                    {isSelected && (
+                      <Image
+                        source={require("../../../assets/zapzone-assests/icon/checked.png")}
+                        style={{ width: 18, height: 18 }}
+                        contentFit="contain"
+                      />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+export default Home;

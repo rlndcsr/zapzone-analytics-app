@@ -1,33 +1,129 @@
 import { apiRequest } from "../lib/api";
 
-export type DashboardMetrics = {
-  parties: number;
-  party_participants: number;
-  attraction_sold: number;
-  event_sold: number;
-  memberships: number;
-  unique_customers: number;
-  confirm_booking: number;
+/** Timeframe enum the backend expects (exact strings — do not abbreviate). */
+export type TimeframeType =
+  | "today"
+  | "last_24h"
+  | "last_7d"
+  | "last_30d"
+  | "all_time"
+  | "custom";
+
+/** A single row in any of the dashboard breakdown lists. */
+export type BreakdownItem = {
+  label: string;
+  count: number;
+  percentage: number;
+};
+
+/** Keys of the `breakdowns` object returned by the dashboard endpoint. */
+export type BreakdownKey =
+  | "packageBreakdown"
+  | "participantBreakdown"
+  | "attractionBreakdown"
+  | "eventBreakdown"
+  | "membershipBreakdown"
+  | "customerBreakdown"
+  | "confirmedBreakdown";
+
+export type DashboardBreakdowns = Record<BreakdownKey, BreakdownItem[]>;
+
+export type DashboardTimeframe = {
+  type: string;
+  date_from: string | null;
+  date_to: string | null;
+  description: string;
+};
+
+/** Scalar totals. Named fields document the API; the index signature keeps it open. */
+export type DashboardTotals = {
+  totalBookings: number;
+  totalRevenue: number;
+  totalCustomers: number;
+  newCustomers: number;
+  returningCustomers: number;
+  confirmedBookings: number;
+  pendingBookings: number;
+  completedBookings: number;
+  cancelledBookings: number;
+  checkedInBookings: number;
+  totalParticipants: number;
+  totalPurchases: number;
+  totalEventPurchases: number;
+  totalEventTickets: number;
+  totalMemberships: number;
+  activeMemberships: number;
+  newMemberships: number;
   [key: string]: number;
 };
 
-export async function fetchDashboardMetrics(
-  userId: number,
-  token: string,
-  dateFilter: string = 'today',
-  customStartDate: string = '',
-  customEndDate: string = ''
-): Promise<DashboardMetrics> {
-  let params = new URLSearchParams();
-  params.append('date_filter', dateFilter);
-  
-  if (dateFilter === 'custom' && customStartDate && customEndDate) {
-    params.append('start_date', customStartDate);
-    params.append('end_date', customEndDate);
+/**
+ * Per-location aggregates keyed by location id. Used to populate the location
+ * filter without calling the heavy /locations endpoint (which is too large for
+ * mobile). Only `name` is needed here; the numeric stats are ignored.
+ */
+export type LocationStat = {
+  name: string;
+  [key: string]: unknown;
+};
+
+/** Full payload of GET /api/metrics/dashboard/{userId}. */
+export type DashboardData = {
+  timeframe: DashboardTimeframe;
+  metrics: DashboardTotals;
+  breakdowns?: DashboardBreakdowns;
+  locationStats?: Record<string, LocationStat>;
+};
+
+export type DashboardMetricsParams = {
+  userId: number;
+  token: string;
+  timeframe: TimeframeType;
+  locationId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  timezone?: string;
+};
+
+/** Device IANA timezone with a Michigan default if Intl is unavailable. */
+function getDeviceTimeZone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) return tz;
+  } catch {
+    // Intl missing in this runtime — fall through to the default.
+  }
+  return "America/Detroit";
+}
+
+// GET /api/metrics/dashboard/{userId} — one call powers every dashboard card.
+export async function fetchDashboardMetrics({
+  userId,
+  token,
+  timeframe,
+  locationId,
+  dateFrom,
+  dateTo,
+  timezone,
+}: DashboardMetricsParams): Promise<DashboardData> {
+  const params = new URLSearchParams();
+  params.append("timeframe", timeframe);
+
+  if (timeframe === "custom" && dateFrom && dateTo) {
+    params.append("date_from", dateFrom);
+    params.append("date_to", dateTo);
   }
 
-  return apiRequest<DashboardMetrics>(
+  if (locationId != null) {
+    params.append("location_id", String(locationId));
+  }
+
+  if (timeframe === "today") {
+    params.append("timezone", timezone ?? getDeviceTimeZone());
+  }
+
+  return apiRequest<DashboardData>(
     `/api/metrics/dashboard/${userId}?${params.toString()}`,
-    { token }
+    { token },
   );
 }
