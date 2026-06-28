@@ -8,11 +8,6 @@ import { LogoSection } from "../components/auth/LogoSection";
 import { isAuthenticated } from "../lib/session";
 import { hasPlayedSplash } from "../lib/splashState";
 
-/**
- * Admin login screen. Shown after the animated splash; redirects back to the
- * splash on a cold launch so the intro always plays first, and straight to the
- * dashboard when a persisted session was restored on launch.
- */
 export default function HomeScreen() {
   if (!hasPlayedSplash()) {
     return <Redirect href="/splash" />;

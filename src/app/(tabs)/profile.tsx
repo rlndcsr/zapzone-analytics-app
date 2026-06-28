@@ -46,7 +46,8 @@ const Profile = () => {
           </View>
         ) : null}
 
-        <View className="mt-auto pb-6">
+        {/* Extra bottom padding clears the floating tab bar. */}
+        <View className="mt-auto pb-24">
           <Pressable
             onPress={handleLogout}
             disabled={loggingOut}

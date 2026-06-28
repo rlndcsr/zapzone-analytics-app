@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -44,9 +45,6 @@ type MetricDefinition = {
   enabled: boolean;
 };
 
-// The icon map, helpers, and MetricCard live at module scope so their identity
-// is stable across renders. Defined inside Home, MetricCard would be a new
-// component type every render, remounting the cards and flickering the icons.
 const ICON_MAP: { [key: string]: any } = {
   "group.png": require("../../../assets/zapzone-assests/icon/group.png"),
   "ticket.png": require("../../../assets/zapzone-assests/icon/ticket.png"),
@@ -135,6 +133,7 @@ const MetricCard = ({
 };
 
 const Home = () => {
+  const insets = useSafeAreaInsets();
   const [selectedMetric, setSelectedMetric] = useState<number | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
   const [showDateDropdown, setShowDateDropdown] = useState(false);
@@ -309,7 +308,12 @@ const Home = () => {
       {/* Blue Header Bar */}
       <View className="bg-[#0644C7] h-[37px] w-full mb-2" />
 
-      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+      <ScrollView
+        className="flex-1"
+        showsVerticalScrollIndicator={false}
+        // Clear the floating tab bar so the last cards aren't trapped behind it.
+        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+      >
         <View className="px-5">
           {/* Header */}
           <View className="flex-row items-center justify-between mb-6">
@@ -431,11 +435,7 @@ const Home = () => {
             <View className="flex-row flex-wrap">
               {metricDefinitions.map((metric) => (
                 <View key={metric.id} className="w-1/2">
-                  <MetricCard
-                    metric={metric}
-                    data={data}
-                    onPress={openModal}
-                  />
+                  <MetricCard metric={metric} data={data} onPress={openModal} />
                 </View>
               ))}
             </View>
