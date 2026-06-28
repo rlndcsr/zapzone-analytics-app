@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { ReactNode } from "react";
+import { ReactNode, Ref } from "react";
 import { Text, TextInput, TextInputProps, View } from "react-native";
 
 type InputFieldProps = TextInputProps & {
@@ -8,6 +8,7 @@ type InputFieldProps = TextInputProps & {
   error?: string;
   rightAccessory?: ReactNode;
   containerClassName?: string;
+  ref?: Ref<TextInput>;
 };
 
 export function InputField({
@@ -16,6 +17,7 @@ export function InputField({
   error,
   rightAccessory,
   containerClassName,
+  ref,
   ...inputProps
 }: InputFieldProps) {
   return (
@@ -30,6 +32,7 @@ export function InputField({
         {icon ? <Feather name={icon} size={18} color="#9CA3AF" /> : null}
 
         <TextInput
+          ref={ref}
           className="ml-3 flex-1 py-0 text-base text-gray-900"
           placeholderTextColor="#9CA3AF"
           {...inputProps}

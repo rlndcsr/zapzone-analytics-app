@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { useRef, useState } from "react";
+import { Pressable, Text, TextInput, View } from "react-native";
 
 import { ApiError } from "../../lib/api";
 import { setSession } from "../../lib/session";
@@ -20,6 +20,7 @@ type FormErrors = {
 
 export function LoginForm() {
   const router = useRouter();
+  const passwordRef = useRef<TextInput>(null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -114,11 +115,14 @@ export function LoginForm() {
         autoComplete="email"
         textContentType="emailAddress"
         returnKeyType="next"
+        submitBehavior="submit"
+        onSubmitEditing={() => passwordRef.current?.focus()}
         editable={!submitting}
         containerClassName="mb-5"
       />
 
       <PasswordInput
+        ref={passwordRef}
         placeholder="Enter your password"
         value={password}
         onChangeText={handlePasswordChange}
