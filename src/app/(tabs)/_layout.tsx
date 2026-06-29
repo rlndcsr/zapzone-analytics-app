@@ -1,14 +1,25 @@
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Image } from "expo-image";
 import { Tabs } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageSourcePropType, Pressable, Text, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import {
+  FAB_PRESS_IN,
+  FAB_PRESS_OUT_SPRING,
+  FAB_PRESS_SCALE,
+} from "../../components/navigation/fabMenuMotion";
+import {
+  FabRect,
+  MorphingFabMenu,
+} from "../../components/navigation/MorphingFabMenu";
 
 const ACTIVE_COLOR = "#0644C7";
 const INACTIVE_COLOR = "#9AA0A6";
@@ -21,12 +32,9 @@ type TabIconProps = {
   focused: boolean;
 };
 
-// Module-scope so the component identity is stable across tab-bar re-renders;
-// defined inline it would remount every render and drop the focus animation.
 const TabIcon = ({ source, focused }: TabIconProps) => {
   const progress = useSharedValue(focused ? 1 : 0);
 
-  // Smooth icon transition when a tab becomes active/inactive.
   useEffect(() => {
     progress.value = withTiming(focused ? 1 : 0, { duration: 180 });
   }, [focused, progress]);
@@ -50,7 +58,6 @@ const TabIcon = ({ source, focused }: TabIconProps) => {
   );
 };
 
-// The center icon always renders white on top of the blue action button.
 const CenterTabIcon = ({ source }: { source: ImageSourcePropType }) => (
   <Image
     source={source}
@@ -59,9 +66,6 @@ const CenterTabIcon = ({ source }: { source: ImageSourcePropType }) => (
   />
 );
 
-// Custom floating tab bar. Navigation behaviour mirrors the default React
-// Navigation bottom bar (tabPress emit + navigate, long-press emit, a11y
-// state) — only the presentation changes.
 const FloatingTabBar = ({
   state,
   descriptors,
@@ -69,8 +73,34 @@ const FloatingTabBar = ({
 }: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
 
-  // Mirror the default bottom-tab press behaviour: let listeners pre-empt the
-  // press, otherwise navigate to the tab. Long-press just emits the event.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuMounted, setMenuMounted] = useState(false);
+  const [fabRect, setFabRect] = useState<FabRect | null>(null);
+  const fabRef = useRef<View>(null);
+
+  const toggleMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    fabRef.current?.measureInWindow((x, y, width, height) => {
+      setFabRect({ x, y, width, height });
+      setMenuMounted(true);
+      setMenuOpen(true);
+    });
+  };
+
+  const fabScale = useSharedValue(1);
+  const fabPressStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: fabScale.value }],
+  }));
+  const onFabPressIn = () => {
+    fabScale.value = withTiming(FAB_PRESS_SCALE, FAB_PRESS_IN);
+  };
+  const onFabPressOut = () => {
+    fabScale.value = withSpring(1, FAB_PRESS_OUT_SPRING);
+  };
+
   const createPressHandlers = (
     route: BottomTabBarProps["state"]["routes"][number],
     isFocused: boolean,
@@ -94,16 +124,9 @@ const FloatingTabBar = ({
   const centerRoute = centerIndex >= 0 ? state.routes[centerIndex] : null;
   const centerOptions = centerRoute && descriptors[centerRoute.key].options;
   const centerFocused = centerIndex === state.index;
-  const centerHandlers = centerRoute
-    ? createPressHandlers(centerRoute, centerFocused)
-    : null;
 
   return (
     <View
-      // Absolutely positioned + transparent so the dashboard scrolls behind it
-      // and shows through around the card — a true floating bar rather than a
-      // reserved strip. box-none lets taps in the transparent gaps reach the
-      // content underneath; only the card and center button capture touches.
       pointerEvents="box-none"
       className="absolute inset-x-0 bottom-0 px-4"
       style={{
@@ -129,8 +152,6 @@ const FloatingTabBar = ({
           const label =
             typeof options.title === "string" ? options.title : route.name;
 
-          // The center route keeps its column as a spacer; its action button is
-          // rendered as an overlay (below) so it stays fully tappable.
           if (route.name === CENTER_ROUTE) {
             return <View key={route.key} className="flex-1" />;
           }
@@ -164,44 +185,52 @@ const FloatingTabBar = ({
         })}
       </View>
 
-      {/* Elevated center action button. Rendered as a box-none overlay so it
-          floats above the card and stays fully tappable on both platforms,
-          while taps outside the circle still reach the tabs underneath. */}
-      {centerRoute && centerOptions && centerHandlers && (
+      {centerRoute && centerOptions && (
         <View
           pointerEvents="box-none"
           className="absolute left-0 right-0 items-center"
-          // Nudged down so ~40% of the FAB floats above the card and ~60%
-          // overlaps it — anchored to the bar while still floating.
           style={{ top: 10 }}
         >
           <Pressable
             accessibilityRole="button"
-            accessibilityState={centerFocused ? { selected: true } : {}}
+            accessibilityState={menuOpen ? { expanded: true } : {}}
             accessibilityLabel={centerOptions.tabBarAccessibilityLabel}
             testID={centerOptions.tabBarButtonTestID}
-            onPress={centerHandlers.onPress}
-            onLongPress={centerHandlers.onLongPress}
+            onPress={toggleMenu}
+            onLongPress={toggleMenu}
+            onPressIn={onFabPressIn}
+            onPressOut={onFabPressOut}
           >
-            <View
-              className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7]"
-              style={{
-                shadowColor: ACTIVE_COLOR,
-                shadowOffset: { width: 0, height: 3 },
-                shadowOpacity: 0.4,
-                shadowRadius: 12,
-                elevation: 12,
-              }}
-            >
-              {centerOptions.tabBarIcon?.({
-                focused: centerFocused,
-                color: "#FFFFFF",
-                size: 26,
-              })}
-            </View>
+            <Animated.View style={fabPressStyle}>
+              <View
+                ref={fabRef}
+                className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7]"
+                style={{
+                  opacity: menuMounted ? 0 : 1,
+                  shadowColor: ACTIVE_COLOR,
+                  shadowOffset: { width: 0, height: 3 },
+                  shadowOpacity: 0.4,
+                  shadowRadius: 12,
+                  elevation: 12,
+                }}
+              >
+                {centerOptions.tabBarIcon?.({
+                  focused: centerFocused,
+                  color: "#FFFFFF",
+                  size: 26,
+                })}
+              </View>
+            </Animated.View>
           </Pressable>
         </View>
       )}
+
+      <MorphingFabMenu
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onClosed={() => setMenuMounted(false)}
+        fabRect={fabRect}
+      />
     </View>
   );
 };

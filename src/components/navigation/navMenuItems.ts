@@ -1,0 +1,23 @@
+import { Feather } from "@expo/vector-icons";
+import type { ComponentProps } from "react";
+
+export type NavMenuItem = {
+  key: string;
+  label: string;
+  icon: ComponentProps<typeof Feather>["name"];
+};
+
+export const NAV_MENU_ITEMS: NavMenuItem[] = [
+  { key: "dashboard", label: "Dashboard", icon: "grid" },
+  { key: "bookings", label: "Bookings", icon: "calendar" },
+  { key: "customers", label: "Customers", icon: "users" },
+  { key: "locations", label: "Locations", icon: "map-pin" },
+  { key: "revenue", label: "Revenue", icon: "dollar-sign" },
+  { key: "reports", label: "Reports", icon: "file-text" },
+  { key: "memberships", label: "Memberships", icon: "award" },
+  { key: "attractions", label: "Attractions", icon: "zap" },
+  { key: "events", label: "Events", icon: "flag" },
+  { key: "notifications", label: "Notifications", icon: "bell" },
+  { key: "analytics", label: "Analytics", icon: "bar-chart-2" },
+  { key: "settings", label: "Settings", icon: "settings" },
+];

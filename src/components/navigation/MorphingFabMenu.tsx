@@ -1,0 +1,490 @@
+import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { useColorScheme } from "nativewind";
+import { useEffect, useState } from "react";
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import Animated, {
+  Extrapolation,
+  interpolate,
+  interpolateColor,
+  type SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { runOnJS } from "react-native-worklets";
+
+import {
+  BACKDROP_COLOR,
+  BACKDROP_MAX_OPACITY,
+  BODY_FADE_RANGE,
+  CLOSE_COLLAPSE_LEAD,
+  CLOSE_EASING,
+  ICON_CLOSE_FADE,
+  ICON_MENU_FADE,
+  ICON_MIN_SCALE,
+  ICON_TURN,
+  ITEM_SCALE_FROM,
+  ITEM_STAGGER,
+  ITEM_TRANSLATE_Y,
+  ITEM_WINDOW,
+  ITEMS_CLOSE_DURATION,
+  ITEMS_EASING,
+  ITEMS_OPEN_DELAY,
+  ITEMS_OPEN_DURATION,
+  MORPH_CLOSE_SPRING,
+  MORPH_OPEN_SPRING,
+  PANEL_RADIUS,
+  SHADOW_ELEVATION_RANGE,
+  SHADOW_OPACITY_RANGE,
+  SHADOW_RADIUS_RANGE,
+} from "./fabMenuMotion";
+import { NAV_MENU_ITEMS, type NavMenuItem } from "./navMenuItems";
+
+const FAB_COLOR = "#0644C7";
+const SURFACE_LIGHT = "#FFFFFF";
+const SURFACE_DARK = "#171717";
+
+const COLUMNS = 3;
+const COLUMN_GAP = 12;
+const ROW_GAP = 16;
+const PANEL_PADDING = 16;
+const HEADER_HEIGHT = 52;
+const CELL_HEIGHT = 84;
+const MAX_PANEL_WIDTH = 440;
+
+export type FabRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type MorphingFabMenuProps = {
+  visible: boolean;
+  onClose: () => void;
+
+  onClosed?: () => void;
+  fabRect: FabRect | null;
+};
+
+const moreIcon = require("../../../assets/zapzone-assests/icon/more.png");
+
+type GridItemProps = {
+  item: NavMenuItem;
+  index: number;
+  width: number;
+  onPress: () => void;
+  itemsProgress: SharedValue<number>;
+};
+
+function GridItem({
+  item,
+  index,
+  width,
+  onPress,
+  itemsProgress,
+}: GridItemProps) {
+  const style = useAnimatedStyle(() => {
+    const start = Math.min(index * ITEM_STAGGER, 1 - ITEM_WINDOW);
+    const local = interpolate(
+      itemsProgress.value,
+      [start, start + ITEM_WINDOW],
+      [0, 1],
+      Extrapolation.CLAMP,
+    );
+    return {
+      opacity: local,
+      transform: [
+        { translateY: (1 - local) * ITEM_TRANSLATE_Y },
+        { scale: ITEM_SCALE_FROM + local * (1 - ITEM_SCALE_FROM) },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View style={[{ width, marginBottom: ROW_GAP }, style]}>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={item.label}
+        className="items-center active:opacity-70"
+      >
+        <View className="h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 dark:bg-blue-900/40">
+          <Feather name={item.icon} size={22} color={FAB_COLOR} />
+        </View>
+        <Text
+          numberOfLines={1}
+          className="mt-1.5 text-xs text-gray-700 dark:text-gray-200"
+        >
+          {item.label}
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+export function MorphingFabMenu({
+  visible,
+  onClose,
+  onClosed,
+  fabRect,
+}: MorphingFabMenuProps) {
+  const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
+  const { colorScheme } = useColorScheme();
+  const surfaceColor = colorScheme === "dark" ? SURFACE_DARK : SURFACE_LIGHT;
+
+  const progress = useSharedValue(0);
+  const itemsProgress = useSharedValue(0);
+  const [mounted, setMounted] = useState(visible);
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      progress.value = 0;
+      itemsProgress.value = 0;
+      progress.value = withSpring(1, MORPH_OPEN_SPRING);
+      itemsProgress.value = withDelay(
+        ITEMS_OPEN_DELAY,
+        withTiming(1, {
+          duration: ITEMS_OPEN_DURATION,
+          easing: ITEMS_EASING,
+        }),
+      );
+    } else if (mounted) {
+      itemsProgress.value = withTiming(0, {
+        duration: ITEMS_CLOSE_DURATION,
+        easing: CLOSE_EASING,
+      });
+      progress.value = withDelay(
+        CLOSE_COLLAPSE_LEAD,
+        withSpring(0, MORPH_CLOSE_SPRING, (done) => {
+          if (done) {
+            runOnJS(setMounted)(false);
+            if (onClosed) runOnJS(onClosed)();
+          }
+        }),
+      );
+    }
+  }, [visible]);
+
+  const fab = fabRect;
+  const fabBottom = fab ? fab.y + fab.height : 0;
+  const fabCenterX = fab ? fab.x + fab.width / 2 : screenW / 2;
+  const fabW = fab?.width ?? 56;
+  const fabH = fab?.height ?? 56;
+
+  const panelW = Math.min(screenW - 32, MAX_PANEL_WIDTH);
+  const contentW = panelW - PANEL_PADDING * 2;
+  const cellW = (contentW - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS;
+  const rows = Math.ceil(NAV_MENU_ITEMS.length / COLUMNS);
+
+  const footerH = fabH + 24;
+
+  const naturalPanelH =
+    HEADER_HEIGHT +
+    PANEL_PADDING +
+    rows * CELL_HEIGHT +
+    (rows - 1) * ROW_GAP +
+    footerH;
+
+  const maxPanelH = fab ? fab.y + fab.height - (insets.top + 8) : naturalPanelH;
+  const panelH = Math.min(naturalPanelH, maxPanelH);
+  const needsScroll = naturalPanelH > maxPanelH;
+
+  const surfaceStyle = useAnimatedStyle(() => {
+    const h = interpolate(
+      progress.value,
+      [0, 1],
+      [fabH, panelH],
+      Extrapolation.CLAMP,
+    );
+    return {
+      width: interpolate(
+        progress.value,
+        [0, 1],
+        [fabW, panelW],
+        Extrapolation.CLAMP,
+      ),
+      height: h,
+
+      top: fabBottom - h,
+      left: interpolate(
+        progress.value,
+        [0, 1],
+        [fabCenterX - fabW / 2, fabCenterX - panelW / 2],
+        Extrapolation.CLAMP,
+      ),
+      borderRadius: interpolate(
+        progress.value,
+        [0, 1],
+        [fabH / 2, PANEL_RADIUS],
+        Extrapolation.CLAMP,
+      ),
+      backgroundColor: interpolateColor(
+        progress.value,
+        [0, 1],
+        [FAB_COLOR, surfaceColor],
+      ),
+      // Soft shadow grows as the panel expands.
+      shadowOpacity: interpolate(
+        progress.value,
+        [0, 1],
+        SHADOW_OPACITY_RANGE,
+        Extrapolation.CLAMP,
+      ),
+      shadowRadius: interpolate(
+        progress.value,
+        [0, 1],
+        SHADOW_RADIUS_RANGE,
+        Extrapolation.CLAMP,
+      ),
+      elevation: interpolate(
+        progress.value,
+        [0, 1],
+        SHADOW_ELEVATION_RANGE,
+        Extrapolation.CLAMP,
+      ),
+    };
+  });
+
+  const clipStyle = useAnimatedStyle(() => ({
+    borderRadius: interpolate(
+      progress.value,
+      [0, 1],
+      [fabH / 2, PANEL_RADIUS],
+      Extrapolation.CLAMP,
+    ),
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      progress.value,
+      [0, 1],
+      [0, BACKDROP_MAX_OPACITY],
+      Extrapolation.CLAMP,
+    ),
+  }));
+
+  const menuIconStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      progress.value,
+      ICON_MENU_FADE,
+      [1, 0],
+      Extrapolation.CLAMP,
+    ),
+    transform: [
+      {
+        rotate: `${interpolate(progress.value, ICON_MENU_FADE, [0, -ICON_TURN], Extrapolation.CLAMP)}deg`,
+      },
+      {
+        scale: interpolate(
+          progress.value,
+          ICON_MENU_FADE,
+          [1, ICON_MIN_SCALE],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
+  }));
+
+  const closeIconStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      progress.value,
+      ICON_CLOSE_FADE,
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+    transform: [
+      {
+        rotate: `${interpolate(progress.value, ICON_CLOSE_FADE, [ICON_TURN, 0], Extrapolation.CLAMP)}deg`,
+      },
+      {
+        scale: interpolate(
+          progress.value,
+          ICON_CLOSE_FADE,
+          [ICON_MIN_SCALE, 1],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
+  }));
+
+  const bodyStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      progress.value,
+      BODY_FADE_RANGE,
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
+
+  if (!mounted || !fab) return null;
+
+  const grid = (
+    <View className="flex-row flex-wrap justify-between">
+      {NAV_MENU_ITEMS.map((item, i) => (
+        <GridItem
+          key={item.key}
+          item={item}
+          index={i}
+          width={cellW}
+          onPress={onClose}
+          itemsProgress={itemsProgress}
+        />
+      ))}
+    </View>
+  );
+
+  return (
+    <Modal
+      visible
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="none"
+      onRequestClose={onClose}
+    >
+      <View style={{ flex: 1 }}>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: BACKDROP_COLOR },
+            backdropStyle,
+          ]}
+        />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close navigation menu"
+        />
+
+        <Animated.View
+          onStartShouldSetResponder={() => true}
+          style={[
+            {
+              position: "absolute",
+              shadowColor: "#0F172A",
+              shadowOffset: { width: 0, height: 8 },
+            },
+            surfaceStyle,
+          ]}
+        >
+          <Animated.View
+            style={[StyleSheet.absoluteFill, { overflow: "hidden" }, clipStyle]}
+          >
+            <Animated.View
+              style={[
+                {
+                  position: "absolute",
+                  left: 0,
+                  bottom: 0,
+                  width: panelW,
+                  height: panelH,
+                },
+                bodyStyle,
+              ]}
+            >
+              <View
+                style={{
+                  flex: 1,
+                  paddingTop: PANEL_PADDING,
+                  paddingHorizontal: PANEL_PADDING,
+                  paddingBottom: footerH,
+                }}
+              >
+                <View
+                  style={{
+                    height: HEADER_HEIGHT - PANEL_PADDING,
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                    Quick Navigation
+                  </Text>
+                </View>
+
+                {/* Grid */}
+                {needsScroll ? (
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{ paddingTop: PANEL_PADDING }}
+                  >
+                    {grid}
+                  </ScrollView>
+                ) : (
+                  <View style={{ paddingTop: PANEL_PADDING }}>{grid}</View>
+                )}
+              </View>
+            </Animated.View>
+
+            <View
+              pointerEvents="box-none"
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: fabH,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Pressable
+                onPress={onClose}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Close navigation menu"
+                style={{
+                  width: fabW,
+                  height: fabH,
+                  borderRadius: fabH / 2,
+                  backgroundColor: FAB_COLOR,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Animated.View
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { alignItems: "center", justifyContent: "center" },
+                    menuIconStyle,
+                  ]}
+                >
+                  <Image
+                    source={moreIcon}
+                    style={{ width: 22, height: 22, tintColor: "#FFFFFF" }}
+                    contentFit="contain"
+                  />
+                </Animated.View>
+                <Animated.View
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { alignItems: "center", justifyContent: "center" },
+                    closeIconStyle,
+                  ]}
+                >
+                  <Feather name="x" size={24} color="#FFFFFF" />
+                </Animated.View>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
