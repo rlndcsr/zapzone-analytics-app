@@ -3,9 +3,10 @@ import React from 'react'
 
 const Calendar = () => {
   return (
-    <View>
-      <Text>Calendar.</Text>
-    </View>
+    <View className='flex-1 justify-center items-center'>
+          <Text className='text-xl'> Calendar is Empty!</Text>
+          <Text className='text-xl font-bold'> WALAY SAB NI UNOOOOD!</Text>
+        </View>
   )
 }
 

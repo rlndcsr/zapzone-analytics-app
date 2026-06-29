@@ -3,8 +3,9 @@ import React from 'react'
 
 const Navigation = () => {
   return (
-    <View>
-      <Text>Navigation</Text>
+    <View className='flex-1 justify-center items-center'>
+      <Text className='text-xl'> Navigation is Empty!</Text>
+      <Text className='text-xl font-bold'> WALAY UNOOOOD!</Text>
     </View>
   )
 }
