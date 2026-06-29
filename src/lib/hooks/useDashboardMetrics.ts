@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchDashboardMetrics,
   type DashboardData,
@@ -24,62 +24,68 @@ export function useDashboardMetrics({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
+  // Monotonic request token. Every load (filter change, mount, or manual
+  // refetch) claims a new id; only the latest may write state, so a slow
+  // earlier response can never clobber a newer one. Bumped on cleanup too, so
+  // an in-flight request is ignored once the effect/component is torn down.
+  const requestIdRef = useRef(0);
 
-    const loadMetrics = async () => {
-      try {
-        const token = getToken();
-        const user = getCurrentUser();
+  const loadMetrics = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
 
-        if (!token || !user) {
-          if (alive) {
-            setError("Not authenticated");
-            setLoading(false);
-          }
-          return;
-        }
+    try {
+      const token = getToken();
+      const user = getCurrentUser();
 
-        if (!user.id) {
-          if (alive) {
-            setError("User ID is missing");
-            setLoading(false);
-          }
-          return;
+      if (!token || !user) {
+        if (isCurrent()) {
+          setError("Not authenticated");
+          setLoading(false);
         }
-
-        setLoading(true);
-        const result = await fetchDashboardMetrics({
-          userId: user.id,
-          token,
-          timeframe,
-          locationId: locationId === "all" ? undefined : locationId,
-          dateFrom,
-          dateTo,
-        });
-        if (alive) {
-          setData(result);
-          setError(null);
-        }
-      } catch (err) {
-        console.error("Metrics error:", err);
-        if (alive) {
-          setError(
-            err instanceof Error ? err.message : "Failed to load metrics",
-          );
-          setData(null);
-        }
-      } finally {
-        if (alive) setLoading(false);
+        return;
       }
-    };
 
-    loadMetrics();
+      if (!user.id) {
+        if (isCurrent()) {
+          setError("User ID is missing");
+          setLoading(false);
+        }
+        return;
+      }
 
-    return () => {
-      alive = false;
-    };
+      setLoading(true);
+      const result = await fetchDashboardMetrics({
+        userId: user.id,
+        token,
+        timeframe,
+        locationId: locationId === "all" ? undefined : locationId,
+        dateFrom,
+        dateTo,
+      });
+      if (isCurrent()) {
+        setData(result);
+        setError(null);
+      }
+    } catch (err) {
+      console.error("Metrics error:", err);
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "Failed to load metrics");
+        setData(null);
+      }
+    } finally {
+      if (isCurrent()) setLoading(false);
+    }
   }, [timeframe, locationId, dateFrom, dateTo]);
 
-  return { data, loading, error };
+  useEffect(() => {
+    loadMetrics();
+    // Invalidate the in-flight request so its response can't update state after
+    // the deps change or the component unmounts.
+    return () => {
+      requestIdRef.current++;
+    };
+  }, [loadMetrics]);
+
+  return { data, loading, error, refetch: loadMetrics };
 }

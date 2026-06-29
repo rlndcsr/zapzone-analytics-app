@@ -43,9 +43,9 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
     loadNotifications();
   }, [loadNotifications]);
 
-  const refresh = () => {
-    loadNotifications();
-  };
+  // Returns the load promise (and is stable) so callers like pull-to-refresh
+  // can await completion before clearing their indicator.
+  const refresh = useCallback(() => loadNotifications(), [loadNotifications]);
 
   const updateFilter = (newFilter: NotificationFilterType) => {
     setFilter(newFilter);

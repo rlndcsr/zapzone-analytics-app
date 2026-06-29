@@ -1,11 +1,12 @@
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   View,
@@ -102,7 +103,9 @@ const MetricCard = ({
     >
       <View className="flex-row items-center justify-between mb-3">
         <View className="flex-row items-center gap-1">
-          <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">{pill}</Text>
+          <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">
+            {pill}
+          </Text>
           <Image
             source={require("../../../assets/zapzone-assests/icon/info.png")}
             style={{ width: 14, height: 14 }}
@@ -124,9 +127,13 @@ const MetricCard = ({
       <Text className="text-base font-semibold text-gray-700 dark:text-gray-200 mb-3">
         {metric.title}
       </Text>
-      <Text className="text-4xl font-bold text-gray-900 dark:text-white">{value}</Text>
+      <Text className="text-4xl font-bold text-gray-900 dark:text-white">
+        {value}
+      </Text>
       {subtitle && (
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">{subtitle}</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          {subtitle}
+        </Text>
       )}
     </Pressable>
   );
@@ -171,13 +178,33 @@ const Home = () => {
     });
   };
 
-  const { data, loading, error } = useDashboardMetrics({
+  const [refreshing, setRefreshing] = useState(false);
+
+  const { data, loading, error, refetch } = useDashboardMetrics({
     timeframe: dateFilter,
     locationId: selectedLocation, // "all" → no location_id param sent
     dateFrom: customStartDate,
     dateTo: customEndDate,
   });
-  const { totalCount: unreadNotificationsCount } = useNotifications("unread");
+  const {
+    totalCount: unreadNotificationsCount,
+    refresh: refreshNotifications,
+  } = useNotifications("unread");
+
+  // Native pull-to-refresh: reload the whole dashboard through the same loaders
+  // as the initial fetch. `refetch` flips the hook's `loading` flag, which swaps
+  // the grid for the skeleton, so no stale values show while data is in flight.
+  // Both loaders swallow their own errors, so this always settles and clears the
+  // indicator even on failure. The native control blocks re-triggering while
+  // active, preventing concurrent refreshes.
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refetch(), refreshNotifications()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch, refreshNotifications]);
 
   // Build the location filter from the metrics response itself (locationStats),
   // mirroring the web admin — no separate /locations call (that payload is too
@@ -325,6 +352,14 @@ const Home = () => {
         showsVerticalScrollIndicator={false}
         // Clear the floating tab bar so the last cards aren't trapped behind it.
         contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#0644C7"
+            colors={["#0644C7"]}
+          />
+        }
       >
         <View className="px-5">
           {/* Header */}
@@ -492,7 +527,9 @@ const Home = () => {
                     </Text>
                   </View>
                   <Pressable onPress={closeModal} className="p-1">
-                    <Text className="text-xl text-gray-500 dark:text-gray-400">✕</Text>
+                    <Text className="text-xl text-gray-500 dark:text-gray-400">
+                      ✕
+                    </Text>
                   </Pressable>
                 </View>
 

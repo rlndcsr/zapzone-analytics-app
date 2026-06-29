@@ -45,7 +45,9 @@ const UtilizationBar = ({ value }: { value: number }) => (
         style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
       />
     </View>
-    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">{value}%</Text>
+    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+      {value}%
+    </Text>
   </View>
 );
 
@@ -97,19 +99,25 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
 
     <View className="flex-row mb-4">
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Bookings</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+          Bookings
+        </Text>
         <Text className="text-xl font-bold text-gray-900 dark:text-white">
           {location.bookings}
         </Text>
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Tickets</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+          Tickets
+        </Text>
         <Text className="text-xl font-bold text-gray-900 dark:text-white">
           {location.tickets}
         </Text>
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Events</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+          Events
+        </Text>
         <Text className="text-xl font-bold text-gray-900 dark:text-white">
           {location.events}
         </Text>
@@ -118,13 +126,17 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
 
     <View className="flex-row items-end justify-between">
       <View>
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Revenue</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+          Revenue
+        </Text>
         <Text className="text-lg font-bold text-[#0644C7]">
           {formatMoney(location.revenue)}
         </Text>
       </View>
       <View className="flex-1 ml-6">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Utilization</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+          Utilization
+        </Text>
         <UtilizationBar value={location.utilization} />
       </View>
     </View>
@@ -277,7 +289,9 @@ const Location = () => {
 
           {/* Title Section */}
           <View className="mb-6">
-            <Text className="text-2xl font-bold text-gray-900 dark:text-white">Locations</Text>
+            <Text className="text-2xl font-bold text-gray-900 dark:text-white">
+              Locations
+            </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400">
               Multi-location booking overview and management
             </Text>
@@ -378,11 +392,7 @@ const Location = () => {
                 Top Performing Locations
               </Text>
               {topLocations.map((loc, index) => (
-                <TopLocationCard
-                  key={loc.id}
-                  rank={index + 1}
-                  location={loc}
-                />
+                <TopLocationCard key={loc.id} rank={index + 1} location={loc} />
               ))}
 
               {/* All Locations Overview */}
