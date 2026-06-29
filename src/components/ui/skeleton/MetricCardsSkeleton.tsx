@@ -24,14 +24,14 @@ function SkeletonBlock({
 
   return (
     <Animated.View style={animatedStyle}>
-      <View className={`bg-gray-200 rounded-md ${className}`} />
+      <View className={`bg-gray-200 dark:bg-neutral-700 rounded-md ${className}`} />
     </Animated.View>
   );
 }
 
 function MetricCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
   return (
-    <View className="bg-white rounded-xl p-4 m-1">
+    <View className="bg-white dark:bg-neutral-900 rounded-xl p-4 m-1">
       {/* Top row: timeframe pill + icon badge */}
       <View className="flex-row items-center justify-between mb-3">
         <SkeletonBlock pulse={pulse} className="w-12 h-3" />

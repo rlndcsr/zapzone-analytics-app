@@ -112,7 +112,7 @@ const FloatingTabBar = ({
       }}
     >
       <View
-        className="flex-row items-center rounded-3xl border border-gray-100 bg-white px-2"
+        className="flex-row items-center rounded-3xl border border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2"
         style={{
           height: 64,
           shadowColor: "#0F172A",

@@ -39,13 +39,13 @@ const OVERVIEW_PREVIEW = 4;
 
 const UtilizationBar = ({ value }: { value: number }) => (
   <View className="flex-row items-center gap-2">
-    <View className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+    <View className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-neutral-800 overflow-hidden">
       <View
         className="h-full rounded-full bg-[#0644C7]"
         style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
       />
     </View>
-    <Text className="text-xs font-semibold text-gray-700">{value}%</Text>
+    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">{value}%</Text>
   </View>
 );
 
@@ -56,7 +56,7 @@ const TopLocationCard = ({
   rank: number;
   location: LocationRow;
 }) => (
-  <View className="border border-blue-200 bg-blue-50/40 rounded-2xl p-4 mb-3">
+  <View className="border border-blue-200 dark:border-blue-900 bg-blue-50/40 rounded-2xl p-4 mb-3">
     <View className="flex-row items-center justify-between mb-3">
       <View className="flex-row items-center gap-3 flex-1 mr-2">
         <View className="w-9 h-9 rounded-full bg-[#0644C7] items-center justify-center">
@@ -64,12 +64,12 @@ const TopLocationCard = ({
         </View>
         <View className="flex-1">
           <Text
-            className="text-base font-bold text-gray-900"
+            className="text-base font-bold text-gray-900 dark:text-white"
             numberOfLines={1}
           >
             {location.name}
           </Text>
-          <Text className="text-xs text-gray-500 mt-0.5">
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
             {location.bookings} bookings • {location.tickets} tickets •{" "}
             {location.events} events • {location.guests} guests
           </Text>
@@ -84,10 +84,10 @@ const TopLocationCard = ({
 );
 
 const OverviewCard = ({ location }: { location: LocationRow }) => (
-  <View className="border border-gray-200 bg-white rounded-2xl p-4 mb-3">
+  <View className="border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3">
     <View className="flex-row items-center justify-between mb-4">
       <Text
-        className="text-base font-semibold text-gray-900 flex-1 mr-2"
+        className="text-base font-semibold text-gray-900 dark:text-white flex-1 mr-2"
         numberOfLines={1}
       >
         {location.name}
@@ -97,20 +97,20 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
 
     <View className="flex-row mb-4">
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 mb-1">Bookings</Text>
-        <Text className="text-xl font-bold text-gray-900">
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Bookings</Text>
+        <Text className="text-xl font-bold text-gray-900 dark:text-white">
           {location.bookings}
         </Text>
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 mb-1">Tickets</Text>
-        <Text className="text-xl font-bold text-gray-900">
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Tickets</Text>
+        <Text className="text-xl font-bold text-gray-900 dark:text-white">
           {location.tickets}
         </Text>
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 mb-1">Events</Text>
-        <Text className="text-xl font-bold text-gray-900">
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Events</Text>
+        <Text className="text-xl font-bold text-gray-900 dark:text-white">
           {location.events}
         </Text>
       </View>
@@ -118,13 +118,13 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
 
     <View className="flex-row items-end justify-between">
       <View>
-        <Text className="text-xs text-gray-500 mb-1">Revenue</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Revenue</Text>
         <Text className="text-lg font-bold text-[#0644C7]">
           {formatMoney(location.revenue)}
         </Text>
       </View>
       <View className="flex-1 ml-6">
-        <Text className="text-xs text-gray-500 mb-1">Utilization</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Utilization</Text>
         <UtilizationBar value={location.utilization} />
       </View>
     </View>
@@ -226,7 +226,7 @@ const Location = () => {
   const hasLocations = filteredLocations.length > 0;
 
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1 bg-background dark:bg-black">
       {/* Blue Header Bar */}
       <View className="bg-[#0644C7] h-[37px] w-full mb-2" />
 
@@ -250,14 +250,14 @@ const Location = () => {
               {unreadNotificationsCount > 0 && (
                 <Pressable
                   onPress={() => router.push("/notification/notification")}
-                  className="bg-gray-200 rounded-full px-4 py-2 flex-row items-center gap-2"
+                  className="bg-gray-200 dark:bg-neutral-800 rounded-full px-4 py-2 flex-row items-center gap-2"
                 >
                   <Image
                     source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
                     style={{ width: 15, height: 15 }}
                     contentFit="contain"
                   />
-                  <Text className="text-gray-800 text-md ">
+                  <Text className="text-gray-800 dark:text-gray-100 text-md ">
                     {unreadNotificationsCount > 99
                       ? "99"
                       : unreadNotificationsCount}
@@ -277,8 +277,8 @@ const Location = () => {
 
           {/* Title Section */}
           <View className="mb-6">
-            <Text className="text-2xl font-bold text-gray-900">Locations</Text>
-            <Text className="text-sm text-gray-500">
+            <Text className="text-2xl font-bold text-gray-900 dark:text-white">Locations</Text>
+            <Text className="text-sm text-gray-500 dark:text-gray-400">
               Multi-location booking overview and management.
             </Text>
           </View>
@@ -286,7 +286,7 @@ const Location = () => {
           {/* Location Filter */}
           <Pressable
             onPress={() => setShowLocationDropdown(true)}
-            className="flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200 mb-3"
+            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-lg border border-gray-200 dark:border-neutral-700 mb-3"
           >
             <Image
               source={require("../../../assets/zapzone-assests/icon/pin.png")}
@@ -294,7 +294,7 @@ const Location = () => {
               contentFit="contain"
             />
             <Text
-              className="text-sm font-medium text-gray-700 flex-1"
+              className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
               numberOfLines={1}
             >
               {selectedLocationLabel}
@@ -310,14 +310,14 @@ const Location = () => {
           <View className="mb-6">
             <Pressable
               onPress={() => setShowDateDropdown(true)}
-              className="flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200"
+              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-lg border border-gray-200 dark:border-neutral-700"
             >
               <Image
                 source={require("../../../assets/zapzone-assests/icon/calendar.png")}
                 style={{ width: 18, height: 18 }}
                 contentFit="contain"
               />
-              <Text className="text-sm font-medium text-gray-700 flex-1">
+              <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1">
                 {currentDateLabel}
               </Text>
               <Image
@@ -341,16 +341,16 @@ const Location = () => {
 
           {/* Empty State (e.g. role without company-wide location stats) */}
           {!loading && !error && !hasLocations && (
-            <View className="bg-white border border-gray-200 rounded-2xl p-8 items-center">
+            <View className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-2xl p-8 items-center">
               <Image
                 source={require("../../../assets/zapzone-assests/icon/pin.png")}
                 style={{ width: 28, height: 28 }}
                 contentFit="contain"
               />
-              <Text className="text-gray-700 font-semibold mt-3">
+              <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
                 No location data
               </Text>
-              <Text className="text-gray-500 text-sm text-center mt-1">
+              <Text className="text-gray-500 dark:text-gray-400 text-sm text-center mt-1">
                 There is no location performance data for this selection.
               </Text>
             </View>
@@ -361,20 +361,20 @@ const Location = () => {
             <>
               {/* Location Performance header */}
               <View className="flex-row items-center gap-2 mb-4">
-                <View className="w-8 h-8 rounded-lg bg-blue-100 items-center justify-center">
+                <View className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
                   <Image
                     source={require("../../../assets/zapzone-assests/icon/pin.png")}
                     style={{ width: 18, height: 18, tintColor: "#0644C7" }}
                     contentFit="contain"
                   />
                 </View>
-                <Text className="text-lg font-bold text-gray-900">
+                <Text className="text-lg font-bold text-gray-900 dark:text-white">
                   Location Performance
                 </Text>
               </View>
 
               {/* Top Performing Locations */}
-              <Text className="text-base font-semibold text-gray-800 mb-3">
+              <Text className="text-base font-semibold text-gray-800 dark:text-gray-100 mb-3">
                 Top Performing Locations
               </Text>
               {topLocations.map((loc, index) => (
@@ -386,7 +386,7 @@ const Location = () => {
               ))}
 
               {/* All Locations Overview */}
-              <Text className="text-base font-semibold text-gray-800 mt-4 mb-3">
+              <Text className="text-base font-semibold text-gray-800 dark:text-gray-100 mt-4 mb-3">
                 All Locations Overview
               </Text>
               {overviewLocations.map((loc) => (
@@ -397,9 +397,9 @@ const Location = () => {
               {filteredLocations.length > OVERVIEW_PREVIEW && (
                 <Pressable
                   onPress={() => setShowAll((prev) => !prev)}
-                  className="self-center bg-white border border-gray-200 rounded-lg px-5 py-2.5 mt-1"
+                  className="self-center bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-lg px-5 py-2.5 mt-1"
                 >
-                  <Text className="text-sm font-medium text-gray-700">
+                  <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
                     {showAll
                       ? "Show Less"
                       : `Show All (${filteredLocations.length})`}
@@ -421,12 +421,14 @@ const Location = () => {
           <Pressable
             onPress={() => handleSelectLocation("all")}
             className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-              selectedLocation === "all" ? "bg-blue-50" : ""
+              selectedLocation === "all" ? "bg-blue-50 dark:bg-blue-900/30" : ""
             }`}
           >
             <Text
               className={`text-base font-medium ${
-                selectedLocation === "all" ? "text-blue-700" : "text-gray-800"
+                selectedLocation === "all"
+                  ? "text-blue-700 dark:text-blue-300"
+                  : "text-gray-800 dark:text-gray-100"
               }`}
             >
               All Locations
@@ -447,12 +449,14 @@ const Location = () => {
                 key={loc.id}
                 onPress={() => handleSelectLocation(loc.id)}
                 className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                  isSelected ? "bg-blue-50" : ""
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/30" : ""
                 }`}
               >
                 <Text
                   className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected ? "text-blue-700" : "text-gray-800"
+                    isSelected
+                      ? "text-blue-700 dark:text-blue-300"
+                      : "text-gray-800 dark:text-gray-100"
                   }`}
                   numberOfLines={1}
                 >
@@ -485,12 +489,14 @@ const Location = () => {
                 key={option.value}
                 onPress={() => handleSelectDate(option.value)}
                 className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                  isSelected ? "bg-blue-50" : ""
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/30" : ""
                 }`}
               >
                 <Text
                   className={`text-base font-medium ${
-                    isSelected ? "text-blue-700" : "text-gray-800"
+                    isSelected
+                      ? "text-blue-700 dark:text-blue-300"
+                      : "text-gray-800 dark:text-gray-100"
                   }`}
                 >
                   {option.label}

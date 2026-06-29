@@ -147,14 +147,14 @@ export function LoginForm() {
             className={`h-5 w-5 items-center justify-center rounded border ${
               rememberMe
                 ? "border-[#0A2472] bg-[#0A2472]"
-                : "border-gray-300 bg-white"
+                : "border-gray-300 bg-white dark:border-neutral-700 dark:bg-neutral-900"
             }`}
           >
             {rememberMe ? (
               <Feather name="check" size={13} color="#FFFFFF" />
             ) : null}
           </View>
-          <Text className="ml-2 text-sm text-gray-600">Remember me</Text>
+          <Text className="ml-2 text-sm text-gray-600 dark:text-gray-300">Remember me</Text>
         </Pressable>
 
         <Pressable
@@ -162,7 +162,7 @@ export function LoginForm() {
           hitSlop={8}
           accessibilityRole="button"
         >
-          <Text className="text-sm font-medium text-gray-700">
+          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
             Forgot password?
           </Text>
         </Pressable>

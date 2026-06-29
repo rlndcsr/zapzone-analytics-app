@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import "../global.css";
 import { restoreSession } from "../lib/session";
+import { applyStoredTheme } from "../lib/theme";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -15,7 +16,11 @@ export default function RootLayout() {
   const [sessionRestored, setSessionRestored] = useState(false);
 
   useEffect(() => {
-    restoreSession().finally(() => setSessionRestored(true));
+    // Restore the saved theme alongside the session so the app paints in the
+    // user's chosen mode from the first frame.
+    Promise.all([restoreSession(), applyStoredTheme()]).finally(() =>
+      setSessionRestored(true),
+    );
   }, []);
 
   if (!sessionRestored) {

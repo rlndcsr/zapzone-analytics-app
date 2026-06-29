@@ -22,18 +22,20 @@ export function InputField({
 }: InputFieldProps) {
   return (
     <View className={containerClassName}>
-      <Text className="mb-2 text-sm font-medium text-gray-700">{label}</Text>
+      <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+        {label}
+      </Text>
 
       <View
-        className={`h-14 flex-row items-center rounded-full border bg-white px-5 ${
-          error ? "border-red-400" : "border-gray-200"
+        className={`h-14 flex-row items-center rounded-full border bg-white dark:bg-neutral-900 px-5 ${
+          error ? "border-red-400" : "border-gray-200 dark:border-neutral-700"
         }`}
       >
         {icon ? <Feather name={icon} size={18} color="#9CA3AF" /> : null}
 
         <TextInput
           ref={ref}
-          className="ml-3 flex-1 py-0 text-base text-gray-900"
+          className="ml-3 flex-1 py-0 text-base text-gray-900 dark:text-white"
           placeholderTextColor="#9CA3AF"
           {...inputProps}
         />

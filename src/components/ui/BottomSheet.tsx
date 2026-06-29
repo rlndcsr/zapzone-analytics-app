@@ -98,18 +98,18 @@ export function BottomSheet({
           <Pressable className="flex-1" onPress={onClose} />
 
           <Animated.View
-            className="bg-white rounded-t-3xl max-h-[80%]"
+            className="bg-white dark:bg-neutral-900 rounded-t-3xl max-h-[80%]"
             style={sheetStyle}
           >
             <GestureDetector gesture={dragGesture}>
               <View className="pb-1">
                 <View className="w-10 h-1 rounded-full bg-gray-300 self-center mt-3" />
                 <View className="flex-row items-center justify-between px-6 pt-4 pb-3">
-                  <Text className="text-lg font-bold text-gray-900">
+                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
                     {title}
                   </Text>
                   <Pressable onPress={onClose} className="p-1">
-                    <Text className="text-xl text-gray-500">✕</Text>
+                    <Text className="text-xl text-gray-500 dark:text-gray-400">✕</Text>
                   </Pressable>
                 </View>
               </View>

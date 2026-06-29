@@ -98,11 +98,11 @@ const MetricCard = ({
   return (
     <Pressable
       onPress={() => onPress(metric.id)}
-      className="flex-1 bg-white rounded-xl p-4 m-1"
+      className="flex-1 bg-white dark:bg-neutral-900 rounded-xl p-4 m-1"
     >
       <View className="flex-row items-center justify-between mb-3">
         <View className="flex-row items-center gap-1">
-          <Text className="text-xs font-medium text-gray-600">{pill}</Text>
+          <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">{pill}</Text>
           <Image
             source={require("../../../assets/zapzone-assests/icon/info.png")}
             style={{ width: 14, height: 14 }}
@@ -121,12 +121,12 @@ const MetricCard = ({
           />
         </View>
       </View>
-      <Text className="text-base font-semibold text-gray-700 mb-3">
+      <Text className="text-base font-semibold text-gray-700 dark:text-gray-200 mb-3">
         {metric.title}
       </Text>
-      <Text className="text-4xl font-bold text-gray-900">{value}</Text>
+      <Text className="text-4xl font-bold text-gray-900 dark:text-white">{value}</Text>
       {subtitle && (
-        <Text className="text-xs text-gray-500 mt-1">{subtitle}</Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">{subtitle}</Text>
       )}
     </Pressable>
   );
@@ -316,7 +316,7 @@ const Home = () => {
   const isBreakdownEmpty = currentBreakdown.length === 0;
 
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1 bg-background dark:bg-black">
       {/* Blue Header Bar */}
       <View className="bg-[#0644C7] h-[37px] w-full mb-2" />
 
@@ -341,14 +341,14 @@ const Home = () => {
               {unreadNotificationsCount > 0 && (
                 <Pressable
                   onPress={() => router.push("/notification/notification")}
-                  className="bg-gray-200 rounded-full px-4 py-2 flex-row items-center gap-2"
+                  className="bg-gray-200 dark:bg-neutral-800 rounded-full px-4 py-2 flex-row items-center gap-2"
                 >
                   <Image
                     source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
                     style={{ width: 15, height: 15 }}
                     contentFit="contain"
                   />
-                  <Text className="text-gray-800 text-md ">
+                  <Text className="text-gray-800 dark:text-gray-100 text-md ">
                     {unreadNotificationsCount > 99
                       ? "99"
                       : unreadNotificationsCount}
@@ -368,10 +368,10 @@ const Home = () => {
 
           {/* Title Section */}
           <View className="mb-6">
-            <Text className="text-lg font-bold text-gray-900 ">
+            <Text className="text-2xl font-bold text-gray-900 dark:text-white ">
               Dashboard / <Text className="font-medium">Overview</Text>
             </Text>
-            <Text className="text-sm text-gray-500">
+            <Text className="text-sm text-gray-500 dark:text-gray-400">
               Real-time venue performance overview.
             </Text>
           </View>
@@ -379,7 +379,7 @@ const Home = () => {
           {/* Location Filter */}
           <Pressable
             onPress={() => setShowLocationDropdown(true)}
-            className="flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200 mb-3"
+            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-lg border border-gray-200 dark:border-neutral-700 mb-3"
           >
             <Image
               source={require("../../../assets/zapzone-assests/icon/pin.png")}
@@ -387,7 +387,7 @@ const Home = () => {
               contentFit="contain"
             />
             <Text
-              className="text-sm font-medium text-gray-700 flex-1"
+              className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
               numberOfLines={1}
             >
               {selectedLocationLabel}
@@ -404,14 +404,14 @@ const Home = () => {
             <View className="flex-1 mr-2">
               <Pressable
                 onPress={() => setShowDateDropdown(true)}
-                className="flex-row items-center gap-2 bg-white px-4 py-3 rounded-lg border border-gray-200"
+                className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-lg border border-gray-200 dark:border-neutral-700"
               >
                 <Image
                   source={require("../../../assets/zapzone-assests/icon/calendar.png")}
                   style={{ width: 18, height: 18 }}
                   contentFit="contain"
                 />
-                <Text className="text-sm font-medium text-gray-700 flex-1">
+                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1">
                   {currentDateLabel}
                 </Text>
                 <Image
@@ -422,7 +422,7 @@ const Home = () => {
               </Pressable>
             </View>
 
-            <Pressable className="bg-white p-3 rounded-lg border border-gray-200">
+            <Pressable className="bg-white dark:bg-neutral-900 p-3 rounded-lg border border-gray-200 dark:border-neutral-700">
               <Image
                 source={require("../../../assets/zapzone-assests/icon/scanner.png")}
                 style={{ width: 20, height: 20 }}
@@ -468,7 +468,7 @@ const Home = () => {
           <Pressable className="flex-1" onPress={closeModal} />
 
           <Animated.View
-            className="bg-white rounded-t-3xl p-6 w-full"
+            className="bg-white dark:bg-neutral-900 rounded-t-3xl p-6 w-full"
             style={{ transform: [{ translateY: slideAnim }] }}
           >
             {currentMetric && (
@@ -487,19 +487,19 @@ const Home = () => {
                         tintColor="#FFFFFF"
                       />
                     </View>
-                    <Text className="text-lg font-bold text-gray-900">
+                    <Text className="text-lg font-bold text-gray-900 dark:text-white">
                       {currentMetric.title} Breakdown
                     </Text>
                   </View>
                   <Pressable onPress={closeModal} className="p-1">
-                    <Text className="text-xl text-gray-500">✕</Text>
+                    <Text className="text-xl text-gray-500 dark:text-gray-400">✕</Text>
                   </Pressable>
                 </View>
 
                 {/* Check if Breakdown is Empty */}
                 {isBreakdownEmpty ? (
                   <View className="justify-center items-center py-12">
-                    <Text className="text-gray-500 text-base font-medium">
+                    <Text className="text-gray-500 dark:text-gray-400 text-base font-medium">
                       No Breakdown available
                     </Text>
                   </View>
@@ -510,12 +510,12 @@ const Home = () => {
                       {currentBreakdown.map((item, index) => (
                         <View
                           key={index}
-                          className="flex-row items-center justify-between py-2 border-b border-gray-100"
+                          className="flex-row items-center justify-between py-2 border-b border-gray-100 dark:border-neutral-800"
                         >
-                          <Text className="text-sm text-gray-700">
+                          <Text className="text-sm text-gray-700 dark:text-gray-200">
                             {item.label}
                           </Text>
-                          <Text className="text-xs text-gray-500">
+                          <Text className="text-xs text-gray-500 dark:text-gray-400">
                             {item.count} ({item.percentage}%)
                           </Text>
                         </View>
@@ -523,11 +523,11 @@ const Home = () => {
                     </View>
 
                     {/* Total */}
-                    <View className="flex-row items-center justify-between pt-4 border-t border-gray-200">
-                      <Text className="text-sm font-semibold text-gray-900">
+                    <View className="flex-row items-center justify-between pt-4 border-t border-gray-200 dark:border-neutral-700">
+                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
                         Total
                       </Text>
-                      <Text className="text-lg font-bold text-gray-900">
+                      <Text className="text-lg font-bold text-gray-900 dark:text-white">
                         {currentMetric.enabled && currentMetric.valueField
                           ? (data?.metrics[currentMetric.valueField] ?? 0)
                           : 0}
@@ -552,12 +552,14 @@ const Home = () => {
           <Pressable
             onPress={() => handleSelectLocation("all")}
             className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-              selectedLocation === "all" ? "bg-blue-50" : ""
+              selectedLocation === "all" ? "bg-blue-50 dark:bg-blue-900/30" : ""
             }`}
           >
             <Text
               className={`text-base font-medium ${
-                selectedLocation === "all" ? "text-blue-700" : "text-gray-800"
+                selectedLocation === "all"
+                  ? "text-blue-700 dark:text-blue-300"
+                  : "text-gray-800 dark:text-gray-100"
               }`}
             >
               All Locations
@@ -578,12 +580,14 @@ const Home = () => {
                 key={loc.id}
                 onPress={() => handleSelectLocation(loc.id)}
                 className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                  isSelected ? "bg-blue-50" : ""
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/30" : ""
                 }`}
               >
                 <Text
                   className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected ? "text-blue-700" : "text-gray-800"
+                    isSelected
+                      ? "text-blue-700 dark:text-blue-300"
+                      : "text-gray-800 dark:text-gray-100"
                   }`}
                   numberOfLines={1}
                 >
@@ -616,12 +620,14 @@ const Home = () => {
                 key={option.value}
                 onPress={() => handleSelectDate(option.value)}
                 className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                  isSelected ? "bg-blue-50" : ""
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/30" : ""
                 }`}
               >
                 <Text
                   className={`text-base font-medium ${
-                    isSelected ? "text-blue-700" : "text-gray-800"
+                    isSelected
+                      ? "text-blue-700 dark:text-blue-300"
+                      : "text-gray-800 dark:text-gray-100"
                   }`}
                 >
                   {option.label}

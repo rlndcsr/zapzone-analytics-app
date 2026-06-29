@@ -18,7 +18,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white dark:bg-neutral-900">
       <StatusBar style="dark" />
 
       {/* "padding" on both platforms is JS-only (no native window resize), so it
