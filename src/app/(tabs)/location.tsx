@@ -238,11 +238,11 @@ const Location = () => {
         "All Locations");
 
   const dateFilterOptions = [
+    { label: "All Time", value: "all_time" as DateFilterType },
     { label: "Today", value: "today" as DateFilterType },
     { label: "Last 24 Hours", value: "last_24h" as DateFilterType },
     { label: "Last 7 Days", value: "last_7d" as DateFilterType },
     { label: "Last 30 Days", value: "last_30d" as DateFilterType },
-    { label: "All Time", value: "all_time" as DateFilterType },
     { label: "Custom Range", value: "custom" as DateFilterType },
   ];
 
