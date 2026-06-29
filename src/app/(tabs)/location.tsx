@@ -1,10 +1,19 @@
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
+import {
+  OverviewCardsSkeleton,
+  TopCardsSkeleton,
+} from "../../components/ui/skeleton/LocationSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 
@@ -153,13 +162,28 @@ const Location = () => {
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
+  const [refreshing, setRefreshing] = useState(false);
+
   // locationStats is computed for every location regardless of location_id, so
   // the location filter is applied client-side; only the timeframe hits the API.
-  const { data, loading, error } = useDashboardMetrics({
+  const { data, loading, error, refetch } = useDashboardMetrics({
     timeframe: dateFilter,
     locationId: "all",
   });
-  const { totalCount: unreadNotificationsCount } = useNotifications("unread");
+  const {
+    totalCount: unreadNotificationsCount,
+    refresh: refreshNotifications,
+  } = useNotifications("unread");
+
+  // Native pull-to-refresh
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refetch(), refreshNotifications()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch, refreshNotifications]);
 
   // Flatten locationStats into typed rows once per response.
   const allLocations: LocationRow[] = useMemo(() => {
@@ -246,6 +270,14 @@ const Location = () => {
         className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#0644C7"
+            colors={["#0644C7"]}
+          />
+        }
       >
         <View className="px-5">
           {/* Header */}
@@ -342,9 +374,6 @@ const Location = () => {
             </Pressable>
           </View>
 
-          {/* Loading State */}
-          {loading && <MetricCardsSkeleton />}
-
           {/* Error State */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
@@ -370,8 +399,7 @@ const Location = () => {
             </View>
           )}
 
-          {/* Content */}
-          {!loading && !error && hasLocations && (
+          {!error && (loading || hasLocations) && (
             <>
               {/* Location Performance header */}
               <View className="flex-row items-center gap-2 mb-4">
@@ -391,30 +419,44 @@ const Location = () => {
               <Text className="text-base font-semibold text-gray-800 dark:text-gray-100 mb-3">
                 Top Performing Locations
               </Text>
-              {topLocations.map((loc, index) => (
-                <TopLocationCard key={loc.id} rank={index + 1} location={loc} />
-              ))}
+              {loading ? (
+                <TopCardsSkeleton />
+              ) : (
+                topLocations.map((loc, index) => (
+                  <TopLocationCard
+                    key={loc.id}
+                    rank={index + 1}
+                    location={loc}
+                  />
+                ))
+              )}
 
               {/* All Locations Overview */}
               <Text className="text-base font-semibold text-gray-800 dark:text-gray-100 mt-4 mb-3">
                 All Locations Overview
               </Text>
-              {overviewLocations.map((loc) => (
-                <OverviewCard key={loc.id} location={loc} />
-              ))}
+              {loading ? (
+                <OverviewCardsSkeleton />
+              ) : (
+                <>
+                  {overviewLocations.map((loc) => (
+                    <OverviewCard key={loc.id} location={loc} />
+                  ))}
 
-              {/* Show All / Show Less toggle */}
-              {filteredLocations.length > OVERVIEW_PREVIEW && (
-                <Pressable
-                  onPress={() => setShowAll((prev) => !prev)}
-                  className="self-center bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-lg px-5 py-2.5 mt-1"
-                >
-                  <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                    {showAll
-                      ? "Show Less"
-                      : `Show All (${filteredLocations.length})`}
-                  </Text>
-                </Pressable>
+                  {/* Show All / Show Less toggle */}
+                  {filteredLocations.length > OVERVIEW_PREVIEW && (
+                    <Pressable
+                      onPress={() => setShowAll((prev) => !prev)}
+                      className="self-center bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-lg px-5 py-2.5 mt-1"
+                    >
+                      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                        {showAll
+                          ? "Show Less"
+                          : `Show All (${filteredLocations.length})`}
+                      </Text>
+                    </Pressable>
+                  )}
+                </>
               )}
             </>
           )}
