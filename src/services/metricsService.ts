@@ -57,8 +57,26 @@ export type DashboardTotals = {
   [key: string]: number;
 };
 
+/** Per-location rollup inside `locationStats` (company_admin responses only). */
 export type LocationStat = {
   name: string;
+  /** Package bookings count. */
+  bookings: number;
+  /** Attraction ticket purchases count (shown as "Tickets"). */
+  purchases: number;
+  /** Event purchases count (shown as "Events"). */
+  eventPurchases: number;
+  /** Event tickets sold. */
+  eventTickets: number;
+  /** Combined revenue: bookings + attraction + event purchases. */
+  revenue: number;
+  /** Total guests: booking participants + attraction + event tickets. */
+  participants: number;
+  /** Capacity utilization 0–100. */
+  utilization: number;
+  bookingRevenue: number;
+  purchaseRevenue: number;
+  eventPurchaseRevenue: number;
   [key: string]: unknown;
 };
 
