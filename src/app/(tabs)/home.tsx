@@ -78,6 +78,20 @@ const darkenColor = (color: string, percent: number = 30) => {
   );
 };
 
+const MetricIconBadge = ({ metric }: { metric: MetricDefinition }) => (
+  <View className={`${metric.iconBg} p-2.5 rounded-lg`}>
+    <Image
+      source={getIcon(metric.icon)}
+      style={{
+        width: 22,
+        height: 22,
+        tintColor: darkenColor(metric.color, 20),
+      }}
+      contentFit="contain"
+    />
+  </View>
+);
+
 const MetricCard = ({
   metric,
   data,
@@ -112,17 +126,7 @@ const MetricCard = ({
             contentFit="contain"
           />
         </View>
-        <View className={`${metric.iconBg} p-2.5 rounded-lg`}>
-          <Image
-            source={getIcon(metric.icon)}
-            style={{
-              width: 22,
-              height: 22,
-              tintColor: darkenColor(metric.color, 20),
-            }}
-            contentFit="contain"
-          />
-        </View>
+        <MetricIconBadge metric={metric} />
       </View>
       <Text className="text-base font-semibold text-gray-700 dark:text-gray-200 mb-3">
         {metric.title}
@@ -238,11 +242,11 @@ const Home = () => {
   };
 
   const dateFilterOptions = [
+    { label: "All Time", value: "all_time" as DateFilterType },
     { label: "Today", value: "today" as DateFilterType },
     { label: "Last 24 Hours", value: "last_24h" as DateFilterType },
     { label: "Last 7 Days", value: "last_7d" as DateFilterType },
     { label: "Last 30 Days", value: "last_30d" as DateFilterType },
-    { label: "All Time", value: "all_time" as DateFilterType },
     { label: "Custom Range", value: "custom" as DateFilterType },
   ];
 
@@ -511,17 +515,7 @@ const Home = () => {
                 {/* Modal Header */}
                 <View className="flex-row items-center justify-between mb-6">
                   <View className="flex-row items-center gap-3">
-                    <View
-                      style={{ backgroundColor: currentMetric.color }}
-                      className="p-2 rounded-lg"
-                    >
-                      <Image
-                        source={getIcon(currentMetric.icon)}
-                        style={{ width: 20, height: 20 }}
-                        contentFit="contain"
-                        tintColor="#FFFFFF"
-                      />
-                    </View>
+                    <MetricIconBadge metric={currentMetric} />
                     <Text className="text-lg font-bold text-gray-900 dark:text-white">
                       {currentMetric.title} Breakdown
                     </Text>
