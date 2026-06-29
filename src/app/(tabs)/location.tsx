@@ -279,7 +279,7 @@ const Location = () => {
           <View className="mb-6">
             <Text className="text-2xl font-bold text-gray-900 dark:text-white">Locations</Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400">
-              Multi-location booking overview and management.
+              Multi-location booking overview and management
             </Text>
           </View>
 
