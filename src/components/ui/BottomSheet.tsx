@@ -90,8 +90,8 @@ export function BottomSheet({
     <Modal visible transparent animationType="none" onRequestClose={onClose}>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <Animated.View
-          className="absolute inset-0 bg-black/50"
-          style={backdropStyle}
+          className="absolute inset-0"
+          style={[{ backgroundColor: "rgba(0,0,0,0.5)" }, backdropStyle]}
         />
 
         <View className="flex-1 justify-end">
