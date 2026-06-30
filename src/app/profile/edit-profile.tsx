@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -14,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { InputField } from "../../components/ui/InputField";
 import { PrimaryButton } from "../../components/ui/PrimaryButton";
+import { EditProfileSkeleton } from "../../components/ui/skeleton/EditProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { getToken } from "../../lib/session";
 import {
@@ -181,9 +181,7 @@ const EditProfile = () => {
           }}
         >
           {loading ? (
-            <View className="py-16 items-center">
-              <ActivityIndicator color="#0644C7" />
-            </View>
+            <EditProfileSkeleton />
           ) : (
             <>
               {/* Personal Information */}

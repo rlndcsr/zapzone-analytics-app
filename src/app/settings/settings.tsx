@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   Switch,
@@ -10,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsAccountSkeleton } from "../../components/ui/skeleton/SettingsAccountSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { saveTheme } from "../../lib/theme";
 
@@ -109,9 +109,7 @@ const Settings = () => {
         <SectionTitle>Account</SectionTitle>
         <View className="overflow-hidden rounded-2xl bg-white dark:bg-neutral-900">
           {loading ? (
-            <View className="py-8 items-center">
-              <ActivityIndicator color="#0644C7" />
-            </View>
+            <SettingsAccountSkeleton />
           ) : (
             <>
               <SettingRow
