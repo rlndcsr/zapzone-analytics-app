@@ -350,9 +350,9 @@ const Calendar = () => {
             </Text>
           </View>
 
-          {/* View-mode filter: Month / Day / Week / Today */}
+          {/* View-mode filter: Month / Week / Day / Today */}
           <View className="flex-row bg-gray-100 dark:bg-neutral-800 rounded-xl p-1 mb-4">
-            {(["month", "day", "week"] as ViewMode[]).map((mode) => {
+            {(["month", "week", "day"] as ViewMode[]).map((mode) => {
               const active = viewMode === mode;
               return (
                 <Pressable
