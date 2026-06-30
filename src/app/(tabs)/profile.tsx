@@ -4,10 +4,12 @@ import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   View,
 } from "react-native";
+import { ProfileSkeleton } from "../../components/ui/skeleton/ProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { getCurrentUser } from "../../lib/session";
 import { signOut } from "../../services/auth";
@@ -83,6 +85,7 @@ const Profile = () => {
   const router = useRouter();
   const { user, stats, loading, error, refresh } = useProfile();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Re-fetch when returning from the edit screen so saved changes show.
   useFocusEffect(
@@ -90,6 +93,15 @@ const Profile = () => {
       refresh();
     }, [refresh]),
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   // Fall back to the cached session user for the header while the fetch runs
   // or if it fails, so the screen is never blank.
@@ -123,6 +135,14 @@ const Profile = () => {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#0644C7"
+            colors={["#0644C7"]}
+          />
+        }
       >
         {/* Header card */}
         <View className="rounded-b-[32px] bg-[#0644C7] px-6 pb-6 pt-14">
@@ -158,11 +178,7 @@ const Profile = () => {
 
         <View className="px-4">
           {/* Loading / error states for the fetched data */}
-          {loading && (
-            <View className="mt-6 items-center">
-              <ActivityIndicator color="#0644C7" />
-            </View>
-          )}
+          {loading && !refreshing && <ProfileSkeleton />}
 
           {!loading && error && (
             <View className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
@@ -173,7 +189,7 @@ const Profile = () => {
             </View>
           )}
 
-          {!loading && user && (
+          {(!loading || refreshing) && user && (
             <>
               {/* Personal Information */}
               <SectionCard icon="user" title="Personal Information">

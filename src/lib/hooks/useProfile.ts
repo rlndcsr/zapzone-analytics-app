@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchCompanyStatistics,
   fetchUserProfile,
@@ -17,6 +17,9 @@ export function useProfile() {
   const [stats, setStats] = useState<CompanyStatistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Track the first successful fetch so focus/refresh revalidations don't
+  // flip `loading` back on and re-show the skeleton over existing data.
+  const hasLoaded = useRef(false);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -28,7 +31,8 @@ export function useProfile() {
       return;
     }
 
-    setLoading(true);
+    // Only show the full-screen loading state on the very first fetch.
+    if (!hasLoaded.current) setLoading(true);
     try {
       const profile = await fetchUserProfile(session.id, token);
       setUser(profile);
@@ -48,6 +52,7 @@ export function useProfile() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load profile");
     } finally {
+      hasLoaded.current = true;
       setLoading(false);
     }
   }, []);
