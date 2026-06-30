@@ -2,7 +2,6 @@ import { Image } from "expo-image";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,7 +10,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
-import { CalendarSkeleton } from "../../components/ui/skeleton/CalendarSkeleton";
+import {
+  CalendarDaySkeleton,
+  CalendarSkeleton,
+  CalendarWeekSkeleton,
+} from "../../components/ui/skeleton/CalendarSkeleton";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import type { CalendarBooking } from "../../services/bookingsService";
@@ -501,11 +504,8 @@ const Calendar = () => {
             ))}
 
           {/* Week / Day loading */}
-          {viewMode !== "month" && loading && (
-            <View className="py-16 items-center">
-              <ActivityIndicator color="#0644C7" />
-            </View>
-          )}
+          {viewMode === "week" && loading && <CalendarWeekSkeleton />}
+          {viewMode === "day" && loading && <CalendarDaySkeleton />}
 
           {/* ---- WEEK ---- */}
           {viewMode === "week" &&
