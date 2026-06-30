@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchBookingsInRange,
+  fetchAllBookings,
   type CalendarBooking,
 } from "../../services/bookingsService";
 import { getToken } from "../session";
@@ -13,25 +13,47 @@ type UseCalendarBookingsParams = {
   locationId?: number;
 };
 
+// Session cache of the full booking list; views filter it client-side.
+type BookingsCache = { key: string; fetchedAt: number; data: CalendarBooking[] };
+let cache: BookingsCache | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const cacheKey = (locationId?: number) => String(locationId ?? "all");
+
 export function useCalendarBookings({
   startDate,
   endDate,
   locationId,
 }: UseCalendarBookingsParams) {
-  const [bookings, setBookings] = useState<CalendarBooking[]>([]);
-  const [loading, setLoading] = useState(true);
+  const key = cacheKey(locationId);
+  const cacheFresh =
+    !!cache && cache.key === key && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+
+  const [allBookings, setAllBookings] = useState<CalendarBooking[]>(
+    cache && cache.key === key ? cache.data : [],
+  );
+  const [loading, setLoading] = useState(!cacheFresh);
   const [error, setError] = useState<string | null>(null);
 
-  // Monotonic request token: only the latest load may write state, so a slow
-  // earlier window can never clobber a newer selection. Bumped on cleanup so an
-  // in-flight request is dropped once the deps change or the screen unmounts.
+  // Only the latest sync may write state (guards against stale responses).
   const requestIdRef = useRef(0);
 
-  const loadBookings = useCallback(async () => {
-    const requestId = ++requestIdRef.current;
-    const isCurrent = () => requestId === requestIdRef.current;
+  // Fetch + cache the full list; `force` (pull-to-refresh) ignores the TTL.
+  const sync = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      const k = cacheKey(locationId);
+      const fresh =
+        !!cache && cache.key === k && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
 
-    try {
+      if (fresh && !force) {
+        setAllBookings(cache!.data);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
+      const requestId = ++requestIdRef.current;
+      const isCurrent = () => requestId === requestIdRef.current;
+
       const token = getToken();
       if (!token) {
         if (isCurrent()) {
@@ -41,36 +63,50 @@ export function useCalendarBookings({
         return;
       }
 
-      setLoading(true);
-      const result = await fetchBookingsInRange({
-        token,
-        startDate,
-        endDate,
-        locationId,
-      });
-      if (isCurrent()) {
-        setBookings(result);
-        setError(null);
+      // Show stale cache instantly and refresh quietly; else show the spinner.
+      if (cache && cache.key === k && !force) {
+        setAllBookings(cache.data);
+        setLoading(false);
+      } else {
+        setLoading(true);
       }
-    } catch (err) {
-      console.error("Calendar bookings error:", err);
-      if (isCurrent()) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load bookings",
-        );
-        setBookings([]);
+
+      try {
+        const data = await fetchAllBookings({ token, locationId });
+        cache = { key: k, fetchedAt: Date.now(), data };
+        if (isCurrent()) {
+          setAllBookings(data);
+          setError(null);
+        }
+      } catch (err) {
+        console.error("Calendar bookings error:", err);
+        if (isCurrent()) {
+          setError(
+            err instanceof Error ? err.message : "Failed to load bookings",
+          );
+          if (!cache) setAllBookings([]);
+        }
+      } finally {
+        if (isCurrent()) setLoading(false);
       }
-    } finally {
-      if (isCurrent()) setLoading(false);
-    }
-  }, [startDate, endDate, locationId]);
+    },
+    [locationId],
+  );
 
   useEffect(() => {
-    loadBookings();
+    sync();
     return () => {
       requestIdRef.current++;
     };
-  }, [loadBookings]);
+  }, [sync]);
 
-  return { bookings, loading, error, refetch: loadBookings };
+  // Bookings within the visible window (YYYY-MM-DD strings compare lexically).
+  const bookings = useMemo(
+    () => allBookings.filter((b) => b.date >= startDate && b.date <= endDate),
+    [allBookings, startDate, endDate],
+  );
+
+  const refetch = useCallback(() => sync({ force: true }), [sync]);
+
+  return { bookings, loading, error, refetch };
 }

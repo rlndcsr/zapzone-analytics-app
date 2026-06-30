@@ -134,13 +134,10 @@ type BookingsListResponse = {
 
 type BookingDetailResponse = { success: boolean; data: RawBookingDetail };
 
+// Backend caps per_page at 100; there's no date-range filter, so we page all.
 const PER_PAGE = 100;
-// Safety cap so navigating to a far-past month can't page forever. The list is
-// sorted newest-first, so reaching a month before today costs one page per ~100
-// newer bookings; this bounds that to 60 pages (~6,000 bookings).
-const MAX_PAGES = 60;
-
-const pad2 = (n: number) => String(n).padStart(2, "0");
+// Safety cap (~10,000 most-recent bookings) to avoid an unbounded paging loop.
+const SYNC_MAX_PAGES = 100;
 
 /** "2026-06-13T00:00:00Z" | "2026-06-13" -> "2026-06-13". */
 function toDateKey(raw: string | null | undefined): string | null {
@@ -203,113 +200,34 @@ async function fetchPage(
   });
 }
 
-/** Exact single-day fetch via the index's booking_date filter (cheap path). */
-async function fetchSingleDay(
-  date: string,
-  params: FetchParams,
-): Promise<CalendarBooking[]> {
-  const out: CalendarBooking[] = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await fetchPage(page, { booking_date: date }, params);
-    const items = res?.data?.bookings ?? [];
-    for (const raw of items) {
-      const d = toDateKey(raw.booking_date);
-      if (d) out.push(mapBooking(raw, d));
-    }
-    const pg = res?.data?.pagination;
-    if (!pg || page >= pg.last_page || items.length === 0) break;
-  }
-  return out;
-}
-
-/**
- * Page through one month (newest-first) and append bookings whose date falls in
- * [rangeLo, rangeHi]. Stops as soon as it crosses below the month's first day,
- * since every later page is older still.
- */
-async function collectMonth(
-  out: CalendarBooking[],
-  year: number,
-  month: number,
-  rangeLo: string,
-  rangeHi: string,
-  params: FetchParams,
-): Promise<void> {
-  const monthStart = `${year}-${pad2(month)}-01`;
-
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await fetchPage(page, {}, params);
-    const items = res?.data?.bookings ?? [];
-    if (items.length === 0) break;
-
-    let reachedPast = false;
-    for (const raw of items) {
-      const date = toDateKey(raw.booking_date);
-      if (!date) continue;
-      if (date < monthStart) {
-        reachedPast = true;
-        continue;
-      }
-      if (date < rangeLo || date > rangeHi) continue;
-      out.push(mapBooking(raw, date));
-    }
-
-    const pg = res?.data?.pagination;
-    if (reachedPast || !pg || page >= pg.last_page) break;
-  }
-}
-
-export type FetchRangeParams = {
-  token: string;
-  /** Inclusive start, YYYY-MM-DD. */
-  startDate: string;
-  /** Inclusive end, YYYY-MM-DD. */
-  endDate: string;
-  locationId?: number;
-  signal?: AbortSignal;
-};
-
-/**
- * All bookings whose date falls within [startDate, endDate].
- *
- * The bookings index has no date-range filter, so for multi-day ranges we scan
- * each spanned month newest-first; single days use the exact booking_date
- * filter. Powers the month / week / day calendar views from one entry point.
- */
-export async function fetchBookingsInRange({
+/** Every booking, paged newest-first. Callers filter by date and cache it. */
+export async function fetchAllBookings({
   token,
-  startDate,
-  endDate,
   locationId,
   signal,
-}: FetchRangeParams): Promise<CalendarBooking[]> {
-  const params: FetchParams = { token, locationId, signal };
-
-  if (startDate === endDate) {
-    return fetchSingleDay(startDate, params);
-  }
-
-  const [sy, sm] = startDate.split("-").map(Number);
-  const [ey, em] = endDate.split("-").map(Number);
+}: FetchParams): Promise<CalendarBooking[]> {
   const out: CalendarBooking[] = [];
+  let page = 1;
+  let lastPage = 1;
 
-  let year = sy;
-  let month = sm;
-  while (year < ey || (year === ey && month <= em)) {
-    const lastDay = new Date(year, month, 0).getDate();
-    const monthStart = `${year}-${pad2(month)}-01`;
-    const monthEnd = `${year}-${pad2(month)}-${pad2(lastDay)}`;
-    const lo = startDate > monthStart ? startDate : monthStart;
-    const hi = endDate < monthEnd ? endDate : monthEnd;
-
-    await collectMonth(out, year, month, lo, hi, params);
-
-    month++;
-    if (month > 12) {
-      month = 1;
-      year++;
+  do {
+    const res = await fetchPage(page, {}, { token, locationId, signal });
+    const items = res?.data?.bookings ?? [];
+    for (const raw of items) {
+      const date = toDateKey(raw.booking_date);
+      if (date) out.push(mapBooking(raw, date));
     }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
+
+  if (lastPage > SYNC_MAX_PAGES) {
+    console.warn(
+      `[bookings] Loaded the ${SYNC_MAX_PAGES * PER_PAGE} most recent bookings; ` +
+        `${lastPage - SYNC_MAX_PAGES} older page(s) were not fetched.`,
+    );
   }
+
   return out;
 }
 
@@ -409,12 +327,7 @@ export async function updateBookingInternalNotes(
   });
 }
 
-/**
- * POST /api/payments — record an in-store payment against a booking. The
- * backend recomputes the booking's amount_paid / payment_status. (Card charges
- * need on-device Accept.js tokenization, which this app doesn't carry, so this
- * records a manual in-store payment for the outstanding balance.)
- */
+/** POST /api/payments — record a manual in-store payment (no card tokenization). */
 export async function recordBookingPayment(
   token: string,
   params: {

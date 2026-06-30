@@ -81,6 +81,15 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 const dateKey = (d: Date) =>
   `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
+/** Monday that starts the week containing `d` (week view runs Mon→Sun). */
+const startOfWeek = (d: Date) => {
+  const day = d.getDay();
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+};
+
 const formatMoney = (value: number) =>
   `$${value.toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -183,8 +192,7 @@ const Calendar = () => {
       return { startDate: dateKey(first), endDate: dateKey(last) };
     }
     if (viewMode === "week") {
-      const start = new Date(anchor);
-      start.setDate(anchor.getDate() - anchor.getDay());
+      const start = startOfWeek(anchor);
       const end = new Date(start);
       end.setDate(start.getDate() + 6);
       return { startDate: dateKey(start), endDate: dateKey(end) };
@@ -235,10 +243,9 @@ const Calendar = () => {
     return out;
   }, [anchor]);
 
-  // Days of the active week (Sun..Sat) for the week agenda.
+  // Days of the active week (Mon..Sun) for the week agenda — matches the web.
   const weekDays = useMemo(() => {
-    const start = new Date(anchor);
-    start.setDate(anchor.getDate() - anchor.getDay());
+    const start = startOfWeek(anchor);
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
