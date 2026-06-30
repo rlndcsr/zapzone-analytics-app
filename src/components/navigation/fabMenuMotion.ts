@@ -1,9 +1,11 @@
 import { Easing } from "react-native-reanimated";
 
+// Open and close share the same well-damped spring profile so the morph
+// glides to rest with matching smoothness in both directions.
 export const MORPH_OPEN_SPRING = {
-  damping: 19,
-  stiffness: 190,
-  mass: 0.9,
+  damping: 26,
+  stiffness: 240,
+  mass: 0.85,
 } as const;
 
 export const MORPH_CLOSE_SPRING = {
@@ -16,9 +18,14 @@ export const CLOSE_COLLAPSE_LEAD = 70;
 
 export const PANEL_RADIUS = 28;
 
-export const SHADOW_OPACITY_RANGE = [0.1, 0.22];
-export const SHADOW_RADIUS_RANGE = [6, 26];
-export const SHADOW_ELEVATION_RANGE = [3, 18];
+// Shadow morphs from the FAB's blue glow (progress 0) to the panel's soft
+// slate shadow (progress 1) so hiding/showing the real FAB never pops.
+export const SHADOW_OPACITY_RANGE = [0.4, 0.22];
+export const SHADOW_RADIUS_RANGE = [12, 26];
+export const SHADOW_ELEVATION_RANGE = [12, 18];
+export const SHADOW_OFFSET_Y_RANGE = [3, 8];
+export const FAB_SHADOW_COLOR = "#0644C7";
+export const PANEL_SHADOW_COLOR = "#0F172A";
 
 export const BODY_FADE_RANGE = [0.4, 1];
 
@@ -30,8 +37,8 @@ export const ICON_MIN_SCALE = 0.6;
 export const BACKDROP_COLOR = "#0B1220";
 export const BACKDROP_MAX_OPACITY = 0.35;
 
-export const ITEMS_OPEN_DELAY = 110;
-export const ITEMS_OPEN_DURATION = 440;
+export const ITEMS_OPEN_DELAY = 70;
+export const ITEMS_OPEN_DURATION = 420;
 export const ITEMS_CLOSE_DURATION = 120;
 export const ITEM_STAGGER = 0.05;
 export const ITEM_WINDOW = 0.5;

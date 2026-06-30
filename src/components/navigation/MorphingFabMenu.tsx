@@ -4,6 +4,7 @@ import { useColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -31,6 +32,7 @@ import {
   BODY_FADE_RANGE,
   CLOSE_COLLAPSE_LEAD,
   CLOSE_EASING,
+  FAB_SHADOW_COLOR,
   ICON_CLOSE_FADE,
   ICON_MENU_FADE,
   ICON_MIN_SCALE,
@@ -46,7 +48,9 @@ import {
   MORPH_CLOSE_SPRING,
   MORPH_OPEN_SPRING,
   PANEL_RADIUS,
+  PANEL_SHADOW_COLOR,
   SHADOW_ELEVATION_RANGE,
+  SHADOW_OFFSET_Y_RANGE,
   SHADOW_OPACITY_RANGE,
   SHADOW_RADIUS_RANGE,
 } from "./fabMenuMotion";
@@ -150,6 +154,13 @@ export function MorphingFabMenu({
   const itemsProgress = useSharedValue(0);
   const [mounted, setMounted] = useState(visible);
 
+  // Unmount the morph and reveal the real FAB in one batched commit; splitting
+  // these across two runOnJS hops flicks the FAB for a frame on close.
+  const finishClose = () => {
+    setMounted(false);
+    onClosed?.();
+  };
+
   useEffect(() => {
     if (visible) {
       setMounted(true);
@@ -171,17 +182,18 @@ export function MorphingFabMenu({
       progress.value = withDelay(
         CLOSE_COLLAPSE_LEAD,
         withSpring(0, MORPH_CLOSE_SPRING, (done) => {
-          if (done) {
-            runOnJS(setMounted)(false);
-            if (onClosed) runOnJS(onClosed)();
-          }
+          if (done) runOnJS(finishClose)();
         }),
       );
     }
   }, [visible]);
 
   const fab = fabRect;
-  const fabBottom = fab ? fab.y + fab.height : 0;
+  // Android's translucent Modal renders from the true screen top while
+  // measureInWindow reports app-window Y, so shift FAB-derived Y down by the
+  // top inset to realign (iOS Modals already share full-screen coordinates).
+  const modalYOffset = Platform.OS === "android" ? insets.top : 0;
+  const fabBottom = fab ? fab.y + fab.height + modalYOffset : 0;
   const fabCenterX = fab ? fab.x + fab.width / 2 : screenW / 2;
   const fabW = fab?.width ?? 56;
   const fabH = fab?.height ?? 56;
@@ -200,7 +212,7 @@ export function MorphingFabMenu({
     (rows - 1) * ROW_GAP +
     footerH;
 
-  const maxPanelH = fab ? fab.y + fab.height - (insets.top + 8) : naturalPanelH;
+  const maxPanelH = fab ? fabBottom - (insets.top + 8) : naturalPanelH;
   const panelH = Math.min(naturalPanelH, maxPanelH);
   const needsScroll = naturalPanelH > maxPanelH;
 
@@ -238,7 +250,22 @@ export function MorphingFabMenu({
         [0, 1],
         [FAB_COLOR, surfaceColor],
       ),
-      // Soft shadow grows as the panel expands.
+      // Shadow morphs from the FAB's blue glow to the panel's slate shadow so
+      // the swap with the real FAB is seamless at both ends of the animation.
+      shadowColor: interpolateColor(
+        progress.value,
+        [0, 1],
+        [FAB_SHADOW_COLOR, PANEL_SHADOW_COLOR],
+      ),
+      shadowOffset: {
+        width: 0,
+        height: interpolate(
+          progress.value,
+          [0, 1],
+          SHADOW_OFFSET_Y_RANGE,
+          Extrapolation.CLAMP,
+        ),
+      },
       shadowOpacity: interpolate(
         progress.value,
         [0, 1],
@@ -376,11 +403,9 @@ export function MorphingFabMenu({
         <Animated.View
           onStartShouldSetResponder={() => true}
           style={[
-            {
-              position: "absolute",
-              shadowColor: "#0F172A",
-              shadowOffset: { width: 0, height: 8 },
-            },
+            { position: "absolute" },
+            // shadowColor / shadowOffset are animated in surfaceStyle so the
+            // FAB→panel shadow morph stays seamless.
             surfaceStyle,
           ]}
         >

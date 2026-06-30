@@ -201,26 +201,29 @@ const FloatingTabBar = ({
             onPressIn={onFabPressIn}
             onPressOut={onFabPressOut}
           >
-            <Animated.View style={fabPressStyle}>
-              <View
-                ref={fabRef}
-                className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7]"
-                style={{
-                  opacity: menuMounted ? 0 : 1,
-                  shadowColor: ACTIVE_COLOR,
-                  shadowOffset: { width: 0, height: 3 },
-                  shadowOpacity: 0.4,
-                  shadowRadius: 12,
-                  elevation: 12,
-                }}
-              >
-                {centerOptions.tabBarIcon?.({
-                  focused: centerFocused,
-                  color: "#FFFFFF",
-                  size: 26,
-                })}
-              </View>
-            </Animated.View>
+            {/* Ref sits outside the press-scale Animated.View so measureInWindow
+                returns the FAB's true resting box, not the shrunk-while-pressed size. */}
+            <View ref={fabRef} collapsable={false}>
+              <Animated.View style={fabPressStyle}>
+                <View
+                  className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7]"
+                  style={{
+                    opacity: menuMounted ? 0 : 1,
+                    shadowColor: ACTIVE_COLOR,
+                    shadowOffset: { width: 0, height: 3 },
+                    shadowOpacity: 0.4,
+                    shadowRadius: 12,
+                    elevation: 12,
+                  }}
+                >
+                  {centerOptions.tabBarIcon?.({
+                    focused: centerFocused,
+                    color: "#FFFFFF",
+                    size: 26,
+                  })}
+                </View>
+              </Animated.View>
+            </View>
           </Pressable>
         </View>
       )}

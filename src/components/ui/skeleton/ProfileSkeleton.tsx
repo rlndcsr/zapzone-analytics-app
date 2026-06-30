@@ -69,9 +69,8 @@ const COMPANY_ROWS = [
 ];
 
 /**
- * Loading placeholder for the profile detail cards. Matches the Personal
- * Information, Company Details, and Business Overview section cards so the
- * screen keeps its shape while data is fetched.
+ * Loading placeholder matching the Personal Information, Company Details, and
+ * Business Overview cards so the screen keeps its shape while data is fetched.
  */
 export function ProfileSkeleton() {
   const pulse = usePulse();

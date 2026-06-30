@@ -51,9 +51,8 @@ const COMPANY_LABELS = [
 ];
 
 /**
- * Loading placeholder for the Edit Profile form. Mirrors the Personal
- * Information and Company Details cards (and the read-only Business Metrics
- * card) plus the Save button so the screen keeps its shape while data loads.
+ * Loading placeholder mirroring the Edit Profile form: Personal Information,
+ * Company Details, Business Metrics cards, and the Save button.
  */
 export function EditProfileSkeleton() {
   const pulse = usePulse();

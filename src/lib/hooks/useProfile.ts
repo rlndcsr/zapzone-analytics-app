@@ -8,9 +8,8 @@ import {
 import { getCurrentUser, getToken } from "../session";
 
 /**
- * Loads the signed-in user's full profile and (if they belong to a company)
- * the company's auto-calculated statistics. Company stats failing is
- * non-fatal — the profile still renders.
+ * Loads the signed-in user's profile plus their company's auto-calculated
+ * stats (best-effort: stats failing is non-fatal, the profile still renders).
  */
 export function useProfile() {
   const [user, setUser] = useState<ProfileUser | null>(null);
