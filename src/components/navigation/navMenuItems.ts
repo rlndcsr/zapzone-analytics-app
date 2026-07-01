@@ -5,9 +5,12 @@ export type NavMenuItem = {
   key: string;
   label: string;
   icon: ComponentProps<typeof Feather>["name"];
+  /** Destination route; items without one just close the menu (not yet wired). */
+  route?: string;
 };
 
 export const NAV_MENU_ITEMS: NavMenuItem[] = [
+  { key: "attractions", label: "Attractions", icon: "zap", route: "/attractions/attractions" },
   { key: "dashboard", label: "Dashboard", icon: "grid" },
   { key: "bookings", label: "Bookings", icon: "calendar" },
   { key: "customers", label: "Customers", icon: "users" },
@@ -15,7 +18,6 @@ export const NAV_MENU_ITEMS: NavMenuItem[] = [
   { key: "revenue", label: "Revenue", icon: "dollar-sign" },
   { key: "reports", label: "Reports", icon: "file-text" },
   { key: "memberships", label: "Memberships", icon: "award" },
-  { key: "attractions", label: "Attractions", icon: "zap" },
   { key: "events", label: "Events", icon: "flag" },
   { key: "notifications", label: "Notifications", icon: "bell" },
   { key: "analytics", label: "Analytics", icon: "bar-chart-2" },

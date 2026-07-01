@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
 import {
@@ -360,6 +361,15 @@ export function MorphingFabMenu({
 
   if (!mounted || !fab) return null;
 
+  // Items with a route navigate then close; the rest keep their close-only
+  // behavior until their destinations exist.
+  const handleSelect = (item: NavMenuItem) => {
+    onClose();
+    if (item.route) {
+      router.push(item.route as never);
+    }
+  };
+
   const grid = (
     <View className="flex-row flex-wrap justify-between">
       {NAV_MENU_ITEMS.map((item, i) => (
@@ -368,7 +378,7 @@ export function MorphingFabMenu({
           item={item}
           index={i}
           width={cellW}
-          onPress={onClose}
+          onPress={() => handleSelect(item)}
           itemsProgress={itemsProgress}
         />
       ))}
