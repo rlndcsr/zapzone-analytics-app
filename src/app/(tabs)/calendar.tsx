@@ -534,7 +534,7 @@ const Calendar = () => {
           {/* ---- MONTH ---- */}
           {viewMode === "month" &&
             (loading ? (
-              <CalendarSkeleton />
+              <CalendarSkeleton rows={cells.length / 7} />
             ) : (
               <>
                 <View className="rounded-2xl overflow-hidden bg-white dark:bg-neutral-900 shadow-sm border border-gray-100 dark:border-neutral-800">
