@@ -7,20 +7,61 @@ import { SkeletonBlock, usePulse } from "./SkeletonBlock";
 // causes no layout shift.
 const CARD_COUNT = 7;
 
+/** A skeleton bar vertically centered within a text line's height. */
+function SkeletonLine({
+  pulse,
+  width,
+  line,
+  bar = "h-3",
+  className = "",
+}: {
+  pulse: SharedValue<number>;
+  width: string;
+  line: string;
+  bar?: string;
+  className?: string;
+}) {
+  return (
+    <View className={`${line} justify-center ${className}`}>
+      <SkeletonBlock pulse={pulse} className={`${width} ${bar}`} />
+    </View>
+  );
+}
+
+/** Matches MetricCard: label + title, icon badge, value, subtitle. */
 function MetricCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
   return (
-    <View className="bg-white dark:bg-neutral-900 rounded-xl p-4 m-1">
-      {/* Top row: timeframe pill + icon badge */}
-      <View className="flex-row items-center justify-between mb-3">
-        <SkeletonBlock pulse={pulse} className="w-12 h-3" />
-        <SkeletonBlock pulse={pulse} className="w-10 h-10 rounded-lg" />
+    <View
+      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-5 m-1.5 shadow-sm"
+      style={{
+        shadowColor: "#424242",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+      }}
+    >
+      {/* Row 1: label + title (left) + icon badge (right) */}
+      <View className="flex-row items-start justify-between mb-4">
+        <View className="flex-1 mr-2">
+          {/* label (text-xs, uppercase) */}
+          <SkeletonLine pulse={pulse} width="w-16" line="h-4" />
+          {/* title (text-sm, mt-1) */}
+          <SkeletonLine
+            pulse={pulse}
+            width="w-24"
+            line="h-5"
+            bar="h-4"
+            className="mt-1"
+          />
+        </View>
+        <SkeletonBlock pulse={pulse} className="w-10 h-10 rounded-xl" />
       </View>
 
-      <View className="mb-3">
-        <SkeletonBlock pulse={pulse} className="w-24 h-4" />
-      </View>
-
-      <SkeletonBlock pulse={pulse} className="w-16 h-8" />
+      {/* value (text-3xl) */}
+      <SkeletonLine pulse={pulse} width="w-16" line="h-9" bar="h-7" />
+      {/* subtitle (text-xs, mt-1.5) */}
+      <SkeletonLine pulse={pulse} width="w-20" line="h-4" className="mt-1.5" />
     </View>
   );
 }
@@ -29,7 +70,7 @@ export function MetricCardsSkeleton() {
   const pulse = usePulse();
 
   return (
-    <View className="flex-row flex-wrap">
+    <View className="flex-row flex-wrap -mx-1.5">
       {Array.from({ length: CARD_COUNT }).map((_, index) => (
         <View key={index} className="w-1/2">
           <MetricCardSkeleton pulse={pulse} />

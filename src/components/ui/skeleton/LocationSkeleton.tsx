@@ -26,29 +26,51 @@ function SkeletonLine({
   );
 }
 
-/** Matches TopLocationCard: rank circle, name + stats line, revenue. */
+/** Matches TopLocationCard: rank circle, name + stats line, revenue badge,
+ *  utilization bar + guests. */
 function TopLocationCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
   return (
-    <View className="border border-blue-200 dark:border-blue-900 bg-blue-50/40 rounded-2xl p-4 mb-3">
+    <View
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm"
+      style={{
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+      }}
+    >
+      {/* Row 1: rank + name/stats + revenue badge */}
       <View className="flex-row items-center justify-between mb-3">
         <View className="flex-row items-center gap-3 flex-1 mr-2">
-          <SkeletonBlock pulse={pulse} className="w-9 h-9 rounded-full" />
+          <SkeletonBlock pulse={pulse} className="w-10 h-10 rounded-full" />
           <View className="flex-1">
-            {/* name (text-base, 1 line) + stats (text-xs, wraps to 2 lines) */}
+            {/* name (text-base, 1 line) + stats (text-xs, 1 line) */}
             <SkeletonLine pulse={pulse} width="w-40" line="h-6" bar="h-4" />
             <SkeletonLine
               pulse={pulse}
-              width="w-48"
+              width="w-44"
               line="h-4"
               className="mt-0.5"
             />
-            <SkeletonLine pulse={pulse} width="w-28" line="h-4" />
           </View>
         </View>
-        {/* revenue (text-lg) */}
-        <SkeletonLine pulse={pulse} width="w-24" line="h-7" bar="h-5" />
+        {/* revenue badge (text-sm, px-3 py-1.5 rounded-lg) */}
+        <SkeletonBlock pulse={pulse} className="w-20 h-8 rounded-lg" />
       </View>
-      <View className="h-4" />
+
+      {/* Row 2: utilization bar (flex-1) + guests */}
+      <View className="flex-row items-center gap-4">
+        <View className="flex-1 flex-row items-center gap-3">
+          {/* track (flex-1 h-2) + percentage (text-xs, min-w-[32px]) */}
+          <View className="flex-1">
+            <SkeletonBlock pulse={pulse} className="w-full h-2 rounded-full" />
+          </View>
+          <SkeletonLine pulse={pulse} width="w-8" line="h-4" />
+        </View>
+        {/* guests (text-xs) */}
+        <SkeletonLine pulse={pulse} width="w-16" line="h-4" />
+      </View>
     </View>
   );
 }
