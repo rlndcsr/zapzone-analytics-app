@@ -643,9 +643,6 @@ const Calendar = () => {
               </>
             ) : (
               <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-                <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                  <Text className="text-2xl">📅</Text>
-                </View>
                 <Text className="text-gray-700 dark:text-gray-200 font-semibold">
                   No bookings
                 </Text>

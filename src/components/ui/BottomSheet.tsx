@@ -5,6 +5,7 @@ import {
   GestureDetector,
   GestureHandlerRootView,
 } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   Extrapolation,
   interpolate,
@@ -35,6 +36,7 @@ export function BottomSheet({
   title,
   children,
 }: BottomSheetProps) {
+  const insets = useSafeAreaInsets();
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const [mounted, setMounted] = useState(visible);
 
@@ -87,11 +89,18 @@ export function BottomSheet({
   if (!mounted) return null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+    <Modal
+      visible
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="none"
+      onRequestClose={onClose}
+    >
       <GestureHandlerRootView style={{ flex: 1 }}>
         <Animated.View
           className="absolute inset-0"
-          style={[{ backgroundColor: "rgba(0,0,0,0.5)" }, backdropStyle]}
+          style={[{ backgroundColor: "rgba(20, 20, 20, 0.5)" }, backdropStyle]}
         />
 
         <View className="flex-1 justify-end">
@@ -99,7 +108,7 @@ export function BottomSheet({
 
           <Animated.View
             className="bg-white dark:bg-neutral-900 rounded-t-3xl max-h-[80%]"
-            style={sheetStyle}
+            style={[sheetStyle, { paddingBottom: insets.bottom }]}
           >
             <GestureDetector gesture={dragGesture}>
               <View className="pb-1">

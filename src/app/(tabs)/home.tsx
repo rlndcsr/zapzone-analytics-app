@@ -92,7 +92,7 @@ const MetricCard = ({
       onPress={() => onPress(metric.id)}
       className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-5 m-1.5 shadow-sm"
       style={{
-        shadowColor: '#000',
+        shadowColor: '#424242',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
         shadowRadius: 8,
@@ -475,17 +475,22 @@ const Home = () => {
       <Modal
         visible={selectedMetric !== null}
         transparent={true}
+        statusBarTranslucent
+        navigationBarTranslucent
         animationType="fade"
         onRequestClose={closeModal}
       >
-        <View className="absolute inset-0 bg-black/60" />
+        <View className="absolute inset-0 bg-black/25" />
 
         <View className="flex-1 justify-end">
           <Pressable className="flex-1" onPress={closeModal} />
 
           <Animated.View
-            className="bg-white dark:bg-neutral-900 rounded-t-3xl px-6 pt-6 pb-8 w-full"
-            style={{ transform: [{ translateY: slideAnim }] }}
+            className="bg-white dark:bg-neutral-900 rounded-t-3xl px-6 pt-6 w-full"
+            style={{
+              transform: [{ translateY: slideAnim }],
+              paddingBottom: insets.bottom + 32,
+            }}
           >
             {currentMetric && (
               <>
