@@ -12,6 +12,22 @@ let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cacheKey = (locationId?: number) => String(locationId ?? "all");
 
+// Set after creating a purchase so the list screen force-refetches on focus.
+let stale = false;
+
+/** Mark the cached purchases stale so they refetch on next focus. */
+export function markAttractionPurchasesStale(): void {
+  cache = null;
+  stale = true;
+}
+
+/** Consume the stale flag (true once after a mutation, then resets). */
+export function consumeAttractionPurchasesStale(): boolean {
+  if (!stale) return false;
+  stale = false;
+  return true;
+}
+
 type UseAttractionPurchasesParams = { locationId?: number };
 
 /** Loads + caches the attraction purchases, with pull-to-refresh (`refetch`). */

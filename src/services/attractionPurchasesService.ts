@@ -128,6 +128,58 @@ export async function fetchAttractionPurchases({
   return items.map(mapPurchase);
 }
 
+/** One add-on line on a new purchase. */
+export type PurchaseAddonInput = {
+  addon_id: number;
+  quantity: number;
+  price_at_purchase: number;
+};
+
+/**
+ * Payload for POST /api/attraction-purchases — mirrors the web on-site
+ * purchase (in-store / pay-later; card payment is web-only and deferred).
+ */
+export type CreateAttractionPurchaseInput = {
+  attraction_id: number;
+  customer_id?: number;
+  guest_name: string;
+  guest_email?: string;
+  guest_phone?: string;
+  quantity: number;
+  amount: number;
+  total_amount: number;
+  amount_paid: number;
+  currency: "USD";
+  method: "cash" | "paylater";
+  payment_method: "in-store" | "paylater";
+  status?: "confirmed";
+  location_id: number;
+  purchase_date: string;
+  scheduled_date?: string;
+  scheduled_time?: string;
+  notes?: string;
+  send_email: boolean;
+  additional_addons?: PurchaseAddonInput[];
+};
+
+type CreatePurchaseResponse = {
+  success: boolean;
+  data: { id: number } & Record<string, unknown>;
+  message?: string;
+};
+
+/** POST /api/attraction-purchases — create an on-site purchase. */
+export async function createAttractionPurchase(
+  token: string,
+  input: CreateAttractionPurchaseInput,
+): Promise<{ id: number }> {
+  const res = await apiRequest<CreatePurchaseResponse>(
+    "/api/attraction-purchases",
+    { method: "POST", token, body: input },
+  );
+  return { id: res.data.id };
+}
+
 /**
  * GET /api/attraction-purchases/trashed — soft-deleted purchases (the web
  * "View Deleted" list). Read-only here; restore/force-delete come later.

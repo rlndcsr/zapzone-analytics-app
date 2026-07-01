@@ -3,6 +3,17 @@ import { apiRequest } from "../lib/api";
 /** Attraction active-state, mirrored from the web `is_active` flag. */
 export type AttractionStatus = "active" | "inactive";
 
+/** An add-on attached to an attraction (used by the Create Purchase form). */
+export type AttractionAddOn = {
+  id: number;
+  name: string;
+  price: number;
+  description: string | null;
+  image: string | null;
+  minQuantity: number;
+  maxQuantity: number;
+};
+
 /** Flattened attraction row backing the Attractions list + KPI cards. */
 export type AttractionRow = {
   id: number;
@@ -21,6 +32,10 @@ export type AttractionRow = {
   createdAt: string | null;
   displayOrder: number;
   displayCapacityToCustomers: boolean;
+  images: string[];
+  addOns: AttractionAddOn[];
+  /** Preferred display order of add-ons, by name. */
+  addOnsOrder: string[];
 };
 
 /** Raw attraction as returned by GET /api/attractions (snake_case). */
@@ -39,6 +54,19 @@ type RawAttraction = {
   display_order?: number | null;
   display_capacity_to_customers?: boolean | null;
   location?: { id?: number; name?: string | null } | null;
+  image?: string | string[] | null;
+  add_ons?: RawAddOn[] | null;
+  add_ons_order?: string[] | null;
+};
+
+type RawAddOn = {
+  id: number;
+  name?: string | null;
+  price?: number | string | null;
+  description?: string | null;
+  image?: string | null;
+  min_quantity?: number | string | null;
+  max_quantity?: number | string | null;
 };
 
 type AttractionsListResponse = {
@@ -76,6 +104,17 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
     createdAt: raw.created_at ?? null,
     displayOrder: Number(raw.display_order ?? 0),
     displayCapacityToCustomers: raw.display_capacity_to_customers ?? true,
+    images: raw.image ? (Array.isArray(raw.image) ? raw.image : [raw.image]) : [],
+    addOns: (raw.add_ons ?? []).map((a) => ({
+      id: a.id,
+      name: a.name?.trim() || "Add-on",
+      price: Number(a.price ?? 0),
+      description: a.description?.trim() || null,
+      image: a.image ?? null,
+      minQuantity: Number(a.min_quantity ?? 0),
+      maxQuantity: Number(a.max_quantity ?? 99),
+    })),
+    addOnsOrder: raw.add_ons_order ?? [],
   };
 }
 

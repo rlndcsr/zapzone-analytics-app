@@ -1,7 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/legacy";
-import { router } from "expo-router";
-import * as Sharing from "expo-sharing";
+import { router, useFocusEffect } from "expo-router";
 import {
   useCallback,
   useEffect,
@@ -24,7 +22,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
-import { useAttractionPurchases } from "../../lib/hooks/useAttractionPurchases";
+import {
+  consumeAttractionPurchasesStale,
+  useAttractionPurchases,
+} from "../../lib/hooks/useAttractionPurchases";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -354,6 +355,14 @@ const ManagePurchases = () => {
     }
   }, [showDeleted, loadDeleted, refetch]);
 
+  // Refetch when returning from Create Purchase so the new purchase + KPIs
+  // appear without a manual pull-to-refresh (filters are preserved in state).
+  useFocusEffect(
+    useCallback(() => {
+      if (consumeAttractionPurchasesStale()) refetch();
+    }, [refetch]),
+  );
+
   // KPI values — computed over the active set (already location-scoped by the
   // fetch), like the web metrics.
   const kpis = useMemo(() => {
@@ -397,6 +406,11 @@ const ManagePurchases = () => {
     }
     setExporting(true);
     try {
+      // Loaded lazily so these native modules never run at app startup (Expo
+      // Router evaluates route modules eagerly on boot).
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+
       const header = [
         "ID", "Customer Name", "Email", "Phone", "Attraction",
         "Quantity", "Total Amount", "Status", "Payment Method", "Date",
@@ -858,6 +872,27 @@ const ManagePurchases = () => {
           )}
         </ScrollView>
       </BottomSheet>
+
+      {/* Floating Action Button — Create Purchase (mirrors the web "New
+          Purchase" button). No floating tab bar on this pushed route. */}
+      <Pressable
+        onPress={() => router.push("/attractions/create-purchase" as never)}
+        accessibilityRole="button"
+        accessibilityLabel="Create purchase"
+        style={{
+          position: "absolute",
+          right: 20,
+          bottom: insets.bottom + 20,
+          shadowColor: PRIMARY,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.4,
+          shadowRadius: 12,
+          elevation: 8,
+        }}
+        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+      >
+        <Feather name="plus" size={26} color="#FFFFFF" />
+      </Pressable>
     </View>
   );
 };

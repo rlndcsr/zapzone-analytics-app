@@ -1,6 +1,5 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import {
   useCallback,
@@ -314,6 +313,8 @@ const CreateAttractionScreen = () => {
       Alert.alert("Limit reached", `You can add up to ${MAX_IMAGES} images.`);
       return;
     }
+    // Loaded lazily so the native module never runs at app startup.
+    const ImagePicker = await import("expo-image-picker");
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert(
