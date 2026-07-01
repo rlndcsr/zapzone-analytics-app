@@ -11,6 +11,7 @@ export type NavMenuItem = {
 
 export const NAV_MENU_ITEMS: NavMenuItem[] = [
   { key: "attractions", label: "Attractions", icon: "zap", route: "/attractions/attractions" },
+  { key: "events", label: "Events", icon: "flag" },
   { key: "dashboard", label: "Dashboard", icon: "grid" },
   { key: "bookings", label: "Bookings", icon: "calendar" },
   { key: "customers", label: "Customers", icon: "users" },
@@ -18,7 +19,6 @@ export const NAV_MENU_ITEMS: NavMenuItem[] = [
   { key: "revenue", label: "Revenue", icon: "dollar-sign" },
   { key: "reports", label: "Reports", icon: "file-text" },
   { key: "memberships", label: "Memberships", icon: "award" },
-  { key: "events", label: "Events", icon: "flag" },
   { key: "notifications", label: "Notifications", icon: "bell" },
   { key: "analytics", label: "Analytics", icon: "bar-chart-2" },
   { key: "settings", label: "Settings", icon: "settings" },
