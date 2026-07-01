@@ -22,9 +22,11 @@ export function InputField({
 }: InputFieldProps) {
   return (
     <View className={containerClassName}>
-      <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-        {label}
-      </Text>
+      {label ? (
+        <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          {label}
+        </Text>
+      ) : null}
 
       <View
         className={`h-14 flex-row items-center rounded-full border bg-white dark:bg-neutral-900 px-5 ${

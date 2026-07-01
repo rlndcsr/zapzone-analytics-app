@@ -12,6 +12,23 @@ let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cacheKey = (locationId?: number) => String(locationId ?? "all");
 
+// Set after a mutation (e.g. creating an attraction) so the list screen knows
+// to force a refetch the next time it regains focus.
+let stale = false;
+
+/** Mark the cached attraction list stale so it refetches on next focus. */
+export function markAttractionsStale(): void {
+  cache = null;
+  stale = true;
+}
+
+/** Consume the stale flag (true once after a mutation, then resets). */
+export function consumeAttractionsStale(): boolean {
+  if (!stale) return false;
+  stale = false;
+  return true;
+}
+
 type UseAttractionsParams = { locationId?: number };
 
 /** Loads + caches the attraction list, with pull-to-refresh (`refetch`). */

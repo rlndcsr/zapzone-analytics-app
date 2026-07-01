@@ -79,6 +79,54 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
   };
 }
 
+/** One availability window: which weekdays + the daily open/close times. */
+export type AvailabilitySchedule = {
+  days: string[];
+  start_time: string;
+  end_time: string;
+};
+
+/** Payload for POST /api/attractions — mirrors the web CreateAttractionData. */
+export type CreateAttractionInput = {
+  location_id: number;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  pricing_type: string;
+  max_capacity: number;
+  /** 0 means "unlimited". */
+  duration: number;
+  duration_unit: "minutes" | "hours";
+  availability: AvailabilitySchedule[];
+  /** Base64 data URLs; omitted when no images were chosen. */
+  image?: string[];
+  is_active: boolean;
+  addon_ids: number[];
+  add_ons_order: string[];
+  display_capacity_to_customers: boolean;
+  display_order: number;
+};
+
+type CreateAttractionResponse = {
+  success: boolean;
+  data: RawAttraction & { id: number };
+  message?: string;
+};
+
+/** POST /api/attractions — create an attraction (same endpoint as the web). */
+export async function createAttraction(
+  token: string,
+  input: CreateAttractionInput,
+): Promise<AttractionRow> {
+  const res = await apiRequest<CreateAttractionResponse>("/api/attractions", {
+    method: "POST",
+    token,
+    body: input,
+  });
+  return mapAttraction(res.data);
+}
+
 type FetchParams = {
   token: string;
   userId: number;

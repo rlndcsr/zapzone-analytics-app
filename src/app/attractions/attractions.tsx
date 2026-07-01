@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useMemo, useState, useCallback, type ComponentProps } from "react";
 import {
   Pressable,
@@ -16,7 +16,10 @@ import {
   AttractionsKpiSkeleton,
   AttractionsListSkeleton,
 } from "../../components/ui/skeleton/AttractionsSkeleton";
-import { useAttractions } from "../../lib/hooks/useAttractions";
+import {
+  consumeAttractionsStale,
+  useAttractions,
+} from "../../lib/hooks/useAttractions";
 import type {
   AttractionRow,
   AttractionStatus,
@@ -243,6 +246,14 @@ const Attractions = () => {
       setRefreshing(false);
     }
   }, [refetch]);
+
+  // After creating an attraction, refetch on return so the new item + KPIs show
+  // without a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      if (consumeAttractionsStale()) refetch();
+    }, [refetch]),
+  );
 
   // Attractions scoped to the selected location. This drives the KPI cards and
   // is the base for the searchable list — mirroring the web, where the location
@@ -696,6 +707,27 @@ const Attractions = () => {
           </Text>
         </ScrollView>
       </BottomSheet>
+
+      {/* Floating Action Button — Create Attraction (mirrors the web "New
+          Attraction" button). This route has no floating tab bar to clash with. */}
+      <Pressable
+        onPress={() => router.push("/attractions/create-attraction")}
+        accessibilityRole="button"
+        accessibilityLabel="Create attraction"
+        style={{
+          position: "absolute",
+          right: 20,
+          bottom: insets.bottom + 20,
+          shadowColor: PRIMARY,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.4,
+          shadowRadius: 12,
+          elevation: 8,
+        }}
+        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+      >
+        <Feather name="plus" size={26} color="#FFFFFF" />
+      </Pressable>
     </View>
   );
 };
