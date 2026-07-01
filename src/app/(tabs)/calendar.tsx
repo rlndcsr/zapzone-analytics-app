@@ -39,42 +39,47 @@ const STATUS_ORDER = ["confirmed", "pending", "checked-in", "completed", "cancel
 
 const STATUS_STYLE: Record<
   string,
-  { label: string; dot: string; text: string; badge: string; card: string }
+  { label: string; dot: string; text: string; badge: string; card: string; color: string }
 > = {
   confirmed: {
-    label: "confirmed",
+    label: "Confirmed",
     dot: "bg-green-500",
     text: "text-green-700 dark:text-green-400",
-    badge: "bg-green-100 text-green-700",
-    card: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-900",
+    badge: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    card: "bg-white dark:bg-neutral-900 border-l-4 border-green-500",
+    color: "#22C55E",
   },
   pending: {
-    label: "pending",
+    label: "Pending",
     dot: "bg-amber-500",
     text: "text-amber-700 dark:text-amber-400",
-    badge: "bg-amber-100 text-amber-700",
-    card: "bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-900",
+    badge: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+    card: "bg-white dark:bg-neutral-900 border-l-4 border-amber-500",
+    color: "#F59E0B",
   },
   cancelled: {
-    label: "cancelled",
+    label: "Cancelled",
     dot: "bg-red-500",
     text: "text-red-700 dark:text-red-400",
-    badge: "bg-red-100 text-red-700",
-    card: "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-900",
+    badge: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+    card: "bg-white dark:bg-neutral-900 border-l-4 border-red-500",
+    color: "#EF4444",
   },
   "checked-in": {
-    label: "checked-in",
+    label: "Checked In",
     dot: "bg-indigo-500",
     text: "text-indigo-700 dark:text-indigo-400",
-    badge: "bg-indigo-100 text-indigo-700",
-    card: "bg-indigo-50 dark:bg-indigo-950 border-indigo-200 dark:border-indigo-900",
+    badge: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
+    card: "bg-white dark:bg-neutral-900 border-l-4 border-indigo-500",
+    color: "#6366F1",
   },
   completed: {
-    label: "completed",
+    label: "Completed",
     dot: "bg-[#0644C7]",
     text: "text-[#0644C7]",
-    badge: "bg-blue-100 text-blue-700",
-    card: "bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-900",
+    badge: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    card: "bg-white dark:bg-neutral-900 border-l-4 border-[#0644C7]",
+    color: "#0644C7",
   },
 };
 
@@ -110,6 +115,31 @@ function formatTime(time: string | null): string {
 
 type DayGroup = { bookings: CalendarBooking[]; counts: Record<string, number> };
 
+/** Status Legend Component */
+const StatusLegend = () => {
+  const legendItems = [
+    { key: "confirmed", label: "Confirmed", color: "#22C55E" },
+    { key: "pending", label: "Pending", color: "#F59E0B" },
+    { key: "cancelled", label: "Cancelled", color: "#EF4444" },
+  ];
+
+  return (
+    <View className="flex-row items-center justify-center gap-4 mt-3 mb-1">
+      {legendItems.map((item) => (
+        <View key={item.key} className="flex-row items-center gap-1.5">
+          <View 
+            className="w-3 h-3 rounded-full" 
+            style={{ backgroundColor: item.color }}
+          />
+          <Text className="text-xs text-gray-600 dark:text-gray-400">
+            {item.label}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+};
+
 /** Rich, status-tinted booking card. Tap opens the full detail sheet. */
 const BookingCard = ({
   booking,
@@ -122,45 +152,65 @@ const BookingCard = ({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
-      className={`border rounded-2xl p-4 mb-3 ${style.card}`}
+      className={`rounded-2xl p-4 mb-3 shadow-sm ${style.card}`}
+      style={({ pressed }) => [
+        {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.04,
+          shadowRadius: 8,
+          elevation: 1,
+        },
+        pressed ? { opacity: 0.8 } : null,
+      ]}
     >
-      <View className="flex-row items-start justify-between mb-1">
-        <Text className="text-sm font-medium text-gray-600 dark:text-gray-300">
-          🕐 {formatTime(booking.time)}
-        </Text>
-        <View className={`px-2.5 py-0.5 rounded-full ${style.badge.split(" ")[0]}`}>
+      <View className="flex-row items-start justify-between mb-2">
+        <View className="flex-row items-center gap-2">
+          <View className="w-8 h-8 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center">
+            <Text className="text-sm">🕐</Text>
+          </View>
+          <Text className="text-sm font-medium text-gray-600 dark:text-gray-300">
+            {formatTime(booking.time)}
+          </Text>
+        </View>
+        <View className={`px-3 py-1 rounded-full ${style.badge.split(" ")[0]}`}>
           <Text className={`text-xs font-semibold ${style.badge.split(" ")[1]}`}>
             {style.label}
           </Text>
         </View>
       </View>
 
-      <View className="flex-row items-center justify-between">
-        <Text
-          className="text-base font-bold text-gray-900 dark:text-white uppercase flex-1 mr-2"
-          numberOfLines={2}
-        >
-          {booking.packageName}
-        </Text>
-        <Text className="text-base font-bold text-gray-900 dark:text-white">
-          {formatMoney(booking.totalAmount)}
-        </Text>
-      </View>
-
-      <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-        {booking.customerName}
-      </Text>
-
-      <View className="flex-row items-center gap-4 mt-2">
-        {!!booking.locationName && (
-          <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
-            📍 {booking.locationName}
+      <View className="ml-10">
+        <View className="flex-row items-center justify-between">
+          <Text
+            className="text-base font-bold text-gray-900 dark:text-white flex-1 mr-2"
+            numberOfLines={1}
+          >
+            {booking.packageName}
           </Text>
+          <Text className="text-base font-bold text-[#0644C7]">
+            {formatMoney(booking.totalAmount)}
+          </Text>
+        </View>
+
+        <View className="flex-row items-center gap-1 mt-1">
+          <Text className="text-sm text-gray-500 dark:text-gray-400">
+            {booking.customerName}
+          </Text>
+          <View className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
+          <Text className="text-sm text-gray-500 dark:text-gray-400">
+            👥 {booking.participants}
+          </Text>
+        </View>
+
+        {!!booking.locationName && (
+          <View className="flex-row items-center gap-1 mt-1.5">
+            <Text className="text-xs text-gray-400 dark:text-gray-500">📍</Text>
+            <Text className="text-xs text-gray-400 dark:text-gray-500" numberOfLines={1}>
+              {booking.locationName}
+            </Text>
+          </View>
         )}
-        <Text className="text-xs text-gray-500 dark:text-gray-400">
-          👥 {booking.participants} participants
-        </Text>
       </View>
     </Pressable>
   );
@@ -289,86 +339,92 @@ const Calendar = () => {
   const openBooking = (id: number) => setSelectedBookingId(id);
 
   return (
-    <View className="flex-1 bg-white dark:bg-black">
-      <View className="bg-[#0644C7] h-[37px] w-full mb-2" />
+    <View className="flex-1 bg-gray-50 dark:bg-black">
+      {/* Gradient Header */}
+      <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
+        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+        <View className="flex-row items-center justify-between relative z-10">
+          <Pressable>
+            <Image
+              source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
+              style={{ width: 70, height: 28 }}
+              contentFit="contain"
+            />
+          </Pressable>
+          <View className="flex-row items-center gap-3">
+            {unreadNotificationsCount > 0 && (
+              <Pressable
+                onPress={() => router.push("/notification/notification")}
+                className="bg-white/20 backdrop-blur-sm rounded-full px-3.5 py-1.5 flex-row items-center gap-2"
+              >
+                <Image
+                  source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
+                  style={{ width: 16, height: 16 }}
+                  contentFit="contain"
+                  tintColor="#FFFFFF"
+                />
+                <Text className="text-white text-xs font-semibold">
+                  {unreadNotificationsCount > 99 ? "99+" : unreadNotificationsCount}
+                </Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => router.push("/settings/settings")}
+              className="bg-white/20 backdrop-blur-sm p-2 rounded-full"
+            >
+              <Image
+                source={require("../../../assets/zapzone-assests/icon/settings.png")}
+                style={{ width: 20, height: 20 }}
+                contentFit="contain"
+                tintColor="#FFFFFF"
+              />
+            </Pressable>
+          </View>
+        </View>
+      </View>
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor="#0644C7"
             colors={["#0644C7"]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-4">
-          {/* App-shell header: logo + notification + settings */}
-          <View className="flex-row items-center justify-between mb-5">
-            <Pressable className="mt-2">
-              <Image
-                source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
-                style={{ width: 60, height: 24 }}
-                contentFit="contain"
-              />
-            </Pressable>
-
-            <View className="flex-row items-center gap-3">
-              {unreadNotificationsCount > 0 && (
-                <Pressable
-                  onPress={() => router.push("/notification/notification")}
-                  className="bg-gray-200 dark:bg-neutral-800 rounded-full px-4 py-2 flex-row items-center gap-2"
-                >
-                  <Image
-                    source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
-                    style={{ width: 15, height: 15 }}
-                    contentFit="contain"
-                  />
-                  <Text className="text-gray-800 dark:text-gray-100 text-md">
-                    {unreadNotificationsCount > 99 ? "99" : unreadNotificationsCount}
-                  </Text>
-                </Pressable>
-              )}
-
-              <Pressable onPress={() => router.push("/settings/settings")}>
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/settings.png")}
-                  style={{ width: 24, height: 24 }}
-                  contentFit="contain"
-                />
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Title */}
-          <View className="mb-4">
-            <Text className="text-2xl font-bold text-gray-900 dark:text-white">
+        <View className="px-5 pt-0">
+          {/* Welcome Section */}
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-[-6px] mb-5 shadow-sm">
+            <Text className="text-lg font-bold text-gray-900 dark:text-white">
               Calendar
             </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              Bookings overview by day
+            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Manage and track all your bookings
             </Text>
           </View>
 
-          {/* View-mode filter: Month / Week / Day / Today */}
-          <View className="flex-row bg-gray-100 dark:bg-neutral-800 rounded-xl p-1 mb-4">
+          {/* View-mode filter */}
+          <View className="flex-row bg-white dark:bg-neutral-900 rounded-xl p-1.5 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
             {(["month", "week", "day"] as ViewMode[]).map((mode) => {
               const active = viewMode === mode;
               return (
                 <Pressable
                   key={mode}
                   onPress={() => setViewMode(mode)}
-                  className={`flex-1 py-2 rounded-lg items-center ${
-                    active ? "bg-white dark:bg-neutral-700" : ""
+                  className={`flex-1 py-2.5 rounded-lg items-center ${
+                    active ? "bg-[#0644C7]" : ""
                   }`}
                 >
                   <Text
                     className={`text-sm font-semibold capitalize ${
                       active
-                        ? "text-[#0644C7] dark:text-white"
+                        ? "text-white"
                         : "text-gray-500 dark:text-gray-400"
                     }`}
                   >
@@ -379,19 +435,19 @@ const Calendar = () => {
             })}
             <Pressable
               onPress={goToToday}
-              className="flex-1 py-2 rounded-lg items-center"
+              className="flex-1 py-2.5 rounded-lg items-center bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
             >
-              <Text className="text-sm font-semibold text-gray-500 dark:text-gray-400">
+              <Text className="text-sm font-semibold text-[#0644C7]">
                 Today
               </Text>
             </Pressable>
           </View>
 
           {/* Period navigation */}
-          <View className="flex-row items-center justify-between mb-4">
+          <View className="flex-row items-center justify-between mb-5">
             <Pressable
               onPress={() => step(-1)}
-              className="w-10 h-10 rounded-full border border-gray-200 dark:border-neutral-700 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+              className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
             >
               <Text className="text-lg text-gray-600 dark:text-gray-300">‹</Text>
             </Pressable>
@@ -400,7 +456,7 @@ const Calendar = () => {
             </Text>
             <Pressable
               onPress={() => step(1)}
-              className="w-10 h-10 rounded-full border border-gray-200 dark:border-neutral-700 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+              className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
             >
               <Text className="text-lg text-gray-600 dark:text-gray-300">›</Text>
             </Pressable>
@@ -408,9 +464,9 @@ const Calendar = () => {
 
           {/* Error */}
           {!loading && error && (
-            <View className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-              <Text className="text-red-700 font-semibold">Error</Text>
-              <Text className="text-red-600 text-sm">{error}</Text>
+            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
+              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
 
@@ -419,88 +475,95 @@ const Calendar = () => {
             (loading ? (
               <CalendarSkeleton />
             ) : (
-              <View className="rounded-2xl overflow-hidden border border-gray-200 dark:border-neutral-700">
-                <View className="flex-row bg-gray-50 dark:bg-neutral-900">
-                  {WEEKDAYS.map((d, i) => (
-                    <View key={i} className="flex-1 items-center py-2.5">
-                      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500">
-                        {d}
-                      </Text>
+              <>
+                <View className="rounded-2xl overflow-hidden bg-white dark:bg-neutral-900 shadow-sm border border-gray-100 dark:border-neutral-800">
+                  <View className="flex-row bg-gray-50 dark:bg-neutral-800/50">
+                    {WEEKDAYS.map((d, i) => (
+                      <View key={i} className="flex-1 items-center py-3">
+                        <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                          {d}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  {Array.from({ length: cells.length / 7 }).map((_, row) => (
+                    <View key={row} className="flex-row">
+                      {cells.slice(row * 7, row * 7 + 7).map((cell, col) => {
+                        const group = cell.key ? byDate[cell.key] : undefined;
+                        const count = group?.bookings.length ?? 0;
+                        const hasBookings = count > 0;
+                        const isToday = cell.key === todayKey;
+                        const shown = group
+                          ? STATUS_ORDER.filter((s) => (group.counts[s] ?? 0) > 0)
+                          : [];
+
+                        return (
+                          <Pressable
+                            key={cell.key ?? `pad-${row}-${col}`}
+                            disabled={!hasBookings}
+                            onPress={() => hasBookings && cell.key && openDay(cell.key)}
+                            style={{ minHeight: 80 }}
+                            className={`flex-1 p-1.5 ${
+                              cell.key === null
+                                ? "bg-gray-50/50 dark:bg-neutral-900/50"
+                                : hasBookings
+                                  ? "active:bg-blue-50 dark:active:bg-blue-900/20"
+                                  : ""
+                            } ${col < 6 ? "border-r border-gray-100 dark:border-neutral-800" : ""} ${
+                              row < Math.ceil(cells.length / 7) - 1 ? "border-b border-gray-100 dark:border-neutral-800" : ""
+                            }`}
+                          >
+                            {cell.key !== null && (
+                              <>
+                                <View
+                                  className={`w-8 h-8 rounded-full items-center justify-center mb-1 ${
+                                    isToday ? "bg-[#0644C7]" : ""
+                                  }`}
+                                >
+                                  <Text
+                                    className={`text-sm font-semibold ${
+                                      isToday
+                                        ? "text-white"
+                                        : hasBookings
+                                          ? "text-gray-900 dark:text-white"
+                                          : "text-gray-300 dark:text-neutral-600"
+                                    }`}
+                                  >
+                                    {cell.day}
+                                  </Text>
+                                </View>
+
+                                {shown.slice(0, 2).map((s) => (
+                                  <View key={s} className="flex-row items-center gap-1 mb-0.5">
+                                    <View
+                                      className={`w-1.5 h-1.5 rounded-full ${statusStyle(s).dot}`}
+                                    />
+                                    <Text
+                                      className={`text-[10px] font-medium ${statusStyle(s).text}`}
+                                      numberOfLines={1}
+                                    >
+                                      {group?.counts[s]}
+                                    </Text>
+                                  </View>
+                                ))}
+                                {hasBookings && shown.length > 2 && (
+                                  <Text className="text-[10px] text-gray-400 dark:text-gray-500">
+                                    +{shown.length - 2} more
+                                  </Text>
+                                )}
+                              </>
+                            )}
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   ))}
                 </View>
-
-                {Array.from({ length: cells.length / 7 }).map((_, row) => (
-                  <View key={row} className="flex-row">
-                    {cells.slice(row * 7, row * 7 + 7).map((cell, col) => {
-                      const group = cell.key ? byDate[cell.key] : undefined;
-                      const count = group?.bookings.length ?? 0;
-                      const hasBookings = count > 0;
-                      const isToday = cell.key === todayKey;
-                      const shown = group
-                        ? STATUS_ORDER.filter((s) => (group.counts[s] ?? 0) > 0)
-                        : [];
-
-                      return (
-                        <Pressable
-                          key={cell.key ?? `pad-${row}-${col}`}
-                          disabled={!hasBookings}
-                          onPress={() => hasBookings && cell.key && openDay(cell.key)}
-                          style={{ minHeight: 78 }}
-                          className={`flex-1 border border-gray-100 dark:border-neutral-800 p-1.5 ${
-                            cell.key === null
-                              ? "bg-gray-50 dark:bg-neutral-900"
-                              : hasBookings
-                                ? "active:bg-blue-50 dark:active:bg-blue-900"
-                                : ""
-                          }`}
-                        >
-                          {cell.key !== null && (
-                            <>
-                              <View
-                                className={`w-7 h-7 rounded-full items-center justify-center mb-0.5 ${
-                                  isToday ? "bg-[#0644C7]" : ""
-                                }`}
-                              >
-                                <Text
-                                  className={`text-sm font-semibold ${
-                                    isToday
-                                      ? "text-white"
-                                      : hasBookings
-                                        ? "text-gray-900 dark:text-white"
-                                        : "text-gray-300 dark:text-neutral-600"
-                                  }`}
-                                >
-                                  {cell.day}
-                                </Text>
-                              </View>
-
-                              {shown.slice(0, 2).map((s) => (
-                                <View key={s} className="flex-row items-center gap-0.5">
-                                  <View
-                                    className={`w-1.5 h-1.5 rounded-full ${statusStyle(s).dot}`}
-                                  />
-                                  <Text
-                                    className={`text-[10px] ${statusStyle(s).text}`}
-                                    numberOfLines={1}
-                                  >
-                                    {group?.counts[s]} {statusStyle(s).label}
-                                  </Text>
-                                </View>
-                              ))}
-                              {hasBookings && (
-                                <Text className="text-[10px] font-medium text-[#0644C7] mt-0.5">
-                                  {count} total
-                                </Text>
-                              )}
-                            </>
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
+                
+                {/* Status Legend */}
+                <StatusLegend />
+              </>
             ))}
 
           {/* Week / Day loading */}
@@ -516,29 +579,39 @@ const Calendar = () => {
               const isToday = key === todayKey;
               return (
                 <View key={key} className="mb-4">
-                  <View className="flex-row items-center gap-2 mb-2">
-                    <Text
-                      className={`text-sm font-bold ${
-                        isToday ? "text-[#0644C7]" : "text-gray-900 dark:text-white"
-                      }`}
-                    >
-                      {WEEKDAY_SHORT[d.getDay()]} {d.getDate()}
-                    </Text>
-                    {!!group && (
-                      <Text className="text-xs text-gray-400 dark:text-gray-500">
-                        {group.bookings.length} booking
-                        {group.bookings.length === 1 ? "" : "s"}
+                  <View className="flex-row items-center gap-3 mb-3">
+                    <View className={`w-10 h-10 rounded-full items-center justify-center ${
+                      isToday ? "bg-[#0644C7]" : "bg-gray-100 dark:bg-neutral-800"
+                    }`}>
+                      <Text className={`text-sm font-bold ${
+                        isToday ? "text-white" : "text-gray-700 dark:text-gray-300"
+                      }`}>
+                        {d.getDate()}
                       </Text>
-                    )}
+                    </View>
+                    <View>
+                      <Text className={`text-sm font-semibold ${
+                        isToday ? "text-[#0644C7]" : "text-gray-900 dark:text-white"
+                      }`}>
+                        {WEEKDAY_FULL[d.getDay()]}
+                      </Text>
+                      {!!group && (
+                        <Text className="text-xs text-gray-400 dark:text-gray-500">
+                          {group.bookings.length} booking{group.bookings.length === 1 ? "" : "s"}
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   {group ? (
                     group.bookings.map((b) => (
                       <BookingCard key={b.id} booking={b} onPress={() => openBooking(b.id)} />
                     ))
                   ) : (
-                    <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1">
-                      No bookings
-                    </Text>
+                    <View className="bg-white dark:bg-neutral-900 rounded-2xl p-6 items-center border border-gray-100 dark:border-neutral-800">
+                      <Text className="text-sm text-gray-400 dark:text-gray-500">
+                        No bookings for this day
+                      </Text>
+                    </View>
                   )}
                 </View>
               );
@@ -548,15 +621,35 @@ const Calendar = () => {
           {viewMode === "day" &&
             !loading &&
             (byDate[startDate]?.bookings.length ? (
-              byDate[startDate].bookings.map((b) => (
-                <BookingCard key={b.id} booking={b} onPress={() => openBooking(b.id)} />
-              ))
+              <>
+                <View className="flex-row items-center gap-3 mb-4">
+                  <View className="w-10 h-10 rounded-full bg-[#0644C7] items-center justify-center">
+                    <Text className="text-white font-bold text-sm">
+                      {anchor.getDate()}
+                    </Text>
+                  </View>
+                  <View>
+                    <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {WEEKDAY_FULL[anchor.getDay()]}
+                    </Text>
+                    <Text className="text-xs text-gray-400 dark:text-gray-500">
+                      {byDate[startDate]?.bookings.length} booking{byDate[startDate]?.bookings.length === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+                </View>
+                {byDate[startDate].bookings.map((b) => (
+                  <BookingCard key={b.id} booking={b} onPress={() => openBooking(b.id)} />
+                ))}
+              </>
             ) : (
-              <View className="items-center mt-8">
+              <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
+                <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                  <Text className="text-2xl">📅</Text>
+                </View>
                 <Text className="text-gray-700 dark:text-gray-200 font-semibold">
                   No bookings
                 </Text>
-                <Text className="text-gray-500 dark:text-gray-400 text-sm text-center mt-1">
+                <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
                   There are no bookings on this day.
                 </Text>
               </View>
@@ -564,15 +657,22 @@ const Calendar = () => {
 
           {/* Empty month */}
           {!loading && !error && viewMode === "month" && bookings.length === 0 && (
-            <View className="items-center mt-8">
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold">
-                No bookings
-              </Text>
-              <Text className="text-gray-500 dark:text-gray-400 text-sm text-center mt-1">
-                There are no bookings in {MONTH_NAMES[anchor.getMonth()]}{" "}
-                {anchor.getFullYear()}.
-              </Text>
-            </View>
+            <>
+              <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
+                <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                  <Text className="text-2xl">📅</Text>
+                </View>
+                <Text className="text-gray-700 dark:text-gray-200 font-semibold">
+                  No bookings
+                </Text>
+                <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+                  There are no bookings in {MONTH_NAMES[anchor.getMonth()]}{" "}
+                  {anchor.getFullYear()}.
+                </Text>
+              </View>
+              {/* Status Legend */}
+              <StatusLegend />
+            </>
           )}
         </View>
       </ScrollView>

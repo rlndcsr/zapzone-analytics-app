@@ -46,19 +46,27 @@ const formatMoney = (value: number) =>
 // How many overview cards to show before "Show All".
 const OVERVIEW_PREVIEW = 4;
 
-const UtilizationBar = ({ value }: { value: number }) => (
-  <View className="flex-row items-center gap-2">
-    <View className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-neutral-800 overflow-hidden">
-      <View
-        className="h-full rounded-full bg-[#0644C7]"
-        style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-      />
+const UtilizationBar = ({ value }: { value: number }) => {
+  // Ensure value is between 0 and 100
+  const clampedValue = Math.min(100, Math.max(0, value));
+  
+  return (
+    <View className="flex-row items-center gap-3">
+      <View className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-neutral-800 overflow-hidden">
+        <View
+          className="h-full rounded-full"
+          style={{ 
+            width: `${clampedValue}%`,
+            backgroundColor: clampedValue > 70 ? '#0644C7' : clampedValue > 40 ? '#F59E0B' : '#EF4444'
+          }}
+        />
+      </View>
+      <Text className="text-xs font-semibold text-gray-700 dark:text-gray-300 min-w-[32px] text-right">
+        {clampedValue}%
+      </Text>
     </View>
-    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-      {value}%
-    </Text>
-  </View>
-);
+  );
+};
 
 const TopLocationCard = ({
   rank,
@@ -66,49 +74,114 @@ const TopLocationCard = ({
 }: {
   rank: number;
   location: LocationRow;
-}) => (
-  <View className="border border-blue-200 dark:border-blue-900 bg-blue-50/40 rounded-2xl p-4 mb-3">
-    <View className="flex-row items-center justify-between mb-3">
-      <View className="flex-row items-center gap-3 flex-1 mr-2">
-        <View className="w-9 h-9 rounded-full bg-[#0644C7] items-center justify-center">
-          <Text className="text-white font-bold text-sm">{rank}</Text>
+}) => {
+  const getRankColor = (rank: number) => {
+    switch (rank) {
+      case 1: return "bg-[#0644C7]";
+      case 2: return "bg-[#0644C7]";
+      case 3: return "bg-[#0644C7]";
+      default: return "bg-[#0644C7]";
+    }
+  };
+
+  return (
+    <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm" 
+      style={{
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+      }}
+    >
+      <View className="flex-row items-center justify-between mb-3">
+        <View className="flex-row items-center gap-3 flex-1 mr-2">
+          <View className={`w-10 h-10 rounded-full ${getRankColor(rank)} items-center justify-center shadow-sm`}>
+            <Text className="text-white font-bold text-sm">
+              {rank}
+            </Text>
+          </View>
+          <View className="flex-1">
+            <Text
+              className="text-base font-bold text-gray-900 dark:text-white"
+              numberOfLines={1}
+            >
+              {location.name}
+            </Text>
+            <View className="flex-row items-center gap-2 mt-0.5">
+              <View className="flex-row items-center gap-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <Text className="text-xs text-gray-500 dark:text-gray-400">
+                  {location.bookings} bookings
+                </Text>
+              </View>
+              <View className="flex-row items-center gap-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                <Text className="text-xs text-gray-500 dark:text-gray-400">
+                  {location.tickets} tickets
+                </Text>
+              </View>
+            </View>
+          </View>
         </View>
-        <View className="flex-1">
-          <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {location.name}
-          </Text>
-          <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            {location.bookings} bookings • {location.tickets} tickets •{" "}
-            {location.events} events • {location.guests} guests
+        <View className="bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg">
+          <Text className="text-sm font-bold text-[#0644C7]">
+            {formatMoney(location.revenue)}
           </Text>
         </View>
       </View>
-      <Text className="text-lg font-bold text-[#0644C7]">
-        {formatMoney(location.revenue)}
-      </Text>
+      
+      <View className="flex-row items-center gap-4">
+        <View className="flex-1">
+          <UtilizationBar value={location.utilization} />
+        </View>
+        <View className="flex-row items-center gap-2">
+          <View className="w-1.5 h-1.5 rounded-full bg-green-500" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {location.guests} guests
+          </Text>
+        </View>
+      </View>
     </View>
-    <UtilizationBar value={location.utilization} />
-  </View>
-);
+  );
+};
 
 const OverviewCard = ({ location }: { location: LocationRow }) => (
-  <View className="border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3">
+  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm"
+    style={{
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      elevation: 2,
+    }}
+  >
     <View className="flex-row items-center justify-between mb-4">
-      <Text
-        className="text-base font-semibold text-gray-900 dark:text-white flex-1 mr-2"
-        numberOfLines={1}
-      >
-        {location.name}
-      </Text>
-      <View className="w-2.5 h-2.5 rounded-full bg-[#0644C7]" />
+      <View className="flex-row items-center gap-2 flex-1">
+        <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
+          <Image
+            source={require("../../../assets/zapzone-assests/icon/pin.png")}
+            style={{ width: 16, height: 16, tintColor: "#0644C7" }}
+            contentFit="contain"
+          />
+        </View>
+        <Text
+          className="text-base font-semibold text-gray-900 dark:text-white flex-1"
+          numberOfLines={1}
+        >
+          {location.name}
+        </Text>
+      </View>
+      <View className="bg-green-50 dark:bg-green-900/30 px-2.5 py-1 rounded-full">
+        <Text className="text-xs font-medium text-green-600 dark:text-green-400">
+          Active
+        </Text>
+      </View>
     </View>
 
     <View className="flex-row mb-4">
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
           Bookings
         </Text>
         <Text className="text-xl font-bold text-gray-900 dark:text-white">
@@ -116,7 +189,7 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
         </Text>
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
           Tickets
         </Text>
         <Text className="text-xl font-bold text-gray-900 dark:text-white">
@@ -124,7 +197,7 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
         </Text>
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
           Events
         </Text>
         <Text className="text-xl font-bold text-gray-900 dark:text-white">
@@ -133,17 +206,17 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
       </View>
     </View>
 
-    <View className="flex-row items-end justify-between">
+    <View className="flex-row items-end justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
       <View>
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
           Revenue
         </Text>
         <Text className="text-lg font-bold text-[#0644C7]">
           {formatMoney(location.revenue)}
         </Text>
       </View>
-      <View className="flex-1 ml-6">
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+      <View className="flex-1 ml-4">
+        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
           Utilization
         </Text>
         <UtilizationBar value={location.utilization} />
@@ -262,138 +335,146 @@ const Location = () => {
   const hasLocations = filteredLocations.length > 0;
 
   return (
-    <View className="flex-1 bg-background dark:bg-black">
-      {/* Blue Header Bar */}
-      <View className="bg-[#0644C7] h-[37px] w-full mb-2" />
+    <View className="flex-1 bg-gray-50 dark:bg-black">
+      {/* Gradient Header - Fixed position */}
+      <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
+        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+        <View className="flex-row items-center justify-between relative z-10">
+          <Pressable>
+            <Image
+              source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
+              style={{ width: 70, height: 28 }}
+              contentFit="contain"
+            />
+          </Pressable>
+          <View className="flex-row items-center gap-3">
+            {unreadNotificationsCount > 0 && (
+              <Pressable
+                onPress={() => router.push("/notification/notification")}
+                className="bg-white/20 backdrop-blur-sm rounded-full px-3.5 py-1.5 flex-row items-center gap-2"
+              >
+                <Image
+                  source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
+                  style={{ width: 16, height: 16 }}
+                  contentFit="contain"
+                  tintColor="#FFFFFF"
+                />
+                <Text className="text-white text-xs font-semibold">
+                  {unreadNotificationsCount > 99 ? "99+" : unreadNotificationsCount}
+                </Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => router.push("/settings/settings")}
+              className="bg-white/20 backdrop-blur-sm p-2 rounded-full"
+            >
+              <Image
+                source={require("../../../assets/zapzone-assests/icon/settings.png")}
+                style={{ width: 20, height: 20 }}
+                contentFit="contain"
+                tintColor="#FFFFFF"
+              />
+            </Pressable>
+          </View>
+        </View>
+      </View>
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor="#0644C7"
             colors={["#0644C7"]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5">
-          {/* Header */}
-          <View className="flex-row items-center justify-between mb-6">
-            <Pressable className="mt-2">
+        <View className="px-5 pt-0">
+          {/* Welcome Section */}
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-[-6px] mb-5 shadow-sm">
+            <Text className="text-lg font-bold text-gray-900 dark:text-white">
+             Location Overview
+            </Text>
+            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Multi-location booking performance at a glance
+            </Text>
+          </View>
+
+          {/* Filters Row */}
+          <View className="flex-row gap-3 mb-5">
+            <Pressable
+              onPress={() => setShowLocationDropdown(true)}
+              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+            >
               <Image
-                source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
-                style={{ width: 60, height: 24 }}
+                source={require("../../../assets/zapzone-assests/icon/pin.png")}
+                style={{ width: 16, height: 16 }}
                 contentFit="contain"
+                tintColor="#0644C7"
+              />
+              <Text
+                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                numberOfLines={1}
+              >
+                {selectedLocationLabel}
+              </Text>
+              <Image
+                source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
+                style={{ width: 10, height: 10 }}
+                contentFit="contain"
+                tintColor="#9CA3AF"
               />
             </Pressable>
 
-            <View className="flex-row items-center gap-3">
-              {unreadNotificationsCount > 0 && (
-                <Pressable
-                  onPress={() => router.push("/notification/notification")}
-                  className="bg-gray-200 dark:bg-neutral-800 rounded-full px-4 py-2 flex-row items-center gap-2"
-                >
-                  <Image
-                    source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
-                    style={{ width: 15, height: 15 }}
-                    contentFit="contain"
-                  />
-                  <Text className="text-gray-800 dark:text-gray-100 text-md ">
-                    {unreadNotificationsCount > 99
-                      ? "99"
-                      : unreadNotificationsCount}
-                  </Text>
-                </Pressable>
-              )}
-
-              <Pressable onPress={() => router.push("/settings/settings")}>
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/settings.png")}
-                  style={{ width: 24, height: 24 }}
-                  contentFit="contain"
-                />
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Title Section */}
-          <View className="mb-6">
-            <Text className="text-2xl font-bold text-gray-900 dark:text-white">
-              Locations
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              Multi-location booking overview and management
-            </Text>
-          </View>
-
-          {/* Location Filter */}
-          <Pressable
-            onPress={() => setShowLocationDropdown(true)}
-            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-lg border border-gray-200 dark:border-neutral-700 mb-3"
-          >
-            <Image
-              source={require("../../../assets/zapzone-assests/icon/pin.png")}
-              style={{ width: 18, height: 18 }}
-              contentFit="contain"
-            />
-            <Text
-              className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
-              numberOfLines={1}
-            >
-              {selectedLocationLabel}
-            </Text>
-            <Image
-              source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
-              style={{ width: 8, height: 12 }}
-              contentFit="contain"
-            />
-          </Pressable>
-
-          {/* Timeframe Filter */}
-          <View className="mb-6">
             <Pressable
               onPress={() => setShowDateDropdown(true)}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-lg border border-gray-200 dark:border-neutral-700"
+              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
               <Image
                 source={require("../../../assets/zapzone-assests/icon/calendar.png")}
-                style={{ width: 18, height: 18 }}
+                style={{ width: 16, height: 16 }}
                 contentFit="contain"
+                tintColor="#0644C7"
               />
-              <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1">
+              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1">
                 {currentDateLabel}
               </Text>
               <Image
                 source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
-                style={{ width: 8, height: 12 }}
+                style={{ width: 10, height: 10 }}
                 contentFit="contain"
+                tintColor="#9CA3AF"
               />
             </Pressable>
           </View>
 
           {/* Error State */}
           {!loading && error && (
-            <View className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-              <Text className="text-red-700 font-semibold">Error</Text>
-              <Text className="text-red-600 text-sm">{error}</Text>
+            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
+              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
 
-          {/* Empty State (e.g. role without company-wide location stats) */}
+          {/* Empty State */}
           {!loading && !error && !hasLocations && (
-            <View className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-2xl p-8 items-center">
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/pin.png")}
-                style={{ width: 28, height: 28 }}
-                contentFit="contain"
-              />
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
+              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                <Image
+                  source={require("../../../assets/zapzone-assests/icon/pin.png")}
+                  style={{ width: 28, height: 28, tintColor: "#9CA3AF" }}
+                  contentFit="contain"
+                />
+              </View>
+              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
                 No location data
               </Text>
-              <Text className="text-gray-500 dark:text-gray-400 text-sm text-center mt-1">
+              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
                 There is no location performance data for this selection.
               </Text>
             </View>
@@ -401,24 +482,13 @@ const Location = () => {
 
           {!error && (loading || hasLocations) && (
             <>
-              {/* Location Performance header */}
+              {/* Top Performing Locations */}
               <View className="flex-row items-center gap-2 mb-4">
-                <View className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-                  <Image
-                    source={require("../../../assets/zapzone-assests/icon/pin.png")}
-                    style={{ width: 18, height: 18, tintColor: "#0644C7" }}
-                    contentFit="contain"
-                  />
-                </View>
                 <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                  Location Performance
+                  Top Performers
                 </Text>
               </View>
-
-              {/* Top Performing Locations */}
-              <Text className="text-base font-semibold text-gray-800 dark:text-gray-100 mb-3">
-                Top Performing Locations
-              </Text>
+              
               {loading ? (
                 <TopCardsSkeleton />
               ) : (
@@ -432,9 +502,24 @@ const Location = () => {
               )}
 
               {/* All Locations Overview */}
-              <Text className="text-base font-semibold text-gray-800 dark:text-gray-100 mt-4 mb-3">
-                All Locations Overview
-              </Text>
+              <View className="flex-row items-center gap-2 mt-6 mb-4">
+                <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
+                  <Image
+                    source={require("../../../assets/zapzone-assests/icon/pin.png")}
+                    style={{ width: 18, height: 18, tintColor: "#0644C7" }}
+                    contentFit="contain"
+                  />
+                </View>
+                <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                  All Locations
+                </Text>
+                <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {filteredLocations.length}
+                  </Text>
+                </View>
+              </View>
+
               {loading ? (
                 <OverviewCardsSkeleton />
               ) : (
@@ -447,9 +532,9 @@ const Location = () => {
                   {filteredLocations.length > OVERVIEW_PREVIEW && (
                     <Pressable
                       onPress={() => setShowAll((prev) => !prev)}
-                      className="self-center bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-lg px-5 py-2.5 mt-1"
+                      className="self-center bg-white dark:bg-neutral-900 px-6 py-3 rounded-xl border border-gray-200 dark:border-neutral-800 mt-2 shadow-sm"
                     >
-                      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      <Text className="text-sm font-semibold text-[#0644C7]">
                         {showAll
                           ? "Show Less"
                           : `Show All (${filteredLocations.length})`}
@@ -463,34 +548,36 @@ const Location = () => {
         </View>
       </ScrollView>
 
-      {/* Location Picker — same pattern as Home */}
+      {/* Location Picker */}
       <BottomSheet
         visible={showLocationDropdown}
         onClose={() => setShowLocationDropdown(false)}
         title="Select Location"
       >
-        <ScrollView className="px-4 pb-6">
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           <Pressable
             onPress={() => handleSelectLocation("all")}
-            className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-              selectedLocation === "all" ? "bg-blue-50 dark:bg-blue-900/30" : ""
+            className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+              selectedLocation === "all" ? "bg-blue-50 dark:bg-blue-900/20" : ""
             }`}
           >
             <Text
               className={`text-base font-medium ${
                 selectedLocation === "all"
-                  ? "text-blue-700 dark:text-blue-300"
-                  : "text-gray-800 dark:text-gray-100"
+                  ? "text-blue-600 dark:text-blue-400"
+                  : "text-gray-700 dark:text-gray-200"
               }`}
             >
               All Locations
             </Text>
             {selectedLocation === "all" && (
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                style={{ width: 18, height: 18 }}
-                contentFit="contain"
-              />
+              <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                <Image
+                  source={require("../../../assets/zapzone-assests/icon/checked.png")}
+                  style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                  contentFit="contain"
+                />
+              </View>
             )}
           </Pressable>
 
@@ -500,26 +587,28 @@ const Location = () => {
               <Pressable
                 key={loc.id}
                 onPress={() => handleSelectLocation(loc.id)}
-                className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/30" : ""
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
                 <Text
                   className={`text-base font-medium flex-1 mr-2 ${
                     isSelected
-                      ? "text-blue-700 dark:text-blue-300"
-                      : "text-gray-800 dark:text-gray-100"
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
                   numberOfLines={1}
                 >
                   {loc.name}
                 </Text>
                 {isSelected && (
-                  <Image
-                    source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                    style={{ width: 18, height: 18 }}
-                    contentFit="contain"
-                  />
+                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                    <Image
+                      source={require("../../../assets/zapzone-assests/icon/checked.png")}
+                      style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                      contentFit="contain"
+                    />
+                  </View>
                 )}
               </Pressable>
             );
@@ -527,38 +616,40 @@ const Location = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Timeframe Picker — same pattern as Home */}
+      {/* Timeframe Picker */}
       <BottomSheet
         visible={showDateDropdown}
         onClose={() => setShowDateDropdown(false)}
         title="Select Timeframe"
       >
-        <ScrollView className="px-4 pb-6">
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {dateFilterOptions.map((option) => {
             const isSelected = dateFilter === option.value;
             return (
               <Pressable
                 key={option.value}
                 onPress={() => handleSelectDate(option.value)}
-                className={`flex-row items-center justify-between px-3 py-3 rounded-lg ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/30" : ""
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
                 <Text
                   className={`text-base font-medium ${
                     isSelected
-                      ? "text-blue-700 dark:text-blue-300"
-                      : "text-gray-800 dark:text-gray-100"
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
                 >
                   {option.label}
                 </Text>
                 {isSelected && (
-                  <Image
-                    source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                    style={{ width: 18, height: 18 }}
-                    contentFit="contain"
-                  />
+                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                    <Image
+                      source={require("../../../assets/zapzone-assests/icon/checked.png")}
+                      style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                      contentFit="contain"
+                    />
+                  </View>
                 )}
               </Pressable>
             );
