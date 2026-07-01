@@ -49,15 +49,20 @@ const OVERVIEW_PREVIEW = 4;
 const UtilizationBar = ({ value }: { value: number }) => {
   // Ensure value is between 0 and 100
   const clampedValue = Math.min(100, Math.max(0, value));
-  
+
   return (
     <View className="flex-row items-center gap-3">
       <View className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-neutral-800 overflow-hidden">
         <View
           className="h-full rounded-full"
-          style={{ 
+          style={{
             width: `${clampedValue}%`,
-            backgroundColor: clampedValue > 70 ? '#0644C7' : clampedValue > 40 ? '#F59E0B' : '#EF4444'
+            backgroundColor:
+              clampedValue > 70
+                ? "#0644C7"
+                : clampedValue > 40
+                  ? "#F59E0B"
+                  : "#EF4444",
           }}
         />
       </View>
@@ -77,17 +82,22 @@ const TopLocationCard = ({
 }) => {
   const getRankColor = (rank: number) => {
     switch (rank) {
-      case 1: return "bg-[#0644C7]";
-      case 2: return "bg-[#0644C7]";
-      case 3: return "bg-[#0644C7]";
-      default: return "bg-[#0644C7]";
+      case 1:
+        return "bg-[#0644C7]";
+      case 2:
+        return "bg-[#0644C7]";
+      case 3:
+        return "bg-[#0644C7]";
+      default:
+        return "bg-[#0644C7]";
     }
   };
 
   return (
-    <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm" 
+    <View
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm"
       style={{
-        shadowColor: '#000',
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
         shadowRadius: 8,
@@ -96,10 +106,10 @@ const TopLocationCard = ({
     >
       <View className="flex-row items-center justify-between mb-3">
         <View className="flex-row items-center gap-3 flex-1 mr-2">
-          <View className={`w-10 h-10 rounded-full ${getRankColor(rank)} items-center justify-center shadow-sm`}>
-            <Text className="text-white font-bold text-sm">
-              {rank}
-            </Text>
+          <View
+            className={`w-10 h-10 rounded-full ${getRankColor(rank)} items-center justify-center shadow-sm`}
+          >
+            <Text className="text-white font-bold text-sm">{rank}</Text>
           </View>
           <View className="flex-1">
             <Text
@@ -130,7 +140,7 @@ const TopLocationCard = ({
           </Text>
         </View>
       </View>
-      
+
       <View className="flex-row items-center gap-4">
         <View className="flex-1">
           <UtilizationBar value={location.utilization} />
@@ -147,9 +157,10 @@ const TopLocationCard = ({
 };
 
 const OverviewCard = ({ location }: { location: LocationRow }) => (
-  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm"
+  <View
+    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm"
     style={{
-      shadowColor: '#000',
+      shadowColor: "#000",
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.05,
       shadowRadius: 8,
@@ -361,7 +372,9 @@ const Location = () => {
                   tintColor="#FFFFFF"
                 />
                 <Text className="text-white text-xs font-semibold">
-                  {unreadNotificationsCount > 99 ? "99+" : unreadNotificationsCount}
+                  {unreadNotificationsCount > 99
+                    ? "99+"
+                    : unreadNotificationsCount}
                 </Text>
               </Pressable>
             )}
@@ -383,7 +396,10 @@ const Location = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + 96,
+          paddingTop: 0,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -396,9 +412,9 @@ const Location = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-[-6px] mb-5 shadow-sm">
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
-             Location Overview
+              Location Overview
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Multi-location booking performance at a glance
@@ -456,7 +472,9 @@ const Location = () => {
           {/* Error State */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -488,7 +506,7 @@ const Location = () => {
                   Top Performers
                 </Text>
               </View>
-              
+
               {loading ? (
                 <TopCardsSkeleton />
               ) : (
@@ -574,7 +592,7 @@ const Location = () => {
               <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                 <Image
                   source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                  style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                  style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
                   contentFit="contain"
                 />
               </View>
@@ -605,7 +623,7 @@ const Location = () => {
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                     <Image
                       source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
                       contentFit="contain"
                     />
                   </View>
@@ -646,7 +664,7 @@ const Location = () => {
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                     <Image
                       source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
                       contentFit="contain"
                     />
                   </View>

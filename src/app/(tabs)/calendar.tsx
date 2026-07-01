@@ -23,29 +23,69 @@ type ViewMode = "month" | "week" | "day";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 const MONTH_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 const WEEKDAY_FULL = [
-  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
 ];
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const STATUS_ORDER = ["confirmed", "pending", "checked-in", "completed", "cancelled"];
+const STATUS_ORDER = [
+  "confirmed",
+  "pending",
+  "checked-in",
+  "completed",
+  "cancelled",
+];
 
 const STATUS_STYLE: Record<
   string,
-  { label: string; dot: string; text: string; badge: string; card: string; color: string }
+  {
+    label: string;
+    dot: string;
+    text: string;
+    badge: string;
+    card: string;
+    color: string;
+  }
 > = {
   confirmed: {
     label: "Confirmed",
     dot: "bg-green-500",
     text: "text-green-700 dark:text-green-400",
-    badge: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    badge:
+      "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
     card: "bg-white dark:bg-neutral-900 border-l-4 border-green-500",
     color: "#22C55E",
   },
@@ -53,7 +93,8 @@ const STATUS_STYLE: Record<
     label: "Pending",
     dot: "bg-amber-500",
     text: "text-amber-700 dark:text-amber-400",
-    badge: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+    badge:
+      "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
     card: "bg-white dark:bg-neutral-900 border-l-4 border-amber-500",
     color: "#F59E0B",
   },
@@ -69,7 +110,8 @@ const STATUS_STYLE: Record<
     label: "Checked In",
     dot: "bg-indigo-500",
     text: "text-indigo-700 dark:text-indigo-400",
-    badge: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
+    badge:
+      "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
     card: "bg-white dark:bg-neutral-900 border-l-4 border-indigo-500",
     color: "#6366F1",
   },
@@ -83,7 +125,8 @@ const STATUS_STYLE: Record<
   },
 };
 
-const statusStyle = (status: string) => STATUS_STYLE[status] ?? STATUS_STYLE.pending;
+const statusStyle = (status: string) =>
+  STATUS_STYLE[status] ?? STATUS_STYLE.pending;
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const dateKey = (d: Date) =>
@@ -127,8 +170,8 @@ const StatusLegend = () => {
     <View className="flex-row items-center justify-center gap-4 mt-3 mb-1">
       {legendItems.map((item) => (
         <View key={item.key} className="flex-row items-center gap-1.5">
-          <View 
-            className="w-3 h-3 rounded-full" 
+          <View
+            className="w-3 h-3 rounded-full"
             style={{ backgroundColor: item.color }}
           />
           <Text className="text-xs text-gray-600 dark:text-gray-400">
@@ -155,7 +198,7 @@ const BookingCard = ({
       className={`rounded-2xl p-4 mb-3 shadow-sm ${style.card}`}
       style={({ pressed }) => [
         {
-          shadowColor: '#000',
+          shadowColor: "#000",
           shadowOffset: { width: 0, height: 2 },
           shadowOpacity: 0.04,
           shadowRadius: 8,
@@ -174,7 +217,9 @@ const BookingCard = ({
           </Text>
         </View>
         <View className={`px-3 py-1 rounded-full ${style.badge.split(" ")[0]}`}>
-          <Text className={`text-xs font-semibold ${style.badge.split(" ")[1]}`}>
+          <Text
+            className={`text-xs font-semibold ${style.badge.split(" ")[1]}`}
+          >
             {style.label}
           </Text>
         </View>
@@ -206,7 +251,10 @@ const BookingCard = ({
         {!!booking.locationName && (
           <View className="flex-row items-center gap-1 mt-1.5">
             <Text className="text-xs text-gray-400 dark:text-gray-500">📍</Text>
-            <Text className="text-xs text-gray-400 dark:text-gray-500" numberOfLines={1}>
+            <Text
+              className="text-xs text-gray-400 dark:text-gray-500"
+              numberOfLines={1}
+            >
               {booking.locationName}
             </Text>
           </View>
@@ -223,7 +271,9 @@ const Calendar = () => {
 
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [anchor, setAnchor] = useState<Date>(today);
-  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
+    null,
+  );
   const [refreshing, setRefreshing] = useState(false);
 
   /** Jump to a specific date in single-day view (used by month-grid taps). */
@@ -276,7 +326,9 @@ const Calendar = () => {
       entry.counts[b.status] = (entry.counts[b.status] ?? 0) + 1;
     }
     for (const key of Object.keys(map)) {
-      map[key].bookings.sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
+      map[key].bookings.sort((a, b) =>
+        (a.time ?? "").localeCompare(b.time ?? ""),
+      );
     }
     return map;
   }, [bookings]);
@@ -365,7 +417,9 @@ const Calendar = () => {
                   tintColor="#FFFFFF"
                 />
                 <Text className="text-white text-xs font-semibold">
-                  {unreadNotificationsCount > 99 ? "99+" : unreadNotificationsCount}
+                  {unreadNotificationsCount > 99
+                    ? "99+"
+                    : unreadNotificationsCount}
                 </Text>
               </Pressable>
             )}
@@ -387,7 +441,10 @@ const Calendar = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + 96,
+          paddingTop: 0,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -400,7 +457,7 @@ const Calendar = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-[-6px] mb-5 shadow-sm">
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
               Calendar
             </Text>
@@ -423,9 +480,7 @@ const Calendar = () => {
                 >
                   <Text
                     className={`text-sm font-semibold capitalize ${
-                      active
-                        ? "text-white"
-                        : "text-gray-500 dark:text-gray-400"
+                      active ? "text-white" : "text-gray-500 dark:text-gray-400"
                     }`}
                   >
                     {mode}
@@ -449,7 +504,9 @@ const Calendar = () => {
               onPress={() => step(-1)}
               className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
             >
-              <Text className="text-lg text-gray-600 dark:text-gray-300">‹</Text>
+              <Text className="text-lg text-gray-600 dark:text-gray-300">
+                ‹
+              </Text>
             </Pressable>
             <Text className="text-base font-bold text-gray-900 dark:text-white flex-1 text-center mx-2">
               {headerLabel}
@@ -458,14 +515,18 @@ const Calendar = () => {
               onPress={() => step(1)}
               className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
             >
-              <Text className="text-lg text-gray-600 dark:text-gray-300">›</Text>
+              <Text className="text-lg text-gray-600 dark:text-gray-300">
+                ›
+              </Text>
             </Pressable>
           </View>
 
           {/* Error */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -495,14 +556,18 @@ const Calendar = () => {
                         const hasBookings = count > 0;
                         const isToday = cell.key === todayKey;
                         const shown = group
-                          ? STATUS_ORDER.filter((s) => (group.counts[s] ?? 0) > 0)
+                          ? STATUS_ORDER.filter(
+                              (s) => (group.counts[s] ?? 0) > 0,
+                            )
                           : [];
 
                         return (
                           <Pressable
                             key={cell.key ?? `pad-${row}-${col}`}
                             disabled={!hasBookings}
-                            onPress={() => hasBookings && cell.key && openDay(cell.key)}
+                            onPress={() =>
+                              hasBookings && cell.key && openDay(cell.key)
+                            }
                             style={{ minHeight: 80 }}
                             className={`flex-1 p-1.5 ${
                               cell.key === null
@@ -511,7 +576,9 @@ const Calendar = () => {
                                   ? "active:bg-blue-50 dark:active:bg-blue-900/20"
                                   : ""
                             } ${col < 6 ? "border-r border-gray-100 dark:border-neutral-800" : ""} ${
-                              row < Math.ceil(cells.length / 7) - 1 ? "border-b border-gray-100 dark:border-neutral-800" : ""
+                              row < Math.ceil(cells.length / 7) - 1
+                                ? "border-b border-gray-100 dark:border-neutral-800"
+                                : ""
                             }`}
                           >
                             {cell.key !== null && (
@@ -535,7 +602,10 @@ const Calendar = () => {
                                 </View>
 
                                 {shown.slice(0, 2).map((s) => (
-                                  <View key={s} className="flex-row items-center gap-1 mb-0.5">
+                                  <View
+                                    key={s}
+                                    className="flex-row items-center gap-1 mb-0.5"
+                                  >
                                     <View
                                       className={`w-1.5 h-1.5 rounded-full ${statusStyle(s).dot}`}
                                     />
@@ -560,7 +630,7 @@ const Calendar = () => {
                     </View>
                   ))}
                 </View>
-                
+
                 {/* Status Legend */}
                 <StatusLegend />
               </>
@@ -580,31 +650,48 @@ const Calendar = () => {
               return (
                 <View key={key} className="mb-4">
                   <View className="flex-row items-center gap-3 mb-3">
-                    <View className={`w-10 h-10 rounded-full items-center justify-center ${
-                      isToday ? "bg-[#0644C7]" : "bg-gray-100 dark:bg-neutral-800"
-                    }`}>
-                      <Text className={`text-sm font-bold ${
-                        isToday ? "text-white" : "text-gray-700 dark:text-gray-300"
-                      }`}>
+                    <View
+                      className={`w-10 h-10 rounded-full items-center justify-center ${
+                        isToday
+                          ? "bg-[#0644C7]"
+                          : "bg-gray-100 dark:bg-neutral-800"
+                      }`}
+                    >
+                      <Text
+                        className={`text-sm font-bold ${
+                          isToday
+                            ? "text-white"
+                            : "text-gray-700 dark:text-gray-300"
+                        }`}
+                      >
                         {d.getDate()}
                       </Text>
                     </View>
                     <View>
-                      <Text className={`text-sm font-semibold ${
-                        isToday ? "text-[#0644C7]" : "text-gray-900 dark:text-white"
-                      }`}>
+                      <Text
+                        className={`text-sm font-semibold ${
+                          isToday
+                            ? "text-[#0644C7]"
+                            : "text-gray-900 dark:text-white"
+                        }`}
+                      >
                         {WEEKDAY_FULL[d.getDay()]}
                       </Text>
                       {!!group && (
                         <Text className="text-xs text-gray-400 dark:text-gray-500">
-                          {group.bookings.length} booking{group.bookings.length === 1 ? "" : "s"}
+                          {group.bookings.length} booking
+                          {group.bookings.length === 1 ? "" : "s"}
                         </Text>
                       )}
                     </View>
                   </View>
                   {group ? (
                     group.bookings.map((b) => (
-                      <BookingCard key={b.id} booking={b} onPress={() => openBooking(b.id)} />
+                      <BookingCard
+                        key={b.id}
+                        booking={b}
+                        onPress={() => openBooking(b.id)}
+                      />
                     ))
                   ) : (
                     <View className="bg-white dark:bg-neutral-900 rounded-2xl p-6 items-center border border-gray-100 dark:border-neutral-800">
@@ -633,12 +720,17 @@ const Calendar = () => {
                       {WEEKDAY_FULL[anchor.getDay()]}
                     </Text>
                     <Text className="text-xs text-gray-400 dark:text-gray-500">
-                      {byDate[startDate]?.bookings.length} booking{byDate[startDate]?.bookings.length === 1 ? "" : "s"}
+                      {byDate[startDate]?.bookings.length} booking
+                      {byDate[startDate]?.bookings.length === 1 ? "" : "s"}
                     </Text>
                   </View>
                 </View>
                 {byDate[startDate].bookings.map((b) => (
-                  <BookingCard key={b.id} booking={b} onPress={() => openBooking(b.id)} />
+                  <BookingCard
+                    key={b.id}
+                    booking={b}
+                    onPress={() => openBooking(b.id)}
+                  />
                 ))}
               </>
             ) : (
@@ -653,24 +745,27 @@ const Calendar = () => {
             ))}
 
           {/* Empty month */}
-          {!loading && !error && viewMode === "month" && bookings.length === 0 && (
-            <>
-              <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-                <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                  <Text className="text-2xl">📅</Text>
+          {!loading &&
+            !error &&
+            viewMode === "month" &&
+            bookings.length === 0 && (
+              <>
+                <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
+                  <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                    <Text className="text-2xl">📅</Text>
+                  </View>
+                  <Text className="text-gray-700 dark:text-gray-200 font-semibold">
+                    No bookings
+                  </Text>
+                  <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+                    There are no bookings in {MONTH_NAMES[anchor.getMonth()]}{" "}
+                    {anchor.getFullYear()}.
+                  </Text>
                 </View>
-                <Text className="text-gray-700 dark:text-gray-200 font-semibold">
-                  No bookings
-                </Text>
-                <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                  There are no bookings in {MONTH_NAMES[anchor.getMonth()]}{" "}
-                  {anchor.getFullYear()}.
-                </Text>
-              </View>
-              {/* Status Legend */}
-              <StatusLegend />
-            </>
-          )}
+                {/* Status Legend */}
+                <StatusLegend />
+              </>
+            )}
         </View>
       </ScrollView>
 

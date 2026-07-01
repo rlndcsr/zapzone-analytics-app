@@ -57,7 +57,10 @@ const ICON_MAP: { [key: string]: any } = {
 const getIcon = (iconName: string) => ICON_MAP[iconName] || null;
 
 const MetricIconBadge = ({ metric }: { metric: MetricDefinition }) => (
-  <View className="w-10 h-10 rounded-xl items-center justify-center" style={{ backgroundColor: metric.gradient[0] + '20' }}>
+  <View
+    className="w-10 h-10 rounded-xl items-center justify-center"
+    style={{ backgroundColor: metric.gradient[0] + "20" }}
+  >
     <Image
       source={getIcon(metric.icon)}
       style={{
@@ -92,7 +95,7 @@ const MetricCard = ({
       onPress={() => onPress(metric.id)}
       className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-5 m-1.5 shadow-sm"
       style={{
-        shadowColor: '#424242',
+        shadowColor: "#424242",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
         shadowRadius: 8,
@@ -110,7 +113,7 @@ const MetricCard = ({
         </View>
         <MetricIconBadge metric={metric} />
       </View>
-      
+
       <Text className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
         {value}
       </Text>
@@ -330,7 +333,6 @@ const Home = () => {
               source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
               style={{ width: 70, height: 28 }}
               contentFit="contain"
-    
             />
           </Pressable>
           <View className="flex-row items-center gap-3">
@@ -346,7 +348,9 @@ const Home = () => {
                   tintColor="#FFFFFF"
                 />
                 <Text className="text-white text-xs font-semibold">
-                  {unreadNotificationsCount > 99 ? "99+" : unreadNotificationsCount}
+                  {unreadNotificationsCount > 99
+                    ? "99+"
+                    : unreadNotificationsCount}
                 </Text>
               </Pressable>
             )}
@@ -368,7 +372,10 @@ const Home = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + 96,
+          paddingTop: 0,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -381,9 +388,9 @@ const Home = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-[-6px] mb-5 shadow-sm">
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
-             Welcome back!
+              Welcome back!
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Here&apos;s what&apos;s happening at your venue
@@ -453,7 +460,9 @@ const Home = () => {
           {/* Error State */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -497,10 +506,19 @@ const Home = () => {
                 {/* Modal Header */}
                 <View className="flex-row items-center justify-between mb-6">
                   <View className="flex-row items-center gap-3">
-                    <View className="w-12 h-12 rounded-2xl items-center justify-center" style={{ backgroundColor: currentMetric.gradient[0] + '20' }}>
+                    <View
+                      className="w-12 h-12 rounded-2xl items-center justify-center"
+                      style={{
+                        backgroundColor: currentMetric.gradient[0] + "20",
+                      }}
+                    >
                       <Image
                         source={getIcon(currentMetric.icon)}
-                        style={{ width: 24, height: 24, tintColor: currentMetric.color }}
+                        style={{
+                          width: 24,
+                          height: 24,
+                          tintColor: currentMetric.color,
+                        }}
                         contentFit="contain"
                       />
                     </View>
@@ -517,7 +535,9 @@ const Home = () => {
                     onPress={closeModal}
                     className="w-8 h-8 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center"
                   >
-                    <Text className="text-gray-500 dark:text-gray-400 text-lg">✕</Text>
+                    <Text className="text-gray-500 dark:text-gray-400 text-lg">
+                      ✕
+                    </Text>
                   </Pressable>
                 </View>
 
@@ -594,7 +614,7 @@ const Home = () => {
               <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                 <Image
                   source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                  style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                  style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
                   contentFit="contain"
                 />
               </View>
@@ -625,7 +645,7 @@ const Home = () => {
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                     <Image
                       source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
                       contentFit="contain"
                     />
                   </View>
@@ -666,7 +686,7 @@ const Home = () => {
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                     <Image
                       source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: '#FFFFFF' }}
+                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
                       contentFit="contain"
                     />
                   </View>
