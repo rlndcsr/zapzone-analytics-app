@@ -32,6 +32,10 @@ import {
   METRIC_CARDS,
   type MetricCardDef,
 } from "../../lib/dashboard/dashboardConfig";
+import {
+  setTimeframeSelection,
+  useTimeframeSelection,
+} from "../../lib/dashboard/timeframeStore";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import { getCurrentUser } from "../../lib/session";
@@ -150,11 +154,14 @@ const Home = () => {
   );
 
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
+  // Timeframe lives in a shared store so the Activity tab stays in sync.
+  const {
+    timeframe: dateFilter,
+    dateFrom: customStartDate,
+    dateTo: customEndDate,
+  } = useTimeframeSelection();
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [showCustomRange, setShowCustomRange] = useState(false);
-  const [customStartDate, setCustomStartDate] = useState("");
-  const [customEndDate, setCustomEndDate] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<number | "all">(
     "all",
   );
@@ -239,13 +246,13 @@ const Home = () => {
       setTimeout(() => setShowCustomRange(true), 260);
       return;
     }
-    setDateFilter(value);
+    setTimeframeSelection({ timeframe: value });
   };
 
   const handleApplyCustomRange = (start: string, end: string) => {
-    setCustomStartDate(start);
-    setCustomEndDate(end);
-    setDateFilter("custom");
+    // One store write flips the filter + both dates, so Home and Activity each
+    // refetch once and stay in sync.
+    setTimeframeSelection({ timeframe: "custom", dateFrom: start, dateTo: end });
     setShowCustomRange(false);
   };
 

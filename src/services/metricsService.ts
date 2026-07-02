@@ -73,12 +73,43 @@ export type LocationStat = {
   [key: string]: unknown;
 };
 
+/** A recent attraction-ticket purchase row (metrics `recentPurchases`). */
+export type RecentPurchase = {
+  id: number;
+  customer_name: string | null;
+  attraction_name: string | null;
+  location_name: string | null;
+  quantity: number;
+  total_amount: number | string;
+  status: string;
+  payment_method: string | null;
+  purchase_date: string | null;
+  created_at: string | null;
+};
+
+/** A recent event purchase row (metrics `recentEventPurchases`). */
+export type RecentEventPurchase = {
+  id: number;
+  customer_name: string | null;
+  event_name: string | null;
+  quantity: number;
+  total_amount: number | string;
+  amount_paid: number | string;
+  status: string;
+  purchase_date: string | null;
+  created_at: string | null;
+};
+
 /** Full payload of GET /api/metrics/dashboard/{userId}. */
 export type DashboardData = {
   timeframe: DashboardTimeframe;
   metrics: DashboardTotals;
   breakdowns?: DashboardBreakdowns;
   locationStats?: Record<string, LocationStat>;
+  /** Recent attraction-ticket purchases (drives the manager Activity screen). */
+  recentPurchases?: RecentPurchase[];
+  /** Recent event purchases (drives the manager Activity screen). */
+  recentEventPurchases?: RecentEventPurchase[];
 };
 
 export type DashboardMetricsParams = {

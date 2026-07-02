@@ -20,6 +20,8 @@ import {
   FabRect,
   MorphingFabMenu,
 } from "../../components/navigation/MorphingFabMenu";
+import { getRoleTabs } from "../../lib/navigation/navConfig";
+import { getCurrentUser } from "../../lib/session";
 
 const ACTIVE_COLOR = "#0644C7";
 const INACTIVE_COLOR = "#9AA0A6";
@@ -125,6 +127,14 @@ const FloatingTabBar = ({
   const centerOptions = centerRoute && descriptors[centerRoute.key].options;
   const centerFocused = centerIndex === state.index;
 
+  // Which tabs this role sees, and in what order — driven by navConfig, not
+  // hardcoded here. All screens stay registered; we simply render the subset.
+  const tabOrder = getRoleTabs(getCurrentUser()?.role);
+  const focusedKey = state.routes[state.index]?.key;
+  const visibleRoutes = tabOrder
+    .map((name) => state.routes.find((r) => r.name === name))
+    .filter((r): r is (typeof state.routes)[number] => !!r);
+
   return (
     <View
       pointerEvents="box-none"
@@ -145,9 +155,9 @@ const FloatingTabBar = ({
           elevation: 8,
         }}
       >
-        {state.routes.map((route, index) => {
+        {visibleRoutes.map((route) => {
           const { options } = descriptors[route.key];
-          const isFocused = state.index === index;
+          const isFocused = route.key === focusedKey;
           const color = isFocused ? ACTIVE_COLOR : INACTIVE_COLOR;
           const label =
             typeof options.title === "string" ? options.title : route.name;
@@ -263,6 +273,18 @@ const TabLayout = () => {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               source={require("../../../assets/zapzone-assests/icon/pin.png")}
+              focused={focused}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="activity"
+        options={{
+          title: "Activity",
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              source={require("../../../assets/zapzone-assests/icon/box.png")}
               focused={focused}
             />
           ),

@@ -403,16 +403,30 @@ export function getNewBookingsCutoff(
   }
 }
 
-export function countNewBookings(
-  bookings: { createdAt: string | null }[],
+/**
+ * Bookings created within the timeframe — the web's `newBookings`. With no
+ * cutoff (all-time) every booking qualifies; bookings with a missing/invalid
+ * `createdAt` are excluded (matches the web, where an invalid Date fails `>=`).
+ * Generic so callers keep their full row type (the Activity screen needs it).
+ */
+export function filterNewBookings<T extends { createdAt: string | null }>(
+  bookings: T[],
   cutoff: Date | null,
-): number {
-  if (!cutoff) return bookings.length;
+): T[] {
+  if (!cutoff) return bookings;
   return bookings.filter((b) => {
     if (!b.createdAt) return false;
     const created = new Date(b.createdAt);
     return !Number.isNaN(created.getTime()) && created >= cutoff;
-  }).length;
+  });
+}
+
+/** Count of new bookings — `filterNewBookings(...).length`. */
+export function countNewBookings(
+  bookings: { createdAt: string | null }[],
+  cutoff: Date | null,
+): number {
+  return filterNewBookings(bookings, cutoff).length;
 }
 
 export function computeAvgBooking(metrics: DashboardTotals): number {
