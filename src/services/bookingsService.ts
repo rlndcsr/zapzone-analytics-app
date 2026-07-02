@@ -22,6 +22,8 @@ export type CalendarBooking = {
   packageName: string;
   customerName: string;
   locationName: string;
+  /** Raw creation timestamp; powers the dashboard "New Bookings" count. */
+  createdAt: string | null;
 };
 
 export type BookingAddOn = {
@@ -75,6 +77,7 @@ type RawBooking = {
   status?: string;
   booking_date?: string | null;
   booking_time?: string | null;
+  created_at?: string | null;
   participants?: number | string | null;
   total_amount?: number | string | null;
   guest_name?: string | null;
@@ -175,6 +178,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     packageName: raw.package?.name?.trim() || "Booking",
     customerName: customerName(raw.customer, raw.guest_name),
     locationName: raw.location?.name?.trim() || "",
+    createdAt: raw.created_at ?? null,
   };
 }
 
@@ -229,6 +233,35 @@ export async function fetchAllBookings({
   }
 
   return out;
+}
+
+/**
+ * Single-page bookings fetch used ONLY to derive the dashboard "New Bookings"
+ * count. Deliberately mirrors the web ManagerDashboard's request exactly — one
+ * `GET /bookings?location_id&per_page=500` with no sort, status, or pagination
+ * (web: `getBookings({ location_id, per_page: 500 })`, then
+ * `allBookings = data.bookings`). The backend caps `per_page` at 100, so this
+ * returns the same capped first page the web sees. This is why All-Time New
+ * Bookings must NOT use `fetchAllBookings` (which pages the full dataset): the
+ * web's count is the capped page's length, not the true total.
+ *
+ * Rows are mapped without dropping any (missing booking_date → ""), matching the
+ * web, which counts every booking the response returns.
+ */
+export async function fetchDashboardBookings({
+  token,
+  locationId,
+  signal,
+}: FetchParams): Promise<CalendarBooking[]> {
+  const params = new URLSearchParams({ per_page: "500" });
+  if (locationId != null) params.append("location_id", String(locationId));
+
+  const res = await apiRequest<BookingsListResponse>(
+    `/api/bookings?${params.toString()}`,
+    { token, signal },
+  );
+  const items = res?.data?.bookings ?? [];
+  return items.map((raw) => mapBooking(raw, toDateKey(raw.booking_date) ?? ""));
 }
 
 function mapAddOns(raw: RawBookingDetail): BookingAddOn[] {

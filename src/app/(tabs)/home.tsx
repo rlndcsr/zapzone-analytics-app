@@ -1,6 +1,12 @@
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   Dimensions,
@@ -14,13 +20,18 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
+import {
+  composeSubtitle,
+  formatMetricValue,
+  getCardSubtitleFn,
+  getDashboardConfig,
+  METRIC_CARDS,
+  type MetricCardDef,
+} from "../../lib/dashboard/dashboardConfig";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
-import type {
-  BreakdownKey,
-  DashboardData,
-  DashboardTotals,
-} from "../../services/metricsService";
+import { getCurrentUser } from "../../lib/session";
+import type { DashboardData } from "../../services/metricsService";
 
 type DateFilterType =
   | "today"
@@ -30,19 +41,6 @@ type DateFilterType =
   | "all_time"
   | "custom";
 
-type MetricDefinition = {
-  id: number;
-  label: string;
-  title: string;
-  breakdownKey: BreakdownKey;
-  valueField?: keyof DashboardTotals;
-  subtitle?: (metrics: DashboardTotals) => string;
-  icon: string;
-  color: string;
-  gradient: [string, string];
-  enabled: boolean;
-};
-
 const ICON_MAP: { [key: string]: any } = {
   "group.png": require("../../../assets/zapzone-assests/icon/group.png"),
   "ticket.png": require("../../../assets/zapzone-assests/icon/ticket.png"),
@@ -51,12 +49,15 @@ const ICON_MAP: { [key: string]: any } = {
   "add-user.png": require("../../../assets/zapzone-assests/icon/add-user.png"),
   "checked.png": require("../../../assets/zapzone-assests/icon/checked.png"),
   "party.png": require("../../../assets/zapzone-assests/icon/party-popper.png"),
+  "box.png": require("../../../assets/zapzone-assests/icon/box.png"),
+  "calendar.png": require("../../../assets/zapzone-assests/icon/calendar.png"),
+  "info.png": require("../../../assets/zapzone-assests/icon/info.png"),
   "zapzone.png": require("../../../assets/zapzone-assests/zapzone.png"),
 };
 
 const getIcon = (iconName: string) => ICON_MAP[iconName] || null;
 
-const MetricIconBadge = ({ metric }: { metric: MetricDefinition }) => (
+const MetricIconBadge = ({ metric }: { metric: MetricCardDef }) => (
   <View
     className="w-10 h-10 rounded-xl items-center justify-center"
     style={{ backgroundColor: metric.gradient[0] + "20" }}
@@ -76,23 +77,35 @@ const MetricIconBadge = ({ metric }: { metric: MetricDefinition }) => (
 const MetricCard = ({
   metric,
   data,
+  interactive,
+  subtitleFn,
+  timeframeLabel,
   onPress,
 }: {
-  metric: MetricDefinition;
+  metric: MetricCardDef;
   data: DashboardData | null;
-  onPress: (id: number) => void;
+  interactive: boolean;
+  /** Role-resolved builder for the card's metric part (timeframe appended here). */
+  subtitleFn?: (metrics: DashboardData["metrics"]) => string;
+  /** Backend timeframe label, e.g. "All Time" — the sub-line's trailing context. */
+  timeframeLabel: string;
+  onPress: (key: string) => void;
 }) => {
-  const active = metric.enabled && data != null;
-  const value =
-    active && metric.valueField
-      ? String(data.metrics[metric.valueField] ?? 0)
-      : "—";
-  const subtitle =
-    active && metric.subtitle ? metric.subtitle(data.metrics) : null;
+  // A field that's absent from the payload (undefined) renders a placeholder,
+  // so cards for not-yet-exposed backend fields degrade gracefully — and light
+  // up automatically once the field appears. A real 0 still shows as "0".
+  const raw = data ? data.metrics[metric.valueField] : undefined;
+  const hasValue = raw != null && !Number.isNaN(raw);
+  const value = hasValue ? formatMetricValue(raw, metric.format) : "—";
+  // Contextual sub-line: "<metric part> • <timeframe>", matching the web.
+  const subtitle = hasValue
+    ? composeSubtitle(subtitleFn ? subtitleFn(data!.metrics) : "", timeframeLabel)
+    : null;
 
   return (
     <Pressable
-      onPress={() => onPress(metric.id)}
+      onPress={interactive ? () => onPress(metric.key) : undefined}
+      disabled={!interactive}
       className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-5 m-1.5 shadow-sm"
       style={{
         shadowColor: "#424242",
@@ -103,11 +116,8 @@ const MetricCard = ({
       }}
     >
       <View className="flex-row items-start justify-between mb-4">
-        <View className="flex-1">
-          <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-            {metric.label}
-          </Text>
-          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200 mt-1">
+        <View className="flex-1 mr-2">
+          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
             {metric.title}
           </Text>
         </View>
@@ -128,7 +138,19 @@ const MetricCard = ({
 
 const Home = () => {
   const insets = useSafeAreaInsets();
-  const [selectedMetric, setSelectedMetric] = useState<number | null>(null);
+
+  // Role drives which cards, endpoint, and controls this dashboard shows. Read
+  // once from the in-memory session (set at login / restored on launch).
+  const dashboardConfig = useMemo(
+    () => getDashboardConfig(getCurrentUser()?.role),
+    [],
+  );
+  const visibleCards = useMemo<MetricCardDef[]>(
+    () => dashboardConfig.cards.map((key) => METRIC_CARDS[key]),
+    [dashboardConfig],
+  );
+
+  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [customStartDate, setCustomStartDate] = useState("");
@@ -145,8 +167,8 @@ const Home = () => {
     new Animated.Value(Dimensions.get("window").height),
   ).current;
 
-  const openModal = (id: number) => {
-    setSelectedMetric(id);
+  const openModal = (key: string) => {
+    setSelectedMetric(key);
     slideAnim.setValue(Dimensions.get("window").height);
     Animated.spring(slideAnim, {
       toValue: 0,
@@ -218,7 +240,6 @@ const Home = () => {
 
   const dateFilterOptions = [
     { label: "All Time", value: "all_time" as DateFilterType },
-    { label: "Today", value: "today" as DateFilterType },
     { label: "Last 24 Hours", value: "last_24h" as DateFilterType },
     { label: "Last 7 Days", value: "last_7d" as DateFilterType },
     { label: "Last 30 Days", value: "last_30d" as DateFilterType },
@@ -226,99 +247,21 @@ const Home = () => {
   ];
 
   const currentDateLabel =
-    dateFilterOptions.find((opt) => opt.value === dateFilter)?.label || "Today";
+    dateFilterOptions.find((opt) => opt.value === dateFilter)?.label ||
+    "All Time";
 
-  const metricDefinitions: MetricDefinition[] = [
-    {
-      id: 1,
-      label: "Packages",
-      title: "Total Bookings",
-      breakdownKey: "packageBreakdown",
-      valueField: "totalBookings",
-      subtitle: (metrics) => `${metrics.confirmedBookings} confirmed`,
-      icon: "party.png",
-      color: "#5B7EFF",
-      gradient: ["#5B7EFF", "#7B9CFF"],
-      enabled: true,
-    },
-    {
-      id: 2,
-      label: "Participants",
-      title: "Party Participants",
-      breakdownKey: "participantBreakdown",
-      valueField: "totalParticipants",
-      subtitle: () => "From package bookings",
-      icon: "group.png",
-      color: "#A78BFA",
-      gradient: ["#A78BFA", "#C4B5FD"],
-      enabled: true,
-    },
-    {
-      id: 3,
-      label: "Attractions",
-      title: "Tickets Sold",
-      breakdownKey: "attractionBreakdown",
-      valueField: "totalPurchases",
-      subtitle: () => "Attraction tickets",
-      icon: "ticket.png",
-      color: "#10B981",
-      gradient: ["#10B981", "#34D399"],
-      enabled: true,
-    },
-    {
-      id: 4,
-      label: "Events",
-      title: "Events Sold",
-      breakdownKey: "eventBreakdown",
-      valueField: "totalEventPurchases",
-      subtitle: (metrics) => `${metrics.totalEventTickets} tickets`,
-      icon: "shopping-cart.png",
-      color: "#EC4899",
-      gradient: ["#EC4899", "#F472B6"],
-      enabled: true,
-    },
-    {
-      id: 5,
-      label: "Memberships",
-      title: "New Members",
-      breakdownKey: "membershipBreakdown",
-      valueField: "newMemberships",
-      subtitle: () => "This period",
-      icon: "membership.png",
-      color: "#F59E0B",
-      gradient: ["#F59E0B", "#FBBF24"],
-      enabled: true,
-    },
-    {
-      id: 6,
-      label: "Customers",
-      title: "Unique Customers",
-      breakdownKey: "customerBreakdown",
-      valueField: "totalCustomers",
-      subtitle: (metrics) => `${metrics.newCustomers ?? 0} new`,
-      icon: "add-user.png",
-      color: "#EF4444",
-      gradient: ["#EF4444", "#F87171"],
-      enabled: true,
-    },
-    {
-      id: 7,
-      label: "Confirmed",
-      title: "Confirmed Bookings",
-      breakdownKey: "confirmedBreakdown",
-      valueField: "confirmedBookings",
-      subtitle: () => "Total confirmed",
-      icon: "checked.png",
-      color: "#14B8A6",
-      gradient: ["#14B8A6", "#2DD4BF"],
-      enabled: true,
-    },
-  ];
+  // Card sub-lines end with the timeframe. Prefer the backend-supplied label
+  // (data.timeframe.description, exactly as the web uses) so it always reflects
+  // the resolved window; fall back to the selected filter label before data.
+  const timeframeLabel = data?.timeframe?.description ?? currentDateLabel;
 
-  const currentMetric = metricDefinitions.find((m) => m.id === selectedMetric);
-  const currentBreakdown = currentMetric?.enabled
-    ? (data?.breakdowns?.[currentMetric.breakdownKey] ?? [])
-    : [];
+  const currentMetric: MetricCardDef | undefined = selectedMetric
+    ? METRIC_CARDS[selectedMetric as keyof typeof METRIC_CARDS]
+    : undefined;
+  const currentBreakdown =
+    currentMetric?.breakdownKey && dashboardConfig.showBreakdowns
+      ? (data?.breakdowns?.[currentMetric.breakdownKey] ?? [])
+      : [];
   const isBreakdownEmpty = currentBreakdown.length === 0;
 
   return (
@@ -399,29 +342,33 @@ const Home = () => {
 
           {/* Filters Row */}
           <View className="flex-row gap-3 mb-5">
-            <Pressable
-              onPress={() => setShowLocationDropdown(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/pin.png")}
-                style={{ width: 16, height: 16 }}
-                contentFit="contain"
-                tintColor="#0644C7"
-              />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
+            {/* Multi-location picker — company-wide roles only. Single-location
+                roles (manager/attendant) are scoped to their own location. */}
+            {dashboardConfig.showLocationSelector && (
+              <Pressable
+                onPress={() => setShowLocationDropdown(true)}
+                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
               >
-                {selectedLocationLabel}
-              </Text>
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
-                style={{ width: 10, height: 10 }}
-                contentFit="contain"
-                tintColor="#9CA3AF"
-              />
-            </Pressable>
+                <Image
+                  source={require("../../../assets/zapzone-assests/icon/pin.png")}
+                  style={{ width: 16, height: 16 }}
+                  contentFit="contain"
+                  tintColor="#0644C7"
+                />
+                <Text
+                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                  numberOfLines={1}
+                >
+                  {selectedLocationLabel}
+                </Text>
+                <Image
+                  source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
+                  style={{ width: 10, height: 10 }}
+                  contentFit="contain"
+                  tintColor="#9CA3AF"
+                />
+              </Pressable>
+            )}
 
             <Pressable
               onPress={() => setShowDateDropdown(true)}
@@ -455,7 +402,7 @@ const Home = () => {
           </View>
 
           {/* Loading State */}
-          {loading && <MetricCardsSkeleton />}
+          {loading && <MetricCardsSkeleton count={visibleCards.length} />}
 
           {/* Error State */}
           {!loading && error && (
@@ -467,12 +414,21 @@ const Home = () => {
             </View>
           )}
 
-          {/* Metrics Grid */}
+          {/* Metrics Grid — cards come from the role's dashboard config. */}
           {!loading && !error && (
             <View className="flex-row flex-wrap -mx-1.5">
-              {metricDefinitions.map((metric) => (
-                <View key={metric.id} className="w-1/2">
-                  <MetricCard metric={metric} data={data} onPress={openModal} />
+              {visibleCards.map((metric) => (
+                <View key={metric.key} className="w-1/2">
+                  <MetricCard
+                    metric={metric}
+                    data={data}
+                    interactive={
+                      dashboardConfig.showBreakdowns && !!metric.breakdownKey
+                    }
+                    subtitleFn={getCardSubtitleFn(dashboardConfig, metric)}
+                    timeframeLabel={timeframeLabel}
+                    onPress={openModal}
+                  />
                 </View>
               ))}
             </View>
@@ -575,9 +531,10 @@ const Home = () => {
                         Total
                       </Text>
                       <Text className="text-xl font-bold text-gray-900 dark:text-white">
-                        {currentMetric.enabled && currentMetric.valueField
-                          ? (data?.metrics[currentMetric.valueField] ?? 0)
-                          : 0}
+                        {formatMetricValue(
+                          data?.metrics[currentMetric.valueField] ?? 0,
+                          currentMetric.format,
+                        )}
                       </Text>
                     </View>
                   </>

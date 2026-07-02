@@ -3,9 +3,9 @@ import { View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import { SkeletonBlock, usePulse } from "./SkeletonBlock";
 
-// Mirrors the 7 cards in the dashboard grid so swapping skeleton -> data
-// causes no layout shift.
-const CARD_COUNT = 7;
+// Matches the number of cards in the dashboard grid so swapping skeleton ->
+// data causes no layout shift. Defaults to the company_admin card count.
+const DEFAULT_CARD_COUNT = 7;
 
 /** A skeleton bar vertically centered within a text line's height. */
 function SkeletonLine({
@@ -66,12 +66,16 @@ function MetricCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
   );
 }
 
-export function MetricCardsSkeleton() {
+export function MetricCardsSkeleton({
+  count = DEFAULT_CARD_COUNT,
+}: {
+  count?: number;
+} = {}) {
   const pulse = usePulse();
 
   return (
     <View className="flex-row flex-wrap -mx-1.5">
-      {Array.from({ length: CARD_COUNT }).map((_, index) => (
+      {Array.from({ length: count }).map((_, index) => (
         <View key={index} className="w-1/2">
           <MetricCardSkeleton pulse={pulse} />
         </View>

@@ -60,19 +60,12 @@ export type DashboardTotals = {
 /** Per-location rollup inside `locationStats` (company_admin responses only). */
 export type LocationStat = {
   name: string;
-  /** Package bookings count. */
   bookings: number;
-  /** Attraction ticket purchases count (shown as "Tickets"). */
   purchases: number;
-  /** Event purchases count (shown as "Events"). */
   eventPurchases: number;
-  /** Event tickets sold. */
   eventTickets: number;
-  /** Combined revenue: bookings + attraction + event purchases. */
   revenue: number;
-  /** Total guests: booking participants + attraction + event tickets. */
   participants: number;
-  /** Capacity utilization 0–100. */
   utilization: number;
   bookingRevenue: number;
   purchaseRevenue: number;
@@ -103,9 +96,7 @@ function getDeviceTimeZone(): string {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (tz) return tz;
-  } catch {
-    // Intl missing in this runtime — fall through to the default.
-  }
+  } catch {}
   return "America/Detroit";
 }
 
@@ -137,6 +128,40 @@ export async function fetchDashboardMetrics({
 
   return apiRequest<DashboardData>(
     `/api/metrics/dashboard/${userId}?${params.toString()}`,
+    { token },
+  );
+}
+
+export type AttendantMetricsParams = {
+  token: string;
+  timeframe: TimeframeType;
+  /** The attendant's assigned location; omitted when unknown. */
+  locationId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export async function fetchAttendantMetrics({
+  token,
+  timeframe,
+  locationId,
+  dateFrom,
+  dateTo,
+}: AttendantMetricsParams): Promise<DashboardData> {
+  const params = new URLSearchParams();
+  params.append("timeframe", timeframe);
+
+  if (locationId != null) {
+    params.append("location_id", String(locationId));
+  }
+
+  if (timeframe === "custom" && dateFrom && dateTo) {
+    params.append("date_from", dateFrom);
+    params.append("date_to", dateTo);
+  }
+
+  return apiRequest<DashboardData>(
+    `/api/metrics/attendant?${params.toString()}`,
     { token },
   );
 }
