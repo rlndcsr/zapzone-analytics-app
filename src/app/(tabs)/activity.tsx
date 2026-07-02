@@ -10,10 +10,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
+import { DashboardHeader } from "../../components/ui/DashboardHeader";
+import { ScreenTitleCard } from "../../components/ui/ScreenTitleCard";
 import { StatusBadge } from "../../components/ui/StatusBadge";
-import { ActivitySkeleton } from "../../components/ui/skeleton/ActivitySkeleton";
+import { ActivityScreenSkeleton } from "../../components/ui/skeleton/ActivityScreenSkeleton";
 import { useTimeframeSelection } from "../../lib/dashboard/timeframeStore";
 import { useManagerActivity } from "../../lib/hooks/useManagerActivity";
+import { useNotifications } from "../../lib/hooks/useNotifications";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type {
   RecentEventPurchase,
@@ -32,8 +35,18 @@ const CARD_SHADOW = {
 } as const;
 
 const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
 const money = (n: number | string | null | undefined) =>
@@ -91,11 +104,16 @@ const Section = ({
         <Feather name={icon} size={15} color={PRIMARY} />
       </View>
       <View className="flex-1">
-        <Text className="text-base font-bold text-gray-900 dark:text-white" numberOfLines={1}>
+        <Text
+          className="text-base font-bold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
           {title}
         </Text>
         {badge ? (
-          <Text className="text-[11px] font-medium text-[#0644C7] mt-0.5">{badge}</Text>
+          <Text className="text-[11px] font-medium text-[#0644C7] mt-0.5">
+            {badge}
+          </Text>
         ) : null}
       </View>
       {onViewAll && (
@@ -116,7 +134,9 @@ const Section = ({
     >
       {isEmpty ? (
         <View className="items-center py-8 px-4">
-          <Text className="text-sm text-gray-400 dark:text-gray-500">{empty}</Text>
+          <Text className="text-sm text-gray-400 dark:text-gray-500">
+            {empty}
+          </Text>
         </View>
       ) : (
         children
@@ -126,7 +146,13 @@ const Section = ({
 );
 
 /** Shared divider wrapper so rows in a section card share a separator. */
-const Row = ({ index, children }: { index: number; children: React.ReactNode }) => (
+const Row = ({
+  index,
+  children,
+}: {
+  index: number;
+  children: React.ReactNode;
+}) => (
   <View
     className={`px-4 py-3 ${index > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
   >
@@ -148,12 +174,18 @@ const NewBookingRow = ({
   return (
     <Row index={index}>
       <View className="flex-row items-start justify-between mb-1">
-        <Text className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>
+        <Text
+          className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2"
+          numberOfLines={1}
+        >
           {b.customerName}
         </Text>
         <StatusBadge status={b.status} />
       </View>
-      <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1.5" numberOfLines={1}>
+      <Text
+        className="text-xs text-gray-500 dark:text-gray-400 mb-1.5"
+        numberOfLines={1}
+      >
         {b.packageName}
       </Text>
       <View className="flex-row items-center justify-between">
@@ -174,18 +206,30 @@ const NewBookingRow = ({
   );
 };
 
-const TicketPurchaseRow = ({ p, index }: { p: RecentPurchase; index: number }) => {
+const TicketPurchaseRow = ({
+  p,
+  index,
+}: {
+  p: RecentPurchase;
+  index: number;
+}) => {
   const when = p.purchase_date || p.created_at;
   const time = fmtTime(when);
   return (
     <Row index={index}>
       <View className="flex-row items-start justify-between mb-1">
-        <Text className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>
+        <Text
+          className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2"
+          numberOfLines={1}
+        >
           {p.customer_name || "Guest"}
         </Text>
         <StatusBadge status={p.status} />
       </View>
-      <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1.5" numberOfLines={1}>
+      <Text
+        className="text-xs text-gray-500 dark:text-gray-400 mb-1.5"
+        numberOfLines={1}
+      >
         {p.attraction_name || "Attraction"}
         {p.location_name ? ` · ${p.location_name}` : ""}
       </Text>
@@ -201,19 +245,33 @@ const TicketPurchaseRow = ({ p, index }: { p: RecentPurchase; index: number }) =
   );
 };
 
-const EventPurchaseRow = ({ e, index }: { e: RecentEventPurchase; index: number }) => (
+const EventPurchaseRow = ({
+  e,
+  index,
+}: {
+  e: RecentEventPurchase;
+  index: number;
+}) => (
   <Row index={index}>
     <View className="flex-row items-start justify-between mb-1">
-      <Text className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>
+      <Text
+        className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2"
+        numberOfLines={1}
+      >
         {e.customer_name || "Guest"}
       </Text>
       <StatusBadge status={e.status} palette="event" />
     </View>
-    <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1.5" numberOfLines={1}>
+    <Text
+      className="text-xs text-gray-500 dark:text-gray-400 mb-1.5"
+      numberOfLines={1}
+    >
       {e.event_name || "Event"}
     </Text>
     <View className="flex-row items-center justify-between">
-      <Meta text={`${fmtDate(e.purchase_date || e.created_at)} · ${e.quantity}×`} />
+      <Meta
+        text={`${fmtDate(e.purchase_date || e.created_at)} · ${e.quantity}×`}
+      />
       <Meta text={`${money(e.total_amount)} · Paid ${money(e.amount_paid)}`} />
     </View>
   </Row>
@@ -236,17 +294,24 @@ const Activity = () => {
     refetch,
   } = useManagerActivity({ timeframe, dateFrom, dateTo });
 
+  const {
+    totalCount: unreadNotificationsCount,
+    refresh: refreshNotifications,
+  } = useNotifications("unread");
+
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
+    null,
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refetch();
+      await Promise.all([refetch(), refreshNotifications()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [refetch, refreshNotifications]);
 
   const newBookingsBadge = `${newBookingsCount}${
     timeframeLabel ? ` • ${timeframeLabel}` : ""
@@ -254,20 +319,15 @@ const Activity = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Gradient header */}
-      <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
-        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
-        <Text className="text-xl font-bold text-white">Activity</Text>
-        <Text className="text-xs text-blue-100 mt-0.5">
-          New bookings and recent sales at your location
-        </Text>
-      </View>
+      <DashboardHeader unreadCount={unreadNotificationsCount} />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + 96,
+          paddingTop: 0,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -278,67 +338,81 @@ const Activity = () => {
           />
         }
       >
-        <View className="px-5 pt-5">
-          {loading && !refreshing ? (
-            <ActivitySkeleton />
-          ) : error ? (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-              <Pressable
-                onPress={refetch}
-                className="mt-3 self-start px-4 py-2 rounded-xl bg-[#0644C7]/10 active:opacity-80"
-              >
-                <Text className="text-xs font-semibold text-[#0644C7]">Try Again</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <>
-              <Section
-                icon="plus-circle"
-                title="New Bookings"
-                badge={newBookingsBadge}
-                // Button stays visible to match the web, but does nothing yet.
-                // TODO: Navigate to the Bookings screen when the mobile Bookings
-                // module is implemented.
-                onViewAll={() => {}}
-                empty="No new bookings yet"
-                isEmpty={newBookings.length === 0}
-              >
-                {newBookings.map((b, i) => (
-                  <NewBookingRow
-                    key={b.id}
-                    b={b}
-                    index={i}
-                    onView={setSelectedBookingId}
-                  />
-                ))}
-              </Section>
+        {loading ? (
+          // Shown on initial load, pull-to-refresh, and any re-fetch (load()
+          // always flips `loading` true). Includes its own title-card + section
+          // placeholders and the same px-5 wrapper as the loaded content below.
+          <ActivityScreenSkeleton />
+        ) : (
+          <View className="px-5 pt-0">
+            <ScreenTitleCard
+              title="Activity"
+              subtitle="Monitor bookings, ticket purchases, and recent event activity."
+            />
 
-              <Section
-                icon="tag"
-                title="Recent Ticket Purchases"
-                empty="No ticket purchases found for this week"
-                isEmpty={recentPurchases.length === 0}
-              >
-                {recentPurchases.map((p, i) => (
-                  <TicketPurchaseRow key={p.id} p={p} index={i} />
-                ))}
-              </Section>
+            {error ? (
+              <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
+                <Text className="text-red-600 font-semibold">
+                  Something went wrong
+                </Text>
+                <Text className="text-red-500 text-sm mt-1">{error}</Text>
+                <Pressable
+                  onPress={refetch}
+                  className="mt-3 self-start px-4 py-2 rounded-xl bg-[#0644C7]/10 active:opacity-80"
+                >
+                  <Text className="text-xs font-semibold text-[#0644C7]">
+                    Try Again
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <>
+                <Section
+                  icon="plus-circle"
+                  title="New Bookings"
+                  badge={newBookingsBadge}
+                  // Button stays visible to match the web, but does nothing yet.
+                  // TODO: Navigate to the Bookings screen when the mobile Bookings
+                  // module is implemented.
+                  onViewAll={() => {}}
+                  empty="No new bookings yet"
+                  isEmpty={newBookings.length === 0}
+                >
+                  {newBookings.map((b, i) => (
+                    <NewBookingRow
+                      key={b.id}
+                      b={b}
+                      index={i}
+                      onView={setSelectedBookingId}
+                    />
+                  ))}
+                </Section>
 
-              <Section
-                icon="calendar"
-                title="Recent Event Purchases"
-                empty="No event purchases yet"
-                isEmpty={recentEventPurchases.length === 0}
-              >
-                {recentEventPurchases.map((e, i) => (
-                  <EventPurchaseRow key={e.id} e={e} index={i} />
-                ))}
-              </Section>
-            </>
-          )}
-        </View>
+                <Section
+                  icon="tag"
+                  title="Recent Ticket Purchases"
+                  empty="No ticket purchases found for this week"
+                  isEmpty={recentPurchases.length === 0}
+                >
+                  {recentPurchases.map((p, i) => (
+                    <TicketPurchaseRow key={p.id} p={p} index={i} />
+                  ))}
+                </Section>
+
+                <Section
+                  icon="calendar"
+                  title="Recent Event Purchases"
+                  empty="No event purchases yet"
+                  isEmpty={recentEventPurchases.length === 0}
+                >
+                  {recentEventPurchases.map((e, i) => (
+                    <EventPurchaseRow key={e.id} e={e} index={i} />
+                  ))}
+                </Section>
+              </>
+            )}
+          </View>
+        )}
       </ScrollView>
 
       {/* Per-booking detail (reused from the calendar tab). */}
