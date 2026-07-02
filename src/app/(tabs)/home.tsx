@@ -19,6 +19,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import {
+  DateRangeSheet,
+  formatShortDate,
+} from "../../components/ui/DateRangeSheet";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
 import {
   composeSubtitle,
@@ -85,21 +89,18 @@ const MetricCard = ({
   metric: MetricCardDef;
   data: DashboardData | null;
   interactive: boolean;
-  /** Role-resolved builder for the card's metric part (timeframe appended here). */
   subtitleFn?: (metrics: DashboardData["metrics"]) => string;
-  /** Backend timeframe label, e.g. "All Time" — the sub-line's trailing context. */
   timeframeLabel: string;
   onPress: (key: string) => void;
 }) => {
-  // A field that's absent from the payload (undefined) renders a placeholder,
-  // so cards for not-yet-exposed backend fields degrade gracefully — and light
-  // up automatically once the field appears. A real 0 still shows as "0".
   const raw = data ? data.metrics[metric.valueField] : undefined;
   const hasValue = raw != null && !Number.isNaN(raw);
   const value = hasValue ? formatMetricValue(raw, metric.format) : "—";
-  // Contextual sub-line: "<metric part> • <timeframe>", matching the web.
   const subtitle = hasValue
-    ? composeSubtitle(subtitleFn ? subtitleFn(data!.metrics) : "", timeframeLabel)
+    ? composeSubtitle(
+        subtitleFn ? subtitleFn(data!.metrics) : "",
+        timeframeLabel,
+      )
     : null;
 
   return (
@@ -139,8 +140,6 @@ const MetricCard = ({
 const Home = () => {
   const insets = useSafeAreaInsets();
 
-  // Role drives which cards, endpoint, and controls this dashboard shows. Read
-  // once from the in-memory session (set at login / restored on launch).
   const dashboardConfig = useMemo(
     () => getDashboardConfig(getCurrentUser()?.role),
     [],
@@ -153,6 +152,7 @@ const Home = () => {
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
   const [showDateDropdown, setShowDateDropdown] = useState(false);
+  const [showCustomRange, setShowCustomRange] = useState(false);
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<number | "all">(
@@ -234,8 +234,19 @@ const Home = () => {
   };
 
   const handleSelectDate = (value: DateFilterType) => {
-    setDateFilter(value);
     setShowDateDropdown(false);
+    if (value === "custom") {
+      setTimeout(() => setShowCustomRange(true), 260);
+      return;
+    }
+    setDateFilter(value);
+  };
+
+  const handleApplyCustomRange = (start: string, end: string) => {
+    setCustomStartDate(start);
+    setCustomEndDate(end);
+    setDateFilter("custom");
+    setShowCustomRange(false);
   };
 
   const dateFilterOptions = [
@@ -250,9 +261,11 @@ const Home = () => {
     dateFilterOptions.find((opt) => opt.value === dateFilter)?.label ||
     "All Time";
 
-  // Card sub-lines end with the timeframe. Prefer the backend-supplied label
-  // (data.timeframe.description, exactly as the web uses) so it always reflects
-  // the resolved window; fall back to the selected filter label before data.
+  const dateButtonLabel =
+    dateFilter === "custom" && customStartDate && customEndDate
+      ? `${formatShortDate(customStartDate)} – ${formatShortDate(customEndDate)}`
+      : currentDateLabel;
+
   const timeframeLabel = data?.timeframe?.description ?? currentDateLabel;
 
   const currentMetric: MetricCardDef | undefined = selectedMetric
@@ -380,8 +393,11 @@ const Home = () => {
                 contentFit="contain"
                 tintColor="#0644C7"
               />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1">
-                {currentDateLabel}
+              <Text
+                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                numberOfLines={1}
+              >
+                {dateButtonLabel}
               </Text>
               <Image
                 source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
@@ -653,6 +669,15 @@ const Home = () => {
           })}
         </ScrollView>
       </BottomSheet>
+
+      {/* Custom Range calendar */}
+      <DateRangeSheet
+        visible={showCustomRange}
+        initialStart={customStartDate}
+        initialEnd={customEndDate}
+        onClose={() => setShowCustomRange(false)}
+        onApply={handleApplyCustomRange}
+      />
     </View>
   );
 };
