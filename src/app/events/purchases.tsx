@@ -23,16 +23,17 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
 import {
-  consumeAttractionPurchasesStale,
-  useAttractionPurchases,
-} from "../../lib/hooks/useAttractionPurchases";
+  consumeEventPurchasesStale,
+  useEventPurchases,
+} from "../../lib/hooks/useEventPurchases";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
-  fetchTrashedAttractionPurchases,
-  type PurchaseRow,
-  type PurchaseStatus,
-} from "../../services/attractionPurchasesService";
+  fetchTrashedEventPurchases,
+  type EventPaymentStatus,
+  type EventPurchaseRow,
+  type EventPurchaseStatus,
+} from "../../services/eventPurchasesService";
 
 const PRIMARY = "#0644C7";
 
@@ -46,7 +47,7 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-type StatusFilter = "all" | PurchaseStatus;
+type StatusFilter = "all" | EventPurchaseStatus;
 type DateRange = "all" | "today" | "week" | "month";
 
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
@@ -54,8 +55,8 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "Confirmed", value: "confirmed" },
   { label: "Pending", value: "pending" },
   { label: "Checked In", value: "checked-in" },
+  { label: "Completed", value: "completed" },
   { label: "Cancelled", value: "cancelled" },
-  { label: "Refunded", value: "refunded" },
 ];
 
 const PAYMENT_OPTIONS: { label: string; value: string }[] = [
@@ -75,13 +76,29 @@ const DATE_OPTIONS: { label: string; value: DateRange }[] = [
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
 
-const STATUS_BADGE: Record<PurchaseStatus, string> = {
+const STATUS_BADGE: Record<EventPurchaseStatus, string> = {
   confirmed: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
   "checked-in": "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
+  completed: "bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400",
   pending: "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
   cancelled: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
+};
+
+const PAYMENT_STATUS_BADGE: Record<EventPaymentStatus, string> = {
+  paid: "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
+  partial: "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
+  pending: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
   refunded: "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400",
   voided: "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400",
+};
+
+// Payment-method labels matching the web ("Authorize Net", "In-Store", …).
+const METHOD_LABELS: Record<string, string> = {
+  "authorize.net": "Authorize Net",
+  "in-store": "In-Store",
+  paylater: "Pay Later",
+  card: "Card",
+  cash: "Cash",
 };
 
 const formatMoney = (value: number) =>
@@ -90,16 +107,25 @@ const formatMoney = (value: number) =>
     maximumFractionDigits: 2,
   })}`;
 
-function prettyStatus(status: PurchaseStatus): string {
+function prettyStatus(status: EventPurchaseStatus): string {
   return status === "checked-in"
     ? "Checked In"
     : status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function prettyPaymentStatus(status: EventPaymentStatus): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 function prettyMethod(method: string): string {
   if (!method) return "—";
-  const spaced = method.replace(/_/g, " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  return (
+    METHOD_LABELS[method] ??
+    (() => {
+      const spaced = method.replace(/_/g, " ");
+      return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+    })()
+  );
 }
 
 function formatDateTime(dateString: string): string {
@@ -128,13 +154,25 @@ function formatScheduled(dateStr: string, timeStr: string | null): string {
   return `${datePart} · ${hour}:${mStr ?? "00"} ${meridian}`;
 }
 
-const StatusBadge = ({ status }: { status: PurchaseStatus }) => {
+const StatusBadge = ({ status }: { status: EventPurchaseStatus }) => {
   const cls = STATUS_BADGE[status] ?? STATUS_BADGE.pending;
   const [bg1, bg2, fg1, fg2] = cls.split(" ");
   return (
     <View className={`px-2.5 py-1 rounded-full ${bg1} ${bg2}`}>
       <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>
         {prettyStatus(status)}
+      </Text>
+    </View>
+  );
+};
+
+const PaymentBadge = ({ status }: { status: EventPaymentStatus }) => {
+  const cls = PAYMENT_STATUS_BADGE[status] ?? PAYMENT_STATUS_BADGE.pending;
+  const [bg1, bg2, fg1, fg2] = cls.split(" ");
+  return (
+    <View className={`px-2.5 py-1 rounded-full ${bg1} ${bg2}`}>
+      <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>
+        {prettyPaymentStatus(status)}
       </Text>
     </View>
   );
@@ -151,7 +189,7 @@ const Stat = ({ label, value, valueClass = "" }: { label: string; value: string;
   </View>
 );
 
-const PurchaseCard = ({ purchase }: { purchase: PurchaseRow }) => {
+const PurchaseCard = ({ purchase }: { purchase: EventPurchaseRow }) => {
   const paidInFull = purchase.amountPaid >= purchase.totalAmount;
   return (
     <View
@@ -172,26 +210,26 @@ const PurchaseCard = ({ purchase }: { purchase: PurchaseRow }) => {
               {purchase.email}
             </Text>
           )}
-          {!!purchase.phone && (
+          {!!purchase.referenceNumber && (
             <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-              {purchase.phone}
+              {purchase.referenceNumber}
             </Text>
           )}
         </View>
         <StatusBadge status={purchase.status} />
       </View>
 
-      {/* Attraction */}
+      {/* Event */}
       <View className="flex-row items-center gap-1.5">
-        <Feather name="zap" size={13} color="#9CA3AF" />
+        <Feather name="calendar" size={13} color="#9CA3AF" />
         <Text className="text-sm font-medium text-gray-700 dark:text-gray-200" numberOfLines={1}>
-          {purchase.attractionName}
+          {purchase.eventName}
         </Text>
       </View>
 
       {/* Stats */}
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <Stat label="Qty" value={String(purchase.quantity)} />
+        <Stat label="Tickets" value={String(purchase.quantity)} />
         <Stat label="Total" value={formatMoney(purchase.totalAmount)} />
         <Stat
           label="Paid"
@@ -200,12 +238,15 @@ const PurchaseCard = ({ purchase }: { purchase: PurchaseRow }) => {
         />
       </View>
 
-      {/* Footer: payment method + created date */}
+      {/* Footer: payment method + payment status + created date */}
       <View className="flex-row items-center justify-between mt-3">
-        <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-1 rounded-lg">
-          <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">
-            {prettyMethod(purchase.paymentMethod)}
-          </Text>
+        <View className="flex-row items-center gap-2 flex-1 mr-2">
+          <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-1 rounded-lg">
+            <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">
+              {prettyMethod(purchase.paymentMethod)}
+            </Text>
+          </View>
+          <PaymentBadge status={purchase.paymentStatus} />
         </View>
         <Text className="text-xs text-gray-400 dark:text-gray-500">
           {formatDateTime(purchase.createdAt)}
@@ -213,11 +254,11 @@ const PurchaseCard = ({ purchase }: { purchase: PurchaseRow }) => {
       </View>
 
       {/* Scheduled */}
-      {!!purchase.scheduledDate && (
+      {!!purchase.purchaseDate && (
         <View className="flex-row items-center gap-1.5 mt-2">
-          <Feather name="calendar" size={12} color="#9CA3AF" />
+          <Feather name="clock" size={12} color="#9CA3AF" />
           <Text className="text-xs text-gray-500 dark:text-gray-400">
-            Scheduled: {formatScheduled(purchase.scheduledDate, purchase.scheduledTime)}
+            Event: {formatScheduled(purchase.purchaseDate, purchase.purchaseTime)}
           </Text>
         </View>
       )}
@@ -282,7 +323,7 @@ const startOfRange = (range: Exclude<DateRange, "all">): Date => {
   return start;
 };
 
-const ManagePurchases = () => {
+const EventPurchases = () => {
   const insets = useSafeAreaInsets();
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
@@ -290,7 +331,7 @@ const ManagePurchases = () => {
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
   // The location drives the fetch (server-side), exactly like the web — the
   // purchase's own location_id is unreliable, so we can't filter client-side.
-  const { purchases, loading, error, refetch } = useAttractionPurchases({
+  const { purchases, loading, error, refetch } = useEventPurchases({
     locationId: locationFilter === "all" ? undefined : locationFilter,
   });
 
@@ -307,7 +348,7 @@ const ManagePurchases = () => {
 
   // Deleted ("trashed") view — loaded lazily when toggled on.
   const [showDeleted, setShowDeleted] = useState(false);
-  const [deletedItems, setDeletedItems] = useState<PurchaseRow[]>([]);
+  const [deletedItems, setDeletedItems] = useState<EventPurchaseRow[]>([]);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedError, setDeletedError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -328,7 +369,7 @@ const ManagePurchases = () => {
     setDeletedLoading(true);
     setDeletedError(null);
     try {
-      const data = await fetchTrashedAttractionPurchases({
+      const data = await fetchTrashedEventPurchases({
         token,
         userId: user.id,
         locationId: locationFilter === "all" ? undefined : locationFilter,
@@ -363,18 +404,20 @@ const ManagePurchases = () => {
   // appear without a manual pull-to-refresh (filters are preserved in state).
   useFocusEffect(
     useCallback(() => {
-      if (consumeAttractionPurchasesStale()) refetch();
+      if (consumeEventPurchasesStale()) refetch();
     }, [refetch]),
   );
 
   // KPI values — computed over the active set (already location-scoped by the
   // fetch), like the web metrics.
+  // KPI math mirrors the web EventPurchases metrics exactly: revenue is the
+  // sum of total_amount (not amount paid), and Avg. Purchase = revenue / count.
   const kpis = useMemo(() => {
     const total = purchases.length;
     const confirmed = purchases.filter((p) => p.status === "confirmed").length;
-    const revenue = purchases.reduce((sum, p) => sum + p.amountPaid, 0);
+    const revenue = purchases.reduce((sum, p) => sum + p.totalAmount, 0);
     const avg = total > 0 ? revenue / total : 0;
-    const customers = new Set(purchases.map((p) => p.email).filter(Boolean)).size;
+    const customers = new Set(purchases.map((p) => p.email)).size;
     return { total, confirmed, revenue, avg, customers };
   }, [purchases]);
 
@@ -396,23 +439,19 @@ const ManagePurchases = () => {
       }
       if (term) {
         const haystack =
-          `${p.customerName} ${p.email} ${p.attractionName} ${p.phone}`.toLowerCase();
+          `${p.customerName} ${p.email} ${p.eventName} ${p.phone} ${p.referenceNumber}`.toLowerCase();
         if (!haystack.includes(term)) return false;
       }
       return true;
     });
   }, [listSource, search, statusFilter, paymentFilter, dateFilter]);
 
-  // Client-side pagination over the filtered list (matches the notifications
-  // pagination: 5 / 10 / 15 per page with Previous / Next).
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page, perPage],
   );
 
-  // Reset to the first page whenever the filters, view, or page size change so
-  // we never land on a now-empty page.
   useEffect(() => {
     setPage(1);
   }, [
@@ -438,13 +477,13 @@ const ManagePurchases = () => {
       const Sharing = await import("expo-sharing");
 
       const header = [
-        "ID", "Customer Name", "Email", "Phone", "Attraction",
-        "Quantity", "Total Amount", "Status", "Payment Method", "Date",
+        "ID", "Reference", "Customer Name", "Email", "Phone", "Event",
+        "Tickets", "Total Amount", "Status", "Payment Method", "Date",
       ];
       const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       const lines = filtered.map((p) =>
         [
-          p.id, p.customerName, p.email, p.phone, p.attractionName,
+          p.id, p.referenceNumber, p.customerName, p.email, p.phone, p.eventName,
           p.quantity, p.totalAmount, p.status, p.paymentMethod,
           p.createdAt ? new Date(p.createdAt).toLocaleString() : "",
         ]
@@ -453,14 +492,14 @@ const ManagePurchases = () => {
       );
       const csv = [header.map(esc).join(","), ...lines].join("\n");
       const date = new Date().toISOString().split("T")[0];
-      const uri = `${FileSystem.cacheDirectory}purchases-export-${date}.csv`;
+      const uri = `${FileSystem.cacheDirectory}event-purchases-export-${date}.csv`;
       await FileSystem.writeAsStringAsync(uri, csv, {
         encoding: FileSystem.EncodingType.UTF8,
       });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
           mimeType: "text/csv",
-          dialogTitle: "Export Purchases",
+          dialogTitle: "Export Event Purchases",
           UTI: "public.comma-separated-values-text",
         });
       } else {
@@ -503,7 +542,7 @@ const ManagePurchases = () => {
           >
             <Feather name="chevron-left" size={20} color="#FFFFFF" />
           </Pressable>
-          <Text className="text-white text-lg font-bold">Manage Purchases</Text>
+          <Text className="text-white text-lg font-bold">Event Purchases</Text>
           <View style={{ width: 36 }} />
         </View>
       </View>
@@ -529,7 +568,7 @@ const ManagePurchases = () => {
               Purchases Overview
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              All customer attraction purchases at a glance
+              All customer event ticket purchases at a glance
             </Text>
           </View>
 
@@ -623,7 +662,7 @@ const ManagePurchases = () => {
               </View>
               <View className="w-1/2">
                 <KpiCard
-                  icon="trending-up"
+                  icon="dollar-sign"
                   tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
                   title="Avg. Purchase"
                   value={formatMoney(kpis.avg)}
@@ -729,7 +768,7 @@ const ManagePurchases = () => {
                 {listSource.length === 0
                   ? showDeleted
                     ? "There are no deleted purchases."
-                    : "There are no purchases for this account yet."
+                    : "There are no event purchases for this account yet."
                   : "Try adjusting your search or filters."}
               </Text>
             </View>
@@ -983,12 +1022,12 @@ const ManagePurchases = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Floating Action Button — Create Purchase (mirrors the web "New
+      {/* Floating Action Button — Onsite Purchase (mirrors the web "New
           Purchase" button). No floating tab bar on this pushed route. */}
       <Pressable
-        onPress={() => router.push("/attractions/create-purchase" as never)}
+        onPress={() => router.push("/events/create-purchase" as never)}
         accessibilityRole="button"
-        accessibilityLabel="Create purchase"
+        accessibilityLabel="Create event purchase"
         style={{
           position: "absolute",
           right: 20,
@@ -1007,4 +1046,4 @@ const ManagePurchases = () => {
   );
 };
 
-export default ManagePurchases;
+export default EventPurchases;

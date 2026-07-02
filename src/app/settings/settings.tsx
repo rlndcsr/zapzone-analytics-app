@@ -89,7 +89,7 @@ const Settings = () => {
       <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
         <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
         <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
-        <View className="flex-row items-center gap-3 relative z-10">
+        <View className="flex-row items-center gap-3 relative z-10 ">
           <Pressable
             onPress={() => router.back()}
             accessibilityRole="button"
@@ -109,7 +109,7 @@ const Settings = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-[-6px] mb-5 shadow-sm">
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
             Settings
             </Text>

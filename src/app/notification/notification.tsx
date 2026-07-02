@@ -150,7 +150,7 @@ const Notification = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-[-6px] mb-5 shadow-sm">
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
               Stay Updated
             </Text>

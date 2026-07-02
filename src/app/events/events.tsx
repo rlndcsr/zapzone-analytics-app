@@ -12,18 +12,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import {
-  AttractionsKpiSkeleton,
-  AttractionsListSkeleton,
-} from "../../components/ui/skeleton/AttractionsSkeleton";
-import {
-  consumeAttractionsStale,
-  useAttractions,
-} from "../../lib/hooks/useAttractions";
-import type {
-  AttractionRow,
-  AttractionStatus,
-} from "../../services/attractionsService";
+import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
+import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
+import type { EventDateType, EventRow, EventStatus } from "../../services/eventsService";
 
 const PRIMARY = "#0644C7";
 
@@ -35,7 +27,10 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-type StatusFilter = "all" | AttractionStatus;
+type ComponentIconName = ComponentProps<typeof Feather>["name"];
+
+type StatusFilter = "all" | EventStatus;
+type DateTypeFilter = "all" | EventDateType;
 
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "All Status", value: "all" },
@@ -43,14 +38,13 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "Inactive", value: "inactive" },
 ];
 
-const PER_PAGE_OPTIONS = [5, 10, 15];
+const DATE_TYPE_OPTIONS: { label: string; value: DateTypeFilter }[] = [
+  { label: "All Types", value: "all" },
+  { label: "One Time", value: "one_time" },
+  { label: "Date Range", value: "date_range" },
+];
 
-// Only these pricing types carry a unit suffix on the web page.
-const PRICING_SUFFIX: Record<string, string> = {
-  per_person: "/person",
-  per_group: "/group",
-  per_hour: "/hour",
-};
+const PER_PAGE_OPTIONS = [5, 10, 15];
 
 const formatMoney = (value: number) =>
   `$${value.toLocaleString("en-US", {
@@ -58,10 +52,10 @@ const formatMoney = (value: number) =>
     maximumFractionDigits: 2,
   })}`;
 
-function formatCreatedAt(dateStr: string | null): string {
+function formatDate(dateStr: string | null): string {
   if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "";
+  const d = new Date(`${dateStr.substring(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -69,12 +63,29 @@ function formatCreatedAt(dateStr: string | null): string {
   });
 }
 
-function durationLabel(row: AttractionRow): string {
-  if (!row.duration) return "Unlimited";
-  return `${row.duration} ${row.durationUnit}`;
+function formatTimeRange(start: string, end: string): string {
+  const fmt = (t: string) => {
+    if (!t) return "";
+    const [hStr, mStr] = t.split(":");
+    let hour = Number(hStr);
+    const meridian = hour >= 12 ? "PM" : "AM";
+    hour = hour % 12 || 12;
+    return `${hour}:${mStr ?? "00"} ${meridian}`;
+  };
+  const s = fmt(start);
+  const e = fmt(end);
+  if (!s && !e) return "";
+  return `${s} – ${e}`;
 }
 
-const StatusBadge = ({ status }: { status: AttractionStatus }) => {
+function dateLabel(event: EventRow): string {
+  if (event.dateType === "date_range") {
+    return `${formatDate(event.startDate)} – ${event.endDate ? formatDate(event.endDate) : "…"}`;
+  }
+  return formatDate(event.startDate);
+}
+
+const StatusBadge = ({ status }: { status: EventStatus }) => {
   const active = status === "active";
   return (
     <View
@@ -93,97 +104,80 @@ const StatusBadge = ({ status }: { status: AttractionStatus }) => {
   );
 };
 
-const Stat = ({
-  icon,
-  label,
-}: {
-  icon: ComponentIconName;
-  label: string;
-}) => (
+const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
   <View className="flex-row items-center gap-1.5">
     <Feather name={icon} size={12} color="#9CA3AF" />
     <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
   </View>
 );
 
-type ComponentIconName = ComponentProps<typeof Feather>["name"];
-
-const AttractionCard = ({ attraction }: { attraction: AttractionRow }) => {
-  const isCopy = attraction.name.includes("(Copy)");
-  const suffix = PRICING_SUFFIX[attraction.pricingType] ?? "";
-  const created = formatCreatedAt(attraction.createdAt);
+const EventCard = ({ event }: { event: EventRow }) => {
+  const timeRange = formatTimeRange(event.timeStart, event.timeEnd);
+  const capacityLabel =
+    event.maxBookingsPerSlot == null
+      ? "Unlimited/slot"
+      : `${event.maxBookingsPerSlot}/slot`;
 
   return (
     <View
       className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
       style={CARD_SHADOW}
     >
-      {/* Header: name + location (left), status (right) */}
+      {/* Header: name + date (left), status (right) */}
       <View className="flex-row items-start justify-between mb-2">
         <View className="flex-1 mr-3">
-          <View className="flex-row items-center gap-2 flex-wrap">
-            <Text
-              className="text-base font-bold text-gray-900 dark:text-white"
-              numberOfLines={1}
-            >
-              {attraction.name}
+          <Text
+            className="text-base font-bold text-gray-900 dark:text-white"
+            numberOfLines={1}
+          >
+            {event.name}
+          </Text>
+          <View className="flex-row items-center gap-1 mt-0.5">
+            <Feather name="calendar" size={11} color="#9CA3AF" />
+            <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+              {dateLabel(event)}
             </Text>
-            {isCopy && (
-              <View className="flex-row items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40">
-                <Feather name="copy" size={9} color="#B45309" />
-                <Text className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                  Copy
-                </Text>
-              </View>
-            )}
           </View>
-          {!!attraction.locationName && (
+          {!!event.locationName && (
             <View className="flex-row items-center gap-1 mt-0.5">
               <Feather name="map-pin" size={11} color="#9CA3AF" />
               <Text className="text-xs text-gray-500 dark:text-gray-400">
-                {attraction.locationName}
+                {event.locationName}
               </Text>
             </View>
           )}
         </View>
-        <StatusBadge status={attraction.status} />
+        <StatusBadge status={event.status} />
       </View>
 
       {/* Description */}
-      {!!attraction.description && (
+      {!!event.description && (
         <Text
           className="text-xs text-gray-500 dark:text-gray-400 leading-5"
           numberOfLines={2}
         >
-          {attraction.description}
+          {event.description}
         </Text>
       )}
 
-      {/* Category + price */}
+      {/* Date type + price */}
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
         <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
           <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-            {attraction.category}
+            {event.dateType === "date_range" ? "Date Range" : "One Time"}
           </Text>
         </View>
         <Text className="text-sm font-bold text-gray-900 dark:text-white">
-          {formatMoney(attraction.price)}
-          {!!suffix && (
-            <Text className="text-xs font-normal text-gray-400"> {suffix}</Text>
-          )}
+          {formatMoney(event.price)}
+          <Text className="text-xs font-normal text-gray-400"> /ticket</Text>
         </Text>
       </View>
 
-      {/* Capacity / duration / created */}
+      {/* Time / interval / capacity */}
       <View className="flex-row items-center flex-wrap gap-x-4 gap-y-1 mt-2">
-        <Stat
-          icon="users"
-          label={`${attraction.maxCapacity} people${
-            attraction.displayCapacityToCustomers ? "" : " (hidden)"
-          }`}
-        />
-        <Stat icon="clock" label={durationLabel(attraction)} />
-        {!!created && <Stat icon="calendar" label={created} />}
+        {!!timeRange && <Stat icon="clock" label={timeRange} />}
+        <Stat icon="repeat" label={`${event.intervalMinutes} min`} />
+        <Stat icon="users" label={capacityLabel} />
       </View>
     </View>
   );
@@ -217,27 +211,26 @@ const KpiCard = ({
     <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
       {title}
     </Text>
-    <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+    <Text
+      className="text-2xl font-bold text-gray-900 dark:text-white mt-1"
+      numberOfLines={1}
+      adjustsFontSizeToFit
+    >
       {value}
     </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      {change}
-    </Text>
+    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">{change}</Text>
   </View>
 );
 
-const Attractions = () => {
+const Events = () => {
   const insets = useSafeAreaInsets();
-  const { attractions, loading, error, refetch } = useAttractions();
+  const { events, loading, error, refetch } = useEvents();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [dateTypeFilter, setDateTypeFilter] = useState<DateTypeFilter>("all");
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  const [showStatusSheet, setShowStatusSheet] = useState(false);
-  const [showCategorySheet, setShowCategorySheet] = useState(false);
-  const [showLocationSheet, setShowLocationSheet] = useState(false);
-  const [showMoreSheet, setShowMoreSheet] = useState(false);
+  const [sheet, setSheet] = useState<null | "status" | "dateType" | "location">(null);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -251,108 +244,88 @@ const Attractions = () => {
     }
   }, [refetch]);
 
-  // After creating an attraction, refetch on return so the new item + KPIs show
+  // After creating an event, refetch on return so the new item + KPIs show
   // without a manual pull-to-refresh.
   useFocusEffect(
     useCallback(() => {
-      if (consumeAttractionsStale()) refetch();
+      if (consumeEventsStale()) refetch();
     }, [refetch]),
   );
 
-  // Attractions scoped to the selected location. This drives the KPI cards and
-  // is the base for the searchable list — mirroring the web, where the location
-  // selector re-scopes the whole dataset while status/category/search only
-  // filter the list below it.
+  // Events scoped to the selected location. Drives the KPI cards and is the
+  // base for the searchable list — mirrors the web location selector.
   const locationScoped = useMemo(
     () =>
       locationFilter === "all"
-        ? attractions
-        : attractions.filter((a) => a.locationId === locationFilter),
-    [attractions, locationFilter],
+        ? events
+        : events.filter((e) => e.locationId === locationFilter),
+    [events, locationFilter],
   );
 
-  // Category options derived from the (location-scoped) data — no extra call.
-  const categories = useMemo(() => {
-    const set = new Set(locationScoped.map((a) => a.category).filter(Boolean));
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [locationScoped]);
-
-  // Location options derived from the loaded attractions — avoids the heavy
+  // Location options derived from the loaded events — avoids the heavy
   // /api/locations endpoint (which OOM-crashes the app).
   const locations = useMemo(() => {
     const byId = new Map<number, string>();
-    for (const a of attractions) {
-      if (a.locationId != null && !byId.has(a.locationId)) {
-        byId.set(a.locationId, a.locationName || `Location ${a.locationId}`);
+    for (const e of events) {
+      if (e.locationId != null && !byId.has(e.locationId)) {
+        byId.set(e.locationId, e.locationName || `Location ${e.locationId}`);
       }
     }
     return [...byId.entries()]
       .map(([id, name]) => ({ id, name }))
       .sort((x, y) => x.name.localeCompare(y.name));
-  }, [attractions]);
+  }, [events]);
 
-  // KPI values — identical math to the web /attractions metrics, computed over
-  // the location-scoped set so the cards react to the location filter.
+  // KPI values, computed over the location-scoped set so the cards react to
+  // the location filter.
   const kpis = useMemo(() => {
     const total = locationScoped.length;
-    const active = locationScoped.filter((a) => a.status === "active").length;
+    const active = locationScoped.filter((e) => e.status === "active").length;
     const inactive = total - active;
     const avgPrice =
-      total > 0
-        ? locationScoped.reduce((sum, a) => sum + a.price, 0) / total
-        : 0;
-    const capacity = locationScoped.reduce((sum, a) => sum + a.maxCapacity, 0);
-    return { total, active, inactive, avgPrice, capacity };
+      total > 0 ? locationScoped.reduce((s, e) => s + e.price, 0) / total : 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const upcoming = locationScoped.filter((e) => {
+      const end = e.dateType === "date_range" && e.endDate ? e.endDate : e.startDate;
+      const d = new Date(`${(end || "").substring(0, 10)}T00:00:00`);
+      return !Number.isNaN(d.getTime()) && d >= today;
+    }).length;
+    return { total, active, inactive, avgPrice, upcoming };
   }, [locationScoped]);
 
-  // Search + status + category over the location-scoped set, sorted by display
-  // order (like the web — the location filter is already applied upstream).
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return locationScoped
-      .filter((a) => {
-        if (statusFilter !== "all" && a.status !== statusFilter) return false;
-        if (categoryFilter !== "all" && a.category !== categoryFilter) return false;
-        if (term) {
-          const haystack = `${a.name} ${a.description} ${a.locationName} ${a.category}`.toLowerCase();
-          if (!haystack.includes(term)) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => a.displayOrder - b.displayOrder);
-  }, [locationScoped, search, statusFilter, categoryFilter]);
+    return locationScoped.filter((e) => {
+      if (statusFilter !== "all" && e.status !== statusFilter) return false;
+      if (dateTypeFilter !== "all" && e.dateType !== dateTypeFilter) return false;
+      if (term) {
+        const haystack = `${e.name} ${e.description} ${e.locationName}`.toLowerCase();
+        if (!haystack.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [locationScoped, search, statusFilter, dateTypeFilter]);
 
-  // Client-side pagination over the filtered list (matches the notifications
-  // pagination: 5 / 10 / 15 per page with Previous / Next).
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page, perPage],
   );
 
-  // Reset to the first page whenever the filters or page size change so we
-  // never land on a now-empty page.
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, categoryFilter, locationFilter, perPage]);
+  }, [search, statusFilter, dateTypeFilter, locationFilter, perPage]);
 
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Status";
-  const categoryLabel = categoryFilter === "all" ? "All Categories" : categoryFilter;
+  const dateTypeLabel =
+    DATE_TYPE_OPTIONS.find((o) => o.value === dateTypeFilter)?.label ?? "All Types";
   const locationLabel =
     locationFilter === "all"
       ? "All Locations"
       : (locations.find((l) => l.id === locationFilter)?.name ?? "All Locations");
   const hasResults = filtered.length > 0;
-
-  // Mirrors the web "More" action menu; these management actions arrive in a
-  // future release, so they're shown but not yet actionable.
-  const moreActions: { label: string; icon: ComponentIconName }[] = [
-    { label: "Fee Supports", icon: "dollar-sign" },
-    { label: "Special Pricing", icon: "percent" },
-    { label: "Import Attractions", icon: "upload" },
-    { label: "Export Attractions", icon: "download" },
-  ];
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -369,7 +342,7 @@ const Attractions = () => {
           >
             <Feather name="chevron-left" size={20} color="#FFFFFF" />
           </Pressable>
-          <Text className="text-white text-lg font-bold">Attractions</Text>
+          <Text className="text-white text-lg font-bold">Events</Text>
           <View style={{ width: 36 }} />
         </View>
       </View>
@@ -392,17 +365,17 @@ const Attractions = () => {
           {/* Overview intro */}
           <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Attractions Overview
+              Events Overview
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Browse all attractions and their details
+              Manage scheduled events and their ticket sales
             </Text>
           </View>
 
-          {/* Manage Purchases — child feature of Attractions (mirrors the web
-              /attractions/purchases submenu item). */}
+          {/* Event Purchases — child feature of Events (mirrors the web
+              /events/purchases submenu item). */}
           <Pressable
-            onPress={() => router.push("/attractions/purchases")}
+            onPress={() => router.push("/events/purchases")}
             className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
             style={CARD_SHADOW}
           >
@@ -411,49 +384,34 @@ const Attractions = () => {
             </View>
             <View className="flex-1">
               <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                Manage Purchases
+                Event Purchases
               </Text>
               <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                View all customer attraction purchases
+                View all customer event ticket purchases
               </Text>
             </View>
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
           </Pressable>
 
-          {/* Location + More (mirrors the web header controls, above the cards) */}
-          <View className="flex-row gap-3 mb-5">
-            <Pressable
-              onPress={() => setShowLocationSheet(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+          {/* Location filter (mirrors the web header control) */}
+          <Pressable
+            onPress={() => setSheet("location")}
+            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
+          >
+            <Feather name="map-pin" size={16} color={PRIMARY} />
+            <Text
+              className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+              numberOfLines={1}
             >
-              <Feather name="map-pin" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {locationLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setShowMoreSheet(true)}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="more-horizontal" size={16} color="#6B7280" />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                More
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          </View>
+              {locationLabel}
+            </Text>
+            <Feather name="chevron-down" size={14} color="#9CA3AF" />
+          </Pressable>
 
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
+              <Text className="text-red-600 font-semibold">Something went wrong</Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -465,9 +423,9 @@ const Attractions = () => {
             <View className="flex-row flex-wrap -mx-1.5 mb-3">
               <View className="w-1/2">
                 <KpiCard
-                  icon="star"
+                  icon="calendar"
                   tone={{ bg: "#0644C720", tint: PRIMARY }}
-                  title="Total Attractions"
+                  title="Total Events"
                   value={String(kpis.total)}
                   change={`${kpis.active} active`}
                 />
@@ -487,16 +445,16 @@ const Attractions = () => {
                   tone={{ bg: "#10B98120", tint: "#10B981" }}
                   title="Avg. Price"
                   value={formatMoney(kpis.avgPrice)}
-                  change="Per attraction"
+                  change="Per ticket"
                 />
               </View>
               <View className="w-1/2">
                 <KpiCard
-                  icon="users"
+                  icon="clock"
                   tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
-                  title="Total Capacity"
-                  value={String(kpis.capacity)}
-                  change="Across all attractions"
+                  title="Upcoming"
+                  value={String(kpis.upcoming)}
+                  change="Not yet ended"
                 />
               </View>
             </View>
@@ -508,7 +466,7 @@ const Attractions = () => {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search attractions..."
+              placeholder="Search events..."
               placeholderTextColor="#9CA3AF"
               className="flex-1 text-sm text-gray-900 dark:text-white"
             />
@@ -522,7 +480,7 @@ const Attractions = () => {
           {/* Filters */}
           <View className="flex-row gap-3 mb-5">
             <Pressable
-              onPress={() => setShowStatusSheet(true)}
+              onPress={() => setSheet("status")}
               className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
               <Feather name="check-circle" size={16} color={PRIMARY} />
@@ -536,15 +494,15 @@ const Attractions = () => {
             </Pressable>
 
             <Pressable
-              onPress={() => setShowCategorySheet(true)}
+              onPress={() => setSheet("dateType")}
               className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
-              <Feather name="tag" size={16} color={PRIMARY} />
+              <Feather name="calendar" size={16} color={PRIMARY} />
               <Text
                 className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                 numberOfLines={1}
               >
-                {categoryLabel}
+                {dateTypeLabel}
               </Text>
               <Feather name="chevron-down" size={14} color="#9CA3AF" />
             </Pressable>
@@ -554,7 +512,7 @@ const Attractions = () => {
           {!loading && !error && (
             <View className="flex-row items-center gap-2 mb-4">
               <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                All Attractions
+                All Events
               </Text>
               <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
                 <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -566,26 +524,26 @@ const Attractions = () => {
 
           {/* List / states */}
           {loading ? (
-            <AttractionsListSkeleton />
+            <EventsListSkeleton />
           ) : !error && !hasResults ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="zap" size={26} color="#9CA3AF" />
+                <Feather name="calendar" size={26} color="#9CA3AF" />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No attractions found
+                No events found
               </Text>
               <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {attractions.length === 0
-                  ? "There are no attractions for this account yet."
+                {events.length === 0
+                  ? "There are no events for this account yet."
                   : "Try adjusting your search or filters."}
               </Text>
             </View>
           ) : (
             !error && (
               <>
-                {paged.map((attraction) => (
-                  <AttractionCard key={attraction.id} attraction={attraction} />
+                {paged.map((event) => (
+                  <EventCard key={event.id} event={event} />
                 ))}
 
                 {/* Pagination */}
@@ -676,8 +634,8 @@ const Attractions = () => {
 
       {/* Status filter */}
       <BottomSheet
-        visible={showStatusSheet}
-        onClose={() => setShowStatusSheet(false)}
+        visible={sheet === "status"}
+        onClose={() => setSheet(null)}
         title="Filter by Status"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
@@ -688,7 +646,7 @@ const Attractions = () => {
                 key={option.value}
                 onPress={() => {
                   setStatusFilter(option.value);
-                  setShowStatusSheet(false);
+                  setSheet(null);
                 }}
                 className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
@@ -714,129 +672,93 @@ const Attractions = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Category filter */}
+      {/* Date type filter */}
       <BottomSheet
-        visible={showCategorySheet}
-        onClose={() => setShowCategorySheet(false)}
-        title="Filter by Category"
+        visible={sheet === "dateType"}
+        onClose={() => setSheet(null)}
+        title="Filter by Date Type"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ label: "All Categories", value: "all" }, ...categories.map((c) => ({ label: c, value: c }))].map(
-            (option) => {
-              const isSelected = categoryFilter === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => {
-                    setCategoryFilter(option.value);
-                    setShowCategorySheet(false);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+          {DATE_TYPE_OPTIONS.map((option) => {
+            const isSelected = dateTypeFilter === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => {
+                  setDateTypeFilter(option.value);
+                  setSheet(null);
+                }}
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium ${
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
                 >
-                  <Text
-                    className={`text-base font-medium flex-1 mr-2 ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {option.label}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
+                  {option.label}
+                </Text>
+                {isSelected && (
+                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                    <Feather name="check" size={14} color="#FFFFFF" />
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </BottomSheet>
 
       {/* Location filter */}
       <BottomSheet
-        visible={showLocationSheet}
-        onClose={() => setShowLocationSheet(false)}
+        visible={sheet === "location"}
+        onClose={() => setSheet(null)}
         title="Select Location"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: "all" as const, name: "All Locations" }, ...locations].map(
-            (option) => {
-              const isSelected = locationFilter === option.id;
-              return (
-                <Pressable
-                  key={String(option.id)}
-                  onPress={() => {
-                    setLocationFilter(option.id);
-                    setShowLocationSheet(false);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+          {[{ id: "all" as const, name: "All Locations" }, ...locations].map((option) => {
+            const isSelected = locationFilter === option.id;
+            return (
+              <Pressable
+                key={String(option.id)}
+                onPress={() => {
+                  setLocationFilter(option.id);
+                  setSheet(null);
+                }}
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium flex-1 mr-2 ${
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
+                  numberOfLines={1}
                 >
-                  <Text
-                    className={`text-base font-medium flex-1 mr-2 ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {option.name}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
+                  {option.name}
+                </Text>
+                {isSelected && (
+                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                    <Feather name="check" size={14} color="#FFFFFF" />
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </BottomSheet>
 
-      {/* More actions (matches the web action menu; wired in a future release) */}
-      <BottomSheet
-        visible={showMoreSheet}
-        onClose={() => setShowMoreSheet(false)}
-        title="More"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {moreActions.map((action) => (
-            <View
-              key={action.label}
-              className="flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 opacity-60"
-            >
-              <View className="flex-row items-center gap-3 flex-1 mr-2">
-                <Feather name={action.icon} size={18} color="#6B7280" />
-                <Text className="text-base font-medium text-gray-700 dark:text-gray-200">
-                  {action.label}
-                </Text>
-              </View>
-              <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-                  Soon
-                </Text>
-              </View>
-            </View>
-          ))}
-          <Text className="text-xs text-gray-400 dark:text-gray-500 px-4 mt-2">
-            Management actions arrive in a future update.
-          </Text>
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Floating Action Button — Create Attraction (mirrors the web "New
-          Attraction" button). This route has no floating tab bar to clash with. */}
+      {/* Floating Action Button — Create Event (mirrors the web "New Event"
+          button). This route has no floating tab bar to clash with. */}
       <Pressable
-        onPress={() => router.push("/attractions/create-attraction")}
+        onPress={() => router.push("/events/create-event")}
         accessibilityRole="button"
-        accessibilityLabel="Create attraction"
+        accessibilityLabel="Create event"
         style={{
           position: "absolute",
           right: 20,
@@ -855,4 +777,4 @@ const Attractions = () => {
   );
 };
 
-export default Attractions;
+export default Events;
