@@ -5,17 +5,8 @@ import type {
   TimeframeType,
 } from "../../services/metricsService";
 
-// ---------------------------------------------------------------------------
-// Role-based dashboard configuration.
-//
-// The web admin renders a different dashboard component per role. Mobile keeps
-// a single screen but drives it from this config so role logic lives in one
-// place, cards stay reusable, and adding a role is a one-line change.
-//
-//   web company_admin  -> CompanyDashboard    (7 cards, location selector, breakdowns)
-//   web location_manager -> ManagerDashboard   (6 cards, own location)
-//   web attendant      -> AttendantDashboard   (6 cards, own location, /metrics/attendant)
-// ---------------------------------------------------------------------------
+// Role-based dashboard config: the web renders a component per role, mobile
+// drives one screen from this so role logic (cards, endpoint, etc.) lives here.
 
 /** Which backend metrics endpoint powers the dashboard for a role. */
 export type MetricsSource = "dashboard" | "attendant";
@@ -37,9 +28,8 @@ export type MetricCardDef = {
   gradient: [string, string];
 };
 
-// Subtitle metric-part builders — reproduce the web's `change`/`description`
-// strings (timeframe appended by the renderer). Unnamed `$`-fields are read via
-// the payload's index signature.
+// Subtitle metric-part builders — reproduce the web's strings (timeframe
+// appended by the renderer); unnamed `$`-fields read via the index signature.
 const amount = (metrics: DashboardTotals, key: string): number =>
   Number(metrics[key] ?? 0);
 
@@ -325,9 +315,8 @@ export function getCardSubtitleFn(
 }
 
 /**
- * Compose a card's full sub-line: "<metric part> • <timeframe>", or just the
- * timeframe when the metric part is empty. `timeframe` is the backend-supplied
- * label (data.timeframe.description), mirroring the web's `timeframeDescription`.
+ * Compose a card's sub-line "<metric part> • <timeframe>" (just the timeframe
+ * when empty); `timeframe` is the backend label, like the web.
  */
 export function composeSubtitle(metricPart: string, timeframe: string): string {
   const part = metricPart.trim();
@@ -348,16 +337,8 @@ export function formatMetricValue(
   return String(value);
 }
 
-// ---------------------------------------------------------------------------
-// Client-derived metrics.
-//
-// A couple of cards are not returned by the metrics endpoint; the web derives
-// them (see web src/pages/admin/ManagerDashboard.tsx):
-//   - Avg Booking  = metrics.bookingRevenue / metrics.totalBookings  (metrics-only)
-//   - New Bookings = count of the location's bookings created within the
-//                    selected timeframe (needs the bookings list)
-// These helpers reproduce those exact rules so mobile matches the web.
-// ---------------------------------------------------------------------------
+// Client-derived metrics the endpoint doesn't return — Avg Booking
+// (bookingRevenue / totalBookings) and New Bookings (created within timeframe).
 
 /** True when the role's dashboard shows a card derived from the bookings list. */
 export function dashboardNeedsBookings(config: DashboardConfig): boolean {
@@ -404,10 +385,8 @@ export function getNewBookingsCutoff(
 }
 
 /**
- * Bookings created within the timeframe — the web's `newBookings`. With no
- * cutoff (all-time) every booking qualifies; bookings with a missing/invalid
- * `createdAt` are excluded (matches the web, where an invalid Date fails `>=`).
- * Generic so callers keep their full row type (the Activity screen needs it).
+ * Bookings created within the timeframe — the web's `newBookings` (no cutoff =
+ * all-time; missing/invalid `createdAt` excluded). Generic to keep the row type.
  */
 export function filterNewBookings<T extends { createdAt: string | null }>(
   bookings: T[],

@@ -1,10 +1,6 @@
 import { Text, View } from "react-native";
 
-/**
- * Which web palette to mirror. The web uses a shared `getStatusColor`
- * (emerald/amber/rose/green) for bookings + ticket purchases, and a distinct
- * blue/green/yellow/red map for event purchases — both reproduced here.
- */
+/** Which web palette to mirror: bookings/tickets ("default") vs events. */
 export type StatusPalette = "default" | "event";
 
 // getStatusColor() — New Bookings + Recent Ticket Purchases.

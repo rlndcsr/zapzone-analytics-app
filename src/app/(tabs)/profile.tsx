@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -9,7 +10,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProfileSkeleton } from "../../components/ui/skeleton/ProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
@@ -41,9 +41,7 @@ const InfoRow = ({
   value?: string | number | null;
 }) => {
   const display =
-    value === null || value === undefined || value === ""
-      ? "—"
-      : String(value);
+    value === null || value === undefined || value === "" ? "—" : String(value);
   return (
     <View className="flex-row items-start justify-between py-3 border-b border-gray-100 dark:border-neutral-800/50">
       <Text className="text-sm text-gray-400 dark:text-gray-500 flex-1 mr-3">
@@ -79,7 +77,13 @@ const SectionCard = ({
 );
 
 const composeAddress = (company: CompanyDetails) =>
-  [company.address, company.city, company.state, company.zip_code, company.country]
+  [
+    company.address,
+    company.city,
+    company.state,
+    company.zip_code,
+    company.country,
+  ]
     .filter(Boolean)
     .join(", ");
 
@@ -137,11 +141,10 @@ const Profile = () => {
           >
             <Feather name="chevron-left" size={22} color="#FFFFFF" />
           </Pressable>
-          
+
           <Text className="text-xl font-bold text-white">Profile</Text>
 
           <View className="flex-row items-center gap-2">
-            
             <Pressable
               onPress={handleLogout}
               disabled={loggingOut}
@@ -163,7 +166,10 @@ const Profile = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + 96,
+          paddingTop: 0,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -176,11 +182,11 @@ const Profile = () => {
       >
         <View className="px-5 pt-0">
           {/* Profile Header Card */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-6 mt-[-6px] mb-5 shadow-sm border border-gray-100 dark:border-neutral-800 items-center">
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-6 mt-6 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800 items-center">
             <View className="w-20 h-20 rounded-full bg-[#0644C7]/10 items-center justify-center">
               <Image
                 source={require("../../../assets/zapzone-assests/zapzone.png")}
-                style={{ width: 50, height: 50 }} 
+                style={{ width: 50, height: 50 }}
                 contentFit="contain"
               />
             </View>
@@ -225,7 +231,9 @@ const Profile = () => {
 
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -261,7 +269,8 @@ const Profile = () => {
               {stats && (
                 <SectionCard icon="bar-chart-2" title="Business Overview">
                   <Text className="text-xs text-gray-400 dark:text-gray-500 mb-3">
-                    Automatically calculated from your companys locations and employees.
+                    Automatically calculated from your companys locations and
+                    employees.
                   </Text>
                   <View className="flex-row gap-3">
                     <View className="flex-1 rounded-2xl bg-[#0644C7]/5 dark:bg-[#0644C7]/10 py-5 items-center">

@@ -1,15 +1,8 @@
 import { useSyncExternalStore } from "react";
 import type { TimeframeType } from "../../services/metricsService";
 
-// ---------------------------------------------------------------------------
-// Shared dashboard timeframe.
-//
-// The web keeps the timeframe on a single /manager/dashboard page. On mobile the
-// dashboard is split across the Home (KPI cards) and Activity (operational
-// lists) tabs, so the selected timeframe lives in this tiny external store and
-// both screens read it via useTimeframeSelection(). Changing the filter on Home
-// keeps Activity in sync, exactly like the single web page.
-// ---------------------------------------------------------------------------
+// Shared dashboard timeframe store so the Home filter and Activity tab stay in
+// sync (the web keeps both on one page; mobile splits them across two tabs).
 
 export type TimeframeSelection = {
   timeframe: TimeframeType;

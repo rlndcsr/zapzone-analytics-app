@@ -1,7 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Image } from "expo-image";
 import { Tabs } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { ImageSourcePropType, Pressable, Text, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
@@ -29,12 +30,15 @@ const INACTIVE_COLOR = "#9AA0A6";
 // The center "navigation" route is rendered as the elevated action button.
 const CENTER_ROUTE = "navigation";
 
+type IoniconName = ComponentProps<typeof Ionicons>["name"];
+
 type TabIconProps = {
-  source: ImageSourcePropType;
+  /** Base (filled) Ionicons name; the outline variant is `${name}-outline`. */
+  name: IoniconName;
   focused: boolean;
 };
 
-const TabIcon = ({ source, focused }: TabIconProps) => {
+const TabIcon = ({ name, focused }: TabIconProps) => {
   const progress = useSharedValue(focused ? 1 : 0);
 
   useEffect(() => {
@@ -45,16 +49,16 @@ const TabIcon = ({ source, focused }: TabIconProps) => {
     transform: [{ scale: 1 + progress.value * 0.1 }],
   }));
 
+  // Filled icon when active, outline when inactive — one consistent language
+  // across every tab (Ionicons provides both variants for each name).
+  const iconName = (focused ? name : `${name}-outline`) as IoniconName;
+
   return (
     <Animated.View style={animatedStyle}>
-      <Image
-        source={source}
-        style={{
-          width: 20,
-          height: 20,
-          tintColor: focused ? ACTIVE_COLOR : INACTIVE_COLOR,
-        }}
-        contentFit="contain"
+      <Ionicons
+        name={iconName}
+        size={22}
+        color={focused ? ACTIVE_COLOR : INACTIVE_COLOR}
       />
     </Animated.View>
   );
@@ -259,10 +263,7 @@ const TabLayout = () => {
         options={{
           title: "Home",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              source={require("../../../assets/zapzone-assests/icon/home.png")}
-              focused={focused}
-            />
+            <TabIcon name="home" focused={focused} />
           ),
         }}
       />
@@ -271,10 +272,7 @@ const TabLayout = () => {
         options={{
           title: "Location",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              source={require("../../../assets/zapzone-assests/icon/pin.png")}
-              focused={focused}
-            />
+            <TabIcon name="location" focused={focused} />
           ),
         }}
       />
@@ -283,10 +281,7 @@ const TabLayout = () => {
         options={{
           title: "Activity",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              source={require("../../../assets/zapzone-assests/icon/box.png")}
-              focused={focused}
-            />
+            <TabIcon name="receipt" focused={focused} />
           ),
         }}
       />
@@ -306,10 +301,7 @@ const TabLayout = () => {
         options={{
           title: "Calendar",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              source={require("../../../assets/zapzone-assests/icon/calendar.png")}
-              focused={focused}
-            />
+            <TabIcon name="calendar" focused={focused} />
           ),
         }}
       />
@@ -318,10 +310,7 @@ const TabLayout = () => {
         options={{
           title: "Profile",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              source={require("../../../assets/zapzone-assests/icon/user.png")}
-              focused={focused}
-            />
+            <TabIcon name="person" focused={focused} />
           ),
         }}
       />

@@ -36,15 +36,8 @@ type ManagerActivity = {
 };
 
 /**
- * Powers the Location Manager's Activity screen, reproducing the three
- * operational lists on the web ManagerDashboard:
- *  - New Bookings          — the location's bookings created within the
- *                            timeframe (same source + cutoff as the KPI count).
- *  - Recent Ticket Purchases — `recentPurchases` from the metrics endpoint.
- *  - Recent Event Purchases  — `recentEventPurchases` from the metrics endpoint.
- *
- * One metrics call + one bookings call, run in parallel, sharing a single
- * loading/error cycle so the screen loads and refreshes as a unit.
+ * Powers the manager Activity screen's three lists (New Bookings + recent ticket
+ * and event purchases) via one metrics call + one bookings call in parallel.
  */
 export function useManagerActivity({
   timeframe,

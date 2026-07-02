@@ -65,9 +65,7 @@ const Meta = ({ text }: { text: string }) => (
   </Text>
 );
 
-// ---------------------------------------------------------------------------
 // Section shell — title, optional "count • timeframe" badge, View All, states.
-// ---------------------------------------------------------------------------
 type SectionProps = {
   icon: IconName;
   title: string;
@@ -136,9 +134,7 @@ const Row = ({ index, children }: { index: number; children: React.ReactNode }) 
   </View>
 );
 
-// ---------------------------------------------------------------------------
-// Row renderers — one per web table
-// ---------------------------------------------------------------------------
+// Row renderers — one per web table.
 const NewBookingRow = ({
   b,
   index,
@@ -223,9 +219,7 @@ const EventPurchaseRow = ({ e, index }: { e: RecentEventPurchase; index: number 
   </Row>
 );
 
-// ---------------------------------------------------------------------------
 // Screen
-// ---------------------------------------------------------------------------
 const Activity = () => {
   const insets = useSafeAreaInsets();
 

@@ -1,15 +1,5 @@
-// ---------------------------------------------------------------------------
-// Role-based bottom-tab configuration.
-//
-// The tab screens are all registered in app/(tabs)/_layout.tsx, but which tabs
-// a role actually SEES (and their order) is decided here — the same
-// config-driven approach as dashboardConfig.ts. The custom tab bar renders the
-// routes named in this list, so adding/reordering a role's tabs is a one-line
-// change with no conditional logic scattered through the navigator.
-//
-//   Company Admin  -> Home · Location · [FAB] · Calendar · Profile
-//   Location Manager -> Home · Activity · [FAB] · Calendar · Profile
-// ---------------------------------------------------------------------------
+// Role-based bottom-tab config: which tabs each role sees (and their order).
+// All screens are registered in _layout.tsx; the tab bar renders this subset.
 
 /** Route names registered in app/(tabs). "navigation" is the center FAB. */
 export type TabKey =
