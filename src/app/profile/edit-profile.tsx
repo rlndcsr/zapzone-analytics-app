@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -43,6 +44,8 @@ const SectionHeader = ({
 const EditProfile = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colorScheme } = useColorScheme();
+  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const { user, stats, loading, refresh } = useProfile();
   const [saving, setSaving] = useState(false);
 
@@ -154,18 +157,18 @@ const EditProfile = () => {
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
       <View
-        className="bg-[#0644C7] px-5 pb-4 flex-row items-center gap-3"
+        className="bg-white dark:bg-neutral-900 px-5 pb-4 flex-row items-center gap-3 border-b border-gray-100 dark:border-neutral-800"
         style={{ paddingTop: insets.top + 12 }}
       >
         <Pressable
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel="Go back"
-          className="h-9 w-9 items-center justify-center rounded-full bg-white/15 active:opacity-80"
+          className="h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-neutral-800 active:opacity-80"
         >
-          <Feather name="chevron-left" size={22} color="#FFFFFF" />
+          <Feather name="chevron-left" size={22} color={headerIcon} />
         </Pressable>
-        <Text className="text-xl font-bold text-white">Edit Profile</Text>
+        <Text className="text-xl font-bold text-gray-900 dark:text-white">Edit Profile</Text>
       </View>
 
       <KeyboardAvoidingView

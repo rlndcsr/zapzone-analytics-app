@@ -1,4 +1,3 @@
-import { Image } from "expo-image";
 import React, {
   useCallback,
   useEffect,
@@ -40,6 +39,28 @@ import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import { getCurrentUser } from "../../lib/session";
 import type { DashboardData } from "../../services/metricsService";
+import {
+  Users,
+  Ticket,
+  ShoppingCart,
+  CreditCard,
+  UserPlus,
+  CheckCircle,
+  PartyPopper,
+  Package,
+  Calendar,
+  Info,
+  MapPin,
+  ChevronDown,
+  Scan,
+  X,
+  Zap,
+  Home as HomeIcon,
+  BarChart3,
+  Clock,
+  TrendingUp,
+  DollarSign,
+} from "lucide-react-native";
 
 type DateFilterType =
   | "today"
@@ -50,37 +71,41 @@ type DateFilterType =
   | "custom";
 
 const ICON_MAP: { [key: string]: any } = {
-  "group.png": require("../../../assets/zapzone-assests/icon/group.png"),
-  "ticket.png": require("../../../assets/zapzone-assests/icon/ticket.png"),
-  "shopping-cart.png": require("../../../assets/zapzone-assests/icon/shopping-cart.png"),
-  "membership.png": require("../../../assets/zapzone-assests/icon/membership.png"),
-  "add-user.png": require("../../../assets/zapzone-assests/icon/add-user.png"),
-  "checked.png": require("../../../assets/zapzone-assests/icon/checked.png"),
-  "party.png": require("../../../assets/zapzone-assests/icon/party-popper.png"),
-  "box.png": require("../../../assets/zapzone-assests/icon/box.png"),
-  "calendar.png": require("../../../assets/zapzone-assests/icon/calendar.png"),
-  "info.png": require("../../../assets/zapzone-assests/icon/info.png"),
-  "zapzone.png": require("../../../assets/zapzone-assests/zapzone.png"),
+  "group.png": Users,
+  "ticket.png": Ticket,
+  "shopping-cart.png": ShoppingCart,
+  "membership.png": CreditCard,
+  "add-user.png": UserPlus,
+  "checked.png": CheckCircle,
+  "party.png": PartyPopper,
+  "box.png": Package,
+  "calendar.png": Calendar,
+  "info.png": Info,
+  "zapzone.png": Zap,
+  "pin.png": MapPin,
+  "arrow-down.png": ChevronDown,
+  "scanner.png": Scan,
 };
 
 const getIcon = (iconName: string) => ICON_MAP[iconName] || null;
 
-const MetricIconBadge = ({ metric }: { metric: MetricCardDef }) => (
-  <View
-    className="w-10 h-10 rounded-xl items-center justify-center"
-    style={{ backgroundColor: metric.gradient[0] + "20" }}
-  >
-    <Image
-      source={getIcon(metric.icon)}
-      style={{
-        width: 20,
-        height: 20,
-        tintColor: metric.color,
-      }}
-      contentFit="contain"
-    />
-  </View>
-);
+const MetricIconBadge = ({ metric }: { metric: MetricCardDef }) => {
+  const IconComponent = getIcon(metric.icon);
+  return (
+    <View
+      className="w-10 h-10 rounded-xl items-center justify-center"
+      style={{ backgroundColor: metric.gradient[0] + "20" }}
+    >
+      {IconComponent && (
+        <IconComponent
+          size={20}
+          color={metric.color}
+          strokeWidth={1.5}
+        />
+      )}
+    </View>
+  );
+};
 
 const MetricCard = ({
   metric,
@@ -111,13 +136,13 @@ const MetricCard = ({
     <Pressable
       onPress={interactive ? () => onPress(metric.key) : undefined}
       disabled={!interactive}
-      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-5 m-1.5 shadow-sm"
+      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-5 m-1.5 shadow-sm border border-gray-100 dark:border-neutral-800"
       style={{
         shadowColor: "#424242",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 1,
       }}
     >
       <View className="flex-row items-start justify-between mb-4">
@@ -154,7 +179,6 @@ const Home = () => {
   );
 
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
-  // Timeframe lives in a shared store so the Activity tab stays in sync.
   const {
     timeframe: dateFilter,
     dateFrom: customStartDate,
@@ -250,18 +274,16 @@ const Home = () => {
   };
 
   const handleApplyCustomRange = (start: string, end: string) => {
-    // One store write flips the filter + both dates, so Home and Activity each
-    // refetch once and stay in sync.
     setTimeframeSelection({ timeframe: "custom", dateFrom: start, dateTo: end });
     setShowCustomRange(false);
   };
 
   const dateFilterOptions = [
-    { label: "All Time", value: "all_time" as DateFilterType },
-    { label: "Last 24 Hours", value: "last_24h" as DateFilterType },
-    { label: "Last 7 Days", value: "last_7d" as DateFilterType },
-    { label: "Last 30 Days", value: "last_30d" as DateFilterType },
-    { label: "Custom Range", value: "custom" as DateFilterType },
+    { label: "All Time", value: "all_time" as DateFilterType, icon: BarChart3 },
+    { label: "Last 24 Hours", value: "last_24h" as DateFilterType, icon: Clock },
+    { label: "Last 7 Days", value: "last_7d" as DateFilterType, icon: TrendingUp },
+    { label: "Last 30 Days", value: "last_30d" as DateFilterType, icon: Calendar },
+    { label: "Custom Range", value: "custom" as DateFilterType, icon: Calendar },
   ];
 
   const currentDateLabel =
@@ -307,7 +329,7 @@ const Home = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
               Welcome back!
             </Text>
@@ -318,31 +340,19 @@ const Home = () => {
 
           {/* Filters Row */}
           <View className="flex-row gap-3 mb-5">
-            {/* Multi-location picker — company-wide roles only. Single-location
-                roles (manager/attendant) are scoped to their own location. */}
             {dashboardConfig.showLocationSelector && (
               <Pressable
                 onPress={() => setShowLocationDropdown(true)}
                 className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
               >
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/pin.png")}
-                  style={{ width: 16, height: 16 }}
-                  contentFit="contain"
-                  tintColor="#0644C7"
-                />
+                <MapPin size={16} color="#0644C7" />
                 <Text
                   className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                   numberOfLines={1}
                 >
                   {selectedLocationLabel}
                 </Text>
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
-                  style={{ width: 10, height: 10 }}
-                  contentFit="contain"
-                  tintColor="#9CA3AF"
-                />
+                <ChevronDown size={12} color="#9CA3AF" />
               </Pressable>
             )}
 
@@ -350,33 +360,18 @@ const Home = () => {
               onPress={() => setShowDateDropdown(true)}
               className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/calendar.png")}
-                style={{ width: 16, height: 16 }}
-                contentFit="contain"
-                tintColor="#0644C7"
-              />
+              <Calendar size={16} color="#0644C7" />
               <Text
                 className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                 numberOfLines={1}
               >
                 {dateButtonLabel}
               </Text>
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
-                style={{ width: 10, height: 10 }}
-                contentFit="contain"
-                tintColor="#9CA3AF"
-              />
+              <ChevronDown size={12} color="#9CA3AF" />
             </Pressable>
 
             <Pressable className="bg-white dark:bg-neutral-900 p-3.5 rounded-xl border border-gray-100 dark:border-neutral-800">
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/scanner.png")}
-                style={{ width: 18, height: 18 }}
-                contentFit="contain"
-                tintColor="#0644C7"
-              />
+              <Scan size={18} color="#0644C7" />
             </Pressable>
           </View>
 
@@ -393,7 +388,7 @@ const Home = () => {
             </View>
           )}
 
-          {/* Metrics Grid — cards come from the role's dashboard config. */}
+          {/* Metrics Grid */}
           {!loading && !error && (
             <View className="flex-row flex-wrap -mx-1.5">
               {visibleCards.map((metric) => (
@@ -447,15 +442,15 @@ const Home = () => {
                         backgroundColor: currentMetric.gradient[0] + "20",
                       }}
                     >
-                      <Image
-                        source={getIcon(currentMetric.icon)}
-                        style={{
-                          width: 24,
-                          height: 24,
-                          tintColor: currentMetric.color,
-                        }}
-                        contentFit="contain"
-                      />
+                      {getIcon(currentMetric.icon) && (
+                        <View style={{ width: 24, height: 24 }}>
+                          {React.createElement(getIcon(currentMetric.icon), {
+                            size: 24,
+                            color: currentMetric.color,
+                            strokeWidth: 1.5,
+                          })}
+                        </View>
+                      )}
                     </View>
                     <View>
                       <Text className="text-sm text-gray-500 dark:text-gray-400">
@@ -470,15 +465,14 @@ const Home = () => {
                     onPress={closeModal}
                     className="w-8 h-8 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center"
                   >
-                    <Text className="text-gray-500 dark:text-gray-400 text-lg">
-                      ✕
-                    </Text>
+                    <X size={18} color="#6b7280" />
                   </Pressable>
                 </View>
 
                 {isBreakdownEmpty ? (
                   <View className="justify-center items-center py-16">
-                    <Text className="text-gray-400 dark:text-gray-500 text-base font-medium">
+                    <BarChart3 size={32} color="#9ca3af" />
+                    <Text className="text-gray-400 dark:text-gray-500 text-base font-medium mt-3">
                       No data available
                     </Text>
                   </View>
@@ -548,11 +542,7 @@ const Home = () => {
             </Text>
             {selectedLocation === "all" && (
               <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                  style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
-                  contentFit="contain"
-                />
+                <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
               </View>
             )}
           </Pressable>
@@ -579,11 +569,7 @@ const Home = () => {
                 </Text>
                 {isSelected && (
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Image
-                      source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
-                      contentFit="contain"
-                    />
+                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
                   </View>
                 )}
               </Pressable>
@@ -601,6 +587,7 @@ const Home = () => {
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {dateFilterOptions.map((option) => {
             const isSelected = dateFilter === option.value;
+            const IconComponent = option.icon;
             return (
               <Pressable
                 key={option.value}
@@ -609,22 +596,24 @@ const Home = () => {
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
+                <View className="flex-row items-center gap-3">
+                  <IconComponent
+                    size={18}
+                    color={isSelected ? "#0644C7" : "#6b7280"}
+                  />
+                  <Text
+                    className={`text-base font-medium ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {option.label}
+                  </Text>
+                </View>
                 {isSelected && (
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Image
-                      source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
-                      contentFit="contain"
-                    />
+                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
                   </View>
                 )}
               </Pressable>

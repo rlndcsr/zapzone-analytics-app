@@ -51,23 +51,28 @@ export type BookingDetail = {
   durationUnit: string;
   participants: number;
   packageName: string;
+  packageId: number | null;
   packagePrice: number | null;
   locationId: number | null;
   locationName: string;
   customerId: number | null;
   roomName: string | null;
+  roomId: number | null;
   customerName: string;
   customerEmail: string | null;
   customerPhone: string | null;
   guestOfHonorName: string | null;
   guestOfHonorAge: number | null;
+  guestOfHonorGender: string | null;
   addOns: BookingAddOn[];
   totalAmount: number;
   paymentStatus: string;
   paymentMethod: string | null;
   amountPaid: number;
   appliedFees: AppliedFee[];
+  customerNotes: string | null;
   internalNotes: string | null;
+  createdAt: string | null;
 };
 
 /** Raw shape of a booking in the list response (index select set). */
@@ -101,11 +106,16 @@ type RawBookingDetail = RawBooking & {
   guest_phone?: string | null;
   guest_of_honor_name?: string | null;
   guest_of_honor_age?: number | null;
+  guest_of_honor_gender?: string | null;
+  customer_notes?: string | null;
+  notes?: string | null;
+  package_id?: number | null;
+  room_id?: number | null;
   applied_fees?:
     | { fee_name?: string; fee_amount?: number | string; fee_application_type?: string }[]
     | null;
-  package?: { name?: string | null; price?: number | string | null } | null;
-  room?: { name?: string | null } | null;
+  package?: { id?: number | null; name?: string | null; price?: number | string | null } | null;
+  room?: { id?: number | null; name?: string | null } | null;
   customer?: {
     first_name?: string | null;
     last_name?: string | null;
@@ -297,16 +307,19 @@ export async function fetchBookingDetail(
     durationUnit: b.duration_unit ?? "hours",
     participants: Number(b.participants ?? 0),
     packageName: b.package?.name?.trim() || "—",
+    packageId: b.package_id ?? b.package?.id ?? null,
     packagePrice: b.package?.price != null ? Number(b.package.price) : null,
     locationId: b.location_id ?? null,
     locationName: b.location?.name?.trim() || "",
     customerId: b.customer_id ?? null,
     roomName: b.room?.name?.trim() || null,
+    roomId: b.room_id ?? b.room?.id ?? null,
     customerName: customerName(b.customer, b.guest_name),
     customerEmail: b.customer?.email ?? b.guest_email ?? null,
     customerPhone: b.customer?.phone ?? b.guest_phone ?? null,
     guestOfHonorName: b.guest_of_honor_name?.trim() || null,
     guestOfHonorAge: b.guest_of_honor_age ?? null,
+    guestOfHonorGender: b.guest_of_honor_gender ?? null,
     addOns: mapAddOns(b),
     totalAmount: Number(b.total_amount ?? 0),
     paymentStatus: b.payment_status ?? "partial",
@@ -317,7 +330,9 @@ export async function fetchBookingDetail(
       amount: Number(f.fee_amount ?? 0),
       applicationType: f.fee_application_type ?? "additive",
     })),
+    customerNotes: b.customer_notes ?? b.notes ?? null,
     internalNotes: b.internal_notes?.trim() || null,
+    createdAt: b.created_at ?? null,
   };
 }
 
@@ -358,6 +373,104 @@ export async function updateBookingInternalNotes(
     token,
     body: { internal_notes: internalNotes },
   });
+}
+
+export type PackageOption = { id: number; name: string; price: number | null };
+export type RoomOption = { id: number; name: string };
+
+/** Loosely pull an array out of the common `{data:{key:[]}}` / `{data:[]}` shapes. */
+function extractList<T>(res: any, key: string): T[] {
+  const d = res?.data ?? res;
+  if (Array.isArray(d)) return d as T[];
+  if (Array.isArray(d?.[key])) return d[key] as T[];
+  return [];
+}
+
+/**
+ * GET /api/packages?location_id= — selectable packages for the Edit form.
+ * NOTE: route/field names are a best guess; adjust if your API differs.
+ */
+export async function fetchPackages(
+  token: string,
+  locationId?: number | null,
+): Promise<PackageOption[]> {
+  const qs = locationId != null ? `?location_id=${locationId}` : "";
+  const res = await apiRequest<any>(`/api/packages${qs}`, { token });
+  return extractList<any>(res, "packages").map((p) => ({
+    id: Number(p.id),
+    name: (p.name ?? "").toString().trim() || `Package #${p.id}`,
+    price: p.price != null ? Number(p.price) : null,
+  }));
+}
+
+/**
+ * GET /api/rooms?location_id= — selectable spaces/rooms for the Edit form.
+ * NOTE: route/field names are a best guess; adjust if your API differs.
+ */
+export async function fetchRooms(
+  token: string,
+  locationId?: number | null,
+): Promise<RoomOption[]> {
+  const qs = locationId != null ? `?location_id=${locationId}` : "";
+  const res = await apiRequest<any>(`/api/rooms${qs}`, { token });
+  return extractList<any>(res, "rooms").map((r) => ({
+    id: Number(r.id),
+    name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+  }));
+}
+
+export type BookingUpdateInput = {
+  packageId?: number | null;
+  roomId?: number | null;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  date?: string; // YYYY-MM-DD
+  time?: string; // HH:mm
+  participants?: number;
+  status?: string;
+  guestOfHonorName?: string | null;
+  guestOfHonorAge?: number | null;
+  guestOfHonorGender?: string | null;
+  customerNotes?: string | null;
+  internalNotes?: string | null;
+  sendEmail?: boolean;
+};
+
+/**
+ * PATCH /api/bookings/{id} — full booking update from the Edit form.
+ * NOTE: route/field names mirror the web edit form as a best guess; adjust the
+ * body keys here if your backend expects different names.
+ */
+export async function updateBooking(
+  token: string,
+  id: number,
+  input: BookingUpdateInput,
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (input.packageId != null) body.package_id = input.packageId;
+  if (input.roomId != null) body.room_id = input.roomId;
+  if (input.customerName != null) {
+    body.customer_name = input.customerName;
+    body.guest_name = input.customerName;
+  }
+  if (input.customerEmail != null) body.guest_email = input.customerEmail;
+  if (input.customerPhone != null) body.guest_phone = input.customerPhone;
+  if (input.date != null) body.booking_date = input.date;
+  if (input.time != null) body.booking_time = input.time;
+  if (input.participants != null) body.participants = input.participants;
+  if (input.status != null) body.status = input.status;
+  if (input.guestOfHonorName !== undefined)
+    body.guest_of_honor_name = input.guestOfHonorName;
+  if (input.guestOfHonorAge !== undefined)
+    body.guest_of_honor_age = input.guestOfHonorAge;
+  if (input.guestOfHonorGender !== undefined)
+    body.guest_of_honor_gender = input.guestOfHonorGender;
+  if (input.customerNotes !== undefined) body.customer_notes = input.customerNotes;
+  if (input.internalNotes !== undefined) body.internal_notes = input.internalNotes;
+  if (input.sendEmail != null) body.send_email = input.sendEmail;
+
+  await apiRequest(`/api/bookings/${id}`, { method: "PATCH", token, body });
 }
 
 /** POST /api/payments — record a manual in-store payment (no card tokenization). */

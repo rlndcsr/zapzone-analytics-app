@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import {
@@ -228,6 +229,8 @@ const KpiCard = ({
 
 const Attractions = () => {
   const insets = useSafeAreaInsets();
+  const { colorScheme } = useColorScheme();
+  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const { attractions, loading, error, refetch } = useAttractions();
 
   const [search, setSearch] = useState("");
@@ -357,19 +360,17 @@ const Attractions = () => {
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Gradient header */}
-      <View className="bg-[#0644C7] pt-12 pb-5 px-5 w-full relative overflow-hidden z-10">
-        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
         <View className="flex-row items-center justify-between relative z-10">
           <Pressable
             onPress={() => router.back()}
-            className="bg-white/20 p-2 rounded-full"
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <Feather name="chevron-left" size={20} color="#FFFFFF" />
+            <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-white text-lg font-bold">Attractions</Text>
+          <Text className="text-gray-900 dark:text-white text-lg font-bold">Attractions</Text>
           <View style={{ width: 36 }} />
         </View>
       </View>

@@ -35,7 +35,15 @@
         }
       ],
       "expo-secure-store",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow ZapZone to save booking QR codes to your photos.",
+          "savePhotosPermission": "Allow ZapZone to save booking QR codes to your photos.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

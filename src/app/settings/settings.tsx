@@ -86,19 +86,17 @@ const Settings = () => {
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Gradient Header */}
-      <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
-        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
         <View className="flex-row items-center gap-3 relative z-10 ">
           <Pressable
             onPress={() => router.back()}
             accessibilityRole="button"
             accessibilityLabel="Go back"
-            className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm items-center justify-center active:opacity-80"
+            className="w-10 h-10 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center active:opacity-80"
           >
-            <Feather name="chevron-left" size={22} color="#FFFFFF" />
+            <Feather name="chevron-left" size={22} color={isDark ? "#FFFFFF" : "#111827"} />
           </Pressable>
-          <Text className="text-xl font-bold text-white">Settings</Text>
+          <Text className="text-xl font-bold text-gray-900 dark:text-white">Settings</Text>
         </View>
       </View>
 

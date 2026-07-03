@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useColorScheme } from "nativewind";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -90,6 +91,8 @@ const composeAddress = (company: CompanyDetails) =>
 const Profile = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colorScheme } = useColorScheme();
+  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#eb4a4a";
   const { user, stats, loading, error, refresh } = useProfile();
   const [loggingOut, setLoggingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -131,31 +134,28 @@ const Profile = () => {
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Gradient Header */}
-      <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
-        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
         <View className="flex-row items-center justify-between relative z-10">
-          <Pressable
-            onPress={() => router.back()}
-            className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm items-center justify-center active:opacity-80"
-          >
-            <Feather name="chevron-left" size={22} color="#FFFFFF" />
-          </Pressable>
+          <Image
+            source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
+            style={{ width: 70, height: 28 }}
+            contentFit="contain"
+          />
 
-          <Text className="text-xl font-bold text-white">Profile</Text>
+          <Text className="text-xl font-bold text-gray-900 dark:text-white">Profile</Text>
 
-          <View className="flex-row items-center gap-2">
+          <View className="flex-row items-center gap-2 ">
             <Pressable
               onPress={handleLogout}
               disabled={loggingOut}
-              className="px-3 py-2 rounded-full bg-white/20 backdrop-blur-sm items-center justify-center flex-row active:opacity-80"
+              className="px-3 py-2 border-red-200 dark:border-red-200 border rounded-full bg-red-100 dark:bg-neutral-800 items-center justify-center flex-row active:opacity-80"
             >
               {loggingOut ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator color={headerIcon} size="small" />
               ) : (
                 <>
-                  <Feather name="log-out" size={16} color="#FFFFFF" />
-                  <Text className="text-xs font-medium text-white">Logout</Text>
+                  <Feather name="log-out" size={16} color={headerIcon} />
+                  <Text className="text-xs font-medium text-red-500 dark:text-white"> Logout</Text>
                 </>
               )}
             </Pressable>

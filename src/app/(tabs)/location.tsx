@@ -1,5 +1,6 @@
 import { Image } from "expo-image";
 import { router } from "expo-router";
+import { useColorScheme } from "nativewind";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   Pressable,
@@ -16,6 +17,20 @@ import {
 } from "../../components/ui/skeleton/LocationSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import {
+  MapPin,
+  ChevronDown,
+  Calendar,
+  CheckCircle,
+  Bell,
+  Settings,
+  TrendingUp,
+  Users,
+  Ticket,
+  CalendarDays,
+  Clock,
+  BarChart3,
+} from "lucide-react-native";
 
 type DateFilterType =
   | "today"
@@ -80,36 +95,36 @@ const TopLocationCard = ({
   rank: number;
   location: LocationRow;
 }) => {
-  const getRankColor = (rank: number) => {
+  const getRankEmoji = (rank: number) => {
     switch (rank) {
       case 1:
-        return "bg-[#0644C7]";
+        return "🥇";
       case 2:
-        return "bg-[#0644C7]";
+        return "🥈";
       case 3:
-        return "bg-[#0644C7]";
+        return "🥉";
       default:
-        return "bg-[#0644C7]";
+        return `${rank}`;
     }
   };
 
   return (
     <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm"
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm border border-gray-100 dark:border-neutral-800"
       style={{
         shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 1,
       }}
     >
       <View className="flex-row items-center justify-between mb-3">
         <View className="flex-row items-center gap-3 flex-1 mr-2">
-          <View
-            className={`w-10 h-10 rounded-full ${getRankColor(rank)} items-center justify-center shadow-sm`}
-          >
-            <Text className="text-white font-bold text-sm">{rank}</Text>
+          <View className="w-10 h-10 rounded-full bg-[#0644C7] items-center justify-center shadow-sm">
+            <Text className="text-white font-bold text-sm">
+              {getRankEmoji(rank)}
+            </Text>
           </View>
           <View className="flex-1">
             <Text
@@ -120,13 +135,13 @@ const TopLocationCard = ({
             </Text>
             <View className="flex-row items-center gap-2 mt-0.5">
               <View className="flex-row items-center gap-1">
-                <View className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <Ticket size={10} color="#3B82F6" />
                 <Text className="text-xs text-gray-500 dark:text-gray-400">
                   {location.bookings} bookings
                 </Text>
               </View>
               <View className="flex-row items-center gap-1">
-                <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                <CalendarDays size={10} color="#8B5CF6" />
                 <Text className="text-xs text-gray-500 dark:text-gray-400">
                   {location.tickets} tickets
                 </Text>
@@ -146,7 +161,7 @@ const TopLocationCard = ({
           <UtilizationBar value={location.utilization} />
         </View>
         <View className="flex-row items-center gap-2">
-          <View className="w-1.5 h-1.5 rounded-full bg-green-500" />
+          <Users size={12} color="#22C55E" />
           <Text className="text-xs text-gray-500 dark:text-gray-400">
             {location.guests} guests
           </Text>
@@ -158,23 +173,19 @@ const TopLocationCard = ({
 
 const OverviewCard = ({ location }: { location: LocationRow }) => (
   <View
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm"
+    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm border border-gray-100 dark:border-neutral-800"
     style={{
       shadowColor: "#000",
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.05,
-      shadowRadius: 8,
-      elevation: 2,
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
+      elevation: 1,
     }}
   >
     <View className="flex-row items-center justify-between mb-4">
       <View className="flex-row items-center gap-2 flex-1">
         <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-          <Image
-            source={require("../../../assets/zapzone-assests/icon/pin.png")}
-            style={{ width: 16, height: 16, tintColor: "#0644C7" }}
-            contentFit="contain"
-          />
+          <MapPin size={16} color="#0644C7" />
         </View>
         <Text
           className="text-base font-semibold text-gray-900 dark:text-white flex-1"
@@ -238,6 +249,8 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
 
 const Location = () => {
   const insets = useSafeAreaInsets();
+  const { colorScheme } = useColorScheme();
+  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<number | "all">(
@@ -322,12 +335,12 @@ const Location = () => {
         "All Locations");
 
   const dateFilterOptions = [
-    { label: "All Time", value: "all_time" as DateFilterType },
-    { label: "Today", value: "today" as DateFilterType },
-    { label: "Last 24 Hours", value: "last_24h" as DateFilterType },
-    { label: "Last 7 Days", value: "last_7d" as DateFilterType },
-    { label: "Last 30 Days", value: "last_30d" as DateFilterType },
-    { label: "Custom Range", value: "custom" as DateFilterType },
+    { label: "All Time", value: "all_time" as DateFilterType, icon: BarChart3 },
+    { label: "Today", value: "today" as DateFilterType, icon: Calendar },
+    { label: "Last 24 Hours", value: "last_24h" as DateFilterType, icon: Clock },
+    { label: "Last 7 Days", value: "last_7d" as DateFilterType, icon: TrendingUp },
+    { label: "Last 30 Days", value: "last_30d" as DateFilterType, icon: CalendarDays },
+    { label: "Custom Range", value: "custom" as DateFilterType, icon: Calendar },
   ];
 
   const currentDateLabel =
@@ -347,10 +360,8 @@ const Location = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Gradient Header - Fixed position */}
-      <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
-        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+      {/* Header - Same as Home */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
         <View className="flex-row items-center justify-between relative z-10">
           <Pressable>
             <Image
@@ -363,15 +374,10 @@ const Location = () => {
             {unreadNotificationsCount > 0 && (
               <Pressable
                 onPress={() => router.push("/notification/notification")}
-                className="bg-white/20 backdrop-blur-sm rounded-full px-3.5 py-1.5 flex-row items-center gap-2"
+                className="bg-gray-100 dark:bg-neutral-800 rounded-full px-3.5 py-1.5 flex-row items-center gap-2"
               >
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/notification-bell.png")}
-                  style={{ width: 16, height: 16 }}
-                  contentFit="contain"
-                  tintColor="#FFFFFF"
-                />
-                <Text className="text-white text-xs font-semibold">
+                <Bell size={16} color={headerIcon} />
+                <Text className="text-gray-900 dark:text-white text-xs font-semibold">
                   {unreadNotificationsCount > 99
                     ? "99+"
                     : unreadNotificationsCount}
@@ -380,14 +386,9 @@ const Location = () => {
             )}
             <Pressable
               onPress={() => router.push("/settings/settings")}
-              className="bg-white/20 backdrop-blur-sm p-2 rounded-full"
+              className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
             >
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/settings.png")}
-                style={{ width: 20, height: 20 }}
-                contentFit="contain"
-                tintColor="#FFFFFF"
-              />
+              <Settings size={20} color={headerIcon} />
             </Pressable>
           </View>
         </View>
@@ -412,7 +413,7 @@ const Location = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
+          <View className="bg-white dark:bg-neutral-900 font-montserrat rounded-2xl p-5 mt-6 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
               Location Overview
             </Text>
@@ -427,45 +428,25 @@ const Location = () => {
               onPress={() => setShowLocationDropdown(true)}
               className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/pin.png")}
-                style={{ width: 16, height: 16 }}
-                contentFit="contain"
-                tintColor="#0644C7"
-              />
+              <MapPin size={16} color="#0644C7" />
               <Text
                 className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                 numberOfLines={1}
               >
                 {selectedLocationLabel}
               </Text>
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
-                style={{ width: 10, height: 10 }}
-                contentFit="contain"
-                tintColor="#9CA3AF"
-              />
+              <ChevronDown size={12} color="#9CA3AF" />
             </Pressable>
 
             <Pressable
               onPress={() => setShowDateDropdown(true)}
               className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/calendar.png")}
-                style={{ width: 16, height: 16 }}
-                contentFit="contain"
-                tintColor="#0644C7"
-              />
+              <Calendar size={16} color="#0644C7" />
               <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1">
                 {currentDateLabel}
               </Text>
-              <Image
-                source={require("../../../assets/zapzone-assests/icon/arrow-down.png")}
-                style={{ width: 10, height: 10 }}
-                contentFit="contain"
-                tintColor="#9CA3AF"
-              />
+              <ChevronDown size={12} color="#9CA3AF" />
             </Pressable>
           </View>
 
@@ -481,13 +462,9 @@ const Location = () => {
 
           {/* Empty State */}
           {!loading && !error && !hasLocations && (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm border border-gray-100 dark:border-neutral-800">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/pin.png")}
-                  style={{ width: 28, height: 28, tintColor: "#9CA3AF" }}
-                  contentFit="contain"
-                />
+                <MapPin size={28} color="#9CA3AF" />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
                 No location data
@@ -502,6 +479,7 @@ const Location = () => {
             <>
               {/* Top Performing Locations */}
               <View className="flex-row items-center gap-2 mb-4">
+                <TrendingUp size={20} color="#0644C7" />
                 <Text className="text-lg font-bold text-gray-900 dark:text-white">
                   Top Performers
                 </Text>
@@ -522,11 +500,7 @@ const Location = () => {
               {/* All Locations Overview */}
               <View className="flex-row items-center gap-2 mt-6 mb-4">
                 <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-                  <Image
-                    source={require("../../../assets/zapzone-assests/icon/pin.png")}
-                    style={{ width: 18, height: 18, tintColor: "#0644C7" }}
-                    contentFit="contain"
-                  />
+                  <MapPin size={18} color="#0644C7" />
                 </View>
                 <Text className="text-lg font-bold text-gray-900 dark:text-white">
                   All Locations
@@ -590,11 +564,7 @@ const Location = () => {
             </Text>
             {selectedLocation === "all" && (
               <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                <Image
-                  source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                  style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
-                  contentFit="contain"
-                />
+                <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
               </View>
             )}
           </Pressable>
@@ -621,11 +591,7 @@ const Location = () => {
                 </Text>
                 {isSelected && (
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Image
-                      source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
-                      contentFit="contain"
-                    />
+                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
                   </View>
                 )}
               </Pressable>
@@ -643,6 +609,7 @@ const Location = () => {
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {dateFilterOptions.map((option) => {
             const isSelected = dateFilter === option.value;
+            const IconComponent = option.icon;
             return (
               <Pressable
                 key={option.value}
@@ -651,22 +618,24 @@ const Location = () => {
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
+                <View className="flex-row items-center gap-3">
+                  <IconComponent
+                    size={18}
+                    color={isSelected ? "#0644C7" : "#6b7280"}
+                  />
+                  <Text
+                    className={`text-base font-medium ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {option.label}
+                  </Text>
+                </View>
                 {isSelected && (
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Image
-                      source={require("../../../assets/zapzone-assests/icon/checked.png")}
-                      style={{ width: 14, height: 14, tintColor: "#FFFFFF" }}
-                      contentFit="contain"
-                    />
+                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
                   </View>
                 )}
               </Pressable>

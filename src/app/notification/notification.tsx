@@ -1,9 +1,9 @@
 import { View, Text, Pressable, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import React from 'react';
-import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useNotifications } from '../../lib/hooks/useNotifications';
 import { AppNotification, NotificationFilterType } from '../../services/notificationService';
+import { Bell, ChevronLeft, Check, X, Filter, Bookmark, CreditCard, AlertCircle, BellOff } from 'lucide-react-native';
 
 const Notification = () => {
   const {
@@ -27,11 +27,23 @@ const Notification = () => {
     switch (priority) {
       case 'high':
       case 'urgent':
-        return 'bg-red-500/10 text-red-600';
+        return 'text-red-600';
       case 'medium':
-        return 'bg-amber-500/10 text-amber-600';
+        return 'text-amber-600';
       default:
-        return 'bg-blue-500/10 text-blue-600';
+        return 'text-blue-600';
+    }
+  };
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case 'high':
+      case 'urgent':
+        return <AlertCircle size={12} color="#dc2626" />;
+      case 'medium':
+        return <AlertCircle size={12} color="#d97706" />;
+      default:
+        return <Bell size={12} color="#2563eb" />;
     }
   };
 
@@ -45,34 +57,44 @@ const Notification = () => {
       onPress={() => handleNotificationPress(item)}
       className={`bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm ${
         item.status === 'unread' 
-          ? 'border-l-4 border-[#0644C7]' 
+          ? 'bg-blue-50/50 dark:bg-neutral-800/50' 
           : 'border border-gray-100 dark:border-neutral-800'
       }`}
       style={{
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.04,
-        shadowRadius: 8,
+        shadowRadius: 6,
         elevation: 1,
       }}
     >
       <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 flex-row items-center gap-2">
-          <View className="w-8 h-8 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center">
-            <Text className="text-base">🔔</Text>
+        <View className="flex-1 flex-row items-center gap-3">
+          <View className={`w-10 h-10 rounded-full items-center justify-center ${
+            item.status === 'unread' 
+              ? 'bg-blue-100 dark:bg-blue-900/30' 
+              : 'bg-gray-100 dark:bg-neutral-800'
+          }`}>
+            <Bell size={20} color={item.status === 'unread' ? '#0644C7' : '#6b7280'} />
           </View>
-          <Text className="text-sm font-semibold text-gray-900 dark:text-white flex-1">
-            {item.title}
-          </Text>
-        </View>
-        <View className={`px-2.5 py-1 rounded-full ${getPriorityColor(item.priority).split(' ')[0]}`}>
-          <Text className={`text-xs font-medium ${getPriorityColor(item.priority).split(' ')[1]}`}>
-            {item.priority?.toUpperCase() || 'NORMAL'}
-          </Text>
+          <View className="flex-1">
+            <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+              {item.title}
+            </Text>
+            <View className="flex-row items-center gap-1.5 mt-0.5">
+              {getPriorityIcon(item.priority)}
+              <Text className={`text-xs font-medium ${getPriorityColor(item.priority)}`}>
+                {item.priority?.toUpperCase() || 'NORMAL'}
+              </Text>
+              {item.status === 'unread' && (
+                <View className="w-1.5 h-1.5 rounded-full bg-blue-600 ml-1" />
+              )}
+            </View>
+          </View>
         </View>
       </View>
 
-      <View className="ml-10">
+      <View className="ml-13">
         <Text className="text-sm text-gray-600 dark:text-gray-300 leading-5 mb-2">
           {item.message}
         </Text>
@@ -101,44 +123,40 @@ const Notification = () => {
     );
   };
 
-  const filterOptions: { label: string, value: NotificationFilterType }[] = [
-    { label: 'All', value: 'all' },
-    { label: 'Unread', value: 'unread' },
-    { label: 'Bookings', value: 'booking' },
-    { label: 'Purchase', value: 'payment' },
+  const filterOptions: { label: string, value: NotificationFilterType, icon: any }[] = [
+    { label: 'All', value: 'all', icon: Bell },
+    { label: 'Unread', value: 'unread', icon: BellOff },
+    { label: 'Bookings', value: 'booking', icon: Bookmark },
+    { label: 'Purchase', value: 'payment', icon: CreditCard },
   ];
 
   const perPageOptions = [5, 10, 15];
 
+  const getFilterIcon = (value: string) => {
+    const option = filterOptions.find(opt => opt.value === value);
+    return option?.icon || Bell;
+  };
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Gradient Header */}
-      <View className="bg-[#0644C7] pt-12 pb-4 px-5 w-full relative overflow-hidden z-10">
-        <View className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <View className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
-        <View className="flex-row items-center justify-between relative z-10">
+      {/* Minimal Header */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center justify-between">
           <Pressable 
             onPress={() => router.back()}
-            className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm items-center justify-center"
+            className="w-10 h-10 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center"
           >
-            <Image
-              source={require('../../../assets/zapzone-assests/icon/left.png')}
-              style={{ width: 18, height: 18 }}
-              contentFit="contain"
-              tintColor="#FFFFFF"
-            />
+            <ChevronLeft size={20} color="#000" strokeWidth={2.5} />
           </Pressable>
-          <Text className="text-xl font-bold text-white">
+          <Text className="text-lg font-semibold text-gray-900 dark:text-white">
             Notifications
           </Text>
           <Pressable 
             onPress={handleClearAll} 
             disabled={actionLoading}
-            className="px-3 py-1.5 rounded-full bg-white/20 backdrop-blur-sm"
+            className="p-2"
           >
-            <Text className="text-xs font-medium text-white">
-              Clear All
-            </Text>
+            <X size={18} color="#6b7280" />
           </Pressable>
         </View>
       </View>
@@ -149,66 +167,60 @@ const Notification = () => {
         contentContainerStyle={{ paddingBottom: 96 }}
       >
         <View className="px-5 pt-0">
-          {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Stay Updated
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {totalCount > 0 
-                ? `You have ${totalCount} notification${totalCount > 1 ? 's' : ''}`
-                : 'No new notifications'}
-            </Text>
+          {/* Stats Section */}
+          <View className="flex-row items-center justify-between bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
+            <View>
+              <Text className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                Total Notifications
+              </Text>
+              <Text className="text-2xl font-bold text-gray-900 dark:text-white">
+                {totalCount}
+              </Text>
+            </View>
+            <Pressable 
+              onPress={markAllAsRead} 
+              disabled={actionLoading}
+              className="flex-row items-center gap-2 px-4 py-2 rounded-xl bg-gray-100 dark:bg-neutral-800"
+            >
+              <Check size={16} color="#0644C7" />
+              <Text className="text-xs font-medium text-[#0644C7]">
+                Mark all read
+              </Text>
+            </Pressable>
           </View>
 
-          {/* Filter & Actions Bar */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
-            <View className="flex-row items-center justify-between mb-3">
-              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                Filter by
-              </Text>
-              <Pressable 
-                onPress={markAllAsRead} 
-                disabled={actionLoading}
-                className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-neutral-800 active:bg-gray-200 dark:active:bg-neutral-700"
-              >
-                <Text className="text-xs font-medium text-[#0644C7]">
-                  Mark all read
-                </Text>
-              </Pressable>
-            </View>
-
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              className="flex-row -mx-1"
-            >
-              {filterOptions.map((opt) => {
-                const isActive = filter === opt.value;
-                return (
-                  <Pressable
-                    key={opt.value}
-                    onPress={() => updateFilter(opt.value)}
-                    className={`mx-1 px-4 py-2 rounded-full border ${
-                      isActive 
-                        ? 'bg-[#0644C7] border-[#0644C7]' 
-                        : 'bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700'
-                    }`}
-                  >
-                    <Text className={`text-xs font-medium ${
-                      isActive ? 'text-white' : 'text-gray-600 dark:text-gray-300'
-                    }`}>
-                      {opt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+          {/* Filter Bar */}
+          <View className="flex-row gap-2 mb-5 overflow-x-auto pb-1">
+            {filterOptions.map((opt) => {
+              const isActive = filter === opt.value;
+              const IconComponent = opt.icon;
+              return (
+                <Pressable
+                  key={opt.value}
+                  onPress={() => updateFilter(opt.value)}
+                  className={`flex-row items-center gap-2 px-4 py-2.5 rounded-xl border ${
+                    isActive 
+                      ? 'bg-[#0644C7] border-[#0644C7]' 
+                      : 'bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700'
+                  }`}
+                >
+                  <IconComponent 
+                    size={16} 
+                    color={isActive ? '#FFFFFF' : '#6b7280'} 
+                  />
+                  <Text className={`text-xs font-medium ${
+                    isActive ? 'text-white' : 'text-gray-600 dark:text-gray-300'
+                  }`}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
 
           {/* Loading State */}
           {(loading || actionLoading) && (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-12 items-center shadow-sm">
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-12 items-center shadow-sm border border-gray-100 dark:border-neutral-800">
               <ActivityIndicator size="large" color="#0644C7" />
               <Text className="text-gray-500 dark:text-gray-400 mt-4 text-sm font-medium">
                 {actionLoading ? 'Processing...' : 'Loading notifications...'}
@@ -228,7 +240,7 @@ const Notification = () => {
           {!loading && !actionLoading && !error && notifications.length === 0 && (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-12 items-center shadow-sm border border-gray-100 dark:border-neutral-800">
               <View className="w-20 h-20 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-4">
-                <Text className="text-4xl">🔔</Text>
+                <BellOff size={32} color="#9ca3af" />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
                 No notifications

@@ -18,6 +18,25 @@ import {
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import type { CalendarBooking } from "../../services/bookingsService";
+import {
+  Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  Users,
+  User,
+  MapPin,
+  Clock,
+  CheckCircle,
+  Clock as ClockIcon,
+  XCircle,
+  AlertCircle,
+  CalendarDays,
+  CalendarRange,
+  Calendar as CalendarDay,
+  CircleDot,
+  BadgeCheck,
+  Circle,
+} from "lucide-react-native";
 
 type ViewMode = "month" | "week" | "day";
 
@@ -78,6 +97,7 @@ const STATUS_STYLE: Record<
     badge: string;
     card: string;
     color: string;
+    icon: any;
   }
 > = {
   confirmed: {
@@ -86,8 +106,9 @@ const STATUS_STYLE: Record<
     text: "text-green-700 dark:text-green-400",
     badge:
       "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    card: "bg-white dark:bg-neutral-900 border-l-4 border-green-500",
+    card: "bg-white dark:bg-neutral-900",
     color: "#22C55E",
+    icon: CheckCircle,
   },
   pending: {
     label: "Pending",
@@ -95,16 +116,18 @@ const STATUS_STYLE: Record<
     text: "text-amber-700 dark:text-amber-400",
     badge:
       "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-    card: "bg-white dark:bg-neutral-900 border-l-4 border-amber-500",
+    card: "bg-white dark:bg-neutral-900",
     color: "#F59E0B",
+    icon: ClockIcon,
   },
   cancelled: {
     label: "Cancelled",
     dot: "bg-red-500",
     text: "text-red-700 dark:text-red-400",
     badge: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-    card: "bg-white dark:bg-neutral-900 border-l-4 border-red-500",
+    card: "bg-white dark:bg-neutral-900",
     color: "#EF4444",
+    icon: XCircle,
   },
   "checked-in": {
     label: "Checked In",
@@ -112,16 +135,18 @@ const STATUS_STYLE: Record<
     text: "text-indigo-700 dark:text-indigo-400",
     badge:
       "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
-    card: "bg-white dark:bg-neutral-900 border-l-4 border-indigo-500",
+    card: "bg-white dark:bg-neutral-900",
     color: "#6366F1",
+    icon: CircleDot,
   },
   completed: {
     label: "Completed",
     dot: "bg-[#0644C7]",
     text: "text-[#0644C7]",
     badge: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    card: "bg-white dark:bg-neutral-900 border-l-4 border-[#0644C7]",
+    card: "bg-white dark:bg-neutral-900",
     color: "#0644C7",
+    icon: BadgeCheck,
   },
 };
 
@@ -170,10 +195,7 @@ const StatusLegend = () => {
     <View className="flex-row items-center justify-center gap-4 mt-3 mb-1">
       {legendItems.map((item) => (
         <View key={item.key} className="flex-row items-center gap-1.5">
-          <View
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: item.color }}
-          />
+          <Circle size={8} fill={item.color} color={item.color} />
           <Text className="text-xs text-gray-600 dark:text-gray-400">
             {item.label}
           </Text>
@@ -183,7 +205,7 @@ const StatusLegend = () => {
   );
 };
 
-/** Rich, status-tinted booking card. Tap opens the full detail sheet. */
+/** Clean, minimal booking card. Tap opens the full detail sheet. */
 const BookingCard = ({
   booking,
   onPress,
@@ -192,74 +214,72 @@ const BookingCard = ({
   onPress: () => void;
 }) => {
   const style = statusStyle(booking.status);
+  const StatusIcon = style.icon;
+
   return (
     <Pressable
       onPress={onPress}
-      className={`rounded-2xl p-4 mb-3 shadow-sm ${style.card}`}
-      style={({ pressed }) => [
-        {
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.04,
-          shadowRadius: 8,
-          elevation: 1,
-        },
-        pressed ? { opacity: 0.8 } : null,
-      ]}
+      className="rounded-2xl p-4 mb-2.5 bg-white dark:bg-neutral-900 border border-gray-100 dark:border-neutral-800 active:opacity-80"
     >
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-row items-center gap-2">
-          <View className="w-8 h-8 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center">
-            <Text className="text-sm">🕐</Text>
-          </View>
-          <Text className="text-sm font-medium text-gray-600 dark:text-gray-300">
+      {/* Time + status */}
+      <View className="flex-row items-center justify-between mb-2.5">
+        <View className="flex-row items-center gap-1.5">
+          <Clock size={14} color="#9ca3af" />
+          <Text className="text-sm font-medium text-gray-500 dark:text-gray-400">
             {formatTime(booking.time)}
           </Text>
         </View>
-        <View className={`px-3 py-1 rounded-full ${style.badge.split(" ")[0]}`}>
-          <Text
-            className={`text-xs font-semibold ${style.badge.split(" ")[1]}`}
-          >
+        <View className="flex-row items-center gap-1.5">
+          <StatusIcon size={13} color={style.color} />
+          <Text className="text-xs font-semibold" style={{ color: style.color }}>
             {style.label}
           </Text>
         </View>
       </View>
 
-      <View className="ml-10">
-        <View className="flex-row items-center justify-between">
+      {/* Title + amount */}
+      <View className="flex-row items-center justify-between">
+        <Text
+          className="text-base font-bold text-gray-900 dark:text-white flex-1 mr-2"
+          numberOfLines={1}
+        >
+          {booking.packageName}
+        </Text>
+        <Text className="text-base font-bold text-[#0644C7]">
+          {formatMoney(booking.totalAmount)}
+        </Text>
+      </View>
+
+      {/* Meta: customer + participants */}
+      <View className="flex-row items-center gap-4 mt-1.5">
+        <View className="flex-row items-center gap-1 flex-1">
+          <User size={13} color="#9ca3af" />
           <Text
-            className="text-base font-bold text-gray-900 dark:text-white flex-1 mr-2"
+            className="text-sm text-gray-500 dark:text-gray-400 flex-1"
             numberOfLines={1}
           >
-            {booking.packageName}
-          </Text>
-          <Text className="text-base font-bold text-[#0644C7]">
-            {formatMoney(booking.totalAmount)}
-          </Text>
-        </View>
-
-        <View className="flex-row items-center gap-1 mt-1">
-          <Text className="text-sm text-gray-500 dark:text-gray-400">
             {booking.customerName}
           </Text>
-          <View className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
+        </View>
+        <View className="flex-row items-center gap-1">
+          <Users size={13} color="#9ca3af" />
           <Text className="text-sm text-gray-500 dark:text-gray-400">
-            👥 {booking.participants}
+            {booking.participants}
           </Text>
         </View>
-
-        {!!booking.locationName && (
-          <View className="flex-row items-center gap-1 mt-1.5">
-            <Text className="text-xs text-gray-400 dark:text-gray-500">📍</Text>
-            <Text
-              className="text-xs text-gray-400 dark:text-gray-500"
-              numberOfLines={1}
-            >
-              {booking.locationName}
-            </Text>
-          </View>
-        )}
       </View>
+
+      {!!booking.locationName && (
+        <View className="flex-row items-center gap-1 mt-1">
+          <MapPin size={12} color="#9ca3af" />
+          <Text
+            className="text-xs text-gray-400 dark:text-gray-500 flex-1"
+            numberOfLines={1}
+          >
+            {booking.locationName}
+          </Text>
+        </View>
+      )}
     </Pressable>
   );
 };
@@ -390,6 +410,15 @@ const Calendar = () => {
 
   const openBooking = (id: number) => setSelectedBookingId(id);
 
+  const getViewIcon = (mode: ViewMode) => {
+    switch (mode) {
+      case 'month': return CalendarDays;
+      case 'week': return CalendarRange;
+      case 'day': return CalendarDay;
+      default: return CalendarIcon;
+    }
+  };
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       <DashboardHeader unreadCount={unreadNotificationsCount} />
@@ -422,14 +451,19 @@ const Calendar = () => {
           <View className="flex-row bg-white dark:bg-neutral-900 rounded-xl p-1.5 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
             {(["month", "week", "day"] as ViewMode[]).map((mode) => {
               const active = viewMode === mode;
+              const IconComponent = getViewIcon(mode);
               return (
                 <Pressable
                   key={mode}
                   onPress={() => setViewMode(mode)}
-                  className={`flex-1 py-2.5 rounded-lg items-center ${
+                  className={`flex-1 py-2.5 rounded-lg items-center flex-row justify-center gap-2 ${
                     active ? "bg-[#0644C7]" : ""
                   }`}
                 >
+                  <IconComponent
+                    size={16}
+                    color={active ? "#FFFFFF" : "#6b7280"}
+                  />
                   <Text
                     className={`text-sm font-semibold capitalize ${
                       active ? "text-white" : "text-gray-500 dark:text-gray-400"
@@ -456,9 +490,7 @@ const Calendar = () => {
               onPress={() => step(-1)}
               className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
             >
-              <Text className="text-lg text-gray-600 dark:text-gray-300">
-                ‹
-              </Text>
+              <ChevronLeft size={20} color="#6b7280" />
             </Pressable>
             <Text className="text-base font-bold text-gray-900 dark:text-white flex-1 text-center mx-2">
               {headerLabel}
@@ -467,9 +499,7 @@ const Calendar = () => {
               onPress={() => step(1)}
               className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
             >
-              <Text className="text-lg text-gray-600 dark:text-gray-300">
-                ›
-              </Text>
+              <ChevronRight size={20} color="#6b7280" />
             </Pressable>
           </View>
 
@@ -553,22 +583,27 @@ const Calendar = () => {
                                   </Text>
                                 </View>
 
-                                {shown.slice(0, 2).map((s) => (
-                                  <View
-                                    key={s}
-                                    className="flex-row items-center gap-1 mb-0.5"
-                                  >
+                                {shown.slice(0, 2).map((s) => {
+                                  const style = statusStyle(s);
+                                  const IconComponent = style.icon;
+                                  return (
                                     <View
-                                      className={`w-1.5 h-1.5 rounded-full ${statusStyle(s).dot}`}
-                                    />
-                                    <Text
-                                      className={`text-[10px] font-medium ${statusStyle(s).text}`}
-                                      numberOfLines={1}
+                                      key={s}
+                                      className="flex-row items-center gap-1 mb-0.5"
                                     >
-                                      {group?.counts[s]}
-                                    </Text>
-                                  </View>
-                                ))}
+                                      <IconComponent
+                                        size={10}
+                                        color={style.color}
+                                      />
+                                      <Text
+                                        className={`text-[10px] font-medium ${style.text}`}
+                                        numberOfLines={1}
+                                      >
+                                        {group?.counts[s]}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
                                 {hasBookings && shown.length > 2 && (
                                   <Text className="text-[10px] text-gray-400 dark:text-gray-500">
                                     +{shown.length - 2} more
@@ -687,7 +722,8 @@ const Calendar = () => {
               </>
             ) : (
               <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-                <Text className="text-gray-700 dark:text-gray-200 font-semibold">
+                <CalendarIcon size={32} color="#9ca3af" />
+                <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
                   No bookings
                 </Text>
                 <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
@@ -703,10 +739,8 @@ const Calendar = () => {
             bookings.length === 0 && (
               <>
                 <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-                  <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                    <Text className="text-2xl">📅</Text>
-                  </View>
-                  <Text className="text-gray-700 dark:text-gray-200 font-semibold">
+                  <CalendarIcon size={32} color="#9ca3af" />
+                  <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
                     No bookings
                   </Text>
                   <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
@@ -733,3 +767,6 @@ const Calendar = () => {
 };
 
 export default Calendar;
+
+
+

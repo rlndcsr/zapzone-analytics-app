@@ -1,3 +1,13 @@
+import {
+  Calendar,
+  Clock,
+  CreditCard,
+  DoorOpen,
+  Eye,
+  MapPin,
+  Package,
+  Pencil,
+} from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -5,18 +15,16 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import { getToken } from "../../lib/session";
 import {
   fetchBookingDetail,
   recordBookingPayment,
-  updateBookingInternalNotes,
-  updateBookingPaymentStatus,
-  updateBookingStatus,
   type BookingDetail,
 } from "../../services/bookingsService";
-import { getToken } from "../../lib/session";
+import { BookingEditSheet } from "./BookingEditSheet";
+import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
 
 const MONTH_NAMES = [
@@ -26,8 +34,6 @@ const MONTH_NAMES = [
 const WEEKDAY_FULL = [
   "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 ];
-
-const STATUS_OPTIONS = ["pending", "confirmed", "checked-in", "completed", "cancelled"];
 
 const STATUS_BADGE: Record<string, string> = {
   confirmed: "bg-green-100 text-green-700",
@@ -110,7 +116,11 @@ type Props = {
   onChanged?: () => void;
 };
 
-/** Full "Booking Details" sheet — fetches the record and supports View / Edit / Process Payment. */
+/**
+ * "Booking Details" sheet — fetches the record and supports View / Edit /
+ * Process Payment. The View button opens the full icon-tile detail view
+ * (with the downloadable QR code).
+ */
 export function BookingDetailSheet({
   bookingId,
   visible,
@@ -122,14 +132,9 @@ export function BookingDetailSheet({
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
-  // Edit mode
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [editStatus, setEditStatus] = useState("pending");
-  const [editPaid, setEditPaid] = useState(false);
-  const [editNotes, setEditNotes] = useState("");
-
   const [processing, setProcessing] = useState(false);
+  const [showFull, setShowFull] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
 
   const load = useCallback(async () => {
     if (bookingId == null) return;
@@ -161,61 +166,22 @@ export function BookingDetailSheet({
   useEffect(() => {
     if (bookingId == null) return;
     setDetail(null);
-    setEditing(false);
+    setShowFull(false);
+    setShowEdit(false);
     load();
     return () => {
       requestIdRef.current++;
     };
   }, [bookingId, load]);
 
-  const startEdit = () => {
-    if (!detail) return;
-    setEditStatus(detail.status);
-    setEditPaid(detail.paymentStatus === "paid");
-    setEditNotes(detail.internalNotes ?? "");
-    setEditing(true);
-  };
-
-  const saveEdit = async () => {
-    if (!detail) return;
-    const token = getToken();
-    if (!token) {
-      Alert.alert("Not authenticated");
-      return;
-    }
-    setSaving(true);
-    try {
-      if (editStatus !== detail.status) {
-        await updateBookingStatus(token, detail.id, editStatus);
-      }
-      const nextPayment = editPaid ? "paid" : "partial";
-      if (nextPayment !== detail.paymentStatus) {
-        await updateBookingPaymentStatus(token, detail.id, nextPayment);
-      }
-      if ((editNotes.trim() || "") !== (detail.internalNotes ?? "")) {
-        await updateBookingInternalNotes(token, detail.id, editNotes.trim());
-      }
-      setEditing(false);
-      await load();
-      onChanged?.();
-    } catch (err) {
-      Alert.alert(
-        "Save failed",
-        err instanceof Error ? err.message : "Could not save changes.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const processPayment = () => {
     if (!detail) return;
-    const remaining = Math.max(0, detail.totalAmount - detail.amountPaid);
-    if (remaining <= 0) return;
+    const remainingDue = Math.max(0, detail.totalAmount - detail.amountPaid);
+    if (remainingDue <= 0) return;
 
     Alert.alert(
       "Process Payment",
-      `Record an in-store payment of ${formatMoney(remaining)} for ${detail.referenceNumber ?? "this booking"}?`,
+      `Record an in-store payment of ${formatMoney(remainingDue)} for ${detail.referenceNumber ?? "this booking"}?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -231,13 +197,13 @@ export function BookingDetailSheet({
             try {
               await recordBookingPayment(token, {
                 bookingId: detail.id,
-                amount: remaining,
+                amount: remainingDue,
                 locationId: detail.locationId,
                 customerId: detail.customerId,
               });
               await load();
               onChanged?.();
-              Alert.alert("Payment recorded", `${formatMoney(remaining)} recorded.`);
+              Alert.alert("Payment recorded", `${formatMoney(remainingDue)} recorded.`);
             } catch (err) {
               Alert.alert(
                 "Payment failed",
@@ -258,336 +224,267 @@ export function BookingDetailSheet({
     ? Math.max(0, detail.totalAmount - detail.amountPaid)
     : 0;
 
+  // Editing swaps the whole surface for the Edit modal. Rendering only one
+  // native Modal at a time avoids the Android crash from stacking full-screen
+  // Modals on top of one another.
+  if (showEdit) {
+    return (
+      <BookingEditSheet
+        visible
+        detail={detail}
+        onClose={() => setShowEdit(false)}
+        onSaved={() => {
+          load();
+          onChanged?.();
+        }}
+      />
+    );
+  }
+
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Booking Details">
-      <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
-        {loading && (
-          <View className="py-16 items-center">
-            <ActivityIndicator color="#0644C7" />
-          </View>
-        )}
+    <>
+      <BottomSheet visible={visible} onClose={onClose} title="Booking Details">
+        <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
+          {loading && (
+            <View className="py-16 items-center">
+              <ActivityIndicator color="#0644C7" />
+            </View>
+          )}
 
-        {!loading && error && (
-          <View className="bg-red-50 border border-red-200 rounded-xl p-4 my-4">
-            <Text className="text-red-700 font-semibold">Error</Text>
-            <Text className="text-red-600 text-sm">{error}</Text>
-          </View>
-        )}
+          {!loading && error && (
+            <View className="bg-red-50 border border-red-200 rounded-xl p-4 my-4">
+              <Text className="text-red-700 font-semibold">Error</Text>
+              <Text className="text-red-600 text-sm">{error}</Text>
+            </View>
+          )}
 
-        {!loading && !error && detail && (
-          <>
-            {/* Customer */}
-            <SectionTitle>Customer Information</SectionTitle>
-            <Card>
-              <Text className="text-base font-semibold text-gray-900 dark:text-white">
-                {detail.customerName}
-              </Text>
-              {!!detail.customerEmail && (
-                <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {detail.customerEmail}
+          {!loading && !error && detail && (
+            <>
+              {/* Customer */}
+              <SectionTitle>Customer Information</SectionTitle>
+              <Card>
+                <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                  {detail.customerName}
                 </Text>
-              )}
-              {!!detail.customerPhone && (
-                <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                  {detail.customerPhone}
-                </Text>
-              )}
-            </Card>
-
-            {/* Booking info */}
-            <SectionTitle>Booking Information</SectionTitle>
-            <Card>
-              <Row label="Reference Number" value={detail.referenceNumber ?? "—"} />
-              <View className="flex-row items-center justify-between py-1">
-                <Text className="text-sm text-gray-500 dark:text-gray-400">Status</Text>
-                <Badge
-                  text={capitalize(detail.status)}
-                  className={STATUS_BADGE[detail.status] ?? PAYMENT_BADGE.pending}
-                />
-              </View>
-              <View className="flex-row items-center justify-between py-1">
-                <Text className="text-sm text-gray-500 dark:text-gray-400">Type</Text>
-                <Badge text={typeLabel} className="bg-blue-100 text-blue-700" />
-              </View>
-            </Card>
-
-            {/* Date & time */}
-            <SectionTitle>Date &amp; Time</SectionTitle>
-            <Card>
-              <Text className="text-base font-medium text-gray-900 dark:text-white">
-                📅 {formatDate(detail.date)}
-              </Text>
-              <Text className="text-base font-medium text-gray-900 dark:text-white mt-1 mb-2">
-                🕐 {formatTime(detail.time)}
-              </Text>
-              <View className="border-t border-gray-200 dark:border-neutral-700 pt-2">
-                <Row
-                  label="Duration"
-                  value={`${detail.duration} ${detail.durationUnit}`}
-                />
-                <Row label="Participants" value={detail.participants} />
-              </View>
-            </Card>
-
-            {/* Package */}
-            <SectionTitle>Package</SectionTitle>
-            <Card>
-              <View className="flex-row items-center justify-between">
-                <Text className="text-base font-semibold text-[#0644C7] uppercase flex-1 mr-2">
-                  📦 {detail.packageName}
-                </Text>
-                {detail.packagePrice != null && (
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">
-                    {formatMoney(detail.packagePrice)}
+                {!!detail.customerEmail && (
+                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    {detail.customerEmail}
                   </Text>
                 )}
-              </View>
-            </Card>
-
-            {/* Location & room */}
-            <SectionTitle>Location</SectionTitle>
-            <Card>
-              <Text className="text-base font-medium text-gray-900 dark:text-white">
-                📍 {detail.locationName || "—"}
-              </Text>
-              {!!detail.roomName && (
-                <Text className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                  🏠 {detail.roomName}
-                </Text>
-              )}
-            </Card>
-
-            {/* Guest of honor */}
-            {!!detail.guestOfHonorName && (
-              <>
-                <SectionTitle>Guest of Honor</SectionTitle>
-                <Card>
-                  <Row
-                    label="Name"
-                    value={
-                      detail.guestOfHonorAge != null
-                        ? `${detail.guestOfHonorName} (${detail.guestOfHonorAge})`
-                        : detail.guestOfHonorName
-                    }
-                  />
-                </Card>
-              </>
-            )}
-
-            {/* Add-ons */}
-            {detail.addOns.length > 0 && (
-              <>
-                <SectionTitle>Add-ons</SectionTitle>
-                <Card>
-                  {detail.addOns.map((a, i) => (
-                    <View
-                      key={a.id}
-                      className={`flex-row items-center justify-between py-1 ${
-                        i > 0 ? "border-t border-gray-200 dark:border-neutral-700" : ""
-                      }`}
-                    >
-                      <Text className="text-sm text-gray-900 dark:text-white">{a.name}</Text>
-                      <Text className="text-sm text-gray-500 dark:text-gray-400">
-                        Qty: {a.quantity}
-                      </Text>
-                    </View>
-                  ))}
-                </Card>
-              </>
-            )}
-
-            {/* Payment */}
-            <SectionTitle>Payment</SectionTitle>
-            <Card>
-              <View className="flex-row items-center justify-between py-1">
-                <Text className="text-sm text-gray-500 dark:text-gray-400">Total Amount</Text>
-                <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                  {formatMoney(detail.totalAmount)}
-                </Text>
-              </View>
-              <View className="flex-row items-center justify-between py-1">
-                <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  Payment Status
-                </Text>
-                <Badge
-                  text={capitalize(detail.paymentStatus)}
-                  className={PAYMENT_BADGE[detail.paymentStatus] ?? PAYMENT_BADGE.pending}
-                />
-              </View>
-              {!!detail.paymentMethod && (
-                <Row label="Payment Method" value={detail.paymentMethod} />
-              )}
-              <Row label="Amount Paid" value={formatMoney(detail.amountPaid)} />
-              <Row
-                label="Balance Due"
-                value={formatMoney(remaining)}
-                valueClass={remaining > 0 ? "text-amber-600" : "text-green-600"}
-              />
-
-              {detail.appliedFees.length > 0 && (
-                <View className="border-t border-gray-200 dark:border-neutral-700 mt-2 pt-2">
-                  {detail.appliedFees.map((f, i) => (
-                    <View
-                      key={`${f.name}-${i}`}
-                      className="flex-row items-center justify-between py-0.5"
-                    >
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        {f.name} ({f.applicationType})
-                      </Text>
-                      <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                        {formatMoney(f.amount)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </Card>
-
-            {/* Internal notes */}
-            <SectionTitle>Internal Notes</SectionTitle>
-            <Card>
-              <Text
-                className={`text-sm ${
-                  detail.internalNotes
-                    ? "text-gray-900 dark:text-white"
-                    : "text-gray-400 dark:text-gray-500 italic"
-                }`}
-              >
-                {detail.internalNotes ?? "No internal notes."}
-              </Text>
-            </Card>
-
-            {/* ---- Edit panel ---- */}
-            {editing && (
-              <>
-                <SectionTitle>Edit Booking</SectionTitle>
-                <Card>
-                  <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
-                    Status
+                {!!detail.customerPhone && (
+                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                    {detail.customerPhone}
                   </Text>
-                  <View className="flex-row flex-wrap gap-2 mb-4">
-                    {STATUS_OPTIONS.map((s) => {
-                      const active = editStatus === s;
-                      return (
-                        <Pressable
-                          key={s}
-                          onPress={() => setEditStatus(s)}
-                          className={`px-3 py-1.5 rounded-full border ${
-                            active
-                              ? "bg-[#0644C7] border-[#0644C7]"
-                              : "border-gray-300 dark:border-neutral-600"
-                          }`}
-                        >
-                          <Text
-                            className={`text-xs font-semibold capitalize ${
-                              active ? "text-white" : "text-gray-600 dark:text-gray-300"
-                            }`}
-                          >
-                            {s}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                )}
+              </Card>
 
-                  <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
+              {/* Booking info */}
+              <SectionTitle>Booking Information</SectionTitle>
+              <Card>
+                <Row label="Reference Number" value={detail.referenceNumber ?? "—"} />
+                <View className="flex-row items-center justify-between py-1">
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">Status</Text>
+                  <Badge
+                    text={capitalize(detail.status)}
+                    className={STATUS_BADGE[detail.status] ?? PAYMENT_BADGE.pending}
+                  />
+                </View>
+                <View className="flex-row items-center justify-between py-1">
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">Type</Text>
+                  <Badge text={typeLabel} className="bg-blue-100 text-blue-700" />
+                </View>
+              </Card>
+
+              {/* Date & time */}
+              <SectionTitle>Date &amp; Time</SectionTitle>
+              <Card>
+                <View className="flex-row items-center gap-2">
+                  <Calendar size={16} color="#0644C7" />
+                  <Text className="text-base font-medium text-gray-900 dark:text-white flex-1">
+                    {formatDate(detail.date)}
+                  </Text>
+                </View>
+                <View className="flex-row items-center gap-2 mt-1.5 mb-2">
+                  <Clock size={16} color="#0644C7" />
+                  <Text className="text-base font-medium text-gray-900 dark:text-white">
+                    {formatTime(detail.time)}
+                  </Text>
+                </View>
+                <View className="border-t border-gray-200 dark:border-neutral-700 pt-2">
+                  <Row
+                    label="Duration"
+                    value={`${detail.duration} ${detail.durationUnit}`}
+                  />
+                  <Row label="Participants" value={detail.participants} />
+                </View>
+              </Card>
+
+              {/* Package */}
+              <SectionTitle>Package</SectionTitle>
+              <Card>
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-2 flex-1 mr-2">
+                    <Package size={16} color="#0644C7" />
+                    <Text
+                      className="text-base font-semibold text-[#0644C7] uppercase flex-1"
+                      numberOfLines={1}
+                    >
+                      {detail.packageName}
+                    </Text>
+                  </View>
+                  {detail.packagePrice != null && (
+                    <Text className="text-base font-bold text-gray-900 dark:text-white">
+                      {formatMoney(detail.packagePrice)}
+                    </Text>
+                  )}
+                </View>
+              </Card>
+
+              {/* Location & room */}
+              <SectionTitle>Location</SectionTitle>
+              <Card>
+                <View className="flex-row items-center gap-2">
+                  <MapPin size={16} color="#0644C7" />
+                  <Text className="text-base font-medium text-gray-900 dark:text-white flex-1">
+                    {detail.locationName || "—"}
+                  </Text>
+                </View>
+                {!!detail.roomName && (
+                  <View className="flex-row items-center gap-2 mt-2">
+                    <DoorOpen size={16} color="#9ca3af" />
+                    <Text className="text-sm text-gray-500 dark:text-gray-400 flex-1">
+                      {detail.roomName}
+                    </Text>
+                  </View>
+                )}
+              </Card>
+
+              {/* Guest of honor */}
+              {!!detail.guestOfHonorName && (
+                <>
+                  <SectionTitle>Guest of Honor</SectionTitle>
+                  <Card>
+                    <Row
+                      label="Name"
+                      value={
+                        detail.guestOfHonorAge != null
+                          ? `${detail.guestOfHonorName} (${detail.guestOfHonorAge} years old)`
+                          : detail.guestOfHonorName
+                      }
+                    />
+                  </Card>
+                </>
+              )}
+
+              {/* Add-ons */}
+              {detail.addOns.length > 0 && (
+                <>
+                  <SectionTitle>Add-ons</SectionTitle>
+                  <Card>
+                    {detail.addOns.map((a, i) => (
+                      <View 
+                        key={a.id}
+                        className={`flex-row items-center justify-between py-1 ${
+                          i > 0 ? "border-t border-gray-200 dark:border-neutral-700" : ""
+                        }`}
+                      >
+                        <Text className="text-sm text-gray-900 dark:text-white">{a.name}</Text>
+                        <Text className="text-sm text-gray-500 dark:text-gray-400">
+                          Qty: {a.quantity}
+                        </Text>
+                      </View>
+                    ))}
+                  </Card>
+                </>
+              )}
+
+              {/* Payment */}
+              <SectionTitle>Payment</SectionTitle>
+              <Card>
+                <View className="flex-row items-center justify-between py-1">
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">Total Amount</Text>
+                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                    {formatMoney(detail.totalAmount)}
+                  </Text>
+                </View>
+                <View className="flex-row items-center justify-between py-1">
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
                     Payment Status
                   </Text>
-                  <View className="flex-row gap-2 mb-4">
-                    {(["partial", "paid"] as const).map((p) => {
-                      const active = editPaid === (p === "paid");
-                      return (
-                        <Pressable
-                          key={p}
-                          onPress={() => setEditPaid(p === "paid")}
-                          className={`px-4 py-1.5 rounded-full border ${
-                            active
-                              ? "bg-[#0644C7] border-[#0644C7]"
-                              : "border-gray-300 dark:border-neutral-600"
-                          }`}
-                        >
-                          <Text
-                            className={`text-xs font-semibold capitalize ${
-                              active ? "text-white" : "text-gray-600 dark:text-gray-300"
-                            }`}
-                          >
-                            {p}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-
-                  <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
-                    Internal Notes
-                  </Text>
-                  <TextInput
-                    value={editNotes}
-                    onChangeText={setEditNotes}
-                    placeholder="Add internal notes…"
-                    placeholderTextColor="#9ca3af"
-                    multiline
-                    className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-xl p-3 text-sm text-gray-900 dark:text-white min-h-[72px]"
-                    textAlignVertical="top"
+                  <Badge
+                    text={capitalize(detail.paymentStatus)}
+                    className={PAYMENT_BADGE[detail.paymentStatus] ?? PAYMENT_BADGE.pending}
                   />
-                </Card>
-              </>
-            )}
+                </View>
+                {!!detail.paymentMethod && (
+                  <Row label="Payment Method" value={detail.paymentMethod} />
+                )}
+                <Row label="Amount Paid" value={formatMoney(detail.amountPaid)} />
+                
 
-            {/* ---- Footer actions ---- */}
-            <View className="mt-6 mb-2">
-              {editing ? (
-                <View className="flex-row gap-3">
+                {detail.appliedFees.length > 0 && (
+                  <View className="border-t border-gray-200 dark:border-neutral-700 mt-2 pt-2">
+                    {detail.appliedFees.map((f, i) => (
+                      <View
+                        key={`${f.name}-${i}`}
+                        className="flex-row items-center justify-between py-0.5"
+                      >
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          {f.name} ({f.applicationType})
+                        </Text>
+                        <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                          {formatMoney(f.amount)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </Card>
+
+              {/* Internal notes */}
+              <SectionTitle>Internal Notes</SectionTitle>
+              <Card>
+                <Text
+                  className={`text-sm ${
+                    detail.internalNotes
+                      ? "text-gray-900 dark:text-white"
+                      : "text-gray-400 dark:text-gray-500 italic"
+                  }`}
+                >
+                  {detail.internalNotes ?? "No internal notes."}
+                </Text>
+              </Card>
+
+              {/* ---- Footer actions ---- */}
+              <View className="mt-6 mb-2">
+                <View className="flex-row gap-2 mb-3">
                   <Pressable
-                    onPress={() => setEditing(false)}
-                    disabled={saving}
-                    className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center"
+                    onPress={() => setShowFull(true)}
+                    style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
+                    className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center flex-row justify-center gap-2"
                   >
-                    <Text className="text-sm font-semibold text-gray-600 dark:text-gray-300">
-                      Cancel
+                    <Eye size={16} color="#6b7280" />
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      View
                     </Text>
                   </Pressable>
                   <Pressable
-                    onPress={saveEdit}
-                    disabled={saving}
-                    className="flex-1 py-3 rounded-xl bg-[#0644C7] items-center"
+                    onPress={() => setShowEdit(true)}
+                    style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
+                    className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center flex-row justify-center gap-2"
                   >
-                    {saving ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Text className="text-sm font-semibold text-white">Save Changes</Text>
-                    )}
+                    <Pencil size={16} color="#6b7280" />
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      Edit
+                    </Text>
                   </Pressable>
-                </View>
-              ) : (
-                <>
-                  <View className="flex-row gap-3 mb-3">
-                    <Pressable
-                      onPress={load}
-                      style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
-                      className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center"
-                    >
-                      <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                        👁 View
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={startEdit}
-                      style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
-                      className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center"
-                    >
-                      <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                        ✎ Edit
-                      </Text>
-                    </Pressable>
-                  </View>
                   <Pressable
                     onPress={processPayment}
                     disabled={remaining <= 0 || processing}
                     style={({ pressed }) =>
                       pressed && remaining > 0 ? { opacity: 0.7 } : null
                     }
-                    className={`py-3 rounded-xl border items-center ${
+                    className={`flex-[1.3] py-3 rounded-xl border items-center flex-row justify-center gap-2 ${
                       remaining <= 0
                         ? "border-gray-200 dark:border-neutral-800"
                         : "border-amber-400"
@@ -596,25 +493,45 @@ export function BookingDetailSheet({
                     {processing ? (
                       <ActivityIndicator color="#d97706" size="small" />
                     ) : (
-                      <Text
-                        className={`text-sm font-semibold ${
-                          remaining <= 0 ? "text-gray-400" : "text-amber-600"
-                        }`}
-                      >
-                        {remaining <= 0
-                          ? "Fully Paid"
-                          : `$ Process Payment (${formatMoney(remaining)})`}
-                      </Text>
+                      <>
+                        <CreditCard
+                          size={16}
+                          color={remaining <= 0 ? "#9ca3af" : "#d97706"}
+                        />
+                        <Text
+                          className={`text-sm font-semibold ${
+                            remaining <= 0 ? "text-gray-400" : "text-amber-600"
+                          }`}
+                        >
+                          {remaining <= 0 ? "Fully Paid" : "Process Payment"}
+                        </Text>
+                      </>
                     )}
                   </Pressable>
-                </>
-              )}
-            </View>
+                </View>
+                <Pressable
+                  onPress={onClose}
+                  style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
+                  className="py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center"
+                >
+                  <Text className="text-sm font-semibold text-gray-600 dark:text-gray-300">
+                    Close
+                  </Text>
+                </Pressable>
+              </View>
 
-            <View style={{ height: 24 }} />
-          </>
-        )}
-      </ScrollView>
-    </BottomSheet>
+              <View style={{ height: 24 }} />
+            </>
+          )}
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Second screen: full icon-tile view + QR, opened from the View button */}
+      <BookingFullView
+        visible={showFull}
+        detail={detail}
+        onClose={() => setShowFull(false)}
+      />
+    </>
   );
 }
