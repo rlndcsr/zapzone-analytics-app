@@ -13,7 +13,12 @@ import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import { ScreenTitleCard } from "../../components/ui/ScreenTitleCard";
 import { StatusBadge } from "../../components/ui/StatusBadge";
-import { ActivityScreenSkeleton } from "../../components/ui/skeleton/ActivityScreenSkeleton";
+import {
+  BadgeSkeleton,
+  NewBookingRowsSkeleton,
+  PurchaseRowsSkeleton,
+} from "../../components/ui/skeleton/ActivityScreenSkeleton";
+import { usePulse } from "../../components/ui/skeleton/SkeletonBlock";
 import { useTimeframeSelection } from "../../lib/dashboard/timeframeStore";
 import { useManagerActivity } from "../../lib/hooks/useManagerActivity";
 import { useNotifications } from "../../lib/hooks/useNotifications";
@@ -25,6 +30,7 @@ import type {
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
+type Pulse = ReturnType<typeof usePulse>;
 
 const CARD_SHADOW = {
   shadowColor: "#000",
@@ -79,6 +85,8 @@ const Meta = ({ text }: { text: string }) => (
 );
 
 // Section shell — title, optional "count • timeframe" badge, View All, states.
+// The icon, title, and View All button are static and always render; only the
+// data-driven badge and card body swap to skeletons while `loading`.
 type SectionProps = {
   icon: IconName;
   title: string;
@@ -86,6 +94,9 @@ type SectionProps = {
   onViewAll?: () => void;
   empty: string;
   isEmpty: boolean;
+  loading?: boolean;
+  pulse?: Pulse;
+  skeleton?: React.ReactNode;
   children: React.ReactNode;
 };
 
@@ -96,6 +107,9 @@ const Section = ({
   onViewAll,
   empty,
   isEmpty,
+  loading,
+  pulse,
+  skeleton,
   children,
 }: SectionProps) => (
   <View className="mb-5">
@@ -111,9 +125,13 @@ const Section = ({
           {title}
         </Text>
         {badge ? (
-          <Text className="text-[11px] font-medium text-[#0644C7] mt-0.5">
-            {badge}
-          </Text>
+          loading && pulse ? (
+            <BadgeSkeleton pulse={pulse} />
+          ) : (
+            <Text className="text-[11px] font-medium text-[#0644C7] mt-0.5">
+              {badge}
+            </Text>
+          )
         ) : null}
       </View>
       {onViewAll && (
@@ -132,7 +150,9 @@ const Section = ({
       className="bg-white dark:bg-neutral-900 rounded-2xl overflow-hidden shadow-sm"
       style={CARD_SHADOW}
     >
-      {isEmpty ? (
+      {loading ? (
+        skeleton
+      ) : isEmpty ? (
         <View className="items-center py-8 px-4">
           <Text className="text-sm text-gray-400 dark:text-gray-500">
             {empty}
@@ -280,6 +300,7 @@ const EventPurchaseRow = ({
 // Screen
 const Activity = () => {
   const insets = useSafeAreaInsets();
+  const pulse = usePulse();
 
   // Timeframe is shared with the Home dashboard filter.
   const { timeframe, dateFrom, dateTo } = useTimeframeSelection();
@@ -338,81 +359,86 @@ const Activity = () => {
           />
         }
       >
-        {loading ? (
-          // Shown on initial load, pull-to-refresh, and any re-fetch (load()
-          // always flips `loading` true). Includes its own title-card + section
-          // placeholders and the same px-5 wrapper as the loaded content below.
-          <ActivityScreenSkeleton />
-        ) : (
-          <View className="px-5 pt-0">
-            <ScreenTitleCard
-              title="Activity"
-              subtitle="Monitor bookings, ticket purchases, and recent event activity."
-            />
+        {/* The header (above) and this title card are static chrome — they stay
+            put through initial load, pull-to-refresh, and any re-fetch. Only the
+            data-driven section bodies (and the New Bookings badge) shimmer. */}
+        <View className="px-5 pt-0">
+          <ScreenTitleCard
+            title="Activity"
+            subtitle="Monitor bookings, ticket purchases, and recent event activity."
+          />
 
-            {error ? (
-              <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
-                <Text className="text-red-600 font-semibold">
-                  Something went wrong
+          {error ? (
+            <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
+              <Text className="text-red-500 text-sm mt-1">{error}</Text>
+              <Pressable
+                onPress={refetch}
+                className="mt-3 self-start px-4 py-2 rounded-xl bg-[#0644C7]/10 active:opacity-80"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7]">
+                  Try Again
                 </Text>
-                <Text className="text-red-500 text-sm mt-1">{error}</Text>
-                <Pressable
-                  onPress={refetch}
-                  className="mt-3 self-start px-4 py-2 rounded-xl bg-[#0644C7]/10 active:opacity-80"
-                >
-                  <Text className="text-xs font-semibold text-[#0644C7]">
-                    Try Again
-                  </Text>
-                </Pressable>
-              </View>
-            ) : (
-              <>
-                <Section
-                  icon="plus-circle"
-                  title="New Bookings"
-                  badge={newBookingsBadge}
-                  // Button stays visible to match the web, but does nothing yet.
-                  // TODO: Navigate to the Bookings screen when the mobile Bookings
-                  // module is implemented.
-                  onViewAll={() => {}}
-                  empty="No new bookings yet"
-                  isEmpty={newBookings.length === 0}
-                >
-                  {newBookings.map((b, i) => (
-                    <NewBookingRow
-                      key={b.id}
-                      b={b}
-                      index={i}
-                      onView={setSelectedBookingId}
-                    />
-                  ))}
-                </Section>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <Section
+                icon="plus-circle"
+                title="New Bookings"
+                badge={newBookingsBadge}
+                // Button stays visible to match the web, but does nothing yet.
+                // TODO: Navigate to the Bookings screen when the mobile Bookings
+                // module is implemented.
+                onViewAll={() => {}}
+                empty="No new bookings yet"
+                isEmpty={newBookings.length === 0}
+                loading={loading}
+                pulse={pulse}
+                skeleton={<NewBookingRowsSkeleton pulse={pulse} />}
+              >
+                {newBookings.map((b, i) => (
+                  <NewBookingRow
+                    key={b.id}
+                    b={b}
+                    index={i}
+                    onView={setSelectedBookingId}
+                  />
+                ))}
+              </Section>
 
-                <Section
-                  icon="tag"
-                  title="Recent Ticket Purchases"
-                  empty="No ticket purchases found for this week"
-                  isEmpty={recentPurchases.length === 0}
-                >
-                  {recentPurchases.map((p, i) => (
-                    <TicketPurchaseRow key={p.id} p={p} index={i} />
-                  ))}
-                </Section>
+              <Section
+                icon="tag"
+                title="Recent Ticket Purchases"
+                empty="No ticket purchases found for this week"
+                isEmpty={recentPurchases.length === 0}
+                loading={loading}
+                pulse={pulse}
+                skeleton={<PurchaseRowsSkeleton pulse={pulse} />}
+              >
+                {recentPurchases.map((p, i) => (
+                  <TicketPurchaseRow key={p.id} p={p} index={i} />
+                ))}
+              </Section>
 
-                <Section
-                  icon="calendar"
-                  title="Recent Event Purchases"
-                  empty="No event purchases yet"
-                  isEmpty={recentEventPurchases.length === 0}
-                >
-                  {recentEventPurchases.map((e, i) => (
-                    <EventPurchaseRow key={e.id} e={e} index={i} />
-                  ))}
-                </Section>
-              </>
-            )}
-          </View>
-        )}
+              <Section
+                icon="calendar"
+                title="Recent Event Purchases"
+                empty="No event purchases yet"
+                isEmpty={recentEventPurchases.length === 0}
+                loading={loading}
+                pulse={pulse}
+                skeleton={<PurchaseRowsSkeleton pulse={pulse} />}
+              >
+                {recentEventPurchases.map((e, i) => (
+                  <EventPurchaseRow key={e.id} e={e} index={i} />
+                ))}
+              </Section>
+            </>
+          )}
+        </View>
       </ScrollView>
 
       {/* Per-booking detail (reused from the calendar tab). */}
