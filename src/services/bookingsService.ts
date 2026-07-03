@@ -19,6 +19,8 @@ export type CalendarBooking = {
   time: string | null;
   participants: number;
   totalAmount: number;
+  /** Amount collected so far; powers the Manage Bookings "Revenue" KPI. */
+  amountPaid: number;
   packageName: string;
   customerName: string;
   locationName: string;
@@ -85,6 +87,7 @@ type RawBooking = {
   created_at?: string | null;
   participants?: number | string | null;
   total_amount?: number | string | null;
+  amount_paid?: number | string | null;
   guest_name?: string | null;
   package?: { name?: string | null } | null;
   location?: { name?: string | null } | null;
@@ -185,6 +188,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     time: toTime(raw.booking_time),
     participants: Number(raw.participants ?? 0),
     totalAmount: Number(raw.total_amount ?? 0),
+    amountPaid: Number(raw.amount_paid ?? 0),
     packageName: raw.package?.name?.trim() || "Booking",
     customerName: customerName(raw.customer, raw.guest_name),
     locationName: raw.location?.name?.trim() || "",
