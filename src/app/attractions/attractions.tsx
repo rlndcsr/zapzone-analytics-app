@@ -575,10 +575,13 @@ const Attractions = () => {
           {/* List header */}
           {!loading && !error && (
             <View className="flex-row items-center gap-2 mb-4">
-              <Text className="text-lg font-bold text-gray-900 dark:text-white">
+              <Text
+                numberOfLines={1}
+                className="shrink text-lg font-bold text-gray-900 dark:text-white"
+              >
                 All Attractions
               </Text>
-              <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
                 <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
                   {filtered.length}
                 </Text>

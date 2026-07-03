@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import type { AppliedDiscount, AppliedFee } from "./pricingService";
 
 /** Booking lifecycle status, mirroring the backend `status` enum. */
 export type EventPurchaseStatus =
@@ -172,7 +173,9 @@ export type EventPurchaseAddonInput = {
 
 /**
  * Payload for POST /api/event-purchases — mirrors the web on-site purchase
- * (in-store / pay-later; card payment is web-only and deferred).
+ * (in-store / pay-later; card payment is web-only and deferred). Fees and
+ * special-pricing discounts are computed server-side and echoed back on submit
+ * as `applied_fees` / `applied_discounts` (same as the web).
  */
 export type CreateEventPurchaseInput = {
   event_id: number;
@@ -193,6 +196,8 @@ export type CreateEventPurchaseInput = {
   notes?: string;
   send_email: boolean;
   add_ons?: EventPurchaseAddonInput[];
+  applied_fees?: AppliedFee[];
+  applied_discounts?: AppliedDiscount[];
 };
 
 type CreatePurchaseResponse = {

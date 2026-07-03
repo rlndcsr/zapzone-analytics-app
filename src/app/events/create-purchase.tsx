@@ -26,12 +26,18 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { InputField } from "../../components/ui/InputField";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
+import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createEventPurchase,
   type CreateEventPurchaseInput,
 } from "../../services/eventPurchasesService";
-import { fetchEvents, type EventRow } from "../../services/eventsService";
+import {
+  fetchEventAvailableDates,
+  fetchEventAvailableTimeSlots,
+  fetchEvents,
+  type EventRow,
+} from "../../services/eventsService";
 import { searchCustomers, type CustomerHit } from "../../services/customersService";
 
 const PRIMARY = "#0644C7";
@@ -258,6 +264,55 @@ const CreateEventPurchaseScreen = () => {
   const [paymentMethod, setPaymentMethod] = useState<"in-store" | "paylater">("in-store");
   const [sendEmail, setSendEmail] = useState(true);
 
+  // Bookable dates/slots come from the backend (same endpoints as the web); the
+  // client-side schedule derivation is only a fallback if those calls fail.
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [timeSlots, setTimeSlots] = useState<string[]>([]);
+  const [loadingDates, setLoadingDates] = useState(false);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  const loadTimeSlots = async (event: EventRow, date: string) => {
+    const token = getToken();
+    if (!token) return;
+    setLoadingSlots(true);
+    setPurchaseTime("");
+    try {
+      const slots = await fetchEventAvailableTimeSlots({
+        token,
+        eventId: event.id,
+        date,
+      });
+      setTimeSlots(slots.length > 0 ? slots : eventTimeSlots(event));
+    } catch {
+      setTimeSlots(eventTimeSlots(event));
+    } finally {
+      setLoadingSlots(false);
+    }
+  };
+
+  const loadAvailableDates = async (event: EventRow) => {
+    const token = getToken();
+    if (!token) return;
+    setLoadingDates(true);
+    try {
+      const fetched = await fetchEventAvailableDates({ token, eventId: event.id });
+      const dates =
+        fetched.length > 0
+          ? fetched
+          : eventDateOptions(event).map((d) => d.value);
+      setAvailableDates(dates);
+      // The web auto-selects the date for a single-date one-time event.
+      if (event.dateType === "one_time" && dates.length === 1) {
+        setPurchaseDate(dates[0]);
+        await loadTimeSlots(event, dates[0]);
+      }
+    } catch {
+      setAvailableDates(eventDateOptions(event).map((d) => d.value));
+    } finally {
+      setLoadingDates(false);
+    }
+  };
+
   // Customer (email search-as-you-type).
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -322,11 +377,12 @@ const CreateEventPurchaseScreen = () => {
     setAmountPaid("");
     setAddonQty({});
     setSearch("");
-    // Default the date/time to the event's first available slot.
-    const dates = eventDateOptions(e);
-    const slots = eventTimeSlots(e);
-    setPurchaseDate(dates[0]?.value ?? "");
-    setPurchaseTime(slots[0] ?? "");
+    setPurchaseDate("");
+    setPurchaseTime("");
+    setTimeSlots([]);
+    setAvailableDates([]);
+    // Load the bookable dates from the backend (auto-selects for one-time events).
+    loadAvailableDates(e);
   };
 
   // Ordered add-ons for the selected event (respecting addOnsOrder by id).
@@ -344,13 +400,10 @@ const CreateEventPurchaseScreen = () => {
   }, [selected]);
 
   const dateOptions = useMemo(
-    () => (selected ? eventDateOptions(selected) : []),
-    [selected],
+    () => availableDates.map((v) => ({ value: v, label: formatDateLabel(v) })),
+    [availableDates],
   );
-  const timeOptions = useMemo(
-    () => (selected ? eventTimeSlots(selected) : []),
-    [selected],
-  );
+  const timeOptions = timeSlots;
 
   const filteredEvents = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -362,17 +415,24 @@ const CreateEventPurchaseScreen = () => {
     );
   }, [events, search]);
 
-  // Totals — base pricing (fees/special-pricing are a later refinement).
-  const subtotal = selected ? selected.price * quantity : 0;
-  const addOnsTotal = useMemo(() => {
-    if (!selected) return 0;
-    return selected.addOns.reduce(
-      (sum, a) => sum + a.price * (addonQty[a.id] ?? 0),
-      0,
-    );
-  }, [selected, addonQty]);
+  // Totals — same math as the web: base (subtotal + add-ons − manual discount),
+  // then server-side fees applied and special-pricing discounts subtracted.
   const discountNum = Math.max(0, Number(discount) || 0);
-  const total = Math.max(0, subtotal + addOnsTotal - discountNum);
+  const {
+    subtotal,
+    total,
+    specialPricingDiscount,
+    feeBreakdown,
+    appliedFees,
+    appliedDiscounts,
+  } = useOnsitePricing({
+    event: selected,
+    quantity,
+    addonQty,
+    discountNum,
+    purchaseDate,
+    purchaseTime,
+  });
 
   const dateLabel = dateOptions.find((d) => d.value === purchaseDate)?.label ?? null;
 
@@ -402,6 +462,14 @@ const CreateEventPurchaseScreen = () => {
       Alert.alert(
         "Select a date & time",
         "An event date and time slot are required before purchasing.",
+      );
+      return;
+    }
+    // Web requires a guest name unless an existing customer is selected.
+    if (!customerName.trim() && !selectedCustomerId) {
+      Alert.alert(
+        "Customer required",
+        "Enter a guest name or select an existing customer.",
       );
       return;
     }
@@ -438,7 +506,9 @@ const CreateEventPurchaseScreen = () => {
       quantity,
       total_amount: total,
       amount_paid: paid,
-      discount_amount: discountNum > 0 ? discountNum : undefined,
+      // Web sends the special-pricing discount here (the manual discount is
+      // already folded into total_amount via the base price).
+      discount_amount: specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
       payment_method: paymentMethod,
       payment_status: isPayLater ? "pending" : paid >= total ? "paid" : "partial",
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
@@ -447,6 +517,8 @@ const CreateEventPurchaseScreen = () => {
         `Event Purchase: ${selected.name} (${quantity} ticket${quantity > 1 ? "s" : ""})`,
       send_email: paymentMethod === "in-store" ? sendEmail : false,
       add_ons: addOnsPayload.length > 0 ? addOnsPayload : undefined,
+      applied_fees: appliedFees.length > 0 ? appliedFees : undefined,
+      applied_discounts: appliedDiscounts.length > 0 ? appliedDiscounts : undefined,
     };
 
     submitLockRef.current = true;
@@ -617,6 +689,7 @@ const CreateEventPurchaseScreen = () => {
               value={customerName}
               onChangeText={setCustomerName}
               placeholder="Walk-in Customer"
+              editable={!selectedCustomerId}
               containerClassName="mb-4 mt-3"
             />
             <InputField
@@ -625,7 +698,26 @@ const CreateEventPurchaseScreen = () => {
               onChangeText={setCustomerPhone}
               placeholder="(555) 123-4567"
               keyboardType="phone-pad"
+              editable={!selectedCustomerId}
             />
+            {selectedCustomerId ? (
+              <Pressable
+                onPress={() => {
+                  setSelectedCustomerId(null);
+                  setCustomerEmail("");
+                  setCustomerName("");
+                  setCustomerPhone("");
+                  setFoundCustomers([]);
+                  setShowCustomerList(false);
+                }}
+                className="mt-3 self-start"
+                hitSlop={8}
+              >
+                <Text className="text-sm font-semibold text-[#0644C7]">
+                  Clear Customer
+                </Text>
+              </Pressable>
+            ) : null}
           </Section>
 
           {selected && (
@@ -711,7 +803,7 @@ const CreateEventPurchaseScreen = () => {
                     <FieldLabel>Date</FieldLabel>
                     <SelectRow
                       icon="calendar"
-                      value={dateLabel}
+                      value={loadingDates ? "Loading dates…" : dateLabel}
                       placeholder="Select date"
                       onPress={() => setSheet("date")}
                     />
@@ -720,12 +812,23 @@ const CreateEventPurchaseScreen = () => {
                     <FieldLabel>Time</FieldLabel>
                     <SelectRow
                       icon="clock"
-                      value={purchaseTime ? formatTime(purchaseTime) : null}
+                      value={
+                        loadingSlots
+                          ? "Loading slots…"
+                          : purchaseTime
+                            ? formatTime(purchaseTime)
+                            : null
+                      }
                       placeholder="Select time"
                       onPress={() => setSheet("time")}
                     />
                   </View>
                 </View>
+                {!loadingSlots && purchaseDate && timeOptions.length === 0 ? (
+                  <Text className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                    No available time slots for this date.
+                  </Text>
+                ) : null}
               </Section>
 
               {/* Payment */}
@@ -743,7 +846,9 @@ const CreateEventPurchaseScreen = () => {
                         key={opt.key}
                         onPress={() => {
                           setPaymentMethod(opt.key);
-                          if (opt.key === "in-store") setAmountPaid(String(total));
+                          // Clear the override so Amount Paid defaults to the
+                          // live total (which updates as fees/discounts load).
+                          setAmountPaid("");
                         }}
                         className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-2xl border ${
                           active
@@ -803,6 +908,32 @@ const CreateEventPurchaseScreen = () => {
                     <Text className="text-sm font-medium text-red-500">-{money(discountNum)}</Text>
                   </View>
                 )}
+                {specialPricingDiscount > 0 && (
+                  <View className="flex-row justify-between mb-2">
+                    <Text className="text-sm text-green-600 dark:text-green-400">
+                      Special Pricing
+                    </Text>
+                    <Text className="text-sm font-medium text-green-600 dark:text-green-400">
+                      -{money(specialPricingDiscount)}
+                    </Text>
+                  </View>
+                )}
+                {feeBreakdown?.fees.map((f) => (
+                  <View key={f.fee_support_id} className="flex-row justify-between mb-2">
+                    <Text
+                      className="text-sm text-gray-500 dark:text-gray-400 flex-1 mr-2"
+                      numberOfLines={1}
+                    >
+                      {f.fee_label || f.fee_name}
+                      {f.fee_application_type === "inclusive" ? " (incl.)" : ""}
+                    </Text>
+                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                      {f.fee_application_type === "additive"
+                        ? `+${money(f.fee_amount)}`
+                        : money(f.fee_amount)}
+                    </Text>
+                  </View>
+                ))}
                 <View className="flex-row justify-between pt-3 mt-1 border-t border-gray-200 dark:border-neutral-700">
                   <Text className="text-base font-bold text-gray-900 dark:text-white">Total</Text>
                   <Text className="text-base font-bold text-gray-900 dark:text-white">
@@ -898,6 +1029,7 @@ const CreateEventPurchaseScreen = () => {
                 onPress={() => {
                   setPurchaseDate(d.value);
                   setSheet(null);
+                  if (selected) loadTimeSlots(selected, d.value);
                 }}
                 className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""

@@ -161,6 +161,63 @@ export async function fetchEvents({
   return extractEvents(res).map(mapEvent);
 }
 
+/** Reads a string[] out of `{key:[…]}`, `{data:{key:[…]}}`, or a bare array. */
+function extractStringList(res: unknown, key: string): string[] {
+  const pick = (o: unknown): unknown =>
+    o && typeof o === "object"
+      ? (o as Record<string, unknown>)[key]
+      : undefined;
+  const direct = pick(res);
+  const nested = pick((res as { data?: unknown })?.data);
+  const arr = Array.isArray(direct)
+    ? direct
+    : Array.isArray(nested)
+      ? nested
+      : Array.isArray(res)
+        ? res
+        : [];
+  return (arr as unknown[]).filter((x): x is string => typeof x === "string");
+}
+
+type EventAvailabilityParams = {
+  token: string;
+  eventId: number;
+  signal?: AbortSignal;
+};
+
+/**
+ * GET /api/events/{id}/available-dates — the bookable dates for an event, as the
+ * web onsite-purchase page uses. Returns `YYYY-MM-DD` strings.
+ */
+export async function fetchEventAvailableDates({
+  token,
+  eventId,
+  signal,
+}: EventAvailabilityParams): Promise<string[]> {
+  const res = await apiRequest<unknown>(
+    `/api/events/${eventId}/available-dates`,
+    { token, signal },
+  );
+  return extractStringList(res, "dates");
+}
+
+/**
+ * GET /api/events/{id}/available-time-slots/{date} — bookable slots for a date.
+ * Normalizes `HH:mm:ss` → `HH:mm` to match the picker values.
+ */
+export async function fetchEventAvailableTimeSlots({
+  token,
+  eventId,
+  date,
+  signal,
+}: EventAvailabilityParams & { date: string }): Promise<string[]> {
+  const res = await apiRequest<unknown>(
+    `/api/events/${eventId}/available-time-slots/${date}`,
+    { token, signal },
+  );
+  return extractStringList(res, "time_slots").map((t) => t.substring(0, 5));
+}
+
 /** Payload for POST /api/events — mirrors the web CreateEventData. */
 export type CreateEventInput = {
   location_id: number;

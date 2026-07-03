@@ -394,6 +394,27 @@ const Events = () => {
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
           </Pressable>
 
+          {/* Onsite Purchase — child feature of Events (mirrors the web
+              /events/onsite-purchase page). */}
+          <Pressable
+            onPress={() => router.push("/events/create-purchase")}
+            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
+            style={CARD_SHADOW}
+          >
+            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
+              <Feather name="plus-circle" size={18} color={PRIMARY} />
+            </View>
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                Onsite Purchase
+              </Text>
+              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Create a walk-in event ticket purchase
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color="#9CA3AF" />
+          </Pressable>
+
           {/* Location filter (mirrors the web header control) */}
           <Pressable
             onPress={() => setSheet("location")}
@@ -512,10 +533,13 @@ const Events = () => {
           {/* List header */}
           {!loading && !error && (
             <View className="flex-row items-center gap-2 mb-4">
-              <Text className="text-lg font-bold text-gray-900 dark:text-white">
+              <Text
+                numberOfLines={1}
+                className="shrink text-lg font-bold text-gray-900 dark:text-white"
+              >
                 All Events
               </Text>
-              <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
                 <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
                   {filtered.length}
                 </Text>
