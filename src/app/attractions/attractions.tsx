@@ -421,6 +421,27 @@ const Attractions = () => {
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
           </Pressable>
 
+          {/* Check-in Scanner — child feature of Attractions (mirrors the web
+              /attractions/check-in scanner). */}
+          <Pressable
+            onPress={() => router.push("/attractions/check-in")}
+            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
+            style={CARD_SHADOW}
+          >
+            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
+              <Feather name="camera" size={18} color={PRIMARY} />
+            </View>
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                Check-in Scanner
+              </Text>
+              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Scan customer QR codes to check them in
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color="#9CA3AF" />
+          </Pressable>
+
           {/* Location + More (mirrors the web header controls, above the cards) */}
           <View className="flex-row gap-3 mb-5">
             <Pressable

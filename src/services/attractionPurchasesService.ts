@@ -180,6 +180,104 @@ export async function createAttractionPurchase(
   return { id: res.data.id };
 }
 
+/** Envelope for a single-purchase response (verify / check-in). */
+type SinglePurchaseResponse = {
+  success: boolean;
+  data: RawPurchase | null;
+  message?: string;
+};
+
+/** Result of verifying or checking in a single attraction purchase. */
+export type PurchaseActionResult = {
+  success: boolean;
+  purchase: PurchaseRow | null;
+  message?: string;
+};
+
+type VerifyParams = {
+  token: string;
+  purchaseId: number;
+  /** Staff member performing the scan (mirrors the web `user_id` query param). */
+  userId?: number;
+  signal?: AbortSignal;
+};
+
+/**
+ * GET /api/attraction-purchases/{id}/verify — the same endpoint the web
+ * check-in scanner calls to look up a scanned ticket. Returns the purchase so
+ * the caller can gate on its status before checking in.
+ */
+export async function verifyAttractionPurchase({
+  token,
+  purchaseId,
+  userId,
+  signal,
+}: VerifyParams): Promise<PurchaseActionResult> {
+  const params = new URLSearchParams();
+  if (userId != null) params.append("user_id", String(userId));
+  const qs = params.toString();
+
+  const res = await apiRequest<SinglePurchaseResponse>(
+    `/api/attraction-purchases/${purchaseId}/verify${qs ? `?${qs}` : ""}`,
+    { token, signal },
+  );
+  return {
+    success: !!res?.success,
+    purchase: res?.data ? mapPurchase(res.data) : null,
+    message: res?.message,
+  };
+}
+
+type FetchOneParams = {
+  token: string;
+  purchaseId: number;
+  signal?: AbortSignal;
+};
+
+/**
+ * GET /api/attraction-purchases/{id} — a single purchase. The web scanner uses
+ * this to backfill `scheduled_date`/`scheduled_time` when the verify response
+ * omits them; returns `null` if the purchase can't be resolved.
+ */
+export async function fetchAttractionPurchase({
+  token,
+  purchaseId,
+  signal,
+}: FetchOneParams): Promise<PurchaseRow | null> {
+  const res = await apiRequest<SinglePurchaseResponse>(
+    `/api/attraction-purchases/${purchaseId}`,
+    { token, signal },
+  );
+  return res?.data ? mapPurchase(res.data) : null;
+}
+
+type CheckInParams = {
+  token: string;
+  purchaseId: number;
+  /** Staff member performing the check-in (recorded as `checked_in_by`). */
+  userId?: number;
+};
+
+/**
+ * PATCH /api/attraction-purchases/{id}/check-in — marks a confirmed ticket as
+ * used. Same endpoint + payload (`{ user_id? }`) the web scanner uses.
+ */
+export async function checkInAttractionPurchase({
+  token,
+  purchaseId,
+  userId,
+}: CheckInParams): Promise<PurchaseActionResult> {
+  const res = await apiRequest<SinglePurchaseResponse>(
+    `/api/attraction-purchases/${purchaseId}/check-in`,
+    { method: "PATCH", token, body: userId != null ? { user_id: userId } : {} },
+  );
+  return {
+    success: !!res?.success,
+    purchase: res?.data ? mapPurchase(res.data) : null,
+    message: res?.message,
+  };
+}
+
 /**
  * GET /api/attraction-purchases/trashed — soft-deleted purchases (the web
  * "View Deleted" list). Read-only here; restore/force-delete come later.

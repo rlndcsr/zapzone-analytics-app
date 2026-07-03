@@ -37,6 +37,13 @@
       "expo-secure-store",
       "expo-sharing",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow ZapZone to access your camera to scan ticket QR codes for check-in.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "Allow ZapZone to save booking QR codes to your photos.",
