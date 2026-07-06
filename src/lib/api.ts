@@ -8,6 +8,12 @@ const API_BASE_URL = (() => {
   return url.replace(/\/+$/, "");
 })();
 
+/** Absolute URL for an API path — for native flows (file download / multipart
+ *  upload) that bypass {@link apiRequest}'s JSON handling. */
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
 /** Field-keyed validation messages as returned by the Laravel backend. */
 export type FieldErrors = Record<string, string[]>;
 

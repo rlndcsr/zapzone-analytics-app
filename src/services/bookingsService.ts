@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/api";
+import { apiRequest, apiUrl } from "../lib/api";
 
 /** Booking status enum exactly as stored by the backend. */
 export type BookingStatus =
@@ -85,6 +85,7 @@ type RawBooking = {
   booking_date?: string | null;
   booking_time?: string | null;
   created_at?: string | null;
+  deleted_at?: string | null;
   participants?: number | string | null;
   total_amount?: number | string | null;
   amount_paid?: number | string | null;
@@ -366,6 +367,28 @@ export async function updateBookingPaymentStatus(
   });
 }
 
+/** DELETE /api/bookings/{id} — soft-delete (moves the booking to trash),
+ *  mirroring the web admin's row "Delete" action (bookingService.deleteBooking). */
+export async function deleteBooking(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/bookings/${id}`, { method: "DELETE", token });
+}
+
+/**
+ * POST /api/bookings/check-in — mark a confirmed booking as checked-in, matching
+ * the web admin's row "Check In" action. The backend records checked_in_at /
+ * checked_in_by from the authenticated user and only accepts confirmed bookings.
+ */
+export async function checkInBooking(
+  token: string,
+  referenceNumber: string,
+): Promise<void> {
+  await apiRequest(`/api/bookings/check-in`, {
+    method: "POST",
+    token,
+    body: { reference_number: referenceNumber },
+  });
+}
+
 /** PATCH /api/bookings/{id}/internal-notes — save internal notes. */
 export async function updateBookingInternalNotes(
   token: string,
@@ -598,6 +621,153 @@ export async function updateBooking(
   if (input.sendEmail != null) body.send_email = input.sendEmail;
 
   await apiRequest(`/api/bookings/${id}`, { method: "PATCH", token, body });
+}
+
+// ---------------------------------------------------------------------------
+// Page-level "More" actions (mirrors the web Manage Bookings header menu):
+// Export Bookings, Generate Report, Bulk Import, View Deleted.
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/bookings/export — the raw booking records the web admin turns into a
+ * CSV (bookingService.exportBookings). Returned as-is so the caller can build
+ * the same CSV columns client-side.
+ */
+export async function exportBookings(
+  token: string,
+  locationId?: number | null,
+): Promise<Record<string, unknown>[]> {
+  const params = new URLSearchParams({ sort_by: "booking_date", sort_order: "desc" });
+  if (locationId != null) params.append("location_id", String(locationId));
+  const res = await apiRequest<{ data?: { bookings?: Record<string, unknown>[] } }>(
+    `/api/bookings/export?${params.toString()}`,
+    { token },
+  );
+  return res?.data?.bookings ?? [];
+}
+
+/** A soft-deleted booking row (adds the deletion timestamp to the list shape). */
+export type TrashedBooking = CalendarBooking & { deletedAt: string | null };
+
+/**
+ * GET /api/bookings/trashed — soft-deleted bookings (the web "View Deleted"
+ * list), paged newest-first and scoped to the location when provided.
+ */
+export async function fetchTrashedBookings({
+  token,
+  locationId,
+  signal,
+}: FetchParams): Promise<TrashedBooking[]> {
+  const out: TrashedBooking[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const params = new URLSearchParams({
+      per_page: String(PER_PAGE),
+      page: String(page),
+      sort_by: "deleted_at",
+      sort_order: "desc",
+    });
+    if (locationId != null) params.append("location_id", String(locationId));
+    const res = await apiRequest<BookingsListResponse & { data: { bookings: RawBooking[] } }>(
+      `/api/bookings/trashed?${params.toString()}`,
+      { token, signal },
+    );
+    for (const raw of res?.data?.bookings ?? []) {
+      out.push({
+        ...mapBooking(raw, toDateKey(raw.booking_date) ?? ""),
+        deletedAt: raw.deleted_at ?? null,
+      });
+    }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
+  return out;
+}
+
+/** POST /api/bookings/{id}/restore — restore a soft-deleted booking. */
+export async function restoreBooking(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/bookings/${id}/restore`, { method: "POST", token });
+}
+
+/** Result of a CSV bulk import (mirrors the web bulkImportCsv response). */
+export type BulkImportResult = {
+  imported: number;
+  skipped: number;
+  errors: { row: number; error: string }[];
+  total_rows: number;
+};
+
+/**
+ * POST /api/bookings/bulk-import-csv — multipart upload of a CSV file, matching
+ * the web admin's Bulk Import. Sent via a direct fetch (not apiRequest) so
+ * React Native sets the multipart boundary itself.
+ */
+export async function bulkImportBookingsCsv(params: {
+  token: string;
+  fileUri: string;
+  locationId: number;
+  skipDuplicates?: boolean;
+}): Promise<BulkImportResult> {
+  const form = new FormData();
+  // React Native's FormData accepts a { uri, name, type } file descriptor.
+  form.append("file", {
+    uri: params.fileUri,
+    name: "bookings-import.csv",
+    type: "text/csv",
+  } as unknown as Blob);
+  form.append("location_id", String(params.locationId));
+  form.append("skip_duplicates", params.skipDuplicates === false ? "0" : "1");
+
+  const res = await fetch(apiUrl("/api/bookings/bulk-import-csv"), {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Bearer ${params.token}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(
+      (data?.message as string) ?? "Bulk import failed. Please check the CSV and try again.",
+    );
+  }
+  return data?.data as BulkImportResult;
+}
+
+/** Report period selector (subset of the web's period types that map cleanly to
+ *  mobile controls). */
+export type ReportPeriod = "today" | "monthly" | "custom";
+
+/**
+ * Absolute URL for GET /api/bookings/details-report (a PDF stream). Built here
+ * so the screen can hand it to expo-file-system's downloader with the same
+ * query params the web sends.
+ */
+export function buildBookingsReportUrl(params: {
+  period: ReportPeriod;
+  viewMode: "individual" | "list";
+  includeCancelled: boolean;
+  month?: number;
+  year?: number;
+  startDate?: string;
+  endDate?: string;
+  locationId?: number | null;
+  userId?: number | null;
+}): string {
+  const qs = new URLSearchParams();
+  qs.append("package_ids", "all");
+  qs.append("period_type", params.period);
+  if (params.period === "monthly") {
+    qs.append("month", String(params.month ?? new Date().getMonth() + 1));
+    qs.append("year", String(params.year ?? new Date().getFullYear()));
+  } else if (params.period === "custom") {
+    if (params.startDate) qs.append("start_date", params.startDate);
+    if (params.endDate) qs.append("end_date", params.endDate);
+  }
+  qs.append("view_mode", params.viewMode);
+  if (params.includeCancelled) qs.append("include_cancelled", "true");
+  if (params.locationId != null) qs.append("location_id", String(params.locationId));
+  if (params.userId != null) qs.append("user_id", String(params.userId));
+  return apiUrl(`/api/bookings/details-report?${qs.toString()}`);
 }
 
 /** POST /api/payments — record a manual in-store payment (no card tokenization). */

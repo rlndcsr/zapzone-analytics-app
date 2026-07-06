@@ -3,6 +3,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,14 +13,24 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BookingActionsSheet } from "../../components/ui/BookingActionsSheet";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
+import { BookingsImportSheet } from "../../components/ui/BookingsImportSheet";
+import { BookingsMoreSheet } from "../../components/ui/BookingsMoreSheet";
+import { BookingsReportSheet } from "../../components/ui/BookingsReportSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkeleton";
 import { consumeBookingsStale, useBookings } from "../../lib/hooks/useBookings";
-import { getCurrentUser } from "../../lib/session";
-import type { BookingStatus, CalendarBooking } from "../../services/bookingsService";
+import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  exportBookings,
+  fetchTrashedBookings,
+  type BookingStatus,
+  type CalendarBooking,
+  type TrashedBooking,
+} from "../../services/bookingsService";
 
 const PRIMARY = "#0644C7";
 
@@ -53,6 +64,78 @@ const DATE_OPTIONS: { label: string; value: DateFilter }[] = [
 ];
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
+
+/** Raw booking shape returned by GET /api/bookings/export (subset we render). */
+type ExportRow = {
+  reference_number?: string | null;
+  customer?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
+  guest_name?: string | null;
+  guest_email?: string | null;
+  guest_phone?: string | null;
+  package?: { name?: string | null } | null;
+  room?: { name?: string | null } | null;
+  location?: { name?: string | null } | null;
+  booking_date?: string | null;
+  booking_time?: string | null;
+  participants?: number | string | null;
+  duration?: number | string | null;
+  duration_unit?: string | null;
+  status?: string | null;
+  payment_method?: string | null;
+  payment_status?: string | null;
+  total_amount?: number | string | null;
+  amount_paid?: number | string | null;
+  attractions?: { name?: string | null; pivot?: { quantity?: number | null } | null }[] | null;
+  add_ons?: { name?: string | null; pivot?: { quantity?: number | null } | null }[] | null;
+  notes?: string | null;
+  created_at?: string | null;
+};
+
+/** Build the same CSV the web admin exports (identical column order). */
+function buildBookingsCsv(rows: ExportRow[]): string {
+  const headers = [
+    "Reference Number", "Customer Name", "Email", "Phone", "Package", "Room",
+    "Location", "Date", "Time", "Participants", "Duration", "Status",
+    "Payment Method", "Payment Status", "Total Amount", "Amount Paid",
+    "Attractions", "Add-ons", "Notes", "Created At",
+  ];
+  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const items = (list: ExportRow["attractions"]) =>
+    (list ?? []).map((a) => `${a.name ?? ""} (${a.pivot?.quantity ?? 1})`).join("; ");
+  const line = (b: ExportRow) =>
+    [
+      b.reference_number ?? "",
+      b.customer
+        ? `${b.customer.first_name ?? ""} ${b.customer.last_name ?? ""}`.trim()
+        : b.guest_name ?? "",
+      b.customer?.email ?? b.guest_email ?? "",
+      b.customer?.phone ?? b.guest_phone ?? "",
+      b.package?.name ?? "",
+      b.room?.name ?? "",
+      b.location?.name ?? "",
+      b.booking_date ?? "",
+      b.booking_time ? formatTime(b.booking_time.substring(0, 5)) : "",
+      b.participants ?? 0,
+      b.duration && b.duration_unit ? `${b.duration} ${b.duration_unit}` : "",
+      b.status ?? "",
+      b.payment_method ?? "",
+      b.payment_status ?? "",
+      b.total_amount ?? 0,
+      b.amount_paid ?? 0,
+      items(b.attractions),
+      items(b.add_ons),
+      b.notes ?? "",
+      b.created_at ?? "",
+    ]
+      .map(esc)
+      .join(",");
+  return [headers.map(esc).join(","), ...rows.map(line)].join("\n");
+}
 
 const formatMoney = (value: number) =>
   `$${value.toLocaleString("en-US", {
@@ -89,6 +172,29 @@ function formatTime(time: string | null): string {
   return `${hour}:${mStr ?? "00"} ${meridian}`;
 }
 
+/** Minutes since midnight for an "HH:MM" time; null/blank → 0 (matches the web's
+ *  '00:00' fallback). */
+function timeToMinutes(time: string | null): number {
+  if (!time) return 0;
+  const [h, m] = time.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+/**
+ * Default booking order, identical to the web admin's applyDefaultSort
+ * (Bookings.tsx): checked-in bookings sink to the bottom, then by date ascending
+ * (booking.date is YYYY-MM-DD, so a lexical compare is chronological), then by
+ * time ascending.
+ */
+function compareBookingsDefault(a: CalendarBooking, b: CalendarBooking): number {
+  const aChecked = a.status === "checked-in";
+  const bChecked = b.status === "checked-in";
+  if (aChecked && !bChecked) return 1;
+  if (!aChecked && bChecked) return -1;
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  return timeToMinutes(a.time) - timeToMinutes(b.time);
+}
+
 const Stat = ({
   icon,
   label,
@@ -108,10 +214,12 @@ const BookingCard = ({
   booking,
   showLocation,
   onPress,
+  onMore,
 }: {
   booking: CalendarBooking;
   showLocation: boolean;
   onPress: () => void;
+  onMore: () => void;
 }) => {
   const dateTime = [formatDate(booking.date), formatTime(booking.time)]
     .filter(Boolean)
@@ -175,12 +283,23 @@ const BookingCard = ({
         </View>
       )}
 
-      {/* Footer: guests + total */}
+      {/* Footer: guests + total + More */}
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
         <Stat icon="users" label={`${booking.participants} guests`} />
-        <Text className="text-sm font-bold text-gray-900 dark:text-white">
-          {formatMoney(booking.totalAmount)}
-        </Text>
+        <View className="flex-row items-center gap-1">
+          <Text className="text-sm font-bold text-gray-900 dark:text-white">
+            {formatMoney(booking.totalAmount)}
+          </Text>
+          <Pressable
+            onPress={onMore}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={`More actions for ${booking.customerName}`}
+            className="ml-1 p-1.5 rounded-full active:bg-gray-100 dark:active:bg-neutral-800"
+          >
+            <Feather name="more-vertical" size={18} color="#9CA3AF" />
+          </Pressable>
+        </View>
       </View>
     </Pressable>
   );
@@ -229,7 +348,12 @@ const Bookings = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+  const currentUser = getCurrentUser();
+  const isCompanyAdmin = currentUser?.role === "company_admin";
+  // Location scope for export / report / import. Managers carry their own
+  // location_id; company admins have none here (the list scopes by name, not id),
+  // so those flows run unscoped / all-locations for them, like the backend allows.
+  const scopeLocationId = currentUser?.location_id ?? null;
 
   const { bookings, loading, error, refetch } = useBookings();
 
@@ -242,15 +366,91 @@ const Bookings = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+  // The booking whose "More" actions sheet is open (null = closed).
+  const [actionsBooking, setActionsBooking] = useState<CalendarBooking | null>(null);
+
+  // Page-level "More" menu (mirrors the web header ActionMenu) + its flows.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // "View Deleted" — trashed bookings loaded lazily when toggled on.
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [deletedItems, setDeletedItems] = useState<TrashedBooking[]>([]);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [deletedError, setDeletedError] = useState<string | null>(null);
+
+  const loadDeleted = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      setDeletedError("Not authenticated");
+      return;
+    }
+    setDeletedLoading(true);
+    setDeletedError(null);
+    try {
+      const items = await fetchTrashedBookings({
+        token,
+        locationId: scopeLocationId ?? undefined,
+      });
+      setDeletedItems(items);
+    } catch (e) {
+      setDeletedError(e instanceof Error ? e.message : "Failed to load deleted bookings");
+    } finally {
+      setDeletedLoading(false);
+    }
+  }, [scopeLocationId]);
+
+  // Load / reload the trashed list whenever it's shown.
+  useEffect(() => {
+    if (showDeleted) loadDeleted();
+  }, [showDeleted, loadDeleted]);
+
+  const runExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      const token = getToken();
+      if (!token) {
+        Alert.alert("Not authenticated");
+        return;
+      }
+      const rows = await exportBookings(token, scopeLocationId);
+      if (rows.length === 0) {
+        Alert.alert("Nothing to export", "There are no bookings to export.");
+        return;
+      }
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const csv = buildBookingsCsv(rows as unknown as ExportRow[]);
+      const stamp = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}bookings-export-${stamp}.csv`;
+      await FileSystem.writeAsStringAsync(uri, csv);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Bookings",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Export ready", `Saved to ${uri}`);
+      }
+      setMoreOpen(false);
+    } catch (e) {
+      Alert.alert("Export failed", e instanceof Error ? e.message : "Could not export bookings.");
+    } finally {
+      setExporting(false);
+    }
+  }, [scopeLocationId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refetch();
+      await (showDeleted ? loadDeleted() : refetch());
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [showDeleted, loadDeleted, refetch]);
 
   // Refetch on return after a mutation (e.g. a status/payment change from the
   // detail sheet) so the list + KPIs reflect it without a manual pull.
@@ -304,10 +504,23 @@ const Bookings = () => {
     };
   }, [locationScoped]);
 
+  // Deleted bookings, scoped to the selected location the same way active ones
+  // are. The list uses this when "View Deleted" is on; KPIs always use active.
+  const deletedScoped = useMemo(
+    () =>
+      locationFilter === "all"
+        ? deletedItems
+        : deletedItems.filter((b) => b.locationName === locationFilter),
+    [deletedItems, locationFilter],
+  );
+  const listBase = showDeleted ? deletedScoped : locationScoped;
+  const listLoading = showDeleted ? deletedLoading : loading;
+  const listError = showDeleted ? deletedError : error;
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     const today = todayKey();
-    return locationScoped.filter((b) => {
+    const result = listBase.filter((b) => {
       if (statusFilter !== "all" && b.status !== statusFilter) return false;
       if (dateFilter === "upcoming" && b.date < today) return false;
       if (dateFilter === "today" && b.date !== today) return false;
@@ -319,7 +532,10 @@ const Bookings = () => {
       }
       return true;
     });
-  }, [locationScoped, search, statusFilter, dateFilter]);
+    // Default ordering identical to the web (applyDefaultSort). The deleted list
+    // keeps its deleted_at-desc fetch order, matching the web's trashed view.
+    return showDeleted ? result : result.sort(compareBookingsDefault);
+  }, [listBase, search, statusFilter, dateFilter, showDeleted]);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
@@ -329,7 +545,7 @@ const Bookings = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, dateFilter, locationFilter, perPage]);
+  }, [search, statusFilter, dateFilter, locationFilter, perPage, showDeleted]);
 
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Statuses";
@@ -380,23 +596,40 @@ const Bookings = () => {
             </Text>
           </View>
 
-          {/* Location filter (company admins only — mirrors the web header
-              control; managers are scoped to their own location). */}
-          {isCompanyAdmin && (
+          {/* Location + More (mirrors the Attractions screen layout, above the
+              cards). The location selector is company-admin only; managers are
+              scoped to their own location by the backend. */}
+          <View className="flex-row gap-3 mb-5">
+            {isCompanyAdmin && (
+              <Pressable
+                onPress={() => setSheet("location")}
+                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+              >
+                <Feather name="map-pin" size={16} color={PRIMARY} />
+                <Text
+                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                  numberOfLines={1}
+                >
+                  {locationLabel}
+                </Text>
+                <Feather name="chevron-down" size={14} color="#9CA3AF" />
+              </Pressable>
+            )}
+
             <Pressable
-              onPress={() => setSheet("location")}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
+              onPress={() => setMoreOpen(true)}
+              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
-              <Feather name="map-pin" size={16} color={PRIMARY} />
+              <Feather name="more-horizontal" size={16} color="#6B7280" />
               <Text
                 className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                 numberOfLines={1}
               >
-                {locationLabel}
+                More
               </Text>
               <Feather name="chevron-down" size={14} color="#9CA3AF" />
             </Pressable>
-          )}
+          </View>
 
           {/* Error state */}
           {!loading && error && (
@@ -508,13 +741,13 @@ const Bookings = () => {
           </View>
 
           {/* List header */}
-          {!loading && !error && (
+          {!listLoading && !listError && (
             <View className="flex-row items-center gap-2 mb-4">
               <Text
                 numberOfLines={1}
                 className="shrink text-lg font-bold text-gray-900 dark:text-white"
               >
-                All Bookings
+                {showDeleted ? "Deleted Bookings" : "All Bookings"}
               </Text>
               <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
                 <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -524,25 +757,35 @@ const Bookings = () => {
             </View>
           )}
 
+          {/* Deleted-list error (active-list error is shown above the KPIs) */}
+          {showDeleted && !listLoading && listError && (
+            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
+              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-500 text-sm mt-1">{listError}</Text>
+            </View>
+          )}
+
           {/* List / states */}
-          {loading ? (
+          {listLoading ? (
             <BookingsListSkeleton />
-          ) : !error && !hasResults ? (
+          ) : !listError && !hasResults ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="calendar" size={26} color="#9CA3AF" />
+                <Feather name={showDeleted ? "archive" : "calendar"} size={26} color="#9CA3AF" />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No bookings found
+                {showDeleted ? "No deleted bookings" : "No bookings found"}
               </Text>
               <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {bookings.length === 0
-                  ? "There are no bookings for this account yet."
-                  : "Try adjusting your search or filters."}
+                {showDeleted
+                  ? "Deleted bookings will appear here."
+                  : bookings.length === 0
+                    ? "There are no bookings for this account yet."
+                    : "Try adjusting your search or filters."}
               </Text>
             </View>
           ) : (
-            !error && (
+            !listError && (
               <>
                 {paged.map((booking) => (
                   <BookingCard
@@ -550,6 +793,7 @@ const Bookings = () => {
                     booking={booking}
                     showLocation={isCompanyAdmin}
                     onPress={() => setSelectedBookingId(booking.id)}
+                    onMore={() => setActionsBooking(booking)}
                   />
                 ))}
 
@@ -766,6 +1010,46 @@ const Bookings = () => {
         visible={selectedBookingId !== null}
         onClose={() => setSelectedBookingId(null)}
         onChanged={refetch}
+      />
+
+      {/* Per-booking "More" actions (mirrors the web row actions) */}
+      <BookingActionsSheet
+        visible={actionsBooking !== null}
+        booking={actionsBooking}
+        deleted={showDeleted}
+        onClose={() => setActionsBooking(null)}
+        onViewDetails={() => {
+          if (actionsBooking) setSelectedBookingId(actionsBooking.id);
+        }}
+        onChanged={showDeleted ? loadDeleted : refetch}
+      />
+
+      {/* Page-level "More" menu (mirrors the web header ActionMenu) */}
+      <BookingsMoreSheet
+        visible={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        showDeleted={showDeleted}
+        exporting={exporting}
+        onBulkImport={() => setShowImport(true)}
+        onExport={runExport}
+        onGenerateReport={() => setShowReport(true)}
+        onToggleDeleted={() => setShowDeleted((v) => !v)}
+      />
+
+      <BookingsReportSheet
+        visible={showReport}
+        onClose={() => setShowReport(false)}
+        locationId={scopeLocationId}
+      />
+
+      <BookingsImportSheet
+        visible={showImport}
+        onClose={() => setShowImport(false)}
+        locationId={scopeLocationId}
+        onImported={() => {
+          refetch();
+          if (showDeleted) loadDeleted();
+        }}
       />
     </View>
   );
