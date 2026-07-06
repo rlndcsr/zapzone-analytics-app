@@ -21,6 +21,7 @@ import {
   consumeAttractionsStale,
   useAttractions,
 } from "../../lib/hooks/useAttractions";
+import { getCurrentUser } from "../../lib/session";
 import type {
   AttractionRow,
   AttractionStatus,
@@ -233,6 +234,11 @@ const Attractions = () => {
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const { attractions, loading, error, refetch } = useAttractions();
 
+  // Company admins can switch locations; location managers are already scoped to
+  // their own location by the backend, so the selector is hidden for them
+  // (mirrors the web ManageAttractions page and the mobile Bookings screen).
+  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -442,28 +448,35 @@ const Attractions = () => {
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
           </Pressable>
 
-          {/* Location + More (mirrors the web header controls, above the cards) */}
+          {/* Location + More (mirrors the web header controls, above the cards).
+              The location selector is company-admin only; managers are scoped to
+              their own location by the backend. */}
           <View className="flex-row gap-3 mb-5">
+            {isCompanyAdmin && (
+              <Pressable
+                onPress={() => setShowLocationSheet(true)}
+                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+              >
+                <Feather name="map-pin" size={16} color={PRIMARY} />
+                <Text
+                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                  numberOfLines={1}
+                >
+                  {locationLabel}
+                </Text>
+                <Feather name="chevron-down" size={14} color="#9CA3AF" />
+              </Pressable>
+            )}
+
             <Pressable
-              onPress={() => setShowLocationSheet(true)}
+              onPress={() => setShowMoreSheet(true)}
               className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
-              <Feather name="map-pin" size={16} color={PRIMARY} />
+              <Feather name="more-horizontal" size={16} color="#6B7280" />
               <Text
                 className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                 numberOfLines={1}
               >
-                {locationLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setShowMoreSheet(true)}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="more-horizontal" size={16} color="#6B7280" />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
                 More
               </Text>
               <Feather name="chevron-down" size={14} color="#9CA3AF" />

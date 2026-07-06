@@ -77,6 +77,20 @@ const DATE_OPTIONS: { label: string; value: DateRange }[] = [
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
 
+// Default list ordering — mirrors the web Event Purchases page exactly: sort by
+// status priority first, then newest-created first within the same status.
+// (Includes refunded/voided for forward-parity even though the mobile status
+// union omits them; unknown statuses fall back to 3, like the web.)
+const STATUS_PRIORITY: Record<string, number> = {
+  confirmed: 0,
+  pending: 1,
+  completed: 2,
+  "checked-in": 3,
+  cancelled: 4,
+  refunded: 5,
+  voided: 6,
+};
+
 const STATUS_BADGE: Record<EventPurchaseStatus, string> = {
   confirmed: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
   "checked-in": "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
@@ -433,20 +447,28 @@ const EventPurchases = () => {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     const rangeStart = dateFilter === "all" ? null : startOfRange(dateFilter);
-    return listSource.filter((p) => {
-      if (statusFilter !== "all" && p.status !== statusFilter) return false;
-      if (paymentFilter !== "all" && p.paymentMethod !== paymentFilter) return false;
-      if (rangeStart) {
-        const d = new Date(p.createdAt);
-        if (Number.isNaN(d.getTime()) || d < rangeStart) return false;
-      }
-      if (term) {
-        const haystack =
-          `${p.customerName} ${p.email} ${p.eventName} ${p.phone} ${p.referenceNumber}`.toLowerCase();
-        if (!haystack.includes(term)) return false;
-      }
-      return true;
-    });
+    return listSource
+      .filter((p) => {
+        if (statusFilter !== "all" && p.status !== statusFilter) return false;
+        if (paymentFilter !== "all" && p.paymentMethod !== paymentFilter) return false;
+        if (rangeStart) {
+          const d = new Date(p.createdAt);
+          if (Number.isNaN(d.getTime()) || d < rangeStart) return false;
+        }
+        if (term) {
+          const haystack =
+            `${p.customerName} ${p.email} ${p.eventName} ${p.phone} ${p.referenceNumber}`.toLowerCase();
+          if (!haystack.includes(term)) return false;
+        }
+        return true;
+      })
+      // Default ordering identical to the web: status priority, then newest first.
+      .sort((a, b) => {
+        const priorityDiff =
+          (STATUS_PRIORITY[a.status] ?? 3) - (STATUS_PRIORITY[b.status] ?? 3);
+        if (priorityDiff !== 0) return priorityDiff;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
   }, [listSource, search, statusFilter, paymentFilter, dateFilter]);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
