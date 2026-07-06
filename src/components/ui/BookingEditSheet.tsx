@@ -17,6 +17,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -24,10 +25,15 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getToken } from "../../lib/session";
 import {
+  fetchAvailableTimeSlots,
+  fetchPackageAvailabilitySchedules,
   fetchPackages,
   fetchRooms,
+  isDateBookable,
   updateBooking,
+  type AvailableSlot,
   type BookingDetail,
+  type PackageAvailabilitySchedule,
   type PackageOption,
   type RoomOption,
 } from "../../services/bookingsService";
@@ -59,15 +65,6 @@ function to12h(hhmm: string): string {
   return `${hour}:${pad2(m)} ${meridian}`;
 }
 
-// 15-minute slots across a typical operating window (11:15 AM – 8:00 PM).
-const TIME_SLOTS = (() => {
-  const out: string[] = [];
-  for (let mins = 11 * 60 + 15; mins <= 20 * 60; mins += 15) {
-    out.push(`${pad2(Math.floor(mins / 60))}:${pad2(mins % 60)}`);
-  }
-  return out;
-})();
-
 const FieldLabel = ({ children }: { children: React.ReactNode }) => (
   <Text className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1.5">
     {children}
@@ -94,27 +91,40 @@ const inputClass =
 
 type Option = { label: string; value: string | number };
 
-/** Tap-to-open option picker (used for package, space, status, gender). */
+type SelectConfig = {
+  label: string;
+  value: string | number | null;
+  options: Option[];
+  onSelect: (v: string | number) => void;
+};
+
+/**
+ * Tap-to-open option picker (package, space, status, gender). It does NOT open
+ * its own Modal — stacking a native Modal on top of the Edit sheet's Modal
+ * crashes Android (New Architecture). Instead it asks the parent to show one
+ * shared in-sheet overlay, so only a single native Modal is ever mounted.
+ */
 const SelectField = ({
   label,
   value,
   placeholder,
   options,
   onSelect,
+  onOpen,
 }: {
   label: string;
   value: string | number | null;
   placeholder: string;
   options: Option[];
   onSelect: (v: string | number) => void;
+  onOpen: (config: SelectConfig) => void;
 }) => {
-  const [open, setOpen] = useState(false);
   const current = options.find((o) => String(o.value) === String(value));
   return (
     <View>
       <FieldLabel>{label}</FieldLabel>
       <Pressable
-        onPress={() => setOpen(true)}
+        onPress={() => onOpen({ label, value, options, onSelect })}
         className="flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-4 py-3 bg-white dark:bg-neutral-900 active:opacity-80"
       >
         <Text
@@ -127,59 +137,6 @@ const SelectField = ({
         </Text>
         <ChevronDown size={18} color="#9ca3af" />
       </Pressable>
-
-      <Modal
-        visible={open}
-        transparent
-        statusBarTranslucent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
-      >
-        <Pressable
-          className="flex-1 justify-end"
-          style={{ backgroundColor: "rgba(20,20,20,0.5)" }}
-          onPress={() => setOpen(false)}
-        >
-          <View className="bg-white dark:bg-neutral-900 rounded-t-3xl max-h-[70%] pb-6">
-            <View className="w-10 h-1 rounded-full bg-gray-300 self-center mt-3 mb-1" />
-            <Text className="text-base font-bold text-gray-900 dark:text-white px-5 pt-3 pb-2">
-              {label}
-            </Text>
-            <ScrollView>
-              {options.length === 0 ? (
-                <Text className="text-sm text-gray-400 px-5 py-4">
-                  No options available.
-                </Text>
-              ) : (
-                options.map((o) => {
-                  const active = String(o.value) === String(value);
-                  return (
-                    <Pressable
-                      key={String(o.value)}
-                      onPress={() => {
-                        onSelect(o.value);
-                        setOpen(false);
-                      }}
-                      className="px-5 py-3.5 flex-row items-center justify-between active:bg-gray-50 dark:active:bg-neutral-800"
-                    >
-                      <Text
-                        className={`text-sm flex-1 mr-2 ${
-                          active
-                            ? "text-[#0644C7] font-semibold"
-                            : "text-gray-700 dark:text-gray-200"
-                        }`}
-                      >
-                        {o.label}
-                      </Text>
-                      {active && <Check size={18} color="#0644C7" />}
-                    </Pressable>
-                  );
-                })
-              )}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
     </View>
   );
 };
@@ -199,6 +156,14 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
   const [packages, setPackages] = useState<PackageOption[]>([]);
   const [rooms, setRooms] = useState<RoomOption[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Availability: which days the package is bookable on, and the open slots for
+  // a newly-picked reschedule date.
+  const [schedules, setSchedules] = useState<PackageAvailabilitySchedule[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  // The option picker currently open, rendered as one in-sheet overlay.
+  const [activeSelect, setActiveSelect] = useState<SelectConfig | null>(null);
 
   // Form state
   const [packageId, setPackageId] = useState<number | null>(null);
@@ -257,6 +222,25 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
     };
   }, [visible, detail?.locationId]);
 
+  // Load the selected package's booking-day rules so the calendar can restrict
+  // which days the booking may be rescheduled onto (e.g. Fridays only). Keyed to
+  // the editable packageId so changing the package updates the calendar.
+  useEffect(() => {
+    if (!visible || packageId == null) {
+      setSchedules([]);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    let alive = true;
+    fetchPackageAvailabilitySchedules(token, packageId)
+      .then((s) => alive && setSchedules(s))
+      .catch(() => alive && setSchedules([]));
+    return () => {
+      alive = false;
+    };
+  }, [visible, packageId]);
+
   // Ensure the current package/space appear as options even if the list fetch
   // failed or omitted them.
   const packageOptions: Option[] = useMemo(() => {
@@ -283,31 +267,56 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
     const m = anchor.getMonth();
     const firstWeekday = new Date(y, m, 1).getDay();
     const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const out: { key: string | null; day: number }[] = [];
-    for (let i = 0; i < firstWeekday; i++) out.push({ key: null, day: 0 });
+    const out: { key: string | null; day: number; bookable: boolean }[] = [];
+    for (let i = 0; i < firstWeekday; i++) out.push({ key: null, day: 0, bookable: false });
     for (let d = 1; d <= daysInMonth; d++) {
-      out.push({ key: `${y}-${pad2(m + 1)}-${pad2(d)}`, day: d });
+      // Only days the package's availability schedule allows are selectable, so
+      // a Friday-only package offers Fridays; others offer their own days.
+      const bookable = isDateBookable(schedules, new Date(y, m, d));
+      out.push({ key: `${y}-${pad2(m + 1)}-${pad2(d)}`, day: d, bookable });
     }
-    while (out.length % 7 !== 0) out.push({ key: null, day: 0 });
+    while (out.length % 7 !== 0) out.push({ key: null, day: 0, bookable: false });
     return out;
-  }, [anchor]);
-
-  const durationMins = useMemo(() => {
-    if (!detail) return 0;
-    return detail.durationUnit === "hours" ? detail.duration * 60 : detail.duration;
-  }, [detail]);
-
-  const endForSlot = (hhmm: string) => {
-    const [h, m] = hhmm.split(":").map(Number);
-    const end = h * 60 + m + durationMins;
-    return to12h(`${pad2(Math.floor((end % 1440) / 60))}:${pad2(end % 60)}`);
-  };
+  }, [anchor, schedules]);
 
   const stepMonth = (dir: number) => {
     const next = new Date(anchor);
     next.setMonth(anchor.getMonth() + dir);
     setAnchor(next);
   };
+
+  // Reschedule state: selectable days come from the package's schedule (above),
+  // and the time stays read-only until the staff picks a new date — at which
+  // point only the real open slots are offered.
+  const originalDate = detail?.date ?? "";
+  const originalTime = detail?.time ?? "";
+  const dateChanged = !!originalDate && date !== originalDate;
+
+  const handleSelectDate = (key: string) => {
+    setDate(key);
+    // Returning to the original date restores its time; any other date clears
+    // the time so a fresh slot must be chosen.
+    setTime(key === originalDate ? originalTime ?? "" : "");
+  };
+
+  // Load the real open slots whenever the booking is moved to a new date.
+  useEffect(() => {
+    const rescheduling = !!originalDate && !!date && date !== originalDate;
+    if (!visible || !rescheduling || packageId == null) {
+      setAvailableSlots([]);
+      setLoadingSlots(false);
+      return;
+    }
+    let alive = true;
+    setLoadingSlots(true);
+    fetchAvailableTimeSlots(getToken() ?? undefined, packageId, date)
+      .then((slots) => alive && setAvailableSlots(slots))
+      .catch(() => alive && setAvailableSlots([]))
+      .finally(() => alive && setLoadingSlots(false));
+    return () => {
+      alive = false;
+    };
+  }, [visible, date, originalDate, packageId]);
 
   const handleSave = async () => {
     if (!detail || saving) return;
@@ -401,6 +410,7 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
             placeholder="Select a package"
             options={packageOptions}
             onSelect={(v) => setPackageId(Number(v))}
+            onOpen={setActiveSelect}
           />
 
           {/* Space Assignment */}
@@ -411,6 +421,7 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
             placeholder="Select a space"
             options={roomOptions}
             onSelect={(v) => setRoomId(Number(v))}
+            onOpen={setActiveSelect}
           />
 
           {/* Customer Information */}
@@ -483,11 +494,12 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
               <View key={row} className="flex-row">
                 {cells.slice(row * 7, row * 7 + 7).map((cell, col) => {
                   const selected = cell.key && cell.key === date;
+                  const disabled = cell.key === null || !cell.bookable;
                   return (
                     <Pressable
                       key={cell.key ?? `pad-${row}-${col}`}
-                      disabled={cell.key === null}
-                      onPress={() => cell.key && setDate(cell.key)}
+                      disabled={disabled}
+                      onPress={() => cell.key && handleSelectDate(cell.key)}
                       className="flex-1 items-center py-1.5"
                     >
                       <View
@@ -500,7 +512,9 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
                             className={`text-sm ${
                               selected
                                 ? "text-white font-bold"
-                                : "text-gray-700 dark:text-gray-200"
+                                : cell.bookable
+                                  ? "text-gray-700 dark:text-gray-200"
+                                  : "text-gray-300 dark:text-neutral-700"
                             }`}
                           >
                             {cell.day}
@@ -518,38 +532,57 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
           <View className="mt-4">
             <FieldLabel>Time</FieldLabel>
           </View>
-          <View className="flex-row flex-wrap -mx-1">
-            {TIME_SLOTS.map((slot) => {
-              const active = slot === time;
-              return (
-                <View key={slot} className="w-1/3 px-1 mb-2">
-                  <Pressable
-                    onPress={() => setTime(slot)}
-                    className={`rounded-xl border px-2 py-2 ${
-                      active
-                        ? "border-[#0644C7] bg-[#0644C7]/10"
-                        : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-                    }`}
-                  >
-                    <Text
-                      className={`text-xs font-semibold ${
-                        active ? "text-[#0644C7]" : "text-gray-800 dark:text-gray-200"
-                      }`}
-                    >
-                      {to12h(slot)}
-                    </Text>
-                    <Text className="text-[10px] text-gray-400">
-                      {endForSlot(slot)}
-                    </Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
-          {!!time && (
-            <Text className="text-xs text-gray-400 mt-1">
-              Selected: {to12h(time)}
-            </Text>
+          {!dateChanged && !!time ? (
+            // Date unchanged: show the current booking time as read-only. The
+            // open-slot grid only appears once a new (rescheduled) date is picked.
+            <View className="rounded-xl border border-[#0644C7]/30 bg-[#0644C7]/10 px-4 py-3">
+              <Text className="text-sm font-semibold text-[#0644C7]">{to12h(time)}</Text>
+              <Text className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                Current booking time. Change the date above to select a different time.
+              </Text>
+            </View>
+          ) : loadingSlots ? (
+            <View className="flex-row items-center gap-2 py-4">
+              <ActivityIndicator size="small" color="#0644C7" />
+              <Text className="text-sm text-gray-500 dark:text-gray-400">Loading available times…</Text>
+            </View>
+          ) : availableSlots.length > 0 ? (
+            <>
+              <View className="flex-row flex-wrap -mx-1">
+                {availableSlots.map((slot) => {
+                  const active = slot.startTime === time;
+                  return (
+                    <View key={`${slot.startTime}-${slot.roomId ?? ""}`} className="w-1/3 px-1 mb-2">
+                      <Pressable
+                        onPress={() => {
+                          setTime(slot.startTime);
+                          if (slot.roomId != null) setRoomId(slot.roomId);
+                        }}
+                        className={`rounded-xl border px-2 py-2 ${
+                          active
+                            ? "border-[#0644C7] bg-[#0644C7]/10"
+                            : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                        }`}
+                      >
+                        <Text
+                          className={`text-xs font-semibold ${
+                            active ? "text-[#0644C7]" : "text-gray-800 dark:text-gray-200"
+                          }`}
+                        >
+                          {to12h(slot.startTime)}
+                        </Text>
+                        <Text className="text-[10px] text-gray-400">{to12h(slot.endTime)}</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+              {!!time && (
+                <Text className="text-xs text-gray-400 mt-1">Selected: {to12h(time)}</Text>
+              )}
+            </>
+          ) : (
+            <Text className="text-sm text-gray-400 py-4">No available times for the selected date.</Text>
           )}
 
           {/* Participants + Status */}
@@ -572,6 +605,7 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
                 placeholder="Select status"
                 options={STATUS_OPTIONS}
                 onSelect={(v) => setStatus(String(v))}
+                onOpen={setActiveSelect}
               />
             </View>
           </View>
@@ -605,6 +639,7 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
                 placeholder="Select"
                 options={GENDER_OPTIONS}
                 onSelect={(v) => setGohGender(String(v))}
+                onOpen={setActiveSelect}
               />
             </View>
           </View>
@@ -716,6 +751,54 @@ export function BookingEditSheet({ visible, detail, onClose, onSaved }: Props) {
             )}
           </Pressable>
         </View>
+
+        {/* Option picker overlay — one in-sheet layer (NOT a nested Modal) shared
+            by every SelectField, so only one native Modal is ever mounted. */}
+        {activeSelect && (
+          <View style={StyleSheet.absoluteFill} className="justify-end">
+            <Pressable
+              style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20,20,20,0.5)" }]}
+              onPress={() => setActiveSelect(null)}
+            />
+            <View
+              className="bg-white dark:bg-neutral-900 rounded-t-3xl max-h-[70%]"
+              style={{ paddingBottom: insets.bottom + 8 }}
+            >
+              <View className="w-10 h-1 rounded-full bg-gray-300 self-center mt-3 mb-1" />
+              <Text className="text-base font-bold text-gray-900 dark:text-white px-5 pt-3 pb-2">
+                {activeSelect.label}
+              </Text>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                {activeSelect.options.length === 0 ? (
+                  <Text className="text-sm text-gray-400 px-5 py-4">No options available.</Text>
+                ) : (
+                  activeSelect.options.map((o) => {
+                    const active = String(o.value) === String(activeSelect.value);
+                    return (
+                      <Pressable
+                        key={String(o.value)}
+                        onPress={() => {
+                          activeSelect.onSelect(o.value);
+                          setActiveSelect(null);
+                        }}
+                        className="px-5 py-3.5 flex-row items-center justify-between active:bg-gray-50 dark:active:bg-neutral-800"
+                      >
+                        <Text
+                          className={`text-sm flex-1 mr-2 ${
+                            active ? "text-[#0644C7] font-semibold" : "text-gray-700 dark:text-gray-200"
+                          }`}
+                        >
+                          {o.label}
+                        </Text>
+                        {active && <Check size={18} color="#0644C7" />}
+                      </Pressable>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        )}
       </View>
     </Modal>
   );

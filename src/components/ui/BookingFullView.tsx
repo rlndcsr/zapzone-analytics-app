@@ -370,20 +370,20 @@ export function BookingFullView({ visible, detail, onClose }: Props) {
             )}
           </Section>
 
-          {/* Internal Notes */}
-          <Section title="Internal Notes">
+          {/* Customer Notes */}
+          <Section title="Customer Notes">
             <View className="flex-row items-start gap-3 py-2">
               <View className="w-9 h-9 rounded-xl items-center justify-center bg-[#0644C7]/10">
                 <StickyNote size={16} color="#0644C7" />
               </View>
               <Text
                 className={`flex-1 text-sm ${
-                  detail.internalNotes
+                  detail.customerNotes
                     ? "text-gray-900 dark:text-white"
                     : "text-gray-400 dark:text-gray-500 italic"
                 }`}
               >
-                {detail.internalNotes ?? "No internal notes."}
+                {detail.customerNotes ?? "No customer notes."}
               </Text>
             </View>
           </Section>

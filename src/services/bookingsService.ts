@@ -390,36 +390,159 @@ function extractList<T>(res: any, key: string): T[] {
   return [];
 }
 
+/** Runaway-paging backstop when following `last_page`. */
+const MAX_LOOKUP_PAGES = 20;
+
 /**
  * GET /api/packages?location_id= — selectable packages for the Edit form.
- * NOTE: route/field names are a best guess; adjust if your API differs.
+ * The endpoint paginates (default 15/page, max 50), so page through all results
+ * or the dropdown silently shows only the first 15.
  */
 export async function fetchPackages(
   token: string,
   locationId?: number | null,
 ): Promise<PackageOption[]> {
-  const qs = locationId != null ? `?location_id=${locationId}` : "";
-  const res = await apiRequest<any>(`/api/packages${qs}`, { token });
-  return extractList<any>(res, "packages").map((p) => ({
-    id: Number(p.id),
-    name: (p.name ?? "").toString().trim() || `Package #${p.id}`,
-    price: p.price != null ? Number(p.price) : null,
-  }));
+  const out: PackageOption[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const params = new URLSearchParams({ per_page: "50", page: String(page) });
+    if (locationId != null) params.append("location_id", String(locationId));
+    const res = await apiRequest<any>(`/api/packages?${params.toString()}`, { token });
+    for (const p of extractList<any>(res, "packages")) {
+      out.push({
+        id: Number(p.id),
+        name: (p.name ?? "").toString().trim() || `Package #${p.id}`,
+        price: p.price != null ? Number(p.price) : null,
+      });
+    }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
+  return out;
 }
 
 /**
  * GET /api/rooms?location_id= — selectable spaces/rooms for the Edit form.
- * NOTE: route/field names are a best guess; adjust if your API differs.
+ * Also paginated (default 15/page, max 500); page through so every space shows.
  */
 export async function fetchRooms(
   token: string,
   locationId?: number | null,
 ): Promise<RoomOption[]> {
-  const qs = locationId != null ? `?location_id=${locationId}` : "";
-  const res = await apiRequest<any>(`/api/rooms${qs}`, { token });
-  return extractList<any>(res, "rooms").map((r) => ({
-    id: Number(r.id),
-    name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+  const out: RoomOption[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const params = new URLSearchParams({ per_page: "500", page: String(page) });
+    if (locationId != null) params.append("location_id", String(locationId));
+    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, { token });
+    for (const r of extractList<any>(res, "rooms")) {
+      out.push({
+        id: Number(r.id),
+        name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+      });
+    }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
+  return out;
+}
+
+/**
+ * A package's availability rule. Together these decide which calendar days a
+ * booking can be rescheduled onto — e.g. a package with a single weekly
+ * `["friday"]` rule is bookable on Fridays only.
+ */
+export type PackageAvailabilitySchedule = {
+  availabilityType: "daily" | "weekly" | "monthly" | string;
+  dayConfiguration: string[] | null;
+  isActive: boolean;
+};
+
+/** A concrete open slot from the mobile availability endpoint. */
+export type AvailableSlot = {
+  startTime: string; // HH:MM
+  endTime: string; // HH:MM
+  roomId: number | null;
+  roomName: string | null;
+};
+
+const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+function weekdayOccurrence(date: Date): number {
+  return Math.ceil(date.getDate() / 7);
+}
+function isLastWeekdayOccurrence(date: Date): boolean {
+  const next = new Date(date);
+  next.setDate(date.getDate() + 7);
+  return next.getMonth() !== date.getMonth();
+}
+
+/** Mirrors the backend PackageAvailabilitySchedule::matchesDate(). Monthly configs
+ *  use the backend `occurrence-dayName` form (e.g. "first-friday", "last-friday"). */
+export function scheduleMatchesDate(schedule: PackageAvailabilitySchedule, date: Date): boolean {
+  if (!schedule.isActive) return false;
+  const dayName = WEEKDAY_NAMES[date.getDay()];
+  switch (schedule.availabilityType) {
+    case "daily":
+      return true;
+    case "weekly":
+      return !!schedule.dayConfiguration?.includes(dayName);
+    case "monthly":
+      return !!schedule.dayConfiguration?.some((config) => {
+        const [occurrence, cfgDay] = config.toLowerCase().split("-");
+        if (cfgDay !== dayName) return false;
+        if (occurrence === "last") return isLastWeekdayOccurrence(date);
+        const map: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4 };
+        return map[occurrence] === weekdayOccurrence(date);
+      });
+    default:
+      return false;
+  }
+}
+
+/** True when at least one active schedule allows booking on `date` (no schedules → unrestricted). */
+export function isDateBookable(schedules: PackageAvailabilitySchedule[], date: Date): boolean {
+  if (schedules.length === 0) return true;
+  return schedules.some((s) => scheduleMatchesDate(s, date));
+}
+
+/** GET /api/packages/{id}/availability-schedules — the package's booking-day rules. */
+export async function fetchPackageAvailabilitySchedules(
+  token: string,
+  packageId: number,
+): Promise<PackageAvailabilitySchedule[]> {
+  const res = await apiRequest<any>(`/api/packages/${packageId}/availability-schedules`, { token });
+  const schedules = res?.data?.schedules ?? [];
+  return (Array.isArray(schedules) ? schedules : []).map((s: any) => ({
+    availabilityType: s.availability_type ?? "",
+    dayConfiguration: Array.isArray(s.day_configuration)
+      ? s.day_configuration.map((d: string) => String(d).toLowerCase())
+      : null,
+    isActive: s.is_active !== false,
+  }));
+}
+
+/**
+ * GET /api/mobile/packages/{id}/availability?date= — the real open slots for a
+ * package on a date (respects rooms, existing bookings, day-offs). Public endpoint.
+ */
+export async function fetchAvailableTimeSlots(
+  token: string | undefined,
+  packageId: number,
+  date: string,
+): Promise<AvailableSlot[]> {
+  const res = await apiRequest<any>(
+    `/api/mobile/packages/${packageId}/availability?date=${encodeURIComponent(date)}`,
+    { token },
+  );
+  const slots = res?.data?.available_slots ?? [];
+  return (Array.isArray(slots) ? slots : []).map((s: any) => ({
+    startTime: toTime(s.start_time) ?? String(s.start_time ?? ""),
+    endTime: toTime(s.end_time) ?? String(s.end_time ?? ""),
+    roomId: s.room_id ?? null,
+    roomName: s.room_name ?? null,
   }));
 }
 
