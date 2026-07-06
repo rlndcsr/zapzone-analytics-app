@@ -16,6 +16,7 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
 import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
+import { getCurrentUser } from "../../lib/session";
 import type { EventDateType, EventRow, EventStatus } from "../../services/eventsService";
 
 const PRIMARY = "#0644C7";
@@ -229,6 +230,11 @@ const Events = () => {
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const { events, loading, error, refetch } = useEvents();
 
+  // Company admins can switch locations; location managers are already scoped to
+  // their own location by the backend, so the selector is hidden for them
+  // (mirrors the web Events page and the mobile Bookings screen).
+  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateTypeFilter, setDateTypeFilter] = useState<DateTypeFilter>("all");
@@ -415,20 +421,23 @@ const Events = () => {
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
           </Pressable>
 
-          {/* Location filter (mirrors the web header control) */}
-          <Pressable
-            onPress={() => setSheet("location")}
-            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
-          >
-            <Feather name="map-pin" size={16} color={PRIMARY} />
-            <Text
-              className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-              numberOfLines={1}
+          {/* Location filter (company admins only — mirrors the web header
+              control; managers are scoped to their own location by the backend). */}
+          {isCompanyAdmin && (
+            <Pressable
+              onPress={() => setSheet("location")}
+              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
             >
-              {locationLabel}
-            </Text>
-            <Feather name="chevron-down" size={14} color="#9CA3AF" />
-          </Pressable>
+              <Feather name="map-pin" size={16} color={PRIMARY} />
+              <Text
+                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                numberOfLines={1}
+              >
+                {locationLabel}
+              </Text>
+              <Feather name="chevron-down" size={14} color="#9CA3AF" />
+            </Pressable>
+          )}
 
           {/* Error state */}
           {!loading && error && (
