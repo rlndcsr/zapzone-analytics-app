@@ -1090,6 +1090,27 @@ const Bookings = () => {
           if (showDeleted) loadDeleted();
         }}
       />
+
+      {/* Floating Action Button — New Booking (mirrors the web "Create Booking"
+          and the Manage Purchases FAB pattern). */}
+      <Pressable
+        onPress={() => router.push("/bookings/create-booking" as never)}
+        accessibilityRole="button"
+        accessibilityLabel="Create booking"
+        style={{
+          position: "absolute",
+          right: 20,
+          bottom: insets.bottom + 20,
+          shadowColor: PRIMARY,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.4,
+          shadowRadius: 12,
+          elevation: 8,
+        }}
+        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+      >
+        <Feather name="plus" size={26} color="#FFFFFF" />
+      </Pressable>
     </View>
   );
 };

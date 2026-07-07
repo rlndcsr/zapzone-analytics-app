@@ -1,4 +1,8 @@
 import { apiRequest, apiUrl } from "../lib/api";
+import type {
+  AppliedDiscount as PricingAppliedDiscount,
+  AppliedFee as PricingAppliedFee,
+} from "./pricingService";
 
 /** Booking status enum exactly as stored by the backend. */
 export type BookingStatus =
@@ -13,18 +17,14 @@ export type CalendarBooking = {
   id: number;
   referenceNumber: string | null;
   status: string;
-  /** Local calendar date as YYYY-MM-DD. */
   date: string;
-  /** 24h time as HH:MM, or null when the API omits it. */
   time: string | null;
   participants: number;
   totalAmount: number;
-  /** Amount collected so far; powers the Manage Bookings "Revenue" KPI. */
   amountPaid: number;
   packageName: string;
   customerName: string;
   locationName: string;
-  /** Raw creation timestamp; powers the dashboard "New Bookings" count. */
   createdAt: string | null;
 };
 
@@ -116,9 +116,17 @@ type RawBookingDetail = RawBooking & {
   package_id?: number | null;
   room_id?: number | null;
   applied_fees?:
-    | { fee_name?: string; fee_amount?: number | string; fee_application_type?: string }[]
+    | {
+        fee_name?: string;
+        fee_amount?: number | string;
+        fee_application_type?: string;
+      }[]
     | null;
-  package?: { id?: number | null; name?: string | null; price?: number | string | null } | null;
+  package?: {
+    id?: number | null;
+    name?: string | null;
+    price?: number | string | null;
+  } | null;
   room?: { id?: number | null; name?: string | null } | null;
   customer?: {
     first_name?: string | null;
@@ -133,7 +141,10 @@ type RawBookingDetail = RawBooking & {
 type RawAddOn = {
   id: number;
   name?: string | null;
-  pivot?: { quantity?: number | string | null; price_at_booking?: number | string | null } | null;
+  pivot?: {
+    quantity?: number | string | null;
+    price_at_booking?: number | string | null;
+  } | null;
 };
 
 type BookingsListResponse = {
@@ -171,7 +182,10 @@ function toTime(raw: string | null | undefined): string | null {
 }
 
 function customerName(
-  customer: { first_name?: string | null; last_name?: string | null } | null | undefined,
+  customer:
+    | { first_name?: string | null; last_name?: string | null }
+    | null
+    | undefined,
   guestName: string | null | undefined,
 ): string {
   const full = customer
@@ -213,10 +227,13 @@ async function fetchPage(
     ...extra,
   });
   if (locationId != null) params.append("location_id", String(locationId));
-  return apiRequest<BookingsListResponse>(`/api/bookings?${params.toString()}`, {
-    token,
-    signal,
-  });
+  return apiRequest<BookingsListResponse>(
+    `/api/bookings?${params.toString()}`,
+    {
+      token,
+      signal,
+    },
+  );
 }
 
 /** Every booking, paged newest-first. Callers filter by date and cache it. */
@@ -250,19 +267,6 @@ export async function fetchAllBookings({
   return out;
 }
 
-/**
- * Single-page bookings fetch used ONLY to derive the dashboard "New Bookings"
- * count. Deliberately mirrors the web ManagerDashboard's request exactly — one
- * `GET /bookings?location_id&per_page=500` with no sort, status, or pagination
- * (web: `getBookings({ location_id, per_page: 500 })`, then
- * `allBookings = data.bookings`). The backend caps `per_page` at 100, so this
- * returns the same capped first page the web sees. This is why All-Time New
- * Bookings must NOT use `fetchAllBookings` (which pages the full dataset): the
- * web's count is the capped page's length, not the true total.
- *
- * Rows are mapped without dropping any (missing booking_date → ""), matching the
- * web, which counts every booking the response returns.
- */
 export async function fetchDashboardBookings({
   token,
   locationId,
@@ -532,7 +536,9 @@ export async function fetchPackages(
   do {
     const params = new URLSearchParams({ per_page: "50", page: String(page) });
     if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<any>(`/api/packages?${params.toString()}`, { token });
+    const res = await apiRequest<any>(`/api/packages?${params.toString()}`, {
+      token,
+    });
     for (const p of extractList<any>(res, "packages")) {
       out.push({
         id: Number(p.id),
@@ -560,7 +566,9 @@ export async function fetchRooms(
   do {
     const params = new URLSearchParams({ per_page: "500", page: String(page) });
     if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, { token });
+    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
+      token,
+    });
     for (const r of extractList<any>(res, "rooms")) {
       out.push({
         id: Number(r.id),
@@ -600,7 +608,11 @@ type RawRoom = {
   name?: string | null;
   capacity?: number | string | null;
   break_time?:
-    | { days?: string[] | null; start_time?: string | null; end_time?: string | null }[]
+    | {
+        days?: string[] | null;
+        start_time?: string | null;
+        end_time?: string | null;
+      }[]
     | null;
 };
 
@@ -681,7 +693,10 @@ type RawScheduleBooking = {
 };
 
 /** Convert a duration + unit to whole minutes (mirrors the web schedule math). */
-function durationToMinutes(duration: number, unit: string | null | undefined): number {
+function durationToMinutes(
+  duration: number,
+  unit: string | null | undefined,
+): number {
   if (unit === "hours and minutes") {
     const hours = Math.floor(duration);
     const mins = Math.round((duration % 1) * 60);
@@ -717,7 +732,10 @@ export async function fetchDaySchedule({
     });
     if (userId != null) params.append("user_id", String(userId));
     const res = await apiRequest<{
-      data?: { bookings?: RawScheduleBooking[]; pagination?: { last_page?: number } };
+      data?: {
+        bookings?: RawScheduleBooking[];
+        pagination?: { last_page?: number };
+      };
     }>(`/api/bookings?${params.toString()}`, { token, signal });
     for (const raw of res?.data?.bookings ?? []) {
       out.push({
@@ -726,7 +744,10 @@ export async function fetchDaySchedule({
         referenceNumber: raw.reference_number ?? null,
         status: raw.status ?? "pending",
         time: toTime(raw.booking_time),
-        durationMinutes: durationToMinutes(Number(raw.duration ?? 0), raw.duration_unit),
+        durationMinutes: durationToMinutes(
+          Number(raw.duration ?? 0),
+          raw.duration_unit,
+        ),
         participants: Number(raw.participants ?? 0),
         totalAmount: Number(raw.total_amount ?? 0),
         amountPaid: Number(raw.amount_paid ?? 0),
@@ -760,7 +781,15 @@ export type AvailableSlot = {
   roomName: string | null;
 };
 
-const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const WEEKDAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
 
 function weekdayOccurrence(date: Date): number {
   return Math.ceil(date.getDate() / 7);
@@ -773,7 +802,10 @@ function isLastWeekdayOccurrence(date: Date): boolean {
 
 /** Mirrors the backend PackageAvailabilitySchedule::matchesDate(). Monthly configs
  *  use the backend `occurrence-dayName` form (e.g. "first-friday", "last-friday"). */
-export function scheduleMatchesDate(schedule: PackageAvailabilitySchedule, date: Date): boolean {
+export function scheduleMatchesDate(
+  schedule: PackageAvailabilitySchedule,
+  date: Date,
+): boolean {
   if (!schedule.isActive) return false;
   const dayName = WEEKDAY_NAMES[date.getDay()];
   switch (schedule.availabilityType) {
@@ -786,7 +818,12 @@ export function scheduleMatchesDate(schedule: PackageAvailabilitySchedule, date:
         const [occurrence, cfgDay] = config.toLowerCase().split("-");
         if (cfgDay !== dayName) return false;
         if (occurrence === "last") return isLastWeekdayOccurrence(date);
-        const map: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4 };
+        const map: Record<string, number> = {
+          first: 1,
+          second: 2,
+          third: 3,
+          fourth: 4,
+        };
         return map[occurrence] === weekdayOccurrence(date);
       });
     default:
@@ -795,7 +832,10 @@ export function scheduleMatchesDate(schedule: PackageAvailabilitySchedule, date:
 }
 
 /** True when at least one active schedule allows booking on `date` (no schedules → unrestricted). */
-export function isDateBookable(schedules: PackageAvailabilitySchedule[], date: Date): boolean {
+export function isDateBookable(
+  schedules: PackageAvailabilitySchedule[],
+  date: Date,
+): boolean {
   if (schedules.length === 0) return true;
   return schedules.some((s) => scheduleMatchesDate(s, date));
 }
@@ -805,7 +845,10 @@ export async function fetchPackageAvailabilitySchedules(
   token: string,
   packageId: number,
 ): Promise<PackageAvailabilitySchedule[]> {
-  const res = await apiRequest<any>(`/api/packages/${packageId}/availability-schedules`, { token });
+  const res = await apiRequest<any>(
+    `/api/packages/${packageId}/availability-schedules`,
+    { token },
+  );
   const schedules = res?.data?.schedules ?? [];
   return (Array.isArray(schedules) ? schedules : []).map((s: any) => ({
     availabilityType: s.availability_type ?? "",
@@ -885,8 +928,10 @@ export async function updateBooking(
     body.guest_of_honor_age = input.guestOfHonorAge;
   if (input.guestOfHonorGender !== undefined)
     body.guest_of_honor_gender = input.guestOfHonorGender;
-  if (input.customerNotes !== undefined) body.customer_notes = input.customerNotes;
-  if (input.internalNotes !== undefined) body.internal_notes = input.internalNotes;
+  if (input.customerNotes !== undefined)
+    body.customer_notes = input.customerNotes;
+  if (input.internalNotes !== undefined)
+    body.internal_notes = input.internalNotes;
   if (input.sendEmail != null) body.send_email = input.sendEmail;
 
   await apiRequest(`/api/bookings/${id}`, { method: "PATCH", token, body });
@@ -906,12 +951,14 @@ export async function exportBookings(
   token: string,
   locationId?: number | null,
 ): Promise<Record<string, unknown>[]> {
-  const params = new URLSearchParams({ sort_by: "booking_date", sort_order: "desc" });
+  const params = new URLSearchParams({
+    sort_by: "booking_date",
+    sort_order: "desc",
+  });
   if (locationId != null) params.append("location_id", String(locationId));
-  const res = await apiRequest<{ data?: { bookings?: Record<string, unknown>[] } }>(
-    `/api/bookings/export?${params.toString()}`,
-    { token },
-  );
+  const res = await apiRequest<{
+    data?: { bookings?: Record<string, unknown>[] };
+  }>(`/api/bookings/export?${params.toString()}`, { token });
   return res?.data?.bookings ?? [];
 }
 
@@ -938,10 +985,9 @@ export async function fetchTrashedBookings({
       sort_order: "desc",
     });
     if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<BookingsListResponse & { data: { bookings: RawBooking[] } }>(
-      `/api/bookings/trashed?${params.toString()}`,
-      { token, signal },
-    );
+    const res = await apiRequest<
+      BookingsListResponse & { data: { bookings: RawBooking[] } }
+    >(`/api/bookings/trashed?${params.toString()}`, { token, signal });
     for (const raw of res?.data?.bookings ?? []) {
       out.push({
         ...mapBooking(raw, toDateKey(raw.booking_date) ?? ""),
@@ -990,13 +1036,17 @@ export async function bulkImportBookingsCsv(params: {
 
   const res = await fetch(apiUrl("/api/bookings/bulk-import-csv"), {
     method: "POST",
-    headers: { Accept: "application/json", Authorization: `Bearer ${params.token}` },
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${params.token}`,
+    },
     body: form,
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     throw new Error(
-      (data?.message as string) ?? "Bulk import failed. Please check the CSV and try again.",
+      (data?.message as string) ??
+        "Bulk import failed. Please check the CSV and try again.",
     );
   }
   return data?.data as BulkImportResult;
@@ -1034,7 +1084,8 @@ export function buildBookingsReportUrl(params: {
   }
   qs.append("view_mode", params.viewMode);
   if (params.includeCancelled) qs.append("include_cancelled", "true");
-  if (params.locationId != null) qs.append("location_id", String(params.locationId));
+  if (params.locationId != null)
+    qs.append("location_id", String(params.locationId));
   if (params.userId != null) qs.append("user_id", String(params.userId));
   return apiUrl(`/api/bookings/details-report?${qs.toString()}`);
 }
@@ -1063,4 +1114,216 @@ export async function recordBookingPayment(
       notes: "Recorded from analytics app",
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Create Booking (mirrors the web /bookings/create OnsiteBooking flow):
+// rich package catalog + POST /api/bookings.
+// ---------------------------------------------------------------------------
+
+export type PackageAddOn = { id: number; name: string; price: number };
+export type PackageAttraction = {
+  id: number;
+  name: string;
+  price: number;
+  /** "per_person" multiplies by participants; otherwise a flat per-unit price. */
+  pricingType: string;
+};
+
+/** A package with everything the Create Booking form needs. */
+export type BookablePackage = {
+  id: number;
+  name: string;
+  category: string;
+  price: number;
+  pricePerAdditional: number;
+  minParticipants: number;
+  maxParticipants: number;
+  duration: number;
+  durationUnit: "hours" | "minutes" | "hours and minutes";
+  hasGuestOfHonor: boolean;
+  timeSlotInterval: number;
+  partialPaymentPercentage: number | null;
+  partialPaymentFixed: number | null;
+  locationId: number | null;
+  addOns: PackageAddOn[];
+  attractions: PackageAttraction[];
+};
+
+type RawPackage = {
+  id: number;
+  name?: string | null;
+  category?: string | null;
+  price?: number | string | null;
+  price_per_additional?: number | string | null;
+  min_participants?: number | string | null;
+  max_participants?: number | string | null;
+  duration?: number | string | null;
+  duration_unit?: string | null;
+  has_guest_of_honor?: boolean | null;
+  time_slot_interval?: number | string | null;
+  partial_payment_percentage?: number | string | null;
+  partial_payment_fixed?: number | string | null;
+  location_id?: number | null;
+  add_ons?:
+    | { id: number; name?: string | null; price?: number | string | null }[]
+    | null;
+  attractions?:
+    | {
+        id: number;
+        name?: string | null;
+        price?: number | string | null;
+        pricing_type?: string | null;
+      }[]
+    | null;
+};
+
+function mapBookablePackage(raw: RawPackage): BookablePackage {
+  const unit = raw.duration_unit;
+  const durationUnit: BookablePackage["durationUnit"] =
+    unit === "minutes" || unit === "hours and minutes" ? unit : "hours";
+  return {
+    id: raw.id,
+    name: raw.name?.trim() || `Package #${raw.id}`,
+    category: raw.category?.trim() || "",
+    price: Number(raw.price ?? 0),
+    pricePerAdditional: Number(raw.price_per_additional ?? 0),
+    minParticipants: Number(raw.min_participants ?? 1) || 1,
+    maxParticipants: Number(raw.max_participants ?? 0) || 0,
+    duration: Number(raw.duration ?? 0),
+    durationUnit,
+    hasGuestOfHonor: !!raw.has_guest_of_honor,
+    timeSlotInterval: Number(raw.time_slot_interval ?? 0) || 0,
+    partialPaymentPercentage:
+      raw.partial_payment_percentage != null
+        ? Number(raw.partial_payment_percentage)
+        : null,
+    partialPaymentFixed:
+      raw.partial_payment_fixed != null
+        ? Number(raw.partial_payment_fixed)
+        : null,
+    locationId: raw.location_id ?? null,
+    addOns: (raw.add_ons ?? []).map((a) => ({
+      id: Number(a.id),
+      name: a.name?.trim() || `Add-on #${a.id}`,
+      price: Number(a.price ?? 0),
+    })),
+    attractions: (raw.attractions ?? []).map((a) => ({
+      id: Number(a.id),
+      name: a.name?.trim() || `Attraction #${a.id}`,
+      price: Number(a.price ?? 0),
+      pricingType: a.pricing_type ?? "flat",
+    })),
+  };
+}
+
+/**
+ * GET /api/packages — the bookable package catalog (with add-ons, attractions,
+ * capacity, duration and deposit rules), scoped by location/user.
+ *
+ * IMPORTANT: this fetches a SINGLE page, exactly like the web
+ * (`bookingService.getPackages({ user_id })`). The `/packages` index eager-loads
+ * 7 relations per package (location, attractions, addOns, rooms, giftCards,
+ * promos, availabilitySchedules), so paging through every package — especially
+ * unscoped, across all locations — builds a huge in-memory payload that OOM-
+ * crashes the app. One bounded page keeps memory small and mirrors the web.
+ */
+export async function fetchBookablePackages(
+  token: string,
+  locationId?: number | null,
+  userId?: number,
+): Promise<BookablePackage[]> {
+  const params = new URLSearchParams({ per_page: "50" });
+  if (locationId != null) params.append("location_id", String(locationId));
+  if (userId != null) params.append("user_id", String(userId));
+  const res = await apiRequest<any>(`/api/packages?${params.toString()}`, {
+    token,
+  });
+  return extractList<RawPackage>(res, "packages").map(mapBookablePackage);
+}
+
+/** One add-on / attraction line on a new booking. */
+export type BookingAddonInput = {
+  addon_id: number;
+  quantity: number;
+  price_at_booking: number;
+};
+export type BookingAttractionInput = {
+  attraction_id: number;
+  quantity: number;
+  price_at_booking: number;
+};
+
+/**
+ * Payload for POST /api/bookings — mirrors the web on-site booking request.
+ * Card (authorize.net) tokenization isn't available in React Native, so the
+ * mobile flow submits `in-store` or `paylater` only.
+ */
+export type CreateBookingInput = {
+  guest_name: string;
+  guest_email?: string;
+  guest_phone?: string;
+  location_id: number;
+  package_id: number;
+  room_id?: number;
+  type: "package";
+  booking_date: string; // YYYY-MM-DD
+  booking_time: string; // HH:MM
+  participants: number;
+  duration: number;
+  duration_unit: string;
+  total_amount: number;
+  amount_paid: number;
+  payment_method: "in-store" | "paylater";
+  status?: "confirmed";
+  payment_status?: "paid" | "partial" | "pending";
+  notes?: string;
+  internal_notes?: string;
+  additional_attractions?: BookingAttractionInput[];
+  additional_addons?: BookingAddonInput[];
+  created_by?: number;
+  guest_of_honor_name?: string;
+  guest_of_honor_age?: number;
+  guest_of_honor_gender?: "male" | "female" | "other";
+  guest_address?: string;
+  guest_city?: string;
+  guest_state?: string;
+  guest_zip?: string;
+  guest_country?: string;
+  sent_email_to_staff?: boolean;
+  applied_fees?: PricingAppliedFee[] | null;
+  discount_amount?: number;
+  applied_discounts?: PricingAppliedDiscount[] | null;
+  send_email?: boolean;
+};
+
+type CreateBookingResponse = {
+  success: boolean;
+  data: {
+    id: number;
+    reference_number?: string | null;
+    customer_id?: number | null;
+  };
+  message?: string;
+};
+
+/** POST /api/bookings — create an on-site package booking. */
+export async function createBooking(
+  token: string,
+  input: CreateBookingInput,
+): Promise<{
+  id: number;
+  referenceNumber: string | null;
+  customerId: number | null;
+}> {
+  const res = await apiRequest<CreateBookingResponse>("/api/bookings", {
+    method: "POST",
+    token,
+    body: input,
+  });
+  return {
+    id: res.data.id,
+    referenceNumber: res.data.reference_number ?? null,
+    customerId: res.data.customer_id ?? null,
+  };
 }
