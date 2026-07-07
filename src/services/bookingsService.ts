@@ -472,6 +472,174 @@ export async function fetchRooms(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Space Schedule (mirrors the web /bookings/space-schedule): the day's bookings
+// laid out per room/space, with each room's break times. Both are scoped by
+// user_id (backend limits to the user's location), exactly like the web.
+// ---------------------------------------------------------------------------
+
+/** A recurring break window on a space, for a set of weekdays. */
+export type SpaceBreak = {
+  /** Lowercased weekday names, e.g. ["saturday","sunday"]. */
+  days: string[];
+  startTime: string; // HH:MM
+  endTime: string; // HH:MM
+};
+
+/** A space/room with the fields the Space Schedule needs. */
+export type Space = {
+  id: number;
+  name: string;
+  capacity: number | null;
+  breaks: SpaceBreak[];
+};
+
+type RawRoom = {
+  id: number;
+  name?: string | null;
+  capacity?: number | string | null;
+  break_time?:
+    | { days?: string[] | null; start_time?: string | null; end_time?: string | null }[]
+    | null;
+};
+
+/**
+ * GET /api/rooms — spaces with capacity + break times. Scoped by user_id like
+ * the web Space Schedule (`roomService.getRooms({ user_id, per_page: 100 })`).
+ */
+export async function fetchSpaces({
+  token,
+  userId,
+  signal,
+}: {
+  token: string;
+  userId?: number;
+  signal?: AbortSignal;
+}): Promise<Space[]> {
+  const out: Space[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const params = new URLSearchParams({ per_page: "100", page: String(page) });
+    if (userId != null) params.append("user_id", String(userId));
+    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
+      token,
+      signal,
+    });
+    for (const r of extractList<RawRoom>(res, "rooms")) {
+      out.push({
+        id: Number(r.id),
+        name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+        capacity: r.capacity != null ? Number(r.capacity) : null,
+        breaks: (r.break_time ?? []).map((b) => ({
+          days: Array.isArray(b.days)
+            ? b.days.map((d) => String(d).toLowerCase())
+            : [],
+          startTime: toTime(b.start_time) ?? String(b.start_time ?? ""),
+          endTime: toTime(b.end_time) ?? String(b.end_time ?? ""),
+        })),
+      });
+    }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
+  return out;
+}
+
+/** One booking on the day schedule — carries room + duration for placement. */
+export type ScheduleBooking = {
+  id: number;
+  roomId: number | null;
+  referenceNumber: string | null;
+  status: string;
+  time: string | null; // HH:MM start
+  durationMinutes: number;
+  participants: number;
+  totalAmount: number;
+  amountPaid: number;
+  paymentStatus: string;
+  packageName: string;
+  customerName: string;
+};
+
+type RawScheduleBooking = {
+  id: number;
+  reference_number?: string | null;
+  status?: string | null;
+  booking_time?: string | null;
+  room_id?: number | null;
+  duration?: number | string | null;
+  duration_unit?: string | null;
+  participants?: number | string | null;
+  total_amount?: number | string | null;
+  amount_paid?: number | string | null;
+  payment_status?: string | null;
+  guest_name?: string | null;
+  package?: { name?: string | null } | null;
+  customer?: { first_name?: string | null; last_name?: string | null } | null;
+};
+
+/** Convert a duration + unit to whole minutes (mirrors the web schedule math). */
+function durationToMinutes(duration: number, unit: string | null | undefined): number {
+  if (unit === "hours and minutes") {
+    const hours = Math.floor(duration);
+    const mins = Math.round((duration % 1) * 60);
+    return hours * 60 + mins;
+  }
+  return unit === "hours" ? duration * 60 : duration;
+}
+
+/**
+ * GET /api/bookings?booking_date=YYYY-MM-DD — the single day's bookings for the
+ * Space Schedule (same request the web makes: `getBookings({ booking_date,
+ * user_id })`). Paged for safety, though a single day rarely exceeds one page.
+ */
+export async function fetchDaySchedule({
+  token,
+  date,
+  userId,
+  signal,
+}: {
+  token: string;
+  date: string;
+  userId?: number;
+  signal?: AbortSignal;
+}): Promise<ScheduleBooking[]> {
+  const out: ScheduleBooking[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const params = new URLSearchParams({
+      booking_date: date,
+      per_page: String(PER_PAGE),
+      page: String(page),
+    });
+    if (userId != null) params.append("user_id", String(userId));
+    const res = await apiRequest<{
+      data?: { bookings?: RawScheduleBooking[]; pagination?: { last_page?: number } };
+    }>(`/api/bookings?${params.toString()}`, { token, signal });
+    for (const raw of res?.data?.bookings ?? []) {
+      out.push({
+        id: raw.id,
+        roomId: raw.room_id ?? null,
+        referenceNumber: raw.reference_number ?? null,
+        status: raw.status ?? "pending",
+        time: toTime(raw.booking_time),
+        durationMinutes: durationToMinutes(Number(raw.duration ?? 0), raw.duration_unit),
+        participants: Number(raw.participants ?? 0),
+        totalAmount: Number(raw.total_amount ?? 0),
+        amountPaid: Number(raw.amount_paid ?? 0),
+        paymentStatus: raw.payment_status ?? "pending",
+        packageName: raw.package?.name?.trim() || "Booking",
+        customerName: customerName(raw.customer, raw.guest_name),
+      });
+    }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
+  return out;
+}
+
 /**
  * A package's availability rule. Together these decide which calendar days a
  * booking can be rescheduled onto — e.g. a package with a single weekly

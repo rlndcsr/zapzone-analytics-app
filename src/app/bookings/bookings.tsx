@@ -604,6 +604,21 @@ const Bookings = () => {
             </Text>
           </View>
 
+          {/* Space Schedule shortcut (mirrors the web Bookings sub-navigation). */}
+          <Pressable
+            onPress={() => router.push("/bookings/space-schedule" as never)}
+            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3"
+          >
+            <Feather name="grid" size={16} color={PRIMARY} />
+            <Text
+              className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+              numberOfLines={1}
+            >
+              Space Schedule
+            </Text>
+            <Feather name="chevron-right" size={14} color="#9CA3AF" />
+          </Pressable>
+
           {/* Location + More (mirrors the Attractions screen layout, above the
               cards). The location selector is company-admin only; managers are
               scoped to their own location by the backend. */}
