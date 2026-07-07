@@ -182,17 +182,17 @@ function timeToMinutes(time: string | null): number {
 
 /**
  * Default booking order, identical to the web admin's applyDefaultSort
- * (Bookings.tsx): checked-in bookings sink to the bottom, then by date ascending
- * (booking.date is YYYY-MM-DD, so a lexical compare is chronological), then by
- * time ascending.
+ * (Bookings.tsx): checked-in bookings sink to the bottom, then by date
+ * descending (newest first — booking.date is YYYY-MM-DD, so a lexical compare is
+ * chronological), then by time descending (latest first).
  */
 function compareBookingsDefault(a: CalendarBooking, b: CalendarBooking): number {
   const aChecked = a.status === "checked-in";
   const bChecked = b.status === "checked-in";
   if (aChecked && !bChecked) return 1;
   if (!aChecked && bChecked) return -1;
-  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-  return timeToMinutes(a.time) - timeToMinutes(b.time);
+  if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+  return timeToMinutes(b.time) - timeToMinutes(a.time);
 }
 
 const Stat = ({
