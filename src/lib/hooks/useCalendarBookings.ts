@@ -108,5 +108,8 @@ export function useCalendarBookings({
 
   const refetch = useCallback(() => sync({ force: true }), [sync]);
 
-  return { bookings, loading, error, refetch };
+  // `bookings` is the visible window; `allBookings` is the full cached set,
+  // handy for deriving stable filter options (e.g. the location list) that
+  // shouldn't change as the user navigates between months.
+  return { bookings, allBookings, loading, error, refetch };
 }

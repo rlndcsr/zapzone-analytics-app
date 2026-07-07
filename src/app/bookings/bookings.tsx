@@ -567,7 +567,15 @@ const Bookings = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">Bookings</Text>
-          <View style={{ width: 36 }} />
+          {/* Calendar View cross-link (mirrors the web list↔calendar toggle). */}
+          <Pressable
+            onPress={() => router.push("/bookings/calendar" as never)}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            accessibilityRole="button"
+            accessibilityLabel="Open calendar view"
+          >
+            <Feather name="calendar" size={20} color={headerIcon} />
+          </Pressable>
         </View>
       </View>
 
