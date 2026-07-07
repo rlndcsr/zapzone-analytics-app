@@ -4,7 +4,7 @@ import { Feather } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
 
 
-const EmailCampaign = () => {
+const AnalyticsReports = () => {
   const router = useRouter()
   const scheme = useColorScheme()
   const headerIcon = scheme === 'dark' ? '#fff' : '#111'
@@ -71,7 +71,7 @@ const EmailCampaign = () => {
           }}
           className="mb-8"
         >
-          <Feather name="mail" size={80} color={scheme === 'dark' ? '#fff' : '#111'} />
+          <Feather name="bar-chart-2" size={80} color={scheme === 'dark' ? '#fff' : '#111'} />
         </Animated.View>
 
         {/* Coming Soon Message */}
@@ -79,7 +79,7 @@ const EmailCampaign = () => {
         Coming Soon!
         </Text>
         <Text className="text-base text-gray-600 dark:text-gray-400 text-center max-w-xs">
-          We are working hard to bring you exciting new email campaigns. Stay tuned for updates!
+          We are working hard to bring you exciting new Analytics and Reports. Stay tuned for updates!
         </Text>
 
         {/* Animated Progress Indicator */}
@@ -113,4 +113,4 @@ const EmailCampaign = () => {
   )
 }
 
-export default EmailCampaign
+export default AnalyticsReports
