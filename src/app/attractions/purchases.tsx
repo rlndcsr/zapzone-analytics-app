@@ -377,7 +377,10 @@ const ManagePurchases = () => {
     const confirmed = purchases.filter((p) => p.status === "confirmed").length;
     const revenue = purchases.reduce((sum, p) => sum + p.amountPaid, 0);
     const avg = total > 0 ? revenue / total : 0;
-    const customers = new Set(purchases.map((p) => p.email).filter(Boolean)).size;
+    // Matches the web exactly: `new Set(purchases.map(p => p.email)).size` — no
+    // falsy filter, so guest rows with a blank email collapse into one bucket
+    // (dropping them would drift the count off the web's value by one).
+    const customers = new Set(purchases.map((p) => p.email)).size;
     return { total, confirmed, revenue, avg, customers };
   }, [purchases]);
 
@@ -700,7 +703,10 @@ const ManagePurchases = () => {
           {/* List header */}
           {!listLoading && !listError && (
             <View className="flex-row items-center gap-2 mb-4">
-              <Text className="text-lg font-bold text-gray-900 dark:text-white">
+              <Text
+                className="text-lg font-bold text-gray-900 dark:text-white"
+                numberOfLines={1}
+              >
                 {showDeleted ? "Deleted Purchases" : "All Purchases"}
               </Text>
               <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">

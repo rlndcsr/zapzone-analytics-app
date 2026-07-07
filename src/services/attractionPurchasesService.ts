@@ -67,8 +67,19 @@ type PurchasesListResponse = {
   };
 };
 
-// Web loads a single large page and filters/sorts client-side; mirror that.
-const PER_PAGE = 100;
+// The web Manage Purchases KPIs aggregate over its purchase *cache*, which
+// holds the full purchase set (filled by a background sync); the cards are
+// computed client-side over that whole list. To match, we must load the full
+// set too — a single page (per_page: 100) truncated the data and skewed every
+// KPI. We request a large page and then page through `last_page`, so we get
+// every record whether the backend honours the large page (1 request) or caps
+// per_page server-side (the minimum necessary requests) — the same page-all
+// approach already used for bookings.
+const PER_PAGE = 500;
+// Deleted ("trashed") view keeps its own page size — it has no KPI cards and
+// stays a client-paginated list, so its data loading is intentionally
+// unaffected by the KPI fix.
+const TRASHED_PER_PAGE = 100;
 
 function mapPurchase(raw: RawPurchase): PurchaseRow {
   const customerName = raw.customer
@@ -114,18 +125,30 @@ export async function fetchAttractionPurchases({
   locationId,
   signal,
 }: FetchParams): Promise<PurchaseRow[]> {
-  const params = new URLSearchParams({
-    per_page: String(PER_PAGE),
-    user_id: String(userId),
-  });
-  if (locationId != null) params.append("location_id", String(locationId));
+  const all: RawPurchase[] = [];
+  let page = 1;
+  let lastPage = 1;
 
-  const res = await apiRequest<PurchasesListResponse>(
-    `/api/attraction-purchases?${params.toString()}`,
-    { token, signal },
-  );
-  const items = res?.data?.purchases ?? [];
-  return items.map(mapPurchase);
+  // Page through every page so the KPI aggregation sees the complete dataset,
+  // regardless of any server-side per_page cap (see PER_PAGE note above).
+  do {
+    const params = new URLSearchParams({
+      per_page: String(PER_PAGE),
+      page: String(page),
+      user_id: String(userId),
+    });
+    if (locationId != null) params.append("location_id", String(locationId));
+
+    const res = await apiRequest<PurchasesListResponse>(
+      `/api/attraction-purchases?${params.toString()}`,
+      { token, signal },
+    );
+    all.push(...(res?.data?.purchases ?? []));
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page += 1;
+  } while (page <= lastPage);
+
+  return all.map(mapPurchase);
 }
 
 /** One add-on line on a new purchase. */
@@ -289,7 +312,7 @@ export async function fetchTrashedAttractionPurchases({
   signal,
 }: FetchParams): Promise<PurchaseRow[]> {
   const params = new URLSearchParams({
-    per_page: String(PER_PAGE),
+    per_page: String(TRASHED_PER_PAGE),
     user_id: String(userId),
   });
   if (locationId != null) params.append("location_id", String(locationId));
