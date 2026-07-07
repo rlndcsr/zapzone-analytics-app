@@ -142,7 +142,12 @@ const Profile = () => {
             contentFit="contain"
           />
 
-          <Text className="text-xl font-bold text-gray-900 dark:text-white">Profile</Text>
+          <Text
+            pointerEvents="none"
+            className="absolute left-0 right-0 text-center text-xl font-bold text-gray-900 dark:text-white"
+          >
+            Profile
+          </Text>
 
           <View className="flex-row items-center gap-2 ">
             <Pressable

@@ -369,10 +369,6 @@ const Home = () => {
               </Text>
               <ChevronDown size={12} color="#9CA3AF" />
             </Pressable>
-
-            <Pressable className="bg-white dark:bg-neutral-900 p-3.5 rounded-xl border border-gray-100 dark:border-neutral-800">
-              <Scan size={18} color="#0644C7" />
-            </Pressable>
           </View>
 
           {/* Loading State */}
