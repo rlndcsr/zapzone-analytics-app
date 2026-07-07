@@ -376,17 +376,118 @@ export async function deleteBooking(token: string, id: number): Promise<void> {
 /**
  * POST /api/bookings/check-in — mark a confirmed booking as checked-in, matching
  * the web admin's row "Check In" action. The backend records checked_in_at /
- * checked_in_by from the authenticated user and only accepts confirmed bookings.
+ * checked_in_by (from `user_id` when provided, else the authenticated user) and
+ * only accepts confirmed bookings.
  */
 export async function checkInBooking(
   token: string,
   referenceNumber: string,
+  userId?: number,
 ): Promise<void> {
   await apiRequest(`/api/bookings/check-in`, {
     method: "POST",
     token,
-    body: { reference_number: referenceNumber },
+    body: {
+      reference_number: referenceNumber,
+      ...(userId != null ? { user_id: userId } : {}),
+    },
   });
+}
+
+/** Booking shape backing the check-in scanner's verify + review surface. */
+export type ScanBooking = {
+  id: number;
+  referenceNumber: string;
+  status: string;
+  packageName: string;
+  customerName: string;
+  date: string; // YYYY-MM-DD
+  time: string | null;
+  participants: number;
+  totalAmount: number;
+  amountPaid: number;
+  paymentStatus: string;
+  locationName: string;
+};
+
+type RawScanBooking = {
+  id: number;
+  reference_number?: string | null;
+  status?: string | null;
+  booking_date?: string | null;
+  booking_time?: string | null;
+  participants?: number | string | null;
+  total_amount?: number | string | null;
+  amount_paid?: number | string | null;
+  payment_status?: string | null;
+  guest_name?: string | null;
+  package?: { name?: string | null } | null;
+  location?: { name?: string | null } | null;
+  customer?: { first_name?: string | null; last_name?: string | null } | null;
+};
+
+function mapScanBooking(raw: RawScanBooking): ScanBooking {
+  return {
+    id: raw.id,
+    referenceNumber: raw.reference_number ?? "",
+    status: raw.status ?? "pending",
+    packageName: raw.package?.name?.trim() || "Booking",
+    customerName: customerName(raw.customer, raw.guest_name),
+    date: toDateKey(raw.booking_date) ?? "",
+    time: toTime(raw.booking_time),
+    participants: Number(raw.participants ?? 0),
+    totalAmount: Number(raw.total_amount ?? 0),
+    amountPaid: Number(raw.amount_paid ?? 0),
+    paymentStatus: raw.payment_status ?? "pending",
+    locationName: raw.location?.name?.trim() || "",
+  };
+}
+
+/**
+ * GET /api/bookings?reference_number= — look up a scanned booking by its
+ * reference number (the same request the web scanner makes,
+ * `getBookings({ reference_number })`). Returns the first match, or null.
+ */
+export async function fetchBookingByReference({
+  token,
+  referenceNumber,
+  userId,
+  signal,
+}: {
+  token: string;
+  referenceNumber: string;
+  userId?: number;
+  signal?: AbortSignal;
+}): Promise<ScanBooking | null> {
+  const params = new URLSearchParams({
+    reference_number: referenceNumber,
+    per_page: "1",
+  });
+  if (userId != null) params.append("user_id", String(userId));
+  const res = await apiRequest<{ data?: { bookings?: RawScanBooking[] } }>(
+    `/api/bookings?${params.toString()}`,
+    { token, signal },
+  );
+  const first = res?.data?.bookings?.[0];
+  return first ? mapScanBooking(first) : null;
+}
+
+/** Adapt a full BookingDetail (from GET /api/bookings/{id}) to a ScanBooking. */
+export function scanBookingFromDetail(d: BookingDetail): ScanBooking {
+  return {
+    id: d.id,
+    referenceNumber: d.referenceNumber ?? "",
+    status: d.status,
+    packageName: d.packageName,
+    customerName: d.customerName,
+    date: d.date,
+    time: d.time,
+    participants: d.participants,
+    totalAmount: d.totalAmount,
+    amountPaid: d.amountPaid,
+    paymentStatus: d.paymentStatus,
+    locationName: d.locationName,
+  };
 }
 
 /** PATCH /api/bookings/{id}/internal-notes — save internal notes. */

@@ -604,20 +604,36 @@ const Bookings = () => {
             </Text>
           </View>
 
-          {/* Space Schedule shortcut (mirrors the web Bookings sub-navigation). */}
-          <Pressable
-            onPress={() => router.push("/bookings/space-schedule" as never)}
-            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3"
-          >
-            <Feather name="grid" size={16} color={PRIMARY} />
-            <Text
-              className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-              numberOfLines={1}
+          {/* Bookings sub-navigation shortcuts (mirror the web Bookings pages). */}
+          <View className="flex-row gap-3 mb-3">
+            <Pressable
+              onPress={() => router.push("/bookings/space-schedule" as never)}
+              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
             >
-              Space Schedule
-            </Text>
-            <Feather name="chevron-right" size={14} color="#9CA3AF" />
-          </Pressable>
+              <Feather name="grid" size={16} color={PRIMARY} />
+              <Text
+                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                numberOfLines={1}
+              >
+                Space Schedule
+              </Text>
+              <Feather name="chevron-right" size={14} color="#9CA3AF" />
+            </Pressable>
+
+            <Pressable
+              onPress={() => router.push("/bookings/check-in" as never)}
+              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+            >
+              <Feather name="camera" size={16} color={PRIMARY} />
+              <Text
+                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                numberOfLines={1}
+              >
+                Check-in
+              </Text>
+              <Feather name="chevron-right" size={14} color="#9CA3AF" />
+            </Pressable>
+          </View>
 
           {/* Location + More (mirrors the Attractions screen layout, above the
               cards). The location selector is company-admin only; managers are
