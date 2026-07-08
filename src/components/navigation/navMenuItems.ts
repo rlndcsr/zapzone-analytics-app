@@ -14,7 +14,7 @@ export const NAV_MENU_ITEMS: NavMenuItem[] = [
   { key: "events", label: "Events", icon: "flag", route: "/events/events" },
   { key: "bookings", label: "Bookings", icon: "calendar", route: "/bookings/bookings" },
   { key: "packages", label: "Packages", icon: "package", route: "/packages/packages" },
-  { key: "pricing", label: "Pricing", icon: "dollar-sign", route: "/pricing/pricing" },
+  { key: "pricing", label: "Pricing", icon: "percent", route: "/pricing/pricing" },
   { key: "waivers", label: "Waivers", icon: "file-text", route: "/waivers/waivers" },
   { key: "customers", label: "Customers", icon: "users", route: "/customers/customers" },
   { key: "memberships", label: "Memberships", icon: "credit-card", route: "/memberships/memberships" },

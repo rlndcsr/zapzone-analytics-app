@@ -21,21 +21,21 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import {
-  SpecialPricingKpiSkeleton,
-  SpecialPricingListSkeleton,
-} from "../../components/ui/skeleton/SpecialPricingSkeleton";
+  FeeSupportKpiSkeleton,
+  FeeSupportListSkeleton,
+} from "../../components/ui/skeleton/FeeSupportSkeleton";
 import {
-  consumeSpecialPricingsStale,
-  markSpecialPricingsStale,
-  useSpecialPricings,
-} from "../../lib/hooks/useSpecialPricings";
+  consumeFeeSupportsStale,
+  markFeeSupportsStale,
+  useFeeSupports,
+} from "../../lib/hooks/useFeeSupports";
 import { getToken } from "../../lib/session";
 import {
-  deleteSpecialPricing,
-  toggleSpecialPricingStatus,
-  type SpecialPricingEntityType,
-  type SpecialPricingRow,
-} from "../../services/specialPricingService";
+  deleteFeeSupport,
+  toggleFeeSupportStatus,
+  type FeeSupportEntityType,
+  type FeeSupportRow,
+} from "../../services/feeSupportService";
 
 const PRIMARY = "#0644C7";
 
@@ -53,13 +53,13 @@ const PER_PAGE_OPTIONS = [5, 10, 15];
 
 // Icon + label per entity type (mirrors the web "Entity Type" column badge).
 const ENTITY_META: Record<
-  SpecialPricingEntityType,
+  FeeSupportEntityType,
   { icon: ComponentIconName; label: string }
 > = {
-  attraction: { icon: "zap", label: "Attraction" },
   package: { icon: "package", label: "Package" },
+  attraction: { icon: "zap", label: "Attraction" },
   event: { icon: "calendar", label: "Event" },
-  all: { icon: "grid", label: "All Entities" },
+  membership: { icon: "credit-card", label: "Membership" },
 };
 
 const StatusBadge = ({
@@ -67,7 +67,7 @@ const StatusBadge = ({
   busy,
   onPress,
 }: {
-  status: SpecialPricingRow["status"];
+  status: FeeSupportRow["status"];
   busy: boolean;
   onPress: () => void;
 }) => {
@@ -85,10 +85,7 @@ const StatusBadge = ({
       }`}
     >
       {busy ? (
-        <ActivityIndicator
-          size="small"
-          color={active ? "#16A34A" : "#9CA3AF"}
-        />
+        <ActivityIndicator size="small" color={active ? "#16A34A" : "#9CA3AF"} />
       ) : (
         <Feather
           name="power"
@@ -109,110 +106,125 @@ const StatusBadge = ({
   );
 };
 
-const Chip = ({
-  icon,
+/** A labeled field cell — a column label above its value, half-width so two
+ *  sit side by side (mirrors the web table columns). */
+const Field = ({
   label,
-  tint = "#0644C7",
+  value,
+  icon,
+  valueClassName = "text-gray-800 dark:text-gray-100",
 }: {
-  icon: ComponentIconName;
   label: string;
-  tint?: string;
+  value: string;
+  icon?: ComponentIconName;
+  valueClassName?: string;
 }) => (
-  <View className="flex-row items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
-    <Feather name={icon} size={11} color={tint} />
-    <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+  <View className="w-1/2 px-1 mb-2.5">
+    <Text className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
       {label}
     </Text>
+    <View className="flex-row items-center gap-1.5 mt-1">
+      {icon && <Feather name={icon} size={13} color="#9CA3AF" />}
+      <Text
+        className={`text-sm font-semibold ${valueClassName}`}
+        numberOfLines={2}
+      >
+        {value}
+      </Text>
+    </View>
   </View>
 );
 
-const Meta = ({ label, value }: { label: string; value: string }) => (
-  <View className="flex-row items-center gap-1">
-    <Text className="text-xs text-gray-400 dark:text-gray-500">{label}</Text>
-    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-      {value}
-    </Text>
-  </View>
-);
-
-const SpecialPricingCard = ({
+const FeeSupportCard = ({
   row,
   busy,
   onToggle,
   onEdit,
   onDelete,
 }: {
-  row: SpecialPricingRow;
+  row: FeeSupportRow;
   busy: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) => {
   const entity = ENTITY_META[row.entityType];
-  const isPercent = row.discountType === "percentage";
+  const isPercent = row.calculationType === "percentage";
+  const locationLabel =
+    row.locationName && row.companyName
+      ? `${row.locationName} | ${row.companyName}`
+      : row.locationName || row.companyName || "All Locations";
   return (
     <View
       className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
       style={CARD_SHADOW}
     >
-      {/* Name + description (left), status (right) */}
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {row.name}
-          </Text>
-          {!!row.description && (
-            <Text
-              className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-              numberOfLines={2}
-            >
-              {row.description}
-            </Text>
-          )}
-        </View>
+      {/* Fee name (left), status (right) - improved spacing and font */}
+      <View className="flex-row items-center justify-between mb-3">
+        <Text
+          className="flex-1 mr-3 text-lg font-bold text-gray-900 dark:text-white"
+          numberOfLines={2}
+        >
+          {row.feeName}
+        </Text>
         <StatusBadge status={row.status} busy={busy} onPress={onToggle} />
       </View>
 
-      {/* Discount + recurrence + entity chips */}
-      <View className="flex-row items-center flex-wrap gap-2 mt-1">
-        <Chip
+      {/* Labeled field grid - improved layout and text clarity */}
+      <View className="flex-row flex-wrap -mx-1 mb-1">
+        <Field
+          label="Amount"
+          value={row.amountLabel}
           icon={isPercent ? "percent" : "dollar-sign"}
-          label={row.discountLabel}
+          valueClassName="text-[#0644C7] dark:text-blue-300 font-bold"
         />
-        {!!row.recurrenceDisplay && (
-          <Chip icon="repeat" label={row.recurrenceDisplay} tint={PRIMARY} />
-        )}
-        <Chip icon={entity.icon} label={entity.label} />
+        <Field
+          label="Calculation"
+          value={isPercent ? "Percentage" : "Fixed"}
+        />
+        <Field
+          label="Application"
+          value={row.applicationType === "additive" ? "Additive" : "Inclusive"}
+        />
+        <Field
+          label="Entity Type"
+          value={entity.label}
+          icon={entity.icon}
+        />
+        <Field
+          label="Entities"
+          value={`${row.entityCount} item${row.entityCount === 1 ? "" : "s"}`}
+        />
+        <Field 
+          label="Location" 
+          value={locationLabel} 
+          icon="map-pin" 
+          valueClassName="text-gray-700 dark:text-gray-200 font-normal"
+        />
       </View>
 
-      {/* Priority / stackable + actions */}
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center gap-4">
-          <Meta label="Priority" value={String(row.priority)} />
-          <Meta label="Stackable" value={row.isStackable ? "Yes" : "No"} />
-        </View>
-
-        <View className="flex-row items-center gap-2">
-          <Pressable
-            onPress={onEdit}
-            className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center"
-            accessibilityRole="button"
-            accessibilityLabel="Edit special pricing"
-          >
-            <Feather name="edit-2" size={15} color="#6B7280" />
-          </Pressable>
-          <Pressable
-            onPress={onDelete}
-            className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/30 items-center justify-center"
-            accessibilityRole="button"
-            accessibilityLabel="Delete special pricing"
-          >
-            <Feather name="trash-2" size={15} color="#EF4444" />
-          </Pressable>
-        </View>
+      {/* Actions - improved button styling */}
+      <View className="flex-row items-center justify-end gap-2 mt-2 pt-3 border-t border-gray-100 dark:border-neutral-800">
+        <Pressable
+          onPress={onEdit}
+          className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-neutral-800 active:opacity-70"
+          accessibilityRole="button"
+          accessibilityLabel="Edit fee support"
+        >
+          <Feather name="edit-2" size={14} color="#6B7280" />
+          <Text className="text-sm font-medium text-gray-600 dark:text-gray-300">
+            Edit
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onDelete}
+          className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 dark:bg-red-900/30 active:opacity-70"
+          accessibilityRole="button"
+          accessibilityLabel="Delete fee support"
+        >
+          <Feather name="trash-2" size={14} color="#EF4444" />
+          <Text className="text-sm font-medium text-red-500">Delete</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -238,15 +250,15 @@ const KpiCard = ({
     style={CARD_SHADOW}
   >
     <View
-      className="w-9 h-9 rounded-xl items-center justify-center"
+      className="w-10 h-10 rounded-xl items-center justify-center"
       style={{ backgroundColor: tone.bg }}
     >
-      <Feather name={icon} size={18} color={tone.tint} />
+      <Feather name={icon} size={20} color={tone.tint} />
     </View>
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
+    <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
       {title}
     </Text>
-    <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+    <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-0.5">
       {value}
     </Text>
     <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
@@ -255,12 +267,12 @@ const KpiCard = ({
   </View>
 );
 
-const Pricing = () => {
+const FeeSupport = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const { specialPricings, loading, error, refetch, applyStatus, remove } =
-    useSpecialPricings();
+  const { feeSupports, loading, error, refetch, applyStatus, remove } =
+    useFeeSupports();
 
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -277,38 +289,36 @@ const Pricing = () => {
     }
   }, [refetch]);
 
-  // After creating / editing a special pricing, refetch on return so the list
-  // + KPIs update without a manual pull-to-refresh.
+  // After creating / editing a fee support, refetch on return so the list +
+  // KPIs update without a manual pull-to-refresh.
   useFocusEffect(
     useCallback(() => {
-      if (consumeSpecialPricingsStale()) refetch();
+      if (consumeFeeSupportsStale()) refetch();
     }, [refetch]),
   );
 
-  // KPI values — mirror the web Special Pricing summary cards.
+  // KPI values — mirror the web Fee Supports summary cards.
   const kpis = useMemo(() => {
-    const total = specialPricings.length;
-    const active = specialPricings.filter((p) => p.status === "active").length;
-    const weekly = specialPricings.filter(
-      (p) => p.recurrenceType === "weekly",
-    ).length;
-    const monthly = specialPricings.filter(
-      (p) => p.recurrenceType === "monthly",
-    ).length;
-    const oneTime = specialPricings.filter(
-      (p) => p.recurrenceType === "one_time",
-    ).length;
-    return { total, active, weekly, monthly, oneTime };
-  }, [specialPricings]);
+    const total = feeSupports.length;
+    const active = feeSupports.filter((f) => f.status === "active").length;
+    const byType = (t: FeeSupportEntityType) =>
+      feeSupports.filter((f) => f.entityType === t).length;
+    return {
+      total,
+      active,
+      packages: byType("package"),
+      attractions: byType("attraction"),
+      events: byType("event"),
+      memberships: byType("membership"),
+    };
+  }, [feeSupports]);
 
-  // Search over name + description (matches the web search box).
+  // Search over fee name (matches the web search box).
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return specialPricings;
-    return specialPricings.filter((p) =>
-      `${p.name} ${p.description}`.toLowerCase().includes(term),
-    );
-  }, [specialPricings, search]);
+    if (!term) return feeSupports;
+    return feeSupports.filter((f) => f.feeName.toLowerCase().includes(term));
+  }, [feeSupports, search]);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
@@ -323,19 +333,19 @@ const Pricing = () => {
   const hasResults = filtered.length > 0;
 
   // Toggle active state via PATCH /toggle-status, optimistic + reconcile.
-  const handleToggle = async (row: SpecialPricingRow) => {
+  const handleToggle = async (row: FeeSupportRow) => {
     const token = getToken();
     if (!token) {
-      Alert.alert("Not signed in", "Please sign in again to update pricing.");
+      Alert.alert("Not signed in", "Please sign in again to update fees.");
       return;
     }
     const next = row.status !== "active";
     applyStatus(row.id, next);
     setBusyId(row.id);
     try {
-      const confirmed = await toggleSpecialPricingStatus(token, row.id);
+      const confirmed = await toggleFeeSupportStatus(token, row.id);
       applyStatus(row.id, confirmed);
-      markSpecialPricingsStale();
+      markFeeSupportsStale();
     } catch (err) {
       applyStatus(row.id, !next); // revert on failure
       Alert.alert(
@@ -347,17 +357,17 @@ const Pricing = () => {
     }
   };
 
-  const handleEdit = (row: SpecialPricingRow) => {
+  const handleEdit = (row: FeeSupportRow) => {
     router.push({
-      pathname: "/pricing/create-special-pricing",
+      pathname: "/pricing/create-fee-support",
       params: { id: String(row.id) },
     });
   };
 
-  const handleDelete = (row: SpecialPricingRow) => {
+  const handleDelete = (row: FeeSupportRow) => {
     Alert.alert(
-      "Delete special pricing",
-      `Delete "${row.name}"? This can't be undone.`,
+      "Delete fee support",
+      `Delete "${row.feeName}"? This can't be undone.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -368,21 +378,21 @@ const Pricing = () => {
             if (!token) {
               Alert.alert(
                 "Not signed in",
-                "Please sign in again to delete pricing.",
+                "Please sign in again to delete fees.",
               );
               return;
             }
             setBusyId(row.id);
             try {
-              await deleteSpecialPricing(token, row.id);
+              await deleteFeeSupport(token, row.id);
               remove(row.id);
-              markSpecialPricingsStale();
+              markFeeSupportsStale();
             } catch (err) {
               Alert.alert(
                 "Delete failed",
                 err instanceof Error
                   ? err.message
-                  : "Could not delete special pricing.",
+                  : "Could not delete fee support.",
               );
             } finally {
               setBusyId(null);
@@ -407,7 +417,7 @@ const Pricing = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Special Pricing
+            Fee Supports
           </Text>
           <View style={{ width: 36 }} />
         </View>
@@ -423,9 +433,7 @@ const Pricing = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
-            progressBackgroundColor={
-              colorScheme === "dark" ? "#171717" : "#FFFFFF"
-            }
+            progressBackgroundColor={colorScheme === "dark" ? "#171717" : "#FFFFFF"}
           />
         }
       >
@@ -433,31 +441,13 @@ const Pricing = () => {
           {/* Overview intro */}
           <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Special Pricing
+              Fee Supports
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Manage automatic discounts for packages and attractions
+              Manage additional fees for packages, attractions, events, and
+              memberships
             </Text>
           </View>
-
-          <Pressable
-            onPress={() => router.push("/pricing/fee-support")}
-            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-              <Feather name="percent" size={18} color={PRIMARY} />
-            </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                Fee Supports
-              </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Manage additional fees for packages, attractions, events, and memberships
-              </Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="#9CA3AF" />
-          </Pressable>
 
           {/* Error state */}
           {!loading && error && (
@@ -471,37 +461,54 @@ const Pricing = () => {
 
           {/* KPI cards */}
           {loading ? (
-            <SpecialPricingKpiSkeleton />
+            <FeeSupportKpiSkeleton />
           ) : (
             <View className="flex-row flex-wrap -mx-1.5 mb-3">
               <View className="w-1/2">
                 <KpiCard
-                  icon="tag"
+                  icon="dollar-sign"
                   tone={{ bg: "#0644C720", tint: PRIMARY }}
-                  title="Total Special Pricings"
+                  title="Total Fee Supports"
                   value={String(kpis.total)}
                   change={`${kpis.active} active`}
                 />
               </View>
               <View className="w-1/2">
                 <KpiCard
-                  icon="repeat"
+                  icon="package"
+                  tone={{ bg: "#3B82F620", tint: "#3B82F6" }}
+                  title="Package Fees"
+                  value={String(kpis.packages)}
+                  change="Applied to packages"
+                />
+              </View>
+              <View className="w-1/2">
+                <KpiCard
+                  icon="zap"
                   tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
-                  title="Weekly Recurring"
-                  value={String(kpis.weekly)}
-                  change="Every week discounts"
+                  title="Attraction Fees"
+                  value={String(kpis.attractions)}
+                  change="Applied to attractions"
                 />
               </View>
               <View className="w-1/2">
                 <KpiCard
                   icon="calendar"
                   tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
-                  title="One-Time Events"
-                  value={String(kpis.oneTime)}
-                  change="Specific date sales"
+                  title="Event Fees"
+                  value={String(kpis.events)}
+                  change="Applied to events"
                 />
               </View>
-              
+              <View className="w-1/2">
+                <KpiCard
+                  icon="credit-card"
+                  tone={{ bg: "#EC489920", tint: "#EC4899" }}
+                  title="Membership Fees"
+                  value={String(kpis.memberships)}
+                  change="Applied to memberships"
+                />
+              </View>
             </View>
           )}
 
@@ -511,7 +518,7 @@ const Pricing = () => {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search special pricings..."
+              placeholder="Search fee supports..."
               placeholderTextColor="#9CA3AF"
               className="flex-1 text-sm text-gray-900 dark:text-white"
             />
@@ -529,7 +536,7 @@ const Pricing = () => {
                 numberOfLines={1}
                 className="shrink text-lg font-bold text-gray-900 dark:text-white"
               >
-                All Special Pricings
+                All Fee Supports
               </Text>
               <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
                 <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -541,18 +548,18 @@ const Pricing = () => {
 
           {/* List / states */}
           {loading ? (
-            <SpecialPricingListSkeleton />
+            <FeeSupportListSkeleton />
           ) : !error && !hasResults ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="tag" size={26} color="#9CA3AF" />
+                <Feather name="dollar-sign" size={26} color="#9CA3AF" />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No special pricing found
+                No fee supports found
               </Text>
               <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {specialPricings.length === 0
-                  ? "Create a special pricing to offer automatic discounts."
+                {feeSupports.length === 0
+                  ? "Create a fee support to add fees to your entities."
                   : "Try adjusting your search."}
               </Text>
             </View>
@@ -560,7 +567,7 @@ const Pricing = () => {
             !error && (
               <>
                 {paged.map((row) => (
-                  <SpecialPricingCard
+                  <FeeSupportCard
                     key={row.id}
                     row={row}
                     busy={busyId === row.id}
@@ -658,12 +665,12 @@ const Pricing = () => {
         </View>
       </ScrollView>
 
-      {/* Floating Action Button — Create Special Pricing (mirrors the web
-          "Create Special Pricing" button). */}
+      {/* Floating Action Button — Create Fee (mirrors the web "Create Fee"
+          button). */}
       <Pressable
-        onPress={() => router.push("/pricing/create-special-pricing")}
+        onPress={() => router.push("/pricing/create-fee-support")}
         accessibilityRole="button"
-        accessibilityLabel="Create special pricing"
+        accessibilityLabel="Create fee"
         style={{
           position: "absolute",
           right: 20,
@@ -682,4 +689,4 @@ const Pricing = () => {
   );
 };
 
-export default Pricing;
+export default FeeSupport;
