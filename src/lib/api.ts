@@ -50,6 +50,12 @@ export async function apiRequest<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
+  // Fail fast after 15s instead of hanging indefinitely.
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), 15000);
+  const onCallerAbort = () => timeoutController.abort();
+  signal?.addEventListener("abort", onCallerAbort);
+
   let response: Response;
 
   try {
@@ -57,13 +63,16 @@ export async function apiRequest<T>(
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal,
+      signal: timeoutController.signal,
     });
   } catch {
     throw new ApiError(
-      "Network error. Please check your connection and try again.",
+      "Network error or request timed out. Please try again.",
       0,
     );
+  } finally {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", onCallerAbort);
   }
 
   const data = await response.json().catch(() => null);
