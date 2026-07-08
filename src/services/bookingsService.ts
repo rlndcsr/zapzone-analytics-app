@@ -1146,6 +1146,8 @@ export type BookablePackage = {
   partialPaymentPercentage: number | null;
   partialPaymentFixed: number | null;
   locationId: number | null;
+  /** Whether the package is active; the web filters these client-side. */
+  isActive: boolean;
   addOns: PackageAddOn[];
   attractions: PackageAttraction[];
 };
@@ -1154,6 +1156,7 @@ type RawPackage = {
   id: number;
   name?: string | null;
   category?: string | null;
+  is_active?: boolean | number | null;
   price?: number | string | null;
   price_per_additional?: number | string | null;
   min_participants?: number | string | null;
@@ -1203,6 +1206,10 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
         ? Number(raw.partial_payment_fixed)
         : null,
     locationId: raw.location_id ?? null,
+    // Active unless the backend explicitly says otherwise (matches the web's
+    // `is_active === true` filter without hiding packages when the field is
+    // simply absent from the payload).
+    isActive: raw.is_active !== false && raw.is_active !== 0,
     addOns: (raw.add_ons ?? []).map((a) => ({
       id: Number(a.id),
       name: a.name?.trim() || `Add-on #${a.id}`,
@@ -1218,28 +1225,100 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
 }
 
 /**
- * GET /api/packages — the bookable package catalog (with add-ons, attractions,
- * capacity, duration and deposit rules), scoped by location/user.
- *
- * IMPORTANT: this fetches a SINGLE page, exactly like the web
- * (`bookingService.getPackages({ user_id })`). The `/packages` index eager-loads
- * 7 relations per package (location, attractions, addOns, rooms, giftCards,
- * promos, availabilitySchedules), so paging through every package — especially
- * unscoped, across all locations — builds a huge in-memory payload that OOM-
- * crashes the app. One bounded page keeps memory small and mirrors the web.
+ * Lightweight package row for the Step-1 list — scalars only, NO relations.
+ * The `/packages` index eager-loads 7 relations per package (rooms, promos,
+ * gift cards, attractions, add-ons, availability schedules), which is far too
+ * heavy to retain for a mobile list; we map only what's needed to list + pick,
+ * and hydrate the full package on selection ({@link fetchBookablePackageDetail}).
  */
-export async function fetchBookablePackages(
+export type PackageListItem = {
+  id: number;
+  name: string;
+  category: string;
+  price: number;
+  duration: number;
+  durationUnit: BookablePackage["durationUnit"];
+  minParticipants: number;
+  maxParticipants: number;
+  isActive: boolean;
+};
+
+function mapPackageListItem(raw: RawPackage): PackageListItem {
+  const unit = raw.duration_unit;
+  return {
+    id: raw.id,
+    name: raw.name?.trim() || `Package #${raw.id}`,
+    category: raw.category?.trim() || "",
+    price: Number(raw.price ?? 0),
+    duration: Number(raw.duration ?? 0),
+    durationUnit:
+      unit === "minutes" || unit === "hours and minutes" ? unit : "hours",
+    minParticipants: Number(raw.min_participants ?? 1) || 1,
+    maxParticipants: Number(raw.max_participants ?? 0) || 0,
+    isActive: raw.is_active !== false && raw.is_active !== 0,
+  };
+}
+
+export type PackageListPage = {
+  items: PackageListItem[];
+  page: number;
+  lastPage: number;
+};
+
+/**
+ * GET /api/packages — one PAGE of the package catalog as lightweight list items
+ * (relations discarded). Mirrors the web's params (`user_id`, optional
+ * `location_id`, server-side `search`) but is paginated + scalar-mapped so the
+ * mobile app never parses/retains the whole hydrated catalog. The backend
+ * auth-scopes by role, so `location_id` is only an optional narrowing filter.
+ */
+export async function fetchPackageList(
   token: string,
-  locationId?: number | null,
-  userId?: number,
-): Promise<BookablePackage[]> {
-  const params = new URLSearchParams({ per_page: "50" });
-  if (locationId != null) params.append("location_id", String(locationId));
-  if (userId != null) params.append("user_id", String(userId));
+  opts: {
+    locationId?: number | null;
+    userId?: number;
+    search?: string;
+    page?: number;
+    perPage?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<PackageListPage> {
+  const page = opts.page ?? 1;
+  const params = new URLSearchParams({
+    per_page: String(opts.perPage ?? 20),
+    page: String(page),
+  });
+  if (opts.locationId != null) params.append("location_id", String(opts.locationId));
+  if (opts.userId != null) params.append("user_id", String(opts.userId));
+  const search = opts.search?.trim();
+  if (search) params.append("search", search);
   const res = await apiRequest<any>(`/api/packages?${params.toString()}`, {
     token,
+    signal: opts.signal,
   });
-  return extractList<RawPackage>(res, "packages").map(mapBookablePackage);
+  const items = extractList<RawPackage>(res, "packages")
+    .map(mapPackageListItem)
+    .filter((p) => p.isActive);
+  const lastPage = Number(res?.data?.pagination?.last_page ?? page) || page;
+  return { items, page, lastPage };
+}
+
+/**
+ * GET /api/packages/{id} — the full package (add-ons, attractions, deposit
+ * rules, etc.), fetched only AFTER a package is picked so the heavy relations
+ * are hydrated for exactly one package instead of the whole list.
+ */
+export async function fetchBookablePackageDetail(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<BookablePackage> {
+  const res = await apiRequest<{ data?: RawPackage | null }>(
+    `/api/packages/${id}`,
+    { token, signal },
+  );
+  if (!res?.data) throw new Error("Package not found");
+  return mapBookablePackage(res.data);
 }
 
 /** One add-on / attraction line on a new booking. */
