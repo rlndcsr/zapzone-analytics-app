@@ -10,6 +10,15 @@ const DEFAULT_STYLES: Record<string, string> = {
   "checked-in": "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400",
   pending: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400",
   cancelled: "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400",
+  // Waiver record + template statuses (mirrors the web waiver status colors).
+  active: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
+  draft: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400",
+  expired: "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400",
+  replaced: "bg-gray-100 dark:bg-neutral-800 text-gray-600 dark:text-gray-300",
+  deleted: "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400",
+  inactive: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
+  archived: "bg-gray-100 dark:bg-neutral-800 text-gray-400 dark:text-gray-500",
+  sent: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
 };
 
 // Recent Event Purchases' inline map on the web.
