@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchPackages, type PackageRow } from "../../services/packagesService";
+import {
+  fetchPackages,
+  isRegularPackage,
+  type PackageRow,
+} from "../../services/packagesService";
 import { getCurrentUser, getToken } from "../session";
 
 // Session cache of the package list, keyed by location; views filter it
@@ -28,7 +32,8 @@ export function consumePackagesStale(): boolean {
 
 type UsePackagesParams = { locationId?: number };
 
-/** Loads + caches the package list, with pull-to-refresh (`refetch`). */
+/** Loads + caches the package list (pull-to-refresh via `refetch`) from the
+ *  lightweight GET /api/mobile/packages in one request; views filter/sort client-side. */
 export function usePackages({ locationId }: UsePackagesParams = {}) {
   const key = cacheKey(locationId);
   const cacheFresh =
@@ -71,7 +76,7 @@ export function usePackages({ locationId }: UsePackagesParams = {}) {
       }
       const user = getCurrentUser();
 
-      // Show stale cache instantly and refresh quietly; else show the spinner.
+      // Show stale cache instantly and refresh quietly; else show the skeleton.
       if (cache && cache.key === k && !force) {
         setPackages(cache.data);
         setLoading(false);
@@ -80,11 +85,14 @@ export function usePackages({ locationId }: UsePackagesParams = {}) {
       }
 
       try {
-        const data = await fetchPackages({
+        // Regular packages only, matching the web /packages catalog (custom
+        // types belong to the separate Custom Packages screen).
+        const all = await fetchPackages({
           token,
           userId: user?.id,
           locationId,
         });
+        const data = all.filter(isRegularPackage);
         cache = { key: k, fetchedAt: Date.now(), data };
         if (isCurrent()) {
           setPackages(data);
@@ -108,11 +116,14 @@ export function usePackages({ locationId }: UsePackagesParams = {}) {
   useEffect(() => {
     sync();
     return () => {
-      requestIdRef.current++;
+      requestIdRef.current += 1;
     };
   }, [sync]);
 
-  const refetch = useCallback(() => sync({ force: true }), [sync]);
+  const refetch = useCallback(() => {
+    cache = null;
+    return sync({ force: true });
+  }, [sync]);
 
   // Patch a single package's active state in the cache + local list without a
   // full refetch (used after an optimistic toggle-status call).

@@ -1,6 +1,5 @@
 import { apiRequest } from "../lib/api";
 
-/** Package active-state, mirrored from the backend `is_active` flag. */
 export type PackageStatus = "active" | "inactive";
 
 /** Flattened package row backing the Packages list cards. */
@@ -10,17 +9,17 @@ export type PackageRow = {
   description: string;
   category: string;
   price: number;
-  /** Max guests for the package (backend `max_participants`). */
   capacity: number | null;
-  /** Booking buffer in hours (backend `min_booking_notice_hours`); null = none. */
   bufferHours: number | null;
   status: PackageStatus;
   locationId: number | null;
   locationName: string;
   createdAt: string | null;
+  packageType: string;
+  displayOrder: number;
 };
 
-/** Raw package as returned by GET /api/packages (PackageResource, snake_case). */
+/** Raw package as returned by GET /api/mobile/packages (MobilePackageResource). */
 type RawPackage = {
   id: number;
   name?: string | null;
@@ -31,17 +30,15 @@ type RawPackage = {
   min_booking_notice_hours?: number | string | null;
   is_active?: boolean | null;
   created_at?: string | null;
+  package_type?: string | null;
+  display_order?: number | string | null;
   location?: { id?: number; name?: string | null } | null;
   location_id?: number | null;
 };
 
-// Backend caps per_page at 50; request the max so the list loads in one page.
-const PER_PAGE = 50;
-// Fail fast instead of leaving the list stuck on the skeleton forever.
-const REQUEST_TIMEOUT_MS = 15000;
-
 function mapPackage(raw: RawPackage): PackageRow {
-  const cap = raw.max_participants == null ? null : Number(raw.max_participants);
+  const cap =
+    raw.max_participants == null ? null : Number(raw.max_participants);
   const buffer =
     raw.min_booking_notice_hours == null
       ? null
@@ -58,22 +55,29 @@ function mapPackage(raw: RawPackage): PackageRow {
     locationId: raw.location?.id ?? raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
+    packageType: raw.package_type?.trim() || "",
+    displayOrder: Number(raw.display_order ?? 0) || 0,
   };
 }
 
-// Is this a package-shaped record (has a numeric id)? Used by the fallback
-// deep-search so we can find the list wherever Laravel nests it.
-function looksLikePackage(v: unknown): v is RawPackage {
-  return !!v && typeof v === "object" && typeof (v as { id?: unknown }).id === "number";
+/** Regular (or unset) package_type — the web `/packages` filter; custom types
+ *  live on the separate Custom Packages screen. */
+export function isRegularPackage(p: PackageRow): boolean {
+  return !p.packageType || p.packageType === "regular";
 }
 
-/**
- * Pull the package array out of the response, tolerating every shape the API
- * has produced: a bare array, `{ data: { packages: [...] } }`, a paginated
- * resource collection (`packages: { data: [...] }`), `{ data: [...] }`, or
- * `{ packages: [...] }`. Falls back to a shallow search for the first array of
- * package-shaped objects so a serialization change can't blank the list.
- */
+// Is this a package-shaped record (has a numeric id)? Used by the fallback
+// deep-search so we can find the list wherever the response nests it.
+function looksLikePackage(v: unknown): v is RawPackage {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    typeof (v as { id?: unknown }).id === "number"
+  );
+}
+
+/** Pull the package array out of any response shape (bare array, `{data:{packages}}`,
+ *  `{data}`, `{packages}`), falling back to a tree search so a shape change can't blank it. */
 function extractPackages(res: unknown): RawPackage[] {
   const asArray = (v: unknown): RawPackage[] | null =>
     Array.isArray(v) && (v.length === 0 || looksLikePackage(v[0]))
@@ -116,53 +120,33 @@ function extractPackages(res: unknown): RawPackage[] {
 
 type FetchParams = {
   token: string;
-  /** Fallback scope hint; the backend also resolves the user from the token. */
   userId?: number;
-  /** Restrict to one location; omit for all the user can access. */
   locationId?: number;
+  search?: string;
   signal?: AbortSignal;
 };
 
-/**
- * GET /api/packages — the same endpoint the web Packages page uses. Returns the
- * package list the user can access (auth-scoped to their company/location).
- */
+/** GET /api/mobile/packages — the lightweight, role-scoped package list (scalars + location,
+ *  one response). Replaces the heavy /api/packages index that OOM-crashed Hermes on base64 images. */
 export async function fetchPackages({
   token,
   userId,
   locationId,
+  search,
   signal,
 }: FetchParams): Promise<PackageRow[]> {
-  const params = new URLSearchParams({ per_page: String(PER_PAGE) });
+  const params = new URLSearchParams();
   if (userId != null) params.append("user_id", String(userId));
   if (locationId != null) params.append("location_id", String(locationId));
+  const q = search?.trim();
+  if (q) params.append("search", q);
+  const qs = params.toString();
 
-  // Abort the request if it outlives the timeout, and also honor any caller
-  // signal, so the screen never hangs on the skeleton indefinitely.
-  const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, REQUEST_TIMEOUT_MS);
-  const onExternalAbort = () => controller.abort();
-  signal?.addEventListener("abort", onExternalAbort);
-
-  try {
-    const res = await apiRequest<unknown>(`/api/packages?${params.toString()}`, {
-      token,
-      signal: controller.signal,
-    });
-    return extractPackages(res).map(mapPackage);
-  } catch (err) {
-    if (timedOut) {
-      throw new Error("Request timed out. Pull to refresh to try again.");
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", onExternalAbort);
-  }
+  const res = await apiRequest<unknown>(
+    `/api/mobile/packages${qs ? `?${qs}` : ""}`,
+    { token, signal },
+  );
+  return extractPackages(res).map(mapPackage);
 }
 
 type ToggleResponse = {
@@ -170,10 +154,8 @@ type ToggleResponse = {
   data?: { package_id?: number; is_active?: boolean | null };
 };
 
-/**
- * PATCH /api/packages/{id}/toggle-status — flips a package's active state.
- * Returns the new active flag reported by the backend.
- */
+/** PATCH /api/packages/{id}/toggle-status — flips active state, returns the new flag.
+ *  A mutation, so it stays on the standard endpoint (the mobile endpoint is list-only). */
 export async function togglePackageStatus(
   token: string,
   id: number,

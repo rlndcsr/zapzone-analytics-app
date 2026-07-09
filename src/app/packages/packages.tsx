@@ -1,6 +1,12 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,7 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
 import { usePackages } from "../../lib/hooks/usePackages";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
 import {
   togglePackageStatus,
   type PackageRow,
@@ -39,8 +45,18 @@ const DEFAULT_VISIBLE = 5;
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
 const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
 /** Format an ISO timestamp as "Jul 1, 2026"; null when unparseable/absent. */
@@ -51,8 +67,10 @@ function formatDate(iso: string | null): string | null {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
-type SortKey = "Name" | "Price" | "Date";
-const SORT_KEYS: SortKey[] = ["Name", "Price", "Date"];
+// Sort options mirror the web /packages dropdown exactly (Name / Price /
+// Category / Display Order). "Date" is not a web option and was removed.
+type SortKey = "Name" | "Price" | "Category" | "Display Order";
+const SORT_KEYS: SortKey[] = ["Name", "Price", "Category", "Display Order"];
 
 const Packages = () => {
   const router = useRouter();
@@ -60,9 +78,10 @@ const Packages = () => {
   const scheme = useColorScheme();
   const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
+  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+
   const [showMoreSheet, setShowMoreSheet] = useState(false);
 
-  // Live package list (auth-scoped by the backend to the user's locations).
   const { packages, loading, error, refetch, applyStatus } = usePackages();
 
   // Package list state
@@ -124,7 +143,9 @@ const Packages = () => {
   const categoryOptions = useMemo(
     () => [
       "All Categories",
-      ...Array.from(new Set(packages.map((p) => p.category).filter(Boolean))).sort(),
+      ...Array.from(
+        new Set(packages.map((p) => p.category).filter(Boolean)),
+      ).sort(),
     ],
     [packages],
   );
@@ -152,15 +173,26 @@ const Packages = () => {
       return matchesSearch && matchesCategory && matchesLocation;
     });
 
+    // Mirrors the web /packages sort: strings compare lowercased, price/display
+    // order numeric, and direction flips the >/< test (not a negated diff).
     result.sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === "Name") cmp = a.name.localeCompare(b.name);
-      else if (sortKey === "Price") cmp = a.price - b.price;
-      else
-        cmp =
-          new Date(a.createdAt ?? 0).getTime() -
-          new Date(b.createdAt ?? 0).getTime();
-      return sortAsc ? cmp : -cmp;
+      let aValue: string | number = "";
+      let bValue: string | number = "";
+      if (sortKey === "Name") {
+        aValue = a.name.toLowerCase();
+        bValue = b.name.toLowerCase();
+      } else if (sortKey === "Price") {
+        aValue = Number(a.price) || 0;
+        bValue = Number(b.price) || 0;
+      } else if (sortKey === "Category") {
+        aValue = a.category.toLowerCase();
+        bValue = b.category.toLowerCase();
+      } else {
+        // Display Order
+        aValue = a.displayOrder;
+        bValue = b.displayOrder;
+      }
+      return sortAsc ? (aValue > bValue ? 1 : -1) : aValue < bValue ? 1 : -1;
     });
 
     return result;
@@ -322,26 +354,32 @@ const Packages = () => {
             )}
           </View>
 
-          {/* Location + Sort controls */}
+          {/* Location + Sort controls. Location selector is company-admin only;
+              hidden for other roles (backend-scoped), so Sort fills the row. */}
           <View className="flex-row items-center gap-2 mt-3">
+            {isCompanyAdmin && (
+              <Pressable
+                onPress={() => setShowLocationSheet(true)}
+                className="flex-1 flex-row items-center justify-between gap-2 bg-white dark:bg-neutral-900 px-3.5 py-3 rounded-xl border border-gray-200 dark:border-neutral-800"
+              >
+                <Text
+                  className="text-sm text-gray-700 dark:text-gray-200 flex-1"
+                  numberOfLines={1}
+                >
+                  {location}
+                </Text>
+                <Feather name="chevron-down" size={16} color="#9CA3AF" />
+              </Pressable>
+            )}
+
             <Pressable
-              onPress={() => setShowLocationSheet(true)}
+              onPress={() => setShowSortSheet(true)}
               className="flex-1 flex-row items-center justify-between gap-2 bg-white dark:bg-neutral-900 px-3.5 py-3 rounded-xl border border-gray-200 dark:border-neutral-800"
             >
               <Text
                 className="text-sm text-gray-700 dark:text-gray-200 flex-1"
                 numberOfLines={1}
               >
-                {location}
-              </Text>
-              <Feather name="chevron-down" size={16} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setShowSortSheet(true)}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-3.5 py-3 rounded-xl border border-gray-200 dark:border-neutral-800"
-            >
-              <Text className="text-sm text-gray-700 dark:text-gray-200">
                 Sort: {sortKey}
               </Text>
               <Feather name="chevron-down" size={16} color="#9CA3AF" />
@@ -636,40 +674,43 @@ const Packages = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Location picker */}
-      <BottomSheet
-        visible={showLocationSheet}
-        onClose={() => setShowLocationSheet(false)}
-        
-        title="Location"
-      >
-        <View className="px-4 pb-6">
-          {locationOptions.map((loc) => {
-            const isActive = location === loc;
-            return (
-              <Pressable
-                key={loc}
-                onPress={() => {
-                  setLocation(loc);
-                  setShowLocationSheet(false);
-                }}
-                className="flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1"
-              >
-                <Text
-                  className={`text-base ${
-                    isActive
-                      ? "font-semibold text-[#0644C7]"
-                      : "font-medium text-gray-700 dark:text-gray-200"
-                  }`}
+      {/* Location picker (company-admin only) */}
+      {isCompanyAdmin && (
+        <BottomSheet
+          visible={showLocationSheet}
+          onClose={() => setShowLocationSheet(false)}
+          title="Location"
+        >
+          <View className="px-4 pb-6">
+            {locationOptions.map((loc) => {
+              const isActive = location === loc;
+              return (
+                <Pressable
+                  key={loc}
+                  onPress={() => {
+                    setLocation(loc);
+                    setShowLocationSheet(false);
+                  }}
+                  className="flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1"
                 >
-                  {loc}
-                </Text>
-                {isActive && <Feather name="check" size={18} color={PRIMARY} />}
-              </Pressable>
-            );
-          })}
-        </View>
-      </BottomSheet>
+                  <Text
+                    className={`text-base ${
+                      isActive
+                        ? "font-semibold text-[#0644C7]"
+                        : "font-medium text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {loc}
+                  </Text>
+                  {isActive && (
+                    <Feather name="check" size={18} color={PRIMARY} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </BottomSheet>
+      )}
 
       {/* Sort picker */}
       <BottomSheet

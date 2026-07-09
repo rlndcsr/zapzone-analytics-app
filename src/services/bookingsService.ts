@@ -521,35 +521,24 @@ function extractList<T>(res: any, key: string): T[] {
 /** Runaway-paging backstop when following `last_page`. */
 const MAX_LOOKUP_PAGES = 20;
 
-/**
- * GET /api/packages?location_id= — selectable packages for the Edit form.
- * The endpoint paginates (default 15/page, max 50), so page through all results
- * or the dropdown silently shows only the first 15.
- */
+/** GET /api/mobile/packages — selectable packages (id/name/price) for the Edit form
+ *  dropdown, via the lightweight mobile list; the full package loads from the detail endpoint. */
 export async function fetchPackages(
   token: string,
   locationId?: number | null,
 ): Promise<PackageOption[]> {
-  const out: PackageOption[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const params = new URLSearchParams({ per_page: "50", page: String(page) });
-    if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<any>(`/api/packages?${params.toString()}`, {
-      token,
-    });
-    for (const p of extractList<any>(res, "packages")) {
-      out.push({
-        id: Number(p.id),
-        name: (p.name ?? "").toString().trim() || `Package #${p.id}`,
-        price: p.price != null ? Number(p.price) : null,
-      });
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
-  return out;
+  const params = new URLSearchParams();
+  if (locationId != null) params.append("location_id", String(locationId));
+  const qs = params.toString();
+  const res = await apiRequest<any>(
+    `/api/mobile/packages${qs ? `?${qs}` : ""}`,
+    { token },
+  );
+  return extractList<any>(res, "packages").map((p) => ({
+    id: Number(p.id),
+    name: (p.name ?? "").toString().trim() || `Package #${p.id}`,
+    price: p.price != null ? Number(p.price) : null,
+  }));
 }
 
 /**
@@ -1265,13 +1254,8 @@ export type PackageListPage = {
   lastPage: number;
 };
 
-/**
- * GET /api/packages — one PAGE of the package catalog as lightweight list items
- * (relations discarded). Mirrors the web's params (`user_id`, optional
- * `location_id`, server-side `search`) but is paginated + scalar-mapped so the
- * mobile app never parses/retains the whole hydrated catalog. The backend
- * auth-scopes by role, so `location_id` is only an optional narrowing filter.
- */
+/** GET /api/mobile/packages — bookable packages as lightweight list items (role-scoped, `search`
+ *  server-side). Not paginated: whole list is one page (`lastPage: 1`), keeping "load more" a no-op. */
 export async function fetchPackageList(
   token: string,
   opts: {
@@ -1283,24 +1267,21 @@ export async function fetchPackageList(
     signal?: AbortSignal;
   } = {},
 ): Promise<PackageListPage> {
-  const page = opts.page ?? 1;
-  const params = new URLSearchParams({
-    per_page: String(opts.perPage ?? 20),
-    page: String(page),
-  });
-  if (opts.locationId != null) params.append("location_id", String(opts.locationId));
+  const params = new URLSearchParams();
+  if (opts.locationId != null)
+    params.append("location_id", String(opts.locationId));
   if (opts.userId != null) params.append("user_id", String(opts.userId));
   const search = opts.search?.trim();
   if (search) params.append("search", search);
-  const res = await apiRequest<any>(`/api/packages?${params.toString()}`, {
-    token,
-    signal: opts.signal,
-  });
+  const qs = params.toString();
+  const res = await apiRequest<any>(
+    `/api/mobile/packages${qs ? `?${qs}` : ""}`,
+    { token, signal: opts.signal },
+  );
   const items = extractList<RawPackage>(res, "packages")
     .map(mapPackageListItem)
     .filter((p) => p.isActive);
-  const lastPage = Number(res?.data?.pagination?.last_page ?? page) || page;
-  return { items, page, lastPage };
+  return { items, page: 1, lastPage: 1 };
 }
 
 /**
