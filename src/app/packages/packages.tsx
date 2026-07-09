@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -23,8 +24,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
-import { usePackages } from "../../lib/hooks/usePackages";
+import { consumePackagesStale, usePackages } from "../../lib/hooks/usePackages";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   togglePackageStatus,
@@ -84,6 +86,14 @@ const Packages = () => {
 
   const { packages, loading, error, refetch, applyStatus } = usePackages();
 
+  // Refetch when returning to the list after a create/edit/duplicate/delete
+  // elsewhere marked the cache stale (mirrors Bookings/Attractions).
+  useFocusEffect(
+    useCallback(() => {
+      if (consumePackagesStale()) refetch();
+    }, [refetch]),
+  );
+
   // Package list state
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
@@ -97,6 +107,9 @@ const Packages = () => {
 
   const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [showSortSheet, setShowSortSheet] = useState(false);
+
+  // Package whose per-card actions sheet (View / Edit / Duplicate / Delete) is open.
+  const [actionsPkg, setActionsPkg] = useState<PackageRow | null>(null);
 
   // Animation values
   const spinValue = useRef(new Animated.Value(0)).current;
@@ -158,6 +171,20 @@ const Packages = () => {
     ],
     [packages],
   );
+
+  // {id,name} locations derived from the loaded list — feeds the Duplicate
+  // destination picker without calling the heavy /api/locations endpoint.
+  const locationObjOptions = useMemo(() => {
+    const byId = new Map<number, string>();
+    packages.forEach((p) => {
+      if (p.locationId != null && !byId.has(p.locationId)) {
+        byId.set(p.locationId, p.locationName || `Location ${p.locationId}`);
+      }
+    });
+    return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [packages]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -488,12 +515,6 @@ const Packages = () => {
                     {/* Top row */}
                     <View className="flex-row items-start justify-between">
                       <View className="flex-row items-start gap-2.5 flex-1 mr-2">
-                        <Feather
-                          name="menu"
-                          size={16}
-                          color="#D1D5DB"
-                          style={{ marginTop: 3 }}
-                        />
                         <Pressable
                           onPress={() => toggleSelected(pkg.id)}
                           hitSlop={6}
@@ -516,33 +537,50 @@ const Packages = () => {
                         </Text>
                       </View>
 
-                      {/* Activate / deactivate */}
-                      <Pressable
-                        onPress={() => handleToggleActive(pkg)}
-                        disabled={togglingId === pkg.id}
-                        className={`w-8 h-8 rounded-lg items-center justify-center ${
-                          isActive
-                            ? "bg-green-100 dark:bg-green-900/40"
-                            : "bg-gray-100 dark:bg-neutral-800"
-                        }`}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          isActive ? "Deactivate package" : "Activate package"
-                        }
-                      >
-                        {togglingId === pkg.id ? (
-                          <ActivityIndicator
-                            size="small"
-                            color={isActive ? "#16A34A" : "#9CA3AF"}
-                          />
-                        ) : (
+                      <View className="flex-row items-center gap-2">
+                        {/* Activate / deactivate */}
+                        <Pressable
+                          onPress={() => handleToggleActive(pkg)}
+                          disabled={togglingId === pkg.id}
+                          className={`w-8 h-8 rounded-lg items-center justify-center ${
+                            isActive
+                              ? "bg-green-100 dark:bg-green-900/40"
+                              : "bg-gray-100 dark:bg-neutral-800"
+                          }`}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            isActive ? "Deactivate package" : "Activate package"
+                          }
+                        >
+                          {togglingId === pkg.id ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={isActive ? "#16A34A" : "#9CA3AF"}
+                            />
+                          ) : (
+                            <Feather
+                              name="power"
+                              size={16}
+                              color={isActive ? "#16A34A" : "#9CA3AF"}
+                            />
+                          )}
+                        </Pressable>
+
+                        {/* Per-card actions: View / Edit / Duplicate / Delete */}
+                        <Pressable
+                          onPress={() => setActionsPkg(pkg)}
+                          hitSlop={6}
+                          className="w-8 h-8 rounded-lg items-center justify-center bg-gray-100 dark:bg-neutral-800"
+                          accessibilityRole="button"
+                          accessibilityLabel="Package actions"
+                        >
                           <Feather
-                            name="power"
+                            name="more-vertical"
                             size={16}
-                            color={isActive ? "#16A34A" : "#9CA3AF"}
+                            color="#6B7280"
                           />
-                        )}
-                      </Pressable>
+                        </Pressable>
+                      </View>
                     </View>
 
                     {/* Location */}
@@ -745,6 +783,16 @@ const Packages = () => {
           })}
         </View>
       </BottomSheet>
+
+      {/* Per-card actions: View / Edit / Duplicate / Delete */}
+      <PackageActionsSheet
+        visible={actionsPkg !== null}
+        pkg={actionsPkg}
+        isCompanyAdmin={isCompanyAdmin}
+        locationOptions={locationObjOptions}
+        onClose={() => setActionsPkg(null)}
+        onChanged={refetch}
+      />
     </View>
   );
 };

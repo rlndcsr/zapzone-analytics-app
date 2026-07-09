@@ -74,10 +74,12 @@ const CustomPackages = () => {
 
           {/* Create Button */}
           <Pressable
-            onPress={() => router.push("/packages/create-packages")}
+            onPress={() =>
+              router.push("/packages/create-packages?type=custom")
+            }
             className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-4"
             accessibilityRole="button"
-            accessibilityLabel="Create package"
+            accessibilityLabel="Create custom package"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
             <Text className="text-sm font-semibold text-white">
