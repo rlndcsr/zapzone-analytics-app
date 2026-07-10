@@ -19,6 +19,7 @@ import { BookingsImportSheet } from "../../components/ui/BookingsImportSheet";
 import { BookingsMoreSheet } from "../../components/ui/BookingsMoreSheet";
 import { BookingsReportSheet } from "../../components/ui/BookingsReportSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkeleton";
@@ -302,6 +303,8 @@ const BookingCard = ({
         </View>
       </View>
     </Pressable>
+
+    
   );
 };
 
@@ -593,82 +596,100 @@ const Bookings = () => {
           />
         }
       >
-        <View className="px-5">
-          {/* Overview intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Manage Bookings
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              View and manage all package bookings
-            </Text>
-          </View>
+        <View className="px-5 mt-5">
 
-          {/* Bookings sub-navigation shortcuts (mirror the web Bookings pages). */}
-          <View className="flex-row gap-3 mb-3">
+          <View className="flex-row items-center justify-between gap-3 mb-5">
+            {/* Space Schedule Card */}
             <Pressable
-              onPress={() => router.push("/bookings/space-schedule" as never)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+              onPress={() => router.push("/bookings/space-schedule")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
             >
-              <Feather name="grid" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="grid" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
                 Space Schedule
               </Text>
-              <Feather name="chevron-right" size={14} color="#9CA3AF" />
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                View all customer bookings
+              </Text>
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  View All
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
             </Pressable>
 
+            {/* Onsite Purchase Card */}
             <Pressable
-              onPress={() => router.push("/bookings/check-in" as never)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+              onPress={() => router.push("/bookings/check-in")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
             >
-              <Feather name="camera" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="camera" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
                 Check-in
               </Text>
-              <Feather name="chevron-right" size={14} color="#9CA3AF" />
-            </Pressable>
-          </View>
-
-          {/* Location + More (mirrors the Attractions screen layout, above the
-              cards). The location selector is company-admin only; managers are
-              scoped to their own location by the backend. */}
-          <View className="flex-row gap-3 mb-5">
-            {isCompanyAdmin && (
-              <Pressable
-                onPress={() => setSheet("location")}
-                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-              >
-                <Feather name="map-pin" size={16} color={PRIMARY} />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                  numberOfLines={1}
-                >
-                  {locationLabel}
-                </Text>
-                <Feather name="chevron-down" size={14} color="#9CA3AF" />
-              </Pressable>
-            )}
-
-            <Pressable
-              onPress={() => setMoreOpen(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="more-horizontal" size={16} color="#6B7280" />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                More
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                Checking in customers
               </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  Scan QR Code
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
             </Pressable>
           </View>
+
+          {/* Header controls — separate full-width segmented pill (Location ·
+              More). The location selector is company-admin only; managers are
+              scoped to their own location by the backend. */}
+          <FilterPill>
+            {isCompanyAdmin && (
+              <PillSegment
+                label={locationLabel}
+                active={sheet === "location"}
+                onPress={() => setSheet("location")}
+                renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
+              />
+            )}
+            <PillSegment
+              label="More"
+              active={moreOpen}
+              onPress={() => setMoreOpen(true)}
+              renderIcon={(c) => (
+                <Feather name="more-horizontal" size={15} color={c} />
+              )}
+            />
+          </FilterPill>
+
+          <Pressable
+            onPress={() => router.push("/bookings/create-booking")}
+            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Create New Booking
+            </Text>
+          </Pressable>
+
 
           {/* Error state */}
           {!loading && error && (
@@ -748,36 +769,21 @@ const Bookings = () => {
             )}
           </View>
 
-          {/* Filters */}
-          <View className="flex-row gap-3 mb-5">
-            <Pressable
+          {/* Filters — full-width segmented pill (Status · Date) */}
+          <FilterPill>
+            <PillSegment
+              label={statusLabel}
+              active={sheet === "status"}
               onPress={() => setSheet("status")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="check-circle" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {statusLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
+              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
+            />
+            <PillSegment
+              label={dateLabel}
+              active={sheet === "date"}
               onPress={() => setSheet("date")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {dateLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          </View>
+              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+            />
+          </FilterPill>
 
           {/* List header */}
           {!listLoading && !listError && (
@@ -1090,27 +1096,6 @@ const Bookings = () => {
           if (showDeleted) loadDeleted();
         }}
       />
-
-      {/* Floating Action Button — New Booking (mirrors the web "Create Booking"
-          and the Manage Purchases FAB pattern). */}
-      <Pressable
-        onPress={() => router.push("/bookings/create-booking" as never)}
-        accessibilityRole="button"
-        accessibilityLabel="Create booking"
-        style={{
-          position: "absolute",
-          right: 20,
-          bottom: insets.bottom + 20,
-          shadowColor: PRIMARY,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.4,
-          shadowRadius: 12,
-          elevation: 8,
-        }}
-        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-      >
-        <Feather name="plus" size={26} color="#FFFFFF" />
-      </Pressable>
     </View>
   );
 };

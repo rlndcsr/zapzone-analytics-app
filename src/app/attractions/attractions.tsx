@@ -406,48 +406,69 @@ const Attractions = () => {
           />
         }
       >
-        <View className="px-5">
+        <View className="px-5 mt-5">
           {/* Overview intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Attractions Overview
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Browse all attractions and their details
-            </Text>
-          </View>
-
-          {/* Manage Purchases — child feature of Attractions (mirrors the web
-              /attractions/purchases submenu item). */}
-          <Pressable
-            onPress={() => router.push("/attractions/purchases")}
-            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-              <Feather name="shopping-bag" size={18} color={PRIMARY} />
-            </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
+          <View className="flex-row items-center justify-between gap-3 mb-5">
+            {/* Space Schedule Card */}
+            <Pressable
+              onPress={() => router.push("/attractions/purchases")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="shopping-bag" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
                 Manage Purchases
               </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                View all customer attraction purchases
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                View customers attraction
               </Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="#9CA3AF" />
-          </Pressable>
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  View All
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
+            </Pressable>
 
-          <Pressable
-            onPress={() => router.push("/attractions/create-attraction")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              New Attraction
-            </Text>
-          </Pressable>
+            {/* Onsite Purchase Card */}
+            <Pressable
+              onPress={() => router.push("/attractions/check-in")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="camera" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+                Check-in
+              </Text>
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                Checking in customers
+              </Text>
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  Scan QR Code
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
+            </Pressable>
+          </View>
 
+         
           {/* Header controls — full-width segmented pill (Location · More ·
               Scanner). The location selector is company-admin only; managers are
               scoped to their own location by the backend. */}
@@ -470,12 +491,18 @@ const Attractions = () => {
                 <Feather name="more-horizontal" size={15} color={c} />
               )}
             />
-            <PillSegment
-              label="Scanner"
-              onPress={() => router.push("/attractions/check-in")}
-              renderIcon={(c) => <Feather name="camera" size={15} color={c} />}
-            />
           </FilterPill>
+
+           <Pressable
+            onPress={() => router.push("/attractions/create-attraction")}
+            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              New Attraction
+            </Text>
+          </Pressable>
+
 
           {/* Error state */}
           {!loading && error && (

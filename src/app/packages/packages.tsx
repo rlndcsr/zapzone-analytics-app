@@ -24,6 +24,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
 import { consumePackagesStale, usePackages } from "../../lib/hooks/usePackages";
@@ -302,66 +303,82 @@ const Packages = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        <View className="px-5">
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Packages Overview
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Browse all packages and their details
-            </Text>
-          </View>
-          {/* Overview intro */}
-          <Pressable
-            onPress={() => router.push("/packages/custom-packages")}
-            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-              <Feather name="package" size={18} color={PRIMARY} />
-            </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
+        <View className="px-5 mt-5">
+          <View className="flex-row items-center justify-between gap-3 mb-5">
+            {/* Space Schedule Card */}
+            <Pressable
+              onPress={() => router.push("/packages/custom-packages")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="package" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
                 Custom Packages
               </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                View all custom packages and their details.
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                View all custom packages and their details
               </Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="#9CA3AF" />
-          </Pressable>
-
-          {/* More + Create Package (mirrors the web header controls) */}
-          <View className="flex-row gap-3 mb-5">
-            <Pressable
-              onPress={() => setShowMoreSheet(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="more-horizontal" size={16} color="#6B7280" />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                More
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  View
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
             </Pressable>
 
+            {/* Onsite Purchase Card */}
             <Pressable
-              onPress={() => router.push("/packages/create-packages")}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
-              accessibilityRole="button"
-              accessibilityLabel="Create package"
+              onPress={() => router.push("/packages/manage-packages")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
             >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                className="text-xs font-semibold text-white"
-                numberOfLines={1}
-              >
-                Create Package
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="package" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+                Manage Packages
               </Text>
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                Manage and view all your packages
+              </Text>
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  View all
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
             </Pressable>
           </View>
+
+          {/* Create Package (mirrors the web header controls) */}
+          <Pressable
+            onPress={() => router.push("/packages/create-packages")}
+            className="flex-1 flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Create package"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text
+              className="text-xs font-semibold text-white"
+              numberOfLines={1}
+            >
+              Create Package
+            </Text>
+          </Pressable>
 
           {/* Search */}
           <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
@@ -381,49 +398,46 @@ const Packages = () => {
             )}
           </View>
 
-          {/* Location + Sort controls. Location selector is company-admin only;
-              hidden for other roles (backend-scoped), so Sort fills the row. */}
-          <View className="flex-row items-center gap-2 mt-3">
-            {isCompanyAdmin && (
-              <Pressable
-                onPress={() => setShowLocationSheet(true)}
-                className="flex-1 flex-row items-center justify-between gap-2 bg-white dark:bg-neutral-900 px-3.5 py-3 rounded-xl border border-gray-200 dark:border-neutral-800"
-              >
-                <Text
-                  className="text-sm text-gray-700 dark:text-gray-200 flex-1"
-                  numberOfLines={1}
-                >
-                  {location}
-                </Text>
-                <Feather name="chevron-down" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
-
-            <Pressable
-              onPress={() => setShowSortSheet(true)}
-              className="flex-1 flex-row items-center justify-between gap-2 bg-white dark:bg-neutral-900 px-3.5 py-3 rounded-xl border border-gray-200 dark:border-neutral-800"
-            >
-              <Text
-                className="text-sm text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                Sort: {sortKey}
-              </Text>
-              <Feather name="chevron-down" size={16} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setSortAsc((v) => !v)}
-              className="bg-white dark:bg-neutral-900 p-3 rounded-xl border border-gray-200 dark:border-neutral-800"
-              accessibilityRole="button"
-              accessibilityLabel="Toggle sort direction"
-            >
-              <Feather
-                name={sortAsc ? "arrow-up" : "arrow-down"}
-                size={16}
-                color="#6B7280"
+          {/* Controls — full-width segmented pill (More · Location · Sort) with
+              a compact sort-direction toggle. Location selector is company-admin
+              only; hidden for other roles (backend-scoped). */}
+          <View className="mt-3">
+            <FilterPill>
+              <PillSegment
+                label="More"
+                active={showMoreSheet}
+                onPress={() => setShowMoreSheet(true)}
+                renderIcon={(c) => (
+                  <Feather name="more-horizontal" size={15} color={c} />
+                )}
               />
-            </Pressable>
+              {isCompanyAdmin && (
+                <PillSegment
+                  label={location}
+                  active={showLocationSheet}
+                  onPress={() => setShowLocationSheet(true)}
+                  renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
+                />
+              )}
+              <PillSegment
+                label={`Sort: ${sortKey}`}
+                active={showSortSheet}
+                onPress={() => setShowSortSheet(true)}
+                renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
+              />
+              <Pressable
+                onPress={() => setSortAsc((v) => !v)}
+                className="px-3 py-2.5 rounded-xl items-center justify-center"
+                accessibilityRole="button"
+                accessibilityLabel="Toggle sort direction"
+              >
+                <Feather
+                  name={sortAsc ? "arrow-up" : "arrow-down"}
+                  size={15}
+                  color="#6B7280"
+                />
+              </Pressable>
+            </FilterPill>
           </View>
 
           {/* Category chips */}

@@ -20,6 +20,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
@@ -526,73 +528,45 @@ const ManagePurchases = () => {
           />
         }
       >
-        <View className="px-5">
-          {/* Overview intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Purchases Overview
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              All customer attraction purchases at a glance
-            </Text>
-          </View>
+        <View className="px-5 mt-5">
 
-          {/* Location (admin) + View Deleted + Export CSV — mirrors the web
-              header controls, placed above the KPI cards. */}
-          <View className="mb-5">
+          
+       
+
+          {/* Header controls — full-width segmented pill (Location · View
+              Deleted · Export CSV), mirrors the web header controls. */}
+          <FilterPill>
             {isCompanyAdmin && (
-              <Pressable
+              <PillSegment
+                label={locationLabel}
+                active={sheet === "location"}
                 onPress={() => setSheet("location")}
-                className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3"
-              >
-                <Feather name="map-pin" size={16} color={PRIMARY} />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                  numberOfLines={1}
-                >
-                  {locationLabel}
-                </Text>
-                <Feather name="chevron-down" size={14} color="#9CA3AF" />
-              </Pressable>
+                renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
+              />
             )}
-            <View className="flex-row gap-3">
-              <Pressable
-                onPress={toggleDeleted}
-                className={`flex-1 flex-row items-center justify-center gap-2 px-4 py-3.5 rounded-xl border ${
-                  showDeleted
-                    ? "bg-[#0644C7] border-[#0644C7]"
-                    : "bg-white dark:bg-neutral-900 border-gray-100 dark:border-neutral-800"
-                }`}
-              >
-                <Feather
-                  name={showDeleted ? "rotate-ccw" : "archive"}
-                  size={16}
-                  color={showDeleted ? "#FFFFFF" : PRIMARY}
-                />
-                <Text
-                  className={`text-xs font-semibold ${
-                    showDeleted ? "text-white" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {showDeleted ? "View Active" : "View Deleted"}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={exportCsv}
-                disabled={exporting}
-                className="flex-1 flex-row items-center justify-center gap-2 px-4 py-3.5 rounded-xl border bg-white dark:bg-neutral-900 border-gray-100 dark:border-neutral-800"
-              >
-                {exporting ? (
-                  <ActivityIndicator size="small" color={PRIMARY} />
+            
+            <PillSegment
+              label="Export CSV"
+              onPress={exportCsv}
+              renderIcon={(c) =>
+                exporting ? (
+                  <ActivityIndicator size="small" color={c} />
                 ) : (
-                  <Feather name="download" size={16} color={PRIMARY} />
-                )}
-                <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  Export CSV
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+                  <Feather name="download" size={15} color={c} />
+                )
+              }
+            />
+          </FilterPill>
+
+          <Pressable
+            onPress={() => router.push("/attractions/create-purchase")}
+            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              New Purchase
+            </Text>
+          </Pressable>
 
           {/* Error state */}
           {!listLoading && listError && (
@@ -663,42 +637,41 @@ const ManagePurchases = () => {
             )}
           </View>
 
-          {/* Filters: Status + Payment */}
-          <View className="flex-row gap-3 mb-3">
-            <Pressable
+          {/* Filters — full-width segmented pill (Status · Payment · Date) */}
+          <FilterPill>
+            <PillSegment
+              label={statusLabel}
+              active={sheet === "status"}
               onPress={() => setSheet("status")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="check-circle" size={16} color={PRIMARY} />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1" numberOfLines={1}>
-                {statusLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
+              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
+            />
+            <PillSegment
+              label={paymentLabel}
+              active={sheet === "payment"}
               onPress={() => setSheet("payment")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="credit-card" size={16} color={PRIMARY} />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1" numberOfLines={1}>
-                {paymentLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          </View>
+              renderIcon={(c) => <Feather name="credit-card" size={15} color={c} />}
+            />
 
-          {/* Filter: Date range */}
-          <Pressable
-            onPress={() => setSheet("date")}
-            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
-          >
-            <Feather name="calendar" size={16} color={PRIMARY} />
-            <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1" numberOfLines={1}>
-              {dateLabel}
-            </Text>
-            <Feather name="chevron-down" size={14} color="#9CA3AF" />
-          </Pressable>
+            <PillSegment
+              label={showDeleted ? "View Active" : "View Deleted"}
+              active={showDeleted}
+              onPress={toggleDeleted}
+              renderIcon={(c) => (
+                <Feather
+                  name={showDeleted ? "rotate-ccw" : "archive"}
+                  size={15}
+                  color={c}
+                />
+              )}
+            />
+            
+            <PillSegment
+              label={dateLabel}
+              active={sheet === "date"}
+              onPress={() => setSheet("date")}
+              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+            />
+          </FilterPill>
 
           {/* List header */}
           {!listLoading && !listError && (
@@ -990,26 +963,7 @@ const ManagePurchases = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Floating Action Button — Create Purchase (mirrors the web "New
-          Purchase" button). No floating tab bar on this pushed route. */}
-      <Pressable
-        onPress={() => router.push("/attractions/create-purchase" as never)}
-        accessibilityRole="button"
-        accessibilityLabel="Create purchase"
-        style={{
-          position: "absolute",
-          right: 20,
-          bottom: insets.bottom + 20,
-          shadowColor: PRIMARY,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.4,
-          shadowRadius: 12,
-          elevation: 8,
-        }}
-        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-      >
-        <Feather name="plus" size={26} color="#FFFFFF" />
-      </Pressable>
+  
     </View>
   );
 };

@@ -1,8 +1,16 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useEffect, useMemo, useState, useCallback, type ComponentProps } from "react";
 import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  type ComponentProps,
+} from "react";
+import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,11 +21,16 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
 import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
 import { getCurrentUser } from "../../lib/session";
-import type { EventDateType, EventRow, EventStatus } from "../../services/eventsService";
+import type {
+  EventDateType,
+  EventRow,
+  EventStatus,
+} from "../../services/eventsService";
 
 const PRIMARY = "#0644C7";
 
@@ -92,12 +105,16 @@ const StatusBadge = ({ status }: { status: EventStatus }) => {
   return (
     <View
       className={`px-2.5 py-1 rounded-full ${
-        active ? "bg-green-50 dark:bg-green-900/30" : "bg-gray-100 dark:bg-neutral-800"
+        active
+          ? "bg-green-50 dark:bg-green-900/30"
+          : "bg-gray-100 dark:bg-neutral-800"
       }`}
     >
       <Text
         className={`text-xs font-semibold capitalize ${
-          active ? "text-green-600 dark:text-green-400" : "text-gray-500 dark:text-gray-400"
+          active
+            ? "text-green-600 dark:text-green-400"
+            : "text-gray-500 dark:text-gray-400"
         }`}
       >
         {status}
@@ -136,7 +153,10 @@ const EventCard = ({ event }: { event: EventRow }) => {
           </Text>
           <View className="flex-row items-center gap-1 mt-0.5">
             <Feather name="calendar" size={11} color="#9CA3AF" />
-            <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+            <Text
+              className="text-xs text-gray-500 dark:text-gray-400"
+              numberOfLines={1}
+            >
               {dateLabel(event)}
             </Text>
           </View>
@@ -220,7 +240,9 @@ const KpiCard = ({
     >
       {value}
     </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">{change}</Text>
+    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+      {change}
+    </Text>
   </View>
 );
 
@@ -239,10 +261,13 @@ const Events = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateTypeFilter, setDateTypeFilter] = useState<DateTypeFilter>("all");
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  const [sheet, setSheet] = useState<null | "status" | "dateType" | "location">(null);
+  const [sheet, setSheet] = useState<null | "status" | "dateType" | "location">(
+    null,
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
+  const [exporting, setExporting] = useState(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -296,7 +321,8 @@ const Events = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const upcoming = locationScoped.filter((e) => {
-      const end = e.dateType === "date_range" && e.endDate ? e.endDate : e.startDate;
+      const end =
+        e.dateType === "date_range" && e.endDate ? e.endDate : e.startDate;
       const d = new Date(`${(end || "").substring(0, 10)}T00:00:00`);
       return !Number.isNaN(d.getTime()) && d >= today;
     }).length;
@@ -307,9 +333,11 @@ const Events = () => {
     const term = search.trim().toLowerCase();
     return locationScoped.filter((e) => {
       if (statusFilter !== "all" && e.status !== statusFilter) return false;
-      if (dateTypeFilter !== "all" && e.dateType !== dateTypeFilter) return false;
+      if (dateTypeFilter !== "all" && e.dateType !== dateTypeFilter)
+        return false;
       if (term) {
-        const haystack = `${e.name} ${e.description} ${e.locationName}`.toLowerCase();
+        const haystack =
+          `${e.name} ${e.description} ${e.locationName}`.toLowerCase();
         if (!haystack.includes(term)) return false;
       }
       return true;
@@ -326,14 +354,67 @@ const Events = () => {
     setPage(1);
   }, [search, statusFilter, dateTypeFilter, locationFilter, perPage]);
 
+  const exportCsv = useCallback(async () => {
+    if (filtered.length === 0) {
+      Alert.alert("Nothing to export", "There are no events to export.");
+      return;
+    }
+    setExporting(true);
+    try {
+      // Loaded lazily so these native modules never run at app startup (Expo
+      // Router evaluates route modules eagerly on boot).
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+
+      const header = [
+        "ID", "Name", "Category", "Location", "Price",
+        "Status", "Date Type", "Start Date", "End Date", "Created",
+      ];
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const lines = filtered.map((e) =>
+        [
+          e.id, e.name, e.dateType, e.locationName, e.price,
+          e.status, e.dateType, e.startDate, e.endDate ?? "",
+          e.createdAt ? new Date(e.createdAt).toLocaleString() : "",
+        ]
+          .map(esc)
+          .join(","),
+      );
+      const csv = [header.map(esc).join(","), ...lines].join("\n");
+      const date = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}events-export-${date}.csv`;
+      await FileSystem.writeAsStringAsync(uri, csv, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Events",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+      }
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [filtered]);
+
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Status";
   const dateTypeLabel =
-    DATE_TYPE_OPTIONS.find((o) => o.value === dateTypeFilter)?.label ?? "All Types";
+    DATE_TYPE_OPTIONS.find((o) => o.value === dateTypeFilter)?.label ??
+    "All Types";
   const locationLabel =
     locationFilter === "all"
       ? "All Locations"
-      : (locations.find((l) => l.id === locationFilter)?.name ?? "All Locations");
+      : (locations.find((l) => l.id === locationFilter)?.name ??
+        "All Locations");
   const hasResults = filtered.length > 0;
 
   return (
@@ -349,7 +430,9 @@ const Events = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">Events</Text>
+          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+            Events
+          </Text>
           <View style={{ width: 36 }} />
         </View>
       </View>
@@ -368,81 +451,110 @@ const Events = () => {
           />
         }
       >
-        <View className="px-5">
-          {/* Overview intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Events Overview
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Manage scheduled events and their ticket sales
-            </Text>
-          </View>
-
-          {/* Event Purchases — child feature of Events (mirrors the web
-              /events/purchases submenu item). */}
-          <Pressable
-            onPress={() => router.push("/events/purchases")}
-            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-              <Feather name="shopping-bag" size={18} color={PRIMARY} />
-            </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
+        <View className="px-5 mt-5">
+          <View className="flex-row items-center justify-between gap-3">
+            {/* Event Purchases Card */}
+            <Pressable
+              onPress={() => router.push("/events/purchases")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="shopping-bag" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
                 Event Purchases
               </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                View all customer event ticket purchases
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                View all customer purchases
               </Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="#9CA3AF" />
-          </Pressable>
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  View All
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
+            </Pressable>
 
-          {/* Onsite Purchase — child feature of Events (mirrors the web
-              /events/onsite-purchase page). */}
-          <Pressable
-            onPress={() => router.push("/events/create-purchase")}
-            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-              <Feather name="plus-circle" size={18} color={PRIMARY} />
-            </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
+            {/* Onsite Purchase Card */}
+            <Pressable
+              onPress={() => router.push("/events/create-purchase")}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="plus-circle" size={20} color="#0644C7" />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
                 Onsite Purchase
               </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Create a walk-in event ticket purchase
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                Create walk-in ticket purchase
               </Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="#9CA3AF" />
-          </Pressable>
-
-          {/* Location filter (company admins only — mirrors the web header
-              control; managers are scoped to their own location by the backend). */}
-          {isCompanyAdmin && (
-            <Pressable
-              onPress={() => setSheet("location")}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
-            >
-              <Feather name="map-pin" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {locationLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
+              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  View All
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
             </Pressable>
-          )}
+          </View>
 
+          {/* Header controls — full-width segmented pill (Location · Export
+              CSV). The location selector is company-admin only; managers are
+              scoped to their own location by the backend. */}
+          <View className="mt-5">
+            <FilterPill>
+              {isCompanyAdmin && (
+                <PillSegment
+                  label={locationLabel}
+                  active={sheet === "location"}
+                  onPress={() => setSheet("location")}
+                  renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
+                />
+              )}
+              <PillSegment
+                label="Export CSV"
+                onPress={exportCsv}
+                renderIcon={(c) =>
+                  exporting ? (
+                    <ActivityIndicator size="small" color={c} />
+                  ) : (
+                    <Feather name="download" size={15} color={c} />
+                  )
+                }
+              />
+            </FilterPill>
+          </View>
+
+          <Pressable
+            onPress={() => router.push("/events/create-event")}
+            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Create New Event
+            </Text>
+          </Pressable>
+          
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -508,36 +620,21 @@ const Events = () => {
             )}
           </View>
 
-          {/* Filters */}
-          <View className="flex-row gap-3 mb-5">
-            <Pressable
+          {/* Filters — full-width segmented pill (Status · Date Type) */}
+          <FilterPill>
+            <PillSegment
+              label={statusLabel}
+              active={sheet === "status"}
               onPress={() => setSheet("status")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="check-circle" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {statusLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
+              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
+            />
+            <PillSegment
+              label={dateTypeLabel}
+              active={sheet === "dateType"}
               onPress={() => setSheet("dateType")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {dateTypeLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          </View>
+              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+            />
+          </FilterPill>
 
           {/* List header */}
           {!loading && !error && (
@@ -602,7 +699,9 @@ const Events = () => {
                             >
                               <Text
                                 className={`text-xs font-medium ${
-                                  isActive ? "text-white" : "text-gray-600 dark:text-gray-300"
+                                  isActive
+                                    ? "text-white"
+                                    : "text-gray-600 dark:text-gray-300"
                                 }`}
                               >
                                 {option}
@@ -753,60 +852,41 @@ const Events = () => {
         title="Select Location"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: "all" as const, name: "All Locations" }, ...locations].map((option) => {
-            const isSelected = locationFilter === option.id;
-            return (
-              <Pressable
-                key={String(option.id)}
-                onPress={() => {
-                  setLocationFilter(option.id);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
+          {[{ id: "all" as const, name: "All Locations" }, ...locations].map(
+            (option) => {
+              const isSelected = locationFilter === option.id;
+              return (
+                <Pressable
+                  key={String(option.id)}
+                  onPress={() => {
+                    setLocationFilter(option.id);
+                    setSheet(null);
+                  }}
+                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                   }`}
-                  numberOfLines={1}
                 >
-                  {option.name}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
+                  <Text
+                    className={`text-base font-medium flex-1 mr-2 ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                    numberOfLines={1}
+                  >
+                    {option.name}
+                  </Text>
+                  {isSelected && (
+                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                      <Feather name="check" size={14} color="#FFFFFF" />
+                    </View>
+                  )}
+                </Pressable>
+              );
+            },
+          )}
         </ScrollView>
       </BottomSheet>
-
-      {/* Floating Action Button — Create Event (mirrors the web "New Event"
-          button). This route has no floating tab bar to clash with. */}
-      <Pressable
-        onPress={() => router.push("/events/create-event")}
-        accessibilityRole="button"
-        accessibilityLabel="Create event"
-        style={{
-          position: "absolute",
-          right: 20,
-          bottom: insets.bottom + 20,
-          shadowColor: PRIMARY,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.4,
-          shadowRadius: 12,
-          elevation: 8,
-        }}
-        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-      >
-        <Feather name="plus" size={26} color="#FFFFFF" />
-      </Pressable>
     </View>
   );
 };
