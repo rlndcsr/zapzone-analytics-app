@@ -364,6 +364,66 @@ const Packages = () => {
             </Pressable>
           </View>
 
+          {/* Catalog sub-features (Space · Add-ons · Promos · Gift Cards) */}
+          <View className="flex-row flex-wrap -mx-1.5 mb-2">
+            {[
+              {
+                label: "Space",
+                desc: "Rooms & availability",
+                icon: "home" as const,
+                route: "/packages/space",
+              },
+              {
+                label: "Add-ons",
+                desc: "Food, beverage & extras",
+                icon: "coffee" as const,
+                route: "/packages/add-ons",
+              },
+              {
+                label: "Promos",
+                desc: "Promotional codes",
+                icon: "tag" as const,
+                route: "/packages/promos",
+              },
+              {
+                label: "Gift Cards",
+                desc: "Customer gift cards",
+                icon: "gift" as const,
+                route: "/packages/gift-cards",
+              },
+            ].map((item) => (
+              <View key={item.route} className="w-1/2 px-1.5 mb-3">
+                <Pressable
+                  onPress={() => router.push(item.route as never)}
+                  className="bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+                  style={{
+                    shadowColor: "#424242",
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.04,
+                    shadowRadius: 6,
+                    elevation: 1,
+                  }}
+                >
+                  <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                    <Feather name={item.icon} size={20} color="#0644C7" />
+                  </View>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+                    {item.label}
+                  </Text>
+                  <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                    {item.desc}
+                  </Text>
+                  <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                    <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                      View
+                    </Text>
+                    <Feather name="chevron-right" size={16} color="#0644C7" />
+                  </View>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+
           {/* Create Package (mirrors the web header controls) */}
           <Pressable
             onPress={() => router.push("/packages/create-packages")}

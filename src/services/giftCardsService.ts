@@ -9,7 +9,68 @@ export type GiftCardOption = {
 type RawGiftCard = {
   id: number;
   code?: string | null;
+  discount_type?: string | null;
+  type?: string | null;
+  value?: number | string | null;
+  amount?: number | string | null;
+  balance?: number | string | null;
+  current_balance?: number | string | null;
+  remaining_balance?: number | string | null;
+  is_active?: boolean | number | null;
+  status?: string | null;
+  deleted?: boolean | number | null;
+  expiry_date?: string | null;
+  expires_at?: string | null;
 };
+
+/** Flattened gift-card row backing the Gift Cards management list. */
+export type GiftCardRow = {
+  id: number;
+  code: string;
+  discountType: string;
+  value: number;
+  balance: number | null;
+  isActive: boolean;
+  expiresAt: string | null;
+};
+
+function mapGiftCardRow(g: RawGiftCard): GiftCardRow {
+  const active =
+    g.is_active === true ||
+    g.is_active === 1 ||
+    (g.status ? g.status.toLowerCase() === "active" : false) ||
+    (g.is_active == null && g.status == null && !g.deleted);
+  const balanceRaw = g.balance ?? g.current_balance ?? g.remaining_balance;
+  return {
+    id: g.id,
+    code: g.code?.trim() || `#${g.id}`,
+    discountType: (g.discount_type ?? g.type ?? "fixed").toLowerCase(),
+    value: Number(g.value ?? g.amount ?? 0),
+    balance: balanceRaw != null ? Number(balanceRaw) : null,
+    isActive: active,
+    expiresAt: g.expiry_date ?? g.expires_at ?? null,
+  };
+}
+
+/** GET /api/gift-cards — the full gift-card list for the management screen. */
+export async function fetchGiftCardList(
+  token: string,
+  signal?: AbortSignal,
+): Promise<GiftCardRow[]> {
+  const out: GiftCardRow[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const res = await apiRequest<GiftCardsResponse>(
+      `/api/gift-cards?per_page=${PER_PAGE}&page=${page}`,
+      { token, signal },
+    );
+    for (const g of res?.data?.gift_cards ?? []) out.push(mapGiftCardRow(g));
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page += 1;
+  } while (page <= lastPage && page <= MAX_PAGES);
+  return out;
+}
 
 type GiftCardsResponse = {
   success?: boolean;

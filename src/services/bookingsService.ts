@@ -596,6 +596,13 @@ type RawRoom = {
   id: number;
   name?: string | null;
   capacity?: number | string | null;
+  area_group?: string | { name?: string | null } | null;
+  booking_interval?: number | string | null;
+  is_active?: boolean | number | null;
+  status?: string | null;
+  location_id?: number | string | null;
+  location?: { id?: number | null; name?: string | null } | null;
+  created_at?: string | null;
   break_time?:
     | {
         days?: string[] | null;
@@ -646,6 +653,165 @@ export async function fetchSpaces({
     page++;
   } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
   return out;
+}
+
+/** Flattened space/room row backing the Spaces management list. */
+export type SpaceRow = {
+  id: number;
+  name: string;
+  capacity: number | null;
+  areaGroup: string | null;
+  bookingInterval: number | null;
+  isActive: boolean;
+  locationId: number | null;
+  locationName: string;
+  breaks: SpaceBreak[];
+  createdAt: string | null;
+};
+
+/** Fields accepted when creating/updating a room (mirrors the web form). */
+export type RoomInput = {
+  name: string;
+  capacity: number | null;
+  is_active: boolean;
+  area_group: string | null;
+  booking_interval: number | null;
+  location_id?: number | null;
+  break_time: { days: string[]; start_time: string; end_time: string }[];
+};
+
+function rawRoomToBreaks(r: RawRoom): SpaceBreak[] {
+  return (r.break_time ?? []).map((b) => ({
+    days: Array.isArray(b.days) ? b.days.map((d) => String(d).toLowerCase()) : [],
+    startTime: toTime(b.start_time) ?? String(b.start_time ?? ""),
+    endTime: toTime(b.end_time) ?? String(b.end_time ?? ""),
+  }));
+}
+
+function mapSpaceRow(r: RawRoom): SpaceRow {
+  const areaGroup =
+    typeof r.area_group === "string"
+      ? r.area_group.trim() || null
+      : r.area_group?.name?.trim() || null;
+  return {
+    id: Number(r.id),
+    name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+    capacity: r.capacity != null ? Number(r.capacity) : null,
+    areaGroup,
+    bookingInterval: r.booking_interval != null ? Number(r.booking_interval) : null,
+    isActive:
+      r.is_active === true ||
+      r.is_active === 1 ||
+      (r.status ? r.status.toLowerCase() === "active" : false) ||
+      (r.is_active == null && r.status == null),
+    locationId:
+      r.location_id != null
+        ? Number(r.location_id)
+        : r.location?.id != null
+          ? Number(r.location.id)
+          : null,
+    locationName: r.location?.name?.trim() || "",
+    breaks: rawRoomToBreaks(r),
+    createdAt: r.created_at ?? null,
+  };
+}
+
+/** Serialize a SpaceRow's break windows back into the API's break_time shape. */
+export function breaksToPayload(
+  breaks: SpaceBreak[],
+): RoomInput["break_time"] {
+  return breaks.map((b) => ({
+    days: b.days,
+    start_time: b.startTime,
+    end_time: b.endTime,
+  }));
+}
+
+/**
+ * GET /api/rooms — the full spaces list for the management screen (name,
+ * capacity, area group, booking interval). Scoped by user_id like the web.
+ */
+export async function fetchSpaceList({
+  token,
+  userId,
+  signal,
+}: {
+  token: string;
+  userId?: number;
+  signal?: AbortSignal;
+}): Promise<SpaceRow[]> {
+  const out: SpaceRow[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const params = new URLSearchParams({ per_page: "100", page: String(page) });
+    if (userId != null) params.append("user_id", String(userId));
+    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
+      token,
+      signal,
+    });
+    for (const r of extractList<RawRoom>(res, "rooms")) {
+      out.push(mapSpaceRow(r));
+    }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
+  return out;
+}
+
+type RoomMutationResponse = { success?: boolean; data?: RawRoom; message?: string };
+
+/** POST /api/rooms — create a space/room. */
+export async function createRoom(
+  token: string,
+  input: RoomInput,
+): Promise<void> {
+  await apiRequest<RoomMutationResponse>("/api/rooms", {
+    method: "POST",
+    token,
+    body: input,
+  });
+}
+
+/** PUT /api/rooms/{id} — update a space/room. */
+export async function updateRoom(
+  token: string,
+  id: number,
+  input: RoomInput,
+): Promise<void> {
+  await apiRequest<RoomMutationResponse>(`/api/rooms/${id}`, {
+    method: "PUT",
+    token,
+    body: input,
+  });
+}
+
+/** DELETE /api/rooms/{id} — remove a space/room. */
+export async function deleteRoom(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/rooms/${id}`, { method: "DELETE", token });
+}
+
+/**
+ * Apply one booking interval to every room in an area group. Uses the confirmed
+ * per-room update route (PUT /api/rooms/{id}) so it doesn't depend on a bulk
+ * endpoint; each room keeps its other fields (name/capacity/breaks/location).
+ */
+export async function updateAreaGroupInterval(
+  token: string,
+  rooms: SpaceRow[],
+  bookingInterval: number,
+): Promise<void> {
+  for (const room of rooms) {
+    await updateRoom(token, room.id, {
+      name: room.name,
+      capacity: room.capacity,
+      is_active: room.isActive,
+      area_group: room.areaGroup,
+      booking_interval: bookingInterval,
+      location_id: room.locationId ?? undefined,
+      break_time: breaksToPayload(room.breaks),
+    });
+  }
 }
 
 /** One booking on the day schedule — carries room + duration for placement. */

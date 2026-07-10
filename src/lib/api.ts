@@ -14,6 +14,30 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
+/**
+ * Resolve a stored image reference to something `<Image>` can load. Passes
+ * through absolute URLs and base64 data URIs; prefixes the API host for
+ * server-relative paths and the storage disk for bare filenames/paths.
+ */
+export function mediaUrl(
+  path: string | null | undefined,
+): string | null {
+  if (!path) return null;
+  const p = String(path).trim();
+  if (!p) return null;
+  // Already usable: absolute URL or data URI.
+  if (/^(https?:|data:)/i.test(p)) return p;
+  // Server-relative path.
+  if (p.startsWith("/")) return `${API_BASE_URL}${p}`;
+  // Raw base64 image data stored without the data-URI prefix (long token, no
+  // path separators) — wrap it so <Image> can decode it.
+  if (p.length > 200 && !p.includes("/") && !p.includes(" ")) {
+    return `data:image/jpeg;base64,${p}`;
+  }
+  // Otherwise a storage-relative path/filename.
+  return `${API_BASE_URL}/storage/${p.replace(/^storage\//, "")}`;
+}
+
 /** Field-keyed validation messages as returned by the Laravel backend. */
 export type FieldErrors = Record<string, string[]>;
 

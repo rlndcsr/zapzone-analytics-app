@@ -1,9 +1,22 @@
 import { apiRequest } from "../lib/api";
 
 /** A company location, for plan location + approved-location pickers. */
-export type LocationOption = { id: number; name: string };
+export type LocationOption = { id: number; name: string; address: string };
 
-type RawLocation = { id: number; name?: string | null };
+type RawLocation = {
+  id: number;
+  name?: string | null;
+  address?: string | null;
+  street_address?: string | null;
+  city?: string | null;
+  state?: string | null;
+};
+
+function locationAddress(l: RawLocation): string {
+  if (l.address?.trim()) return l.address.trim();
+  if (l.street_address?.trim()) return l.street_address.trim();
+  return [l.city, l.state].filter((s) => s?.trim()).join(", ");
+}
 
 /**
  * GET /api/mobile/locations — the active locations list, mobile-optimized
@@ -22,6 +35,10 @@ export async function fetchLocations(
   const list = Array.isArray(res) ? res : (res.data ?? []);
   return list
     .filter((l): l is RawLocation => !!l && typeof l.id === "number")
-    .map((l) => ({ id: l.id, name: l.name?.trim() || `Location #${l.id}` }))
+    .map((l) => ({
+      id: l.id,
+      name: l.name?.trim() || `Location #${l.id}`,
+      address: locationAddress(l),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
