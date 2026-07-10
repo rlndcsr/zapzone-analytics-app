@@ -13,13 +13,25 @@ import { getToken } from "../session";
  * paginates server-side, so useActivityLogs refetches on any filter/page change.
  */
 
-function todayKey(): string {
+/**
+ * Local calendar-day "today" test — mirrors the web admin's `isToday`
+ * (`date.getDate()/getMonth()/getFullYear()` against now, in device-local time).
+ */
+function isTodayLocal(value: string | null): boolean {
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return (
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear()
+  );
 }
+
+// The web activity list uses a fixed page size of 20 (itemsPerPage), and its
+// "Today's Activities" KPI counts isToday rows within that loaded page. Match it.
+const WEB_PAGE_SIZE = 20;
 
 type UseActivityParams = {
   filters: ActivityFilters;
@@ -82,22 +94,28 @@ export function useActivityLogs({ filters, page, perPage = 15 }: UseActivityPara
 export type ActivityStats = {
   total: number;
   today: number;
-  managerActions: number;
-  attendantActions: number;
+  purchases: number;
+  activeAttendants: number;
 };
 
 /**
- * KPI counts for the Activity Log header. Total + today come from cheap
- * `per_page=1` count requests; the manager/attendant split is computed over
- * today's entries (bounded fetch) since the index has no actor-role filter.
- * Both counts respect the active location filter. Refetches when `nonce` bumps.
+ * KPI counts for the Activity Log header — computed exactly like the web
+ * `getLocationMetrics`:
+ *   - Total Activities  → server pagination total (cheap `per_page=1` count).
+ *   - Purchases Made    → server count filtered by `action=purchased`.
+ *   - Today's Activities → count of `isToday` (device-local calendar day) rows
+ *     within the newest loaded page (web loads `itemsPerPage=20` newest-first
+ *     and filters that page client-side; NOT a whole-dataset server date count).
+ *   - Active Attendants → distinct users with a `logged_in` action among those
+ *     same today rows.
+ * All respect the active location filter. Refetches when `nonce` bumps.
  */
 export function useActivityStats(locationId: number | undefined, nonce = 0) {
   const [stats, setStats] = useState<ActivityStats>({
     total: 0,
     today: 0,
-    managerActions: 0,
-    attendantActions: 0,
+    purchases: 0,
+    activeAttendants: 0,
   });
   const [loading, setLoading] = useState(true);
   const requestIdRef = useRef(0);
@@ -111,23 +129,34 @@ export function useActivityStats(locationId: number | undefined, nonce = 0) {
     }
     setLoading(true);
 
-    const today = todayKey();
     const base: ActivityFilters = { locationId };
 
     Promise.all([
       fetchActivityCount(token, base),
-      fetchActivityCount(token, { ...base, dateFrom: today }),
-      fetchActivityLogs(token, { ...base, dateFrom: today }, 1, 100),
+      fetchActivityCount(token, { ...base, action: "purchased" }),
+      // Newest page (web itemsPerPage=20, created_at desc) — the web derives
+      // both Today's Activities and Active Attendants from this loaded page.
+      fetchActivityLogs(token, base, 1, WEB_PAGE_SIZE),
     ])
-      .then(([total, todayCount, todayPage]) => {
+      .then(([total, purchases, recentPage]) => {
         if (requestId !== requestIdRef.current) return;
-        let managerActions = 0;
-        let attendantActions = 0;
-        for (const log of todayPage.logs) {
-          if (log.actor.role === "location_manager") managerActions++;
-          else if (log.actor.role === "attendant") attendantActions++;
+        // Rows in the loaded page whose local calendar day is today (web isToday).
+        const todayLogs = recentPage.logs.filter((log) =>
+          isTodayLocal(log.createdAt),
+        );
+        // Distinct users who logged in today (web's unique-userId set).
+        const activeIds = new Set<number>();
+        for (const log of todayLogs) {
+          if (log.action === "logged_in" && log.actor.id != null) {
+            activeIds.add(log.actor.id);
+          }
         }
-        setStats({ total, today: todayCount, managerActions, attendantActions });
+        setStats({
+          total,
+          today: todayLogs.length,
+          purchases,
+          activeAttendants: activeIds.size,
+        });
       })
       .catch(() => {
         /* KPIs are best-effort; the list surfaces real errors. */

@@ -53,6 +53,8 @@ export type StaffUser = {
   department: string | null;
   position: string | null;
   employeeId: string | null;
+  shift: string | null;
+  hireDate: string | null;
   lastLogin: string | null;
   createdAt: string | null;
 };
@@ -71,6 +73,8 @@ type RawUser = {
   department?: string | null;
   position?: string | null;
   employee_id?: string | null;
+  shift?: string | null;
+  hire_date?: string | null;
   last_login?: string | null;
   created_at?: string | null;
   location?: { id?: number; name?: string | null } | null;
@@ -113,6 +117,8 @@ function mapUser(raw: RawUser): StaffUser {
     department: raw.department?.trim() || null,
     position: raw.position?.trim() || null,
     employeeId: raw.employee_id?.trim() || null,
+    shift: raw.shift?.trim() || null,
+    hireDate: raw.hire_date ?? null,
     lastLogin: raw.last_login ?? null,
     createdAt: raw.created_at ?? null,
   };
@@ -215,6 +221,133 @@ export async function fetchRecentStaff(
     signal,
   );
   return res.users;
+}
+
+/**
+ * Every staff account matching a filter, following pagination to the last page.
+ * The web Attendants page loads the full (server-scoped) attendant set once and
+ * does all search/filter/sort/paginate client-side; this mirrors that so the
+ * KPI aggregates (departments, ≤30-day counts) match the web exactly. Bounded
+ * by `maxPages` as a runaway guard — a single location's staff is small.
+ */
+export async function fetchAllStaffUsers(
+  token: string,
+  filters: StaffFilters,
+  signal?: AbortSignal,
+  perPage = 100,
+  maxPages = 20,
+): Promise<StaffUser[]> {
+  const first = await fetchStaffUsers(token, filters, 1, perPage, signal);
+  const users = [...first.users];
+  const pages = Math.min(first.lastPage, maxPages);
+  for (let page = 2; page <= pages; page += 1) {
+    const next = await fetchStaffUsers(token, filters, page, perPage, signal);
+    users.push(...next.users);
+  }
+  return users;
+}
+
+/* ------------------------------------------------------------- create/edit -- */
+
+/**
+ * Create-staff request — mirrors the web `CreateStaffAccountModal` payload sent
+ * to `POST /users/staff`. `location_id` is the caller's own location for a
+ * location_manager (server also enforces this).
+ */
+export type CreateStaffPayload = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  role: StaffRole;
+  location_id?: number | null;
+  password_mode: "generate" | "custom";
+  password?: string;
+  send_email: boolean;
+  return_password: boolean;
+  login_url?: string;
+};
+
+export type CreateStaffResult = {
+  user: StaffUser | null;
+  /** Temporary password, present only when `return_password` was set. */
+  generatedPassword: string | null;
+  emailSent: boolean;
+};
+
+/** POST /api/users/staff — provision a new staff account (admin/manager). */
+export async function createStaff(
+  token: string,
+  payload: CreateStaffPayload,
+): Promise<CreateStaffResult> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: {
+      user?: RawUser;
+      generated_password?: string | null;
+      email_sent?: boolean;
+    };
+    user?: RawUser;
+    generated_password?: string | null;
+    email_sent?: boolean;
+  }>("/api/users/staff", { method: "POST", token, body: payload });
+
+  const rawUser = res?.data?.user ?? res?.user ?? null;
+  return {
+    user: rawUser ? mapUser(rawUser) : null,
+    generatedPassword:
+      res?.data?.generated_password ?? res?.generated_password ?? null,
+    emailSent: Boolean(res?.data?.email_sent ?? res?.email_sent),
+  };
+}
+
+/** Fields the web edit modal updates via `PUT /users/{id}`. */
+export type UpdateStaffPayload = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  position?: string | null;
+  department?: string | null;
+  shift?: string | null;
+  status?: StaffStatus;
+};
+
+/** PUT /api/users/{id} — update an existing staff account. */
+export async function updateStaff(
+  token: string,
+  id: number,
+  payload: UpdateStaffPayload,
+): Promise<StaffUser | null> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: RawUser;
+    user?: RawUser;
+  }>(`/api/users/${id}`, { method: "PUT", token, body: payload });
+  const raw = res?.data ?? res?.user ?? null;
+  return raw ? mapUser(raw) : null;
+}
+
+/**
+ * POST /api/shareable-tokens — mint a self-service signup invitation link for a
+ * new attendant (or manager). Mirrors the web "Send Invitation" modal.
+ */
+export type InvitePayload = {
+  email: string;
+  role: StaffRole;
+  company_id?: number | null;
+  location_id?: number | null;
+};
+
+export async function createStaffInvite(
+  token: string,
+  payload: InvitePayload,
+): Promise<string> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: { link?: string | null } | null;
+  }>("/api/shareable-tokens", { method: "POST", token, body: payload });
+  return res?.data?.link ?? "";
 }
 
 /* ---------------------------------------------------------------- writes -- */

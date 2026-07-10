@@ -122,6 +122,8 @@ export type DayOffFilters = {
   upcomingOnly?: boolean;
   /** Only whole-location blocks (no package/room scoping). */
   locationWideOnly?: boolean;
+  /** Type filter → `is_recurring` (true = recurring only, false = one-time). */
+  isRecurring?: boolean;
   sortBy?: "date" | "created_at" | "updated_at";
   sortOrder?: "asc" | "desc";
 };
@@ -149,6 +151,8 @@ function buildParams(
     params.append("location_id", String(filters.locationId));
   if (filters.upcomingOnly) params.append("upcoming_only", "1");
   if (filters.locationWideOnly) params.append("location_wide_only", "1");
+  if (filters.isRecurring != null)
+    params.append("is_recurring", filters.isRecurring ? "1" : "0");
   return params;
 }
 

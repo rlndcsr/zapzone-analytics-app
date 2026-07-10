@@ -55,7 +55,8 @@ import {
   SHADOW_OPACITY_RANGE,
   SHADOW_RADIUS_RANGE,
 } from "./fabMenuMotion";
-import { NAV_MENU_ITEMS, type NavMenuItem } from "./navMenuItems";
+import { getCurrentUser } from "../../lib/session";
+import { getNavMenuItems, type NavMenuItem } from "./navMenuItems";
 
 const FAB_COLOR = "#0644C7";
 const SURFACE_LIGHT = "#FFFFFF";
@@ -151,6 +152,11 @@ export function MorphingFabMenu({
   const { colorScheme } = useColorScheme();
   const surfaceColor = colorScheme === "dark" ? SURFACE_DARK : SURFACE_LIGHT;
 
+  // Quick Navigation is role-aware: the management entry swaps between User
+  // Management (company_admin) and Attendants Management (location_manager),
+  // mirroring the Web Admin sidebar.
+  const items = getNavMenuItems(getCurrentUser()?.role);
+
   const progress = useSharedValue(0);
   const itemsProgress = useSharedValue(0);
   const [mounted, setMounted] = useState(visible);
@@ -202,7 +208,7 @@ export function MorphingFabMenu({
   const panelW = Math.min(screenW - 32, MAX_PANEL_WIDTH);
   const contentW = panelW - PANEL_PADDING * 2;
   const cellW = (contentW - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS;
-  const rows = Math.ceil(NAV_MENU_ITEMS.length / COLUMNS);
+  const rows = Math.ceil(items.length / COLUMNS);
 
   const footerH = fabH + 24;
 
@@ -372,7 +378,7 @@ export function MorphingFabMenu({
 
   const grid = (
     <View className="flex-row flex-wrap justify-between">
-      {NAV_MENU_ITEMS.map((item, i) => (
+      {items.map((item, i) => (
         <GridItem
           key={item.key}
           item={item}

@@ -145,8 +145,15 @@ function mapLog(raw: RawLog): ActivityLogEntry {
 
 export type ActivityFilters = {
   search?: string;
-  category?: ActivityCategory;
+  /**
+   * Resource-type filter → `category` query param. Accepts any dynamic value
+   * (mirrors the web Resource Type filter, whose options come from the data).
+   */
+  category?: string;
+  /** Action filter → `action` query param. */
   action?: string;
+  /** Attendant filter → `user_id[]` query param (single id). */
+  userId?: number;
   locationId?: number;
   /** Inclusive `created_at >=` date (YYYY-MM-DD). */
   dateFrom?: string;
@@ -175,6 +182,8 @@ function buildParams(
   if (filters.search?.trim()) params.append("search", filters.search.trim());
   if (filters.category) params.append("category", filters.category);
   if (filters.action?.trim()) params.append("action", filters.action.trim());
+  if (filters.userId != null)
+    params.append("user_id[]", String(filters.userId));
   if (filters.locationId != null)
     params.append("location_id", String(filters.locationId));
   if (filters.dateFrom) params.append("date_from", filters.dateFrom);
@@ -202,6 +211,28 @@ export async function fetchActivityLogs(
     currentPage: pg?.current_page ?? page,
     lastPage: pg?.last_page ?? page,
   };
+}
+
+/**
+ * Every entry matching a filter, following pagination to the last page — used
+ * by CSV export (mirrors the web export's `per_page=100` page loop). Bounded by
+ * `maxPages` as a runaway guard.
+ */
+export async function fetchAllActivityLogs(
+  token: string,
+  filters: ActivityFilters,
+  signal?: AbortSignal,
+  perPage = 100,
+  maxPages = 50,
+): Promise<ActivityLogEntry[]> {
+  const first = await fetchActivityLogs(token, filters, 1, perPage, signal);
+  const logs = [...first.logs];
+  const pages = Math.min(first.lastPage, maxPages);
+  for (let page = 2; page <= pages; page += 1) {
+    const next = await fetchActivityLogs(token, filters, page, perPage, signal);
+    logs.push(...next.logs);
+  }
+  return logs;
 }
 
 /** Total entry count matching a filter (via a cheap `per_page=1` request). */
