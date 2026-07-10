@@ -20,6 +20,6 @@ export const NAV_MENU_ITEMS: NavMenuItem[] = [
   { key: "memberships", label: "Memberships", icon: "credit-card", route: "/memberships/memberships" },
   { key: "email", label: "Email Campaign", icon: "mail", route: "/email-campaign/email-templates" },
   { key: "payments", label: "Payments", icon: "dollar-sign", route: "/payments/payments" },
-  { key: "management", label: "User Management", icon: "user", route: "/management/management" },
+  { key: "management", label: "User Management", icon: "user", route: "/user-managements/manage-accounts" },
   { key: "analytics", label: "Analytics & Reports", icon: "bar-chart-2", route: "/analytics-reports/performance-analytics" },
 ];

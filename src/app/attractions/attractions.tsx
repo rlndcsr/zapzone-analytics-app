@@ -1,6 +1,12 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useEffect, useMemo, useState, useCallback, type ComponentProps } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  type ComponentProps,
+} from "react";
 import {
   Pressable,
   RefreshControl,
@@ -13,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import {
   AttractionsKpiSkeleton,
   AttractionsListSkeleton,
@@ -81,12 +88,16 @@ const StatusBadge = ({ status }: { status: AttractionStatus }) => {
   return (
     <View
       className={`px-2.5 py-1 rounded-full ${
-        active ? "bg-green-50 dark:bg-green-900/30" : "bg-gray-100 dark:bg-neutral-800"
+        active
+          ? "bg-green-50 dark:bg-green-900/30"
+          : "bg-gray-100 dark:bg-neutral-800"
       }`}
     >
       <Text
         className={`text-xs font-semibold capitalize ${
-          active ? "text-green-600 dark:text-green-400" : "text-gray-500 dark:text-gray-400"
+          active
+            ? "text-green-600 dark:text-green-400"
+            : "text-gray-500 dark:text-gray-400"
         }`}
       >
         {status}
@@ -95,13 +106,7 @@ const StatusBadge = ({ status }: { status: AttractionStatus }) => {
   );
 };
 
-const Stat = ({
-  icon,
-  label,
-}: {
-  icon: ComponentIconName;
-  label: string;
-}) => (
+const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
   <View className="flex-row items-center gap-1.5">
     <Feather name={icon} size={12} color="#9CA3AF" />
     <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
@@ -321,9 +326,11 @@ const Attractions = () => {
     return locationScoped
       .filter((a) => {
         if (statusFilter !== "all" && a.status !== statusFilter) return false;
-        if (categoryFilter !== "all" && a.category !== categoryFilter) return false;
+        if (categoryFilter !== "all" && a.category !== categoryFilter)
+          return false;
         if (term) {
-          const haystack = `${a.name} ${a.description} ${a.locationName} ${a.category}`.toLowerCase();
+          const haystack =
+            `${a.name} ${a.description} ${a.locationName} ${a.category}`.toLowerCase();
           if (!haystack.includes(term)) return false;
         }
         return true;
@@ -347,11 +354,13 @@ const Attractions = () => {
 
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Status";
-  const categoryLabel = categoryFilter === "all" ? "All Categories" : categoryFilter;
+  const categoryLabel =
+    categoryFilter === "all" ? "All Categories" : categoryFilter;
   const locationLabel =
     locationFilter === "all"
       ? "All Locations"
-      : (locations.find((l) => l.id === locationFilter)?.name ?? "All Locations");
+      : (locations.find((l) => l.id === locationFilter)?.name ??
+        "All Locations");
   const hasResults = filtered.length > 0;
 
   // Mirrors the web "More" action menu; these management actions arrive in a
@@ -364,7 +373,7 @@ const Attractions = () => {
   ];
 
   return (
-    <View className="flex-1 bg-gray-50 dark:bg-black">
+    <View className="flex-1 bg-white dark:bg-black">
       {/* Gradient header */}
       <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
         <View className="flex-row items-center justify-between relative z-10">
@@ -376,7 +385,9 @@ const Attractions = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">Attractions</Text>
+          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+            Attractions
+          </Text>
           <View style={{ width: 36 }} />
         </View>
       </View>
@@ -427,61 +438,44 @@ const Attractions = () => {
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
           </Pressable>
 
-          {/* Check-in Scanner — child feature of Attractions (mirrors the web
-              /attractions/check-in scanner). */}
           <Pressable
-            onPress={() => router.push("/attractions/check-in")}
-            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-5 shadow-sm"
-            style={CARD_SHADOW}
+            onPress={() => router.push("/attractions/create-attraction")}
+            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
           >
-            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-              <Feather name="camera" size={18} color={PRIMARY} />
-            </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                Check-in Scanner
-              </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Scan customer QR codes to check them in
-              </Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="#9CA3AF" />
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              New Attraction
+            </Text>
           </Pressable>
 
-          {/* Location + More (mirrors the web header controls, above the cards).
-              The location selector is company-admin only; managers are scoped to
-              their own location by the backend. */}
-          <View className="flex-row gap-3 mb-5">
+          {/* Header controls — full-width segmented pill (Location · More ·
+              Scanner). The location selector is company-admin only; managers are
+              scoped to their own location by the backend. */}
+          <FilterPill>
             {isCompanyAdmin && (
-              <Pressable
+              <PillSegment
+                label={locationLabel}
+                active={showLocationSheet}
                 onPress={() => setShowLocationSheet(true)}
-                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-              >
-                <Feather name="map-pin" size={16} color={PRIMARY} />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                  numberOfLines={1}
-                >
-                  {locationLabel}
-                </Text>
-                <Feather name="chevron-down" size={14} color="#9CA3AF" />
-              </Pressable>
+                renderIcon={(c) => (
+                  <Feather name="map-pin" size={15} color={c} />
+                )}
+              />
             )}
-
-            <Pressable
+            <PillSegment
+              label="More"
+              active={showMoreSheet}
               onPress={() => setShowMoreSheet(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="more-horizontal" size={16} color="#6B7280" />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                More
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          </View>
+              renderIcon={(c) => (
+                <Feather name="more-horizontal" size={15} color={c} />
+              )}
+            />
+            <PillSegment
+              label="Scanner"
+              onPress={() => router.push("/attractions/check-in")}
+              renderIcon={(c) => <Feather name="camera" size={15} color={c} />}
+            />
+          </FilterPill>
 
           {/* Error state */}
           {!loading && error && (
@@ -554,36 +548,23 @@ const Attractions = () => {
             )}
           </View>
 
-          {/* Filters */}
-          <View className="flex-row gap-3 mb-5">
-            <Pressable
+          {/* Filters — full-width segmented pill (Status · Categories) */}
+          <FilterPill>
+            <PillSegment
+              label={statusLabel}
+              active={showStatusSheet}
               onPress={() => setShowStatusSheet(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="check-circle" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {statusLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
+              renderIcon={(c) => (
+                <Feather name="check-circle" size={15} color={c} />
+              )}
+            />
+            <PillSegment
+              label={categoryLabel}
+              active={showCategorySheet}
               onPress={() => setShowCategorySheet(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="tag" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {categoryLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          </View>
+              renderIcon={(c) => <Feather name="tag" size={15} color={c} />}
+            />
+          </FilterPill>
 
           {/* List header */}
           {!loading && !error && (
@@ -648,7 +629,9 @@ const Attractions = () => {
                             >
                               <Text
                                 className={`text-xs font-medium ${
-                                  isActive ? "text-white" : "text-gray-600 dark:text-gray-300"
+                                  isActive
+                                    ? "text-white"
+                                    : "text-gray-600 dark:text-gray-300"
                                 }`}
                               >
                                 {option}
@@ -759,39 +742,40 @@ const Attractions = () => {
         title="Filter by Category"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ label: "All Categories", value: "all" }, ...categories.map((c) => ({ label: c, value: c }))].map(
-            (option) => {
-              const isSelected = categoryFilter === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => {
-                    setCategoryFilter(option.value);
-                    setShowCategorySheet(false);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+          {[
+            { label: "All Categories", value: "all" },
+            ...categories.map((c) => ({ label: c, value: c })),
+          ].map((option) => {
+            const isSelected = categoryFilter === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => {
+                  setCategoryFilter(option.value);
+                  setShowCategorySheet(false);
+                }}
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium flex-1 mr-2 ${
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
+                  numberOfLines={1}
                 >
-                  <Text
-                    className={`text-base font-medium flex-1 mr-2 ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {option.label}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
+                  {option.label}
+                </Text>
+                {isSelected && (
+                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                    <Feather name="check" size={14} color="#FFFFFF" />
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </BottomSheet>
 
@@ -869,26 +853,6 @@ const Attractions = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Floating Action Button — Create Attraction (mirrors the web "New
-          Attraction" button). This route has no floating tab bar to clash with. */}
-      <Pressable
-        onPress={() => router.push("/attractions/create-attraction")}
-        accessibilityRole="button"
-        accessibilityLabel="Create attraction"
-        style={{
-          position: "absolute",
-          right: 20,
-          bottom: insets.bottom + 20,
-          shadowColor: PRIMARY,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.4,
-          shadowRadius: 12,
-          elevation: 8,
-        }}
-        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-      >
-        <Feather name="plus" size={26} color="#FFFFFF" />
-      </Pressable>
     </View>
   );
 };
