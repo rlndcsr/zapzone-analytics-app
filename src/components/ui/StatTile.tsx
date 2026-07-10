@@ -44,7 +44,7 @@ export function StatTile({
         <View className="flex-1 flex-row items-center gap-1">
           <Text
             className="text-sm font-bold text-gray-900 dark:text-white shrink"
-            numberOfLines={1}
+            numberOfLines={2}
           >
             {label}
           </Text>
