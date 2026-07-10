@@ -622,7 +622,7 @@ const ActivityLogs = () => {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sheet, setSheet] = useState<
-    null | "action" | "resource" | "attendant" | "daterange" | "location"
+    null | "action" | "resource" | "attendant" | "daterange"
   >(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(15);
@@ -774,7 +774,6 @@ const ActivityLogs = () => {
     setResourceTypeFilter("all");
     setAttendantFilter("all");
     setDateRange("all");
-    setLocationFilter(null);
     setSearch("");
     setDebouncedSearch("");
     setPage(1);
@@ -785,7 +784,6 @@ const ActivityLogs = () => {
     resourceTypeFilter !== "all" ||
     attendantFilter !== "all" ||
     dateRange !== "all" ||
-    locationFilter != null ||
     search.trim() !== "";
 
   const actionLabel =
@@ -799,10 +797,6 @@ const ActivityLogs = () => {
         "Attendant");
   const dateRangeLabel =
     DATE_RANGE_OPTIONS.find((o) => o.value === dateRange)?.label ?? "All Time";
-  const locationLabel =
-    locationFilter == null
-      ? "All Locations"
-      : (locations.find((l) => l.id === locationFilter)?.name ?? "Location");
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -849,6 +843,63 @@ const ActivityLogs = () => {
             </Text>
           </View>
 
+          {/* Location filter (company admin) — below the header, above the KPIs */}
+          {isCompanyAdmin && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="mb-5 -mx-5 px-5"
+              contentContainerStyle={{ gap: 8 }}
+            >
+              <Pressable
+                onPress={() => setLocationFilter(null)}
+                className={`flex-row items-center gap-1.5 px-4 py-2 rounded-lg ${
+                  locationFilter == null
+                    ? "bg-[#0644C7]"
+                    : "bg-gray-100 dark:bg-neutral-800"
+                }`}
+              >
+                <Feather
+                  name="map-pin"
+                  size={14}
+                  color={locationFilter == null ? "#FFFFFF" : "#6B7280"}
+                />
+                <Text
+                  className={`text-sm font-medium ${
+                    locationFilter == null
+                      ? "text-white"
+                      : "text-gray-700 dark:text-gray-200"
+                  }`}
+                >
+                  All Locations
+                </Text>
+              </Pressable>
+              {locations.map((l) => {
+                const active = locationFilter === l.id;
+                return (
+                  <Pressable
+                    key={l.id}
+                    onPress={() => setLocationFilter(l.id)}
+                    className={`px-4 py-2 rounded-lg ${
+                      active ? "bg-[#0644C7]" : "bg-gray-100 dark:bg-neutral-800"
+                    }`}
+                  >
+                    <Text
+                      className={`text-sm font-medium ${
+                        active
+                          ? "text-white"
+                          : "text-gray-700 dark:text-gray-200"
+                      }`}
+                      numberOfLines={1}
+                    >
+                      {l.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
@@ -877,24 +928,49 @@ const ActivityLogs = () => {
                 hint="Last 24 hours"
               />
             </View>
-            <View className="w-1/2">
-              <KpiCard
-                icon="shopping-cart"
-                tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
-                title="Purchases Made"
-                value={String(stats.purchases)}
-                hint="Total sales"
-              />
-            </View>
-            <View className="w-1/2">
-              <KpiCard
-                icon="users"
-                tone={{ bg: "#8B5CF620", tint: "#8B5CF6" }}
-                title="Active Attendants"
-                value={String(stats.activeAttendants)}
-                hint="Logged in today"
-              />
-            </View>
+            {isCompanyAdmin ? (
+              <>
+                <View className="w-1/2">
+                  <KpiCard
+                    icon="user"
+                    tone={{ bg: "#3B82F620", tint: "#3B82F6" }}
+                    title="Manager Actions"
+                    value={String(stats.managerActions)}
+                    hint="Manager activities"
+                  />
+                </View>
+                <View className="w-1/2">
+                  <KpiCard
+                    icon="users"
+                    tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
+                    title="Attendant Actions"
+                    value={String(stats.attendantActions)}
+                    hint="Staff activities"
+                  />
+                </View>
+              </>
+            ) : (
+              <>
+                <View className="w-1/2">
+                  <KpiCard
+                    icon="shopping-cart"
+                    tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
+                    title="Purchases Made"
+                    value={String(stats.purchases)}
+                    hint="Total sales"
+                  />
+                </View>
+                <View className="w-1/2">
+                  <KpiCard
+                    icon="users"
+                    tone={{ bg: "#8B5CF620", tint: "#8B5CF6" }}
+                    title="Active Attendants"
+                    value={String(stats.activeAttendants)}
+                    hint="Logged in today"
+                  />
+                </View>
+              </>
+            )}
           </View>
 
           {/* Search */}
@@ -940,21 +1016,6 @@ const ActivityLogs = () => {
             />
           </View>
 
-          {isCompanyAdmin && (
-            <Pressable
-              onPress={() => setSheet("location")}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3"
-            >
-              <Feather name="map-pin" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {locationLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          )}
           {/* Actions — Clear Filters + Export CSV (mirrors the web toolbar) */}
           <View className="flex-row gap-3 mb-5">
             <Pressable
@@ -1091,48 +1152,6 @@ const ActivityLogs = () => {
         value={dateRange}
         onSelect={setDateRange}
       />
-
-      {/* Location filter (company admin) */}
-      <BottomSheet
-        visible={sheet === "location"}
-        onClose={() => setSheet(null)}
-        title="Filter by Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: null as number | null, name: "All Locations" }, ...locations].map(
-            (option) => {
-              const isSelected = locationFilter === option.id;
-              return (
-                <Pressable
-                  key={String(option.id ?? "all")}
-                  onPress={() => {
-                    setLocationFilter(option.id);
-                    setSheet(null);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-base font-medium ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    {option.name}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
-        </ScrollView>
-      </BottomSheet>
 
       {/* Activity detail */}
       <BottomSheet

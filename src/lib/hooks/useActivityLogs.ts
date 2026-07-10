@@ -96,19 +96,22 @@ export type ActivityStats = {
   today: number;
   purchases: number;
   activeAttendants: number;
+  managerActions: number;
+  attendantActions: number;
 };
 
 /**
  * KPI counts for the Activity Log header — computed exactly like the web
- * `getLocationMetrics`:
+ * (`getLocationMetrics`), all over the newest loaded page except Total:
  *   - Total Activities  → server pagination total (cheap `per_page=1` count).
- *   - Purchases Made    → server count filtered by `action=purchased`.
  *   - Today's Activities → count of `isToday` (device-local calendar day) rows
- *     within the newest loaded page (web loads `itemsPerPage=20` newest-first
- *     and filters that page client-side; NOT a whole-dataset server date count).
- *   - Active Attendants → distinct users with a `logged_in` action among those
- *     same today rows.
- * All respect the active location filter. Refetches when `nonce` bumps.
+ *     in the newest loaded page (web loads `itemsPerPage=20` newest-first and
+ *     filters that page client-side; NOT a whole-dataset server date count).
+ *   - Purchases Made / Active Attendants → location-manager page cards.
+ *   - Manager Actions / Attendant Actions → company-admin (/admin/activity)
+ *     cards: page rows whose actor role is location_manager / attendant.
+ * The screen picks which two role-specific cards to show. All respect the
+ * active location filter. Refetches when `nonce` bumps.
  */
 export function useActivityStats(locationId: number | undefined, nonce = 0) {
   const [stats, setStats] = useState<ActivityStats>({
@@ -116,6 +119,8 @@ export function useActivityStats(locationId: number | undefined, nonce = 0) {
     today: 0,
     purchases: 0,
     activeAttendants: 0,
+    managerActions: 0,
+    attendantActions: 0,
   });
   const [loading, setLoading] = useState(true);
   const requestIdRef = useRef(0);
@@ -151,11 +156,21 @@ export function useActivityStats(locationId: number | undefined, nonce = 0) {
             activeIds.add(log.actor.id);
           }
         }
+        // Manager / Attendant Actions — page rows by actor role (web's
+        // filteredLogs.filter(userType === 'location_manager' | 'attendant')).
+        let managerActions = 0;
+        let attendantActions = 0;
+        for (const log of recentPage.logs) {
+          if (log.actor.role === "location_manager") managerActions += 1;
+          else if (log.actor.role === "attendant") attendantActions += 1;
+        }
         setStats({
           total,
           today: todayLogs.length,
           purchases,
           activeAttendants: activeIds.size,
+          managerActions,
+          attendantActions,
         });
       })
       .catch(() => {
