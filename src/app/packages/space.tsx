@@ -901,18 +901,18 @@ const Space = () => {
 
           {/* States */}
           {loading ? (
-            <View className="py-16 items-center">
+            <View key="s-loading" className="py-16 items-center">
               <ActivityIndicator color={PRIMARY} />
             </View>
           ) : error ? (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
+            <View key="s-error" className="bg-red-50 border border-red-100 rounded-2xl p-5">
               <Text className="text-red-600 font-semibold">
                 Something went wrong
               </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           ) : filtered.length === 0 ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
+            <View key="s-empty" className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
                 <Feather name="home" size={26} color="#9CA3AF" />
               </View>
@@ -926,7 +926,7 @@ const Space = () => {
               </Text>
             </View>
           ) : (
-            <>
+            <View key="s-list">
               {paged.map((space) => (
                 <SpaceCard
                   key={space.id}
@@ -942,7 +942,7 @@ const Space = () => {
                 onPageChange={setPage}
                 onPerPageChange={setPerPage}
               />
-            </>
+            </View>
           )}
         </View>
       </ScrollView>

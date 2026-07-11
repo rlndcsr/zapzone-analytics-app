@@ -25,7 +25,7 @@ function formatDate(dateStr: string | null): string {
   const d = new Date(`${dateStr.substring(0, 10)}T00:00:00`);
   if (Number.isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString("en-US", {
-    month: "short",
+    month: "long",
     day: "numeric",
     year: "numeric",
   });
@@ -36,7 +36,7 @@ function formatDateTime(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("en-US", {
-    month: "short",
+    month: "long",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
@@ -44,17 +44,133 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
-const Row = ({ label, value }: { label: string; value: string }) => (
-  <View className="flex-row items-start justify-between py-2 border-b border-gray-100 dark:border-neutral-800">
-    <Text className="text-sm text-gray-500 dark:text-gray-400">{label}</Text>
-    <Text
-      className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-right ml-4"
-      numberOfLines={2}
-    >
+function marketingLabel(status: WaiverDetail["marketingConsentStatus"]): string {
+  return status === "opted_in"
+    ? "Opted in"
+    : status === "withdrawn"
+      ? "Withdrawn"
+      : "Not opted in";
+}
+
+/** Section heading (icon + uppercase label + hairline). */
+const SectionHeader = ({
+  icon,
+  title,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  title: string;
+}) => (
+  <View className="mt-5 mb-2">
+    <View className="flex-row items-center gap-2 pb-2 border-b border-gray-100 dark:border-neutral-800">
+      <Feather name={icon} size={14} color="#6B7280" />
+      <Text className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+        {title}
+      </Text>
+    </View>
+  </View>
+);
+
+/** One labelled value in the two-column info grid. */
+const Info = ({ label, value }: { label: string; value: string }) => (
+  <View className="w-1/2 mb-3 pr-3">
+    <Text className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-0.5">
+      {label}
+    </Text>
+    <Text className="text-sm text-gray-900 dark:text-white" numberOfLines={2}>
       {value}
     </Text>
   </View>
 );
+
+/** One acknowledgment line with a Yes/Agreed pill. */
+const Ack = ({
+  label,
+  value,
+  good,
+}: {
+  label: string;
+  value: string;
+  good: boolean;
+}) => (
+  <View className="flex-row items-center justify-between py-2 border-b border-gray-100 dark:border-neutral-800">
+    <Text className="text-sm text-gray-600 dark:text-gray-300">{label}</Text>
+    {good ? (
+      <View className="bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 rounded">
+        <Text className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+          {value}
+        </Text>
+      </View>
+    ) : (
+      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+        {value}
+      </Text>
+    )}
+  </View>
+);
+
+/** Build a printable HTML document from the waiver detail. */
+function buildWaiverHtml(d: WaiverDetail): string {
+  const esc = (s: string | null | undefined) =>
+    String(s ?? "—").replace(/[&<>]/g, (c) =>
+      c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;",
+    );
+  const linked = d.bookingReference
+    ? `Booking ${d.bookingReference}`
+    : d.eventName
+      ? `Event · ${d.eventName}`
+      : d.attractionPurchaseId
+        ? `Attraction purchase #${d.attractionPurchaseId}`
+        : "—";
+  const minors = d.minors
+    .map(
+      (m) =>
+        `<li>${esc(`${m.firstName} ${m.lastName}`.trim())} — ${esc(
+          formatDate(m.dateOfBirth),
+        )}${m.relationship ? ` · ${esc(m.relationship)}` : ""}</li>`,
+    )
+    .join("");
+  return `<!doctype html><html><head><meta charset="utf-8"/>
+  <style>
+    body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#111;padding:28px;font-size:13px;line-height:1.5}
+    h1{font-size:20px;margin:0 0 2px}
+    .sub{color:#6b7280;margin-bottom:16px}
+    h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;border-bottom:1px solid #eee;padding-bottom:6px;margin:20px 0 10px}
+    .grid{display:flex;flex-wrap:wrap}
+    .cell{width:50%;margin-bottom:10px}
+    .lbl{font-size:10px;text-transform:uppercase;color:#9ca3af;letter-spacing:.05em}
+    .val{font-size:13px}
+    .body{white-space:pre-wrap;border:1px solid #eee;border-radius:8px;padding:12px;color:#374151;font-size:12px}
+    ul{margin:0;padding-left:18px}
+    .sig{margin-top:8px;font-weight:bold}
+  </style></head><body>
+  <h1>${esc(d.adultName)} — ${esc(d.status)}</h1>
+  <div class="sub">${esc(d.templateTitle)} · Waiver #${d.id}</div>
+  <h2>Participant / Guardian</h2>
+  <div class="grid">
+    <div class="cell"><div class="lbl">Full Name</div><div class="val">${esc(d.adultName)}</div></div>
+    <div class="cell"><div class="lbl">Date of Birth</div><div class="val">${esc(formatDate(d.adultDob))}</div></div>
+    <div class="cell"><div class="lbl">Email</div><div class="val">${esc(d.adultEmail)}</div></div>
+    <div class="cell"><div class="lbl">Phone</div><div class="val">${esc(d.adultPhone)}</div></div>
+  </div>
+  <h2>Visit Details</h2>
+  <div class="grid">
+    <div class="cell"><div class="lbl">Location</div><div class="val">${esc(d.locationName)}</div></div>
+    <div class="cell"><div class="lbl">Visit Date</div><div class="val">${esc(formatDate(d.selectedDate))}</div></div>
+    <div class="cell"><div class="lbl">Linked To</div><div class="val">${esc(linked)}</div></div>
+    <div class="cell"><div class="lbl">Source</div><div class="val">${esc(SOURCE_LABELS[d.source] ?? d.source)}</div></div>
+    <div class="cell"><div class="lbl">Submitted</div><div class="val">${esc(formatDateTime(d.submittedAt))}</div></div>
+  </div>
+  ${d.minors.length ? `<h2>Minor Participants (${d.minors.length})</h2><ul>${minors}</ul>` : ""}
+  ${d.renderedBody ? `<h2>Waiver Agreement</h2><div class="body">${esc(d.renderedBody)}</div>` : ""}
+  <h2>Acknowledgment &amp; Signature</h2>
+  <div>Agreement accepted: <b>${d.agreementAccepted ? "Yes" : "No"}</b></div>
+  <div>Electronic consent: <b>${d.electronicConsentAccepted ? "Yes" : "No"}</b></div>
+  <div>Photo / video release: <b>${d.photoVideoConsent == null ? "—" : d.photoVideoConsent ? "Agreed" : "Declined"}</b></div>
+  <div>Marketing consent: <b>${esc(marketingLabel(d.marketingConsentStatus))}</b></div>
+  <div class="sig">Signed electronically by ${esc(d.typedLegalName ?? d.adultName)}</div>
+  <div class="sub">${esc(formatDateTime(d.submittedAt))}</div>
+  </body></html>`;
+}
 
 type Props = {
   waiverId: number | null;
@@ -66,9 +182,9 @@ type Props = {
 };
 
 /**
- * View one waiver record (GET /waivers/{id}) — adult, minors, consents, the
- * linked purchase, and the rendered legal body. Admins can soft-delete with an
- * audit reason (DELETE /waivers/{id}), mirroring the web DeleteWaiverModal.
+ * View one waiver record (GET /waivers/{id}) — participant, visit, minors,
+ * consents, the legal body, and the electronic signature — with a Print action
+ * (native print dialog via expo-print). Admins can soft-delete with a reason.
  */
 export function WaiverDetailSheet({
   waiverId,
@@ -80,6 +196,7 @@ export function WaiverDetailSheet({
   const [detail, setDetail] = useState<WaiverDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [printing, setPrinting] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [reason, setReason] = useState("");
@@ -139,19 +256,35 @@ export function WaiverDetailSheet({
     }
   };
 
-  const linkedTo = (() => {
-    if (!detail) return null;
-    if (detail.bookingReference) return `Booking #${detail.bookingReference}`;
-    if (detail.bookingId) return `Booking #${detail.bookingId}`;
-    if (detail.eventName) return `Event · ${detail.eventName}`;
-    if (detail.attractionPurchaseId)
-      return `Attraction purchase #${detail.attractionPurchaseId}`;
-    return null;
-  })();
+  const runPrint = async () => {
+    if (!detail) return;
+    setPrinting(true);
+    try {
+      const Print = await import("expo-print");
+      await Print.printAsync({ html: buildWaiverHtml(detail) });
+    } catch (e) {
+      Alert.alert(
+        "Print failed",
+        e instanceof Error ? e.message : "Could not open the print dialog.",
+      );
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  const linked = detail
+    ? detail.bookingReference
+      ? `Booking ${detail.bookingReference}`
+      : detail.eventName
+        ? `Event · ${detail.eventName}`
+        : detail.attractionPurchaseId
+          ? `Attraction purchase #${detail.attractionPurchaseId}`
+          : "—"
+    : "—";
 
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Waiver Details">
-      <ScrollView className="px-6 pb-8" showsVerticalScrollIndicator={false}>
+      <ScrollView className="px-6" showsVerticalScrollIndicator={false}>
         {loading && (
           <View className="items-center py-10">
             <ActivityIndicator color="#0644C7" />
@@ -167,79 +300,131 @@ export function WaiverDetailSheet({
 
         {!loading && detail && (
           <>
-            <View className="flex-row items-center justify-between mb-3">
-              <Text
-                className="text-xl font-bold text-gray-900 dark:text-white flex-1 mr-3"
-                numberOfLines={1}
-              >
+            {/* Title */}
+            <View className="flex-row items-center gap-2 flex-wrap">
+              <Text className="text-xl font-bold text-gray-900 dark:text-white">
                 {detail.adultName}
               </Text>
               <StatusBadge status={detail.status} />
             </View>
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-1">
+              {detail.templateTitle ?? "Waiver"} · Waiver #{detail.id}
+            </Text>
 
-            <View className="mb-4">
-              {detail.adultEmail && <Row label="Email" value={detail.adultEmail} />}
-              {detail.adultPhone && <Row label="Phone" value={detail.adultPhone} />}
-              <Row label="Visit date" value={formatDate(detail.selectedDate)} />
-              <Row label="Template" value={detail.templateTitle ?? "—"} />
-              {detail.locationName && (
-                <Row label="Location" value={detail.locationName} />
-              )}
-              {linkedTo && <Row label="Linked to" value={linkedTo} />}
-              <Row label="Source" value={SOURCE_LABELS[detail.source] ?? detail.source} />
-              <Row
-                label="Marketing"
-                value={
-                  detail.marketingConsentStatus === "opted_in"
-                    ? "Opted in"
-                    : detail.marketingConsentStatus === "withdrawn"
-                      ? "Withdrawn"
-                      : "Not opted in"
-                }
-              />
-              <Row label="Submitted" value={formatDateTime(detail.submittedAt)} />
+            {/* Participant / Guardian */}
+            <SectionHeader icon="users" title="Participant / Guardian" />
+            <View className="flex-row flex-wrap">
+              <Info label="Full Name" value={detail.adultName} />
+              <Info label="Date of Birth" value={formatDate(detail.adultDob)} />
+              <Info label="Email" value={detail.adultEmail ?? "—"} />
+              <Info label="Phone" value={detail.adultPhone ?? "—"} />
             </View>
 
-            {/* Minors */}
+            {/* Visit Details */}
+            <SectionHeader icon="link" title="Visit Details" />
+            <View className="flex-row flex-wrap">
+              <Info label="Location" value={detail.locationName ?? "—"} />
+              <Info label="Visit Date" value={formatDate(detail.selectedDate)} />
+              <Info label="Linked To" value={linked} />
+              <Info
+                label="Source"
+                value={SOURCE_LABELS[detail.source] ?? detail.source}
+              />
+              <Info label="Submitted" value={formatDateTime(detail.submittedAt)} />
+            </View>
+
+            {/* Minor Participants */}
             {detail.minors.length > 0 && (
-              <View className="mb-4">
-                <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-                  Minors ({detail.minors.length})
-                </Text>
-                {detail.minors.map((m, i) => (
-                  <View
-                    key={m.id ?? i}
-                    className="flex-row items-center gap-2 py-1.5"
-                  >
-                    <Feather name="user" size={14} color="#9CA3AF" />
-                    <Text className="text-sm text-gray-700 dark:text-gray-200">
-                      {`${m.firstName} ${m.lastName}`.trim() || "—"}
-                      {m.relationship ? ` · ${m.relationship}` : ""}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+              <>
+                <SectionHeader
+                  icon="users"
+                  title={`Minor Participants (${detail.minors.length})`}
+                />
+                <View className="bg-gray-50 dark:bg-neutral-800 rounded-xl border border-gray-100 dark:border-neutral-700">
+                  {detail.minors.map((m, i) => (
+                    <View
+                      key={m.id ?? i}
+                      className={`flex-row items-center justify-between px-3.5 py-3 ${
+                        i < detail.minors.length - 1
+                          ? "border-b border-gray-100 dark:border-neutral-700"
+                          : ""
+                      }`}
+                    >
+                      <Text
+                        className="text-sm font-medium text-gray-800 dark:text-gray-100 flex-1 mr-2"
+                        numberOfLines={1}
+                      >
+                        {`${m.firstName} ${m.lastName}`.trim() || "—"}
+                      </Text>
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        {formatDate(m.dateOfBirth)}
+                        {m.relationship ? ` · ${m.relationship}` : ""}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </>
             )}
 
-            {/* Rendered legal body */}
-            {!!detail.renderedBody && (
-              <View className="mb-4">
-                <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-                  Waiver text
+            {/* Waiver Agreement */}
+            <SectionHeader icon="file-text" title="Waiver Agreement" />
+            <View className="bg-gray-50 dark:bg-neutral-800 rounded-xl border border-gray-100 dark:border-neutral-700 p-4 max-h-56">
+              {detail.renderedBody ? (
+                <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
+                  <Text className="text-xs leading-5 text-gray-600 dark:text-gray-300">
+                    {detail.renderedBody}
+                  </Text>
+                </ScrollView>
+              ) : (
+                <Text className="text-xs text-gray-400 dark:text-gray-500">
+                  No waiver text on file.
                 </Text>
-                <View className="bg-gray-50 dark:bg-neutral-800 rounded-xl p-4 max-h-64">
-                  <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
-                    <Text className="text-xs leading-5 text-gray-600 dark:text-gray-300">
-                      {detail.renderedBody}
-                    </Text>
-                  </ScrollView>
-                </View>
-              </View>
-            )}
+              )}
+            </View>
+
+            {/* Acknowledgment & Signature */}
+            <SectionHeader icon="shield" title="Acknowledgment & Signature" />
+            <View className="bg-gray-50 dark:bg-neutral-800 rounded-xl border border-gray-100 dark:border-neutral-700 px-3.5 pt-1 pb-3">
+              <Ack
+                label="Agreement accepted"
+                value={detail.agreementAccepted ? "Yes" : "No"}
+                good={detail.agreementAccepted}
+              />
+              <Ack
+                label="Electronic consent"
+                value={detail.electronicConsentAccepted ? "Yes" : "No"}
+                good={detail.electronicConsentAccepted}
+              />
+              <Ack
+                label="Photo / video release"
+                value={
+                  detail.photoVideoConsent == null
+                    ? "—"
+                    : detail.photoVideoConsent
+                      ? "Agreed"
+                      : "Declined"
+                }
+                good={detail.photoVideoConsent === true}
+              />
+              <Ack
+                label="Marketing consent"
+                value={marketingLabel(detail.marketingConsentStatus)}
+                good={detail.marketingConsentStatus === "opted_in"}
+              />
+              <Text className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
+                Signed electronically by
+              </Text>
+              <Text className="text-base font-bold text-gray-900 dark:text-white">
+                {detail.typedLegalName ?? detail.adultName}
+              </Text>
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                {formatDateTime(detail.submittedAt)}
+              </Text>
+            </View>
 
             {/* Delete (admin only) */}
             {canDelete && (
-              <View className="mt-2">
+              <View className="mt-4">
                 {!confirmingDelete ? (
                   <Pressable
                     onPress={() => setConfirmingDelete(true)}
@@ -291,6 +476,32 @@ export function WaiverDetailSheet({
                 )}
               </View>
             )}
+
+            {/* Footer: Close · Print */}
+            <View className="flex-row gap-3 mt-5 mb-8">
+              <Pressable
+                onPress={onClose}
+                className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
+              >
+                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  Close
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={runPrint}
+                disabled={printing}
+                className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+              >
+                {printing ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Feather name="printer" size={16} color="#FFFFFF" />
+                    <Text className="text-sm font-semibold text-white">Print</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
           </>
         )}
       </ScrollView>

@@ -12,12 +12,15 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BottomSheet } from "../../components/ui/BottomSheet";
 import { ContactActionsSheet } from "../../components/ui/ContactActionsSheet";
 import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
-import { SheetSelect } from "../../components/ui/SheetSelect";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { Pagination } from "../../components/ui/Pagination";
+import { type SheetSelectOption } from "../../components/ui/SheetSelect";
 import { StatTile } from "../../components/ui/StatTile";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
@@ -61,6 +64,70 @@ const SORT_OPTIONS = [
   { label: "Status", value: "status:asc" },
 ];
 
+/** A FilterPill segment that opens its own options sheet (replaces SheetSelect
+ *  inside the pills, so the customers filters match the app's pill design). */
+function PillSelect({
+  icon,
+  title,
+  value,
+  options,
+  onSelect,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  title: string;
+  value: string;
+  options: SheetSelectOption[];
+  onSelect: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => String(o.value) === value) ?? null;
+  return (
+    <>
+      <PillSegment
+        label={selected ? selected.label : title}
+        active={open}
+        onPress={() => setOpen(true)}
+        renderIcon={(c) => <Feather name={icon} size={15} color={c} />}
+      />
+      <BottomSheet visible={open} onClose={() => setOpen(false)} title={title}>
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {options.map((option) => {
+            const isSelected = String(option.value) === value;
+            return (
+              <Pressable
+                key={String(option.value)}
+                onPress={() => {
+                  onSelect(String(option.value));
+                  setOpen(false);
+                }}
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium flex-1 mr-2 ${
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
+                  }`}
+                  numberOfLines={1}
+                >
+                  {option.label}
+                </Text>
+                {isSelected && (
+                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                    <Feather name="check" size={14} color="#FFFFFF" />
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+    </>
+  );
+}
+
 const Customers = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -91,7 +158,8 @@ const Customers = () => {
   const [showDateSheet, setShowDateSheet] = useState(false);
   const [sort, setSort] = useState("created_at:desc");
 
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(PAGE_SIZE);
 
   // undefined = sheet closed; null = create; row = actions for that contact.
   const [sheetContact, setSheetContact] = useState<ContactRow | null | undefined>(
@@ -209,12 +277,15 @@ const Customers = () => {
     return sorted;
   }, [allRows, search, status, tag, source, company, sms, dateStart, dateEnd, sort]);
 
-  // Reset the client pagination whenever the result set changes.
+  // Reset to the first page whenever the result set changes.
   useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [search, status, tag, source, company, sms, dateStart, dateEnd, sort]);
+    setPage(1);
+  }, [search, status, tag, source, company, sms, dateStart, dateEnd, sort, perPage]);
 
-  const visible = filtered.slice(0, visibleCount);
+  const visible = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage],
+  );
   const activeFilterCount =
     (status !== "all" ? 1 : 0) +
     (tag !== "all" ? 1 : 0) +
@@ -254,14 +325,7 @@ const Customers = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Customers
           </Text>
-          <Pressable
-            onPress={() => setSheetContact(null)}
-            className="bg-[#0644C7] p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Add customer"
-          >
-            <Feather name="plus" size={18} color="#fff" />
-          </Pressable>
+          <View style={{ width: 36 }} />
         </View>
       </View>
 
@@ -332,6 +396,19 @@ const Customers = () => {
             </View>
           )}
 
+          {/* Add customer (above the filter pills) */}
+          <Pressable
+            onPress={() => setSheetContact(null)}
+            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Add customer"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white" numberOfLines={1}>
+              Add Customer
+            </Text>
+          </Pressable>
+
           {/* Search */}
           <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
             <Feather name="search" size={18} color="#9CA3AF" />
@@ -351,7 +428,70 @@ const Customers = () => {
             )}
           </View>
 
-          {/* Status chips + clear */}
+          {/* Tags · Sources · Companies */}
+          <FilterPill>
+            <PillSelect
+              icon="tag"
+              title="All Tags"
+              value={tag}
+              options={[
+                { label: "All Tags", value: "all" },
+                ...tagChoices.map((t) => ({ label: t, value: t })),
+              ]}
+              onSelect={setTag}
+            />
+            <PillSelect
+              icon="git-branch"
+              title="All Sources"
+              value={source}
+              options={[
+                { label: "All Sources", value: "all" },
+                ...sourceOptions.map((s) => ({ label: s, value: s })),
+              ]}
+              onSelect={setSource}
+            />
+            <PillSelect
+              icon="briefcase"
+              title="All Companies"
+              value={company}
+              options={[
+                { label: "All Companies", value: "all" },
+                ...companyOptions.map((c) => ({ label: c, value: c })),
+              ]}
+              onSelect={setCompany}
+            />
+          </FilterPill>
+
+          {/* SMS · Created Date · Sort */}
+          <FilterPill>
+            <PillSelect
+              icon="message-square"
+              title="All SMS"
+              value={sms}
+              options={SMS_OPTIONS}
+              onSelect={setSms}
+            />
+            <PillSegment
+              label={
+                dateStart && dateEnd
+                  ? `${formatShortDate(dateStart)} – ${formatShortDate(dateEnd)}`
+                  : "Created Date"
+              }
+              active={showDateSheet}
+              onPress={() => setShowDateSheet(true)}
+              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+            />
+            <PillSelect
+              icon="sliders"
+              title="Newest"
+              value={sort}
+              options={SORT_OPTIONS}
+              onSelect={setSort}
+            />
+          </FilterPill>
+
+
+           {/* Status chips + clear */}
           <View className="flex-row items-center justify-between">
             <View className="flex-row gap-2">
               {STATUS_FILTERS.map((s) => {
@@ -384,97 +524,6 @@ const Customers = () => {
                 </Text>
               </Pressable>
             )}
-          </View>
-
-          {/* Tag + Source */}
-          <View className="flex-row gap-2">
-            <View className="flex-1">
-              <SheetSelect
-                icon="tag"
-                title="Tag"
-                value={tag}
-                options={[
-                  { label: "All Tags", value: "all" },
-                  ...tagChoices.map((t) => ({ label: t, value: t })),
-                ]}
-                onSelect={(v) => setTag(String(v))}
-              />
-            </View>
-            <View className="flex-1">
-              <SheetSelect
-                icon="git-branch"
-                title="Source"
-                value={source}
-                options={[
-                  { label: "All Sources", value: "all" },
-                  ...sourceOptions.map((s) => ({ label: s, value: s })),
-                ]}
-                onSelect={(v) => setSource(String(v))}
-              />
-            </View>
-          </View>
-
-          {/* Company + SMS consent */}
-          <View className="flex-row gap-2">
-            <View className="flex-1">
-              <SheetSelect
-                icon="briefcase"
-                title="Company"
-                value={company}
-                options={[
-                  { label: "All Companies", value: "all" },
-                  ...companyOptions.map((c) => ({ label: c, value: c })),
-                ]}
-                onSelect={(v) => setCompany(String(v))}
-              />
-            </View>
-            <View className="flex-1">
-              <SheetSelect
-                icon="message-square"
-                title="SMS Consent"
-                value={sms}
-                options={SMS_OPTIONS}
-                onSelect={(v) => setSms(String(v))}
-              />
-            </View>
-          </View>
-
-          {/* Created date + Sort */}
-          <View className="flex-row gap-2">
-            <Pressable
-              onPress={() => setShowDateSheet(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {dateStart && dateEnd
-                  ? `${formatShortDate(dateStart)} – ${formatShortDate(dateEnd)}`
-                  : "Created date"}
-              </Text>
-              {(dateStart || dateEnd) && (
-                <Pressable
-                  onPress={() => {
-                    setDateStart(undefined);
-                    setDateEnd(undefined);
-                  }}
-                  hitSlop={8}
-                >
-                  <Feather name="x" size={14} color="#9CA3AF" />
-                </Pressable>
-              )}
-            </Pressable>
-            <View className="flex-1">
-              <SheetSelect
-                icon="sliders"
-                title="Sort by"
-                value={sort}
-                options={SORT_OPTIONS}
-                onSelect={(v) => setSort(String(v))}
-              />
-            </View>
           </View>
 
           {/* Count */}
@@ -592,17 +641,14 @@ const Customers = () => {
                 </View>
               )}
 
-              {/* Load more (client-side reveal) */}
-              {visibleCount < filtered.length && (
-                <Pressable
-                  onPress={() => setVisibleCount((n) => n + PAGE_SIZE)}
-                  className="flex-row items-center justify-center gap-2 mt-1 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-                >
-                  <Text className="text-sm font-semibold text-[#0644C7]">
-                    Load more
-                  </Text>
-                </Pressable>
-              )}
+              {/* Pagination */}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
             </View>
           )}
         </View>

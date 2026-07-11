@@ -315,12 +315,28 @@ const CreateWaiver = () => {
           className="bg-white dark:bg-neutral-900 border-t border-gray-100 dark:border-neutral-800 px-5 pt-4"
           style={{ paddingBottom: insets.bottom + 12 }}
         >
-          <PrimaryButton
-            label="Assign & Send Link"
-            onPress={submit}
-            loading={submitting}
-            disabled={templatesLoading}
-          />
+          <Text className="text-xs text-gray-400 dark:text-gray-500 text-center mb-3">
+            A waiver link will be sent by email and/or SMS.
+          </Text>
+          <View className="flex-row items-center gap-3">
+            <Pressable
+              onPress={() => router.back()}
+              disabled={submitting}
+              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-200 dark:border-neutral-700 active:opacity-80"
+            >
+              <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
+                Cancel
+              </Text>
+            </Pressable>
+            <View className="flex-1">
+              <PrimaryButton
+                label="Assign & Send"
+                onPress={submit}
+                loading={submitting}
+                disabled={templatesLoading}
+              />
+            </View>
+          </View>
         </View>
       </KeyboardAvoidingView>
 

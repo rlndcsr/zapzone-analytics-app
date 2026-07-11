@@ -16,6 +16,11 @@ type RawGiftCard = {
   balance?: number | string | null;
   current_balance?: number | string | null;
   remaining_balance?: number | string | null;
+  max_usage?: number | string | null;
+  usage_limit?: number | string | null;
+  used_count?: number | string | null;
+  times_used?: number | string | null;
+  description?: string | null;
   is_active?: boolean | number | null;
   status?: string | null;
   deleted?: boolean | number | null;
@@ -30,8 +35,21 @@ export type GiftCardRow = {
   discountType: string;
   value: number;
   balance: number | null;
+  maxUsage: number | null;
+  usedCount: number;
+  description: string;
   isActive: boolean;
   expiresAt: string | null;
+};
+
+/** Fields for POST /api/gift-cards — mirrors the web create form. */
+export type GiftCardInput = {
+  type: string;
+  value: number;
+  balance: number;
+  max_usage: number;
+  expiry_date?: string | null;
+  description?: string | null;
 };
 
 function mapGiftCardRow(g: RawGiftCard): GiftCardRow {
@@ -47,6 +65,9 @@ function mapGiftCardRow(g: RawGiftCard): GiftCardRow {
     discountType: (g.discount_type ?? g.type ?? "fixed").toLowerCase(),
     value: Number(g.value ?? g.amount ?? 0),
     balance: balanceRaw != null ? Number(balanceRaw) : null,
+    maxUsage: g.max_usage != null ? Number(g.max_usage) : g.usage_limit != null ? Number(g.usage_limit) : null,
+    usedCount: Number(g.used_count ?? g.times_used ?? 0),
+    description: g.description?.trim() || "",
     isActive: active,
     expiresAt: g.expiry_date ?? g.expires_at ?? null,
   };
@@ -70,6 +91,19 @@ export async function fetchGiftCardList(
     page += 1;
   } while (page <= lastPage && page <= MAX_PAGES);
   return out;
+}
+
+/** POST /api/gift-cards — create a gift card. */
+export async function createGiftCard(
+  token: string,
+  input: GiftCardInput,
+): Promise<void> {
+  await apiRequest("/api/gift-cards", { method: "POST", token, body: input });
+}
+
+/** DELETE /api/gift-cards/{id} — remove a gift card. */
+export async function deleteGiftCard(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/gift-cards/${id}`, { method: "DELETE", token });
 }
 
 type GiftCardsResponse = {

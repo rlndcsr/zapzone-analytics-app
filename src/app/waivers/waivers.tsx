@@ -9,6 +9,8 @@ import {
   type ComponentProps,
 } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -19,6 +21,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { WaiverDetailSheet } from "../../components/ui/WaiverDetailSheet";
 import {
@@ -34,8 +37,10 @@ import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
 import { getCurrentUser } from "../../lib/session";
 import {
   SOURCE_LABELS,
+  type MarketingConsentStatus,
   type Waiver,
   type WaiverSearchFilters,
+  type WaiverSource,
   type WaiverStatus,
 } from "../../services/waiversService";
 
@@ -67,6 +72,105 @@ const DATE_OPTIONS: { label: string; value: DateFilter }[] = [
 ];
 
 const PER_PAGE_OPTIONS = [10, 25, 50];
+
+type SourceFilter = "all" | WaiverSource;
+type MarketingFilter = "all" | MarketingConsentStatus;
+
+const SOURCE_OPTIONS: { label: string; value: SourceFilter }[] = [
+  { label: "Any source", value: "all" },
+  { label: "Checkout", value: "checkout" },
+  { label: "Email link", value: "confirmation_email" },
+  { label: "SMS link", value: "sms_link" },
+  { label: "Kiosk", value: "kiosk" },
+  { label: "Staff sent", value: "staff_sent" },
+  { label: "Group invite", value: "bulk_invite" },
+];
+const MARKETING_OPTIONS: { label: string; value: MarketingFilter }[] = [
+  { label: "Any marketing consent", value: "all" },
+  { label: "Opted in", value: "opted_in" },
+  { label: "Not opted in", value: "not_opted_in" },
+  { label: "Withdrawn", value: "withdrawn" },
+];
+
+/** Toggleable card fields (mirrors the web "Columns" menu). */
+type WColKey =
+  | "linked"
+  | "minors"
+  | "template"
+  | "location"
+  | "source"
+  | "date"
+  | "submitted"
+  | "status"
+  | "marketing";
+type WCols = Record<WColKey, boolean>;
+const DEFAULT_WCOLS: WCols = {
+  linked: true,
+  minors: true,
+  template: true,
+  location: true,
+  source: true,
+  date: true,
+  submitted: true,
+  status: true,
+  marketing: true,
+};
+const WCOLUMN_META: { key: WColKey; label: string }[] = [
+  { key: "linked", label: "Linked to" },
+  { key: "minors", label: "Minors" },
+  { key: "template", label: "Template" },
+  { key: "location", label: "Location" },
+  { key: "source", label: "Source" },
+  { key: "date", label: "Date" },
+  { key: "submitted", label: "Submitted" },
+  { key: "status", label: "Status" },
+  { key: "marketing", label: "Marketing" },
+];
+
+/** A row of chip choices used inside the collapsible Filters panel. */
+function ChipRow<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View className="mb-3">
+      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+        {label}
+      </Text>
+      <View className="flex-row flex-wrap gap-2">
+        {options.map((opt) => {
+          const on = value === opt.value;
+          return (
+            <Pressable
+              key={opt.value}
+              onPress={() => onChange(opt.value)}
+              className={`px-3.5 py-2 rounded-lg border ${
+                on
+                  ? "bg-[#0644C7] border-[#0644C7]"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+              }`}
+            >
+              <Text
+                className={`text-xs font-medium ${
+                  on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                }`}
+              >
+                {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 function todayKey(): string {
   const now = new Date();
@@ -122,17 +226,21 @@ const KpiCard = ({
     >
       {value}
     </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">{change}</Text>
+    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+      {change}
+    </Text>
   </View>
 );
 
 const WaiverCard = ({
   waiver,
   showLocation,
+  cols,
   onPress,
 }: {
   waiver: Waiver;
   showLocation: boolean;
+  cols: WCols;
   onPress: () => void;
 }) => {
   const linkedTo = waiver.bookingReference
@@ -168,30 +276,57 @@ const WaiverCard = ({
             </Text>
           )}
         </View>
-        <StatusBadge status={waiver.status} />
+        {cols.status && <StatusBadge status={waiver.status} />}
       </View>
 
-      <View className="flex-row items-center gap-1.5">
-        <Feather name="file-text" size={12} color="#9CA3AF" />
-        <Text
-          className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
-          numberOfLines={1}
-        >
-          {waiver.templateTitle ?? "—"}
-        </Text>
-      </View>
+      {cols.template && (
+        <View className="flex-row items-center gap-1.5">
+          <Feather name="file-text" size={12} color="#9CA3AF" />
+          <Text
+            className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
+            numberOfLines={1}
+          >
+            {waiver.templateTitle ?? "—"}
+          </Text>
+        </View>
+      )}
 
-      <View className="flex-row items-center gap-1.5 mt-1">
-        <Feather name="calendar" size={12} color="#9CA3AF" />
-        <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
-          {formatDate(waiver.selectedDate)} · {SOURCE_LABELS[waiver.source] ?? waiver.source}
-        </Text>
-      </View>
+      {(cols.date || cols.source) && (
+        <View className="flex-row items-center gap-1.5 mt-1">
+          <Feather name="calendar" size={12} color="#9CA3AF" />
+          <Text
+            className="text-xs text-gray-500 dark:text-gray-400"
+            numberOfLines={1}
+          >
+            {[
+              cols.date ? formatDate(waiver.selectedDate) : null,
+              cols.source ? SOURCE_LABELS[waiver.source] ?? waiver.source : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </Text>
+        </View>
+      )}
 
-      {showLocation && !!waiver.locationName && (
+      {cols.submitted && !!waiver.submittedAt && (
+        <View className="flex-row items-center gap-1.5 mt-1">
+          <Feather name="clock" size={12} color="#9CA3AF" />
+          <Text
+            className="text-xs text-gray-500 dark:text-gray-400"
+            numberOfLines={1}
+          >
+            Submitted {formatDate(waiver.submittedAt)}
+          </Text>
+        </View>
+      )}
+
+      {cols.location && showLocation && !!waiver.locationName && (
         <View className="flex-row items-center gap-1.5 mt-1">
           <Feather name="map-pin" size={12} color="#9CA3AF" />
-          <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+          <Text
+            className="text-xs text-gray-500 dark:text-gray-400"
+            numberOfLines={1}
+          >
             {waiver.locationName}
           </Text>
         </View>
@@ -199,22 +334,29 @@ const WaiverCard = ({
 
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
         <View className="flex-row items-center gap-1.5">
-          <Feather name="users" size={12} color="#9CA3AF" />
-          <Text className="text-xs text-gray-500 dark:text-gray-400">
-            {waiver.minorsCount} minor{waiver.minorsCount === 1 ? "" : "s"}
-          </Text>
+          {cols.minors && (
+            <>
+              <Feather name="users" size={12} color="#9CA3AF" />
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                {waiver.minorsCount} minor{waiver.minorsCount === 1 ? "" : "s"}
+              </Text>
+            </>
+          )}
         </View>
         <View className="flex-row items-center gap-2">
-          {waiver.marketingConsentStatus === "opted_in" && (
+          {cols.marketing && waiver.marketingConsentStatus === "opted_in" && (
             <View className="bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
               <Text className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                 Opted in
               </Text>
             </View>
           )}
-          {!!linkedTo && (
+          {cols.linked && !!linkedTo && (
             <View className="bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
-              <Text className="text-[10px] font-medium text-blue-700 dark:text-blue-400" numberOfLines={1}>
+              <Text
+                className="text-[10px] font-medium text-blue-700 dark:text-blue-400"
+                numberOfLines={1}
+              >
                 {linkedTo}
               </Text>
             </View>
@@ -254,6 +396,19 @@ const Waivers = () => {
   const [statsNonce, setStatsNonce] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  // Extra filters (Source + Marketing are server-side; Template + Location are
+  // applied client-side over the current page) + column visibility.
+  const [showFilters, setShowFilters] = useState(false);
+  const [showColumns, setShowColumns] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [marketingFilter, setMarketingFilter] = useState<MarketingFilter>("all");
+  const [templateFilter, setTemplateFilter] = useState<string>("all");
+  const [locationFilter, setLocationFilter] = useState<string>("all");
+  const [cols, setCols] = useState<WCols>(DEFAULT_WCOLS);
+  const [exporting, setExporting] = useState(false);
+  const toggleCol = (key: WColKey) =>
+    setCols((prev) => ({ ...prev, [key]: !prev[key] }));
+
   // Debounce the search box so we don't fire a request per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -263,7 +418,14 @@ const Waivers = () => {
   // Reset to page 1 whenever a filter changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, dateFilter, debouncedSearch, perPage]);
+  }, [
+    statusFilter,
+    dateFilter,
+    debouncedSearch,
+    perPage,
+    sourceFilter,
+    marketingFilter,
+  ]);
 
   const filters = useMemo<WaiverSearchFilters>(
     () => ({
@@ -271,8 +433,11 @@ const Waivers = () => {
       all: dateFilter === "all",
       date: dateFilter === "today" ? todayKey() : undefined,
       adultName: debouncedSearch || undefined,
+      source: sourceFilter === "all" ? undefined : sourceFilter,
+      marketingConsentStatus:
+        marketingFilter === "all" ? undefined : marketingFilter,
     }),
-    [statusFilter, dateFilter, debouncedSearch],
+    [statusFilter, dateFilter, debouncedSearch, sourceFilter, marketingFilter],
   );
 
   const { waivers, total, lastPage, loading, error, refetch } = useWaivers({
@@ -307,6 +472,104 @@ const Waivers = () => {
   const dateLabel =
     DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
 
+  // Template + location options derived from the current page (client-side).
+  const templateOptions = useMemo(() => {
+    const set = new Map<string, string>();
+    waivers.forEach((w) => {
+      if (w.templateTitle) set.set(w.templateTitle, w.templateTitle);
+    });
+    return [
+      { label: "Any template", value: "all" },
+      ...Array.from(set.keys()).map((t) => ({ label: t, value: t })),
+    ];
+  }, [waivers]);
+  const locationOptions = useMemo(() => {
+    const set = new Map<string, string>();
+    waivers.forEach((w) => {
+      if (w.locationName) set.set(w.locationName, w.locationName);
+    });
+    return [
+      { label: "Any location", value: "all" },
+      ...Array.from(set.keys()).map((l) => ({ label: l, value: l })),
+    ];
+  }, [waivers]);
+
+  // Apply the client-side Template / Location filters over the fetched page.
+  const displayed = useMemo(
+    () =>
+      waivers.filter((w) => {
+        if (templateFilter !== "all" && w.templateTitle !== templateFilter)
+          return false;
+        if (locationFilter !== "all" && w.locationName !== locationFilter)
+          return false;
+        return true;
+      }),
+    [waivers, templateFilter, locationFilter],
+  );
+
+  const filtersActive =
+    sourceFilter !== "all" ||
+    marketingFilter !== "all" ||
+    templateFilter !== "all" ||
+    locationFilter !== "all";
+
+  const clearFilters = () => {
+    setSourceFilter("all");
+    setMarketingFilter("all");
+    setTemplateFilter("all");
+    setLocationFilter("all");
+  };
+
+  const exportCsv = useCallback(async () => {
+    if (displayed.length === 0) {
+      Alert.alert("Nothing to export", "There are no waivers to export.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const header = [
+        "ID", "Name", "Email", "Phone", "Template", "Location",
+        "Source", "Minors", "Marketing", "Date", "Submitted", "Status",
+      ];
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const lines = displayed.map((w) =>
+        [
+          w.id, w.adultName, w.adultEmail, w.adultPhone,
+          w.templateTitle, w.locationName,
+          SOURCE_LABELS[w.source] ?? w.source, w.minorsCount,
+          w.marketingConsentStatus, formatDate(w.selectedDate),
+          w.submittedAt ? formatDate(w.submittedAt) : "", w.status,
+        ]
+          .map(esc)
+          .join(","),
+      );
+      const csv = [header.map(esc).join(","), ...lines].join("\n");
+      const date = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}waivers-export-${date}.csv`;
+      await FileSystem.writeAsStringAsync(uri, csv, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Waivers",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+      }
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [displayed]);
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
@@ -320,7 +583,9 @@ const Waivers = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">Waivers</Text>
+          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+            Waivers
+          </Text>
           {canManageSubModules ? (
             <Pressable
               onPress={() => setSheet("manage")}
@@ -350,104 +615,176 @@ const Waivers = () => {
           />
         }
       >
-        <View className="px-5">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Waiver Records
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Search and review signed and pending waivers
-            </Text>
+        <View className="px-5 mt-5">
+          <View className="flex-row flex-wrap -mx-1.5 mb-2">
+            {[
+              {
+                label: "Templates",
+                desc: "Waiver templates",
+                icon: "file-text" as const,
+                route: "/waivers/templates",
+              },
+              {
+                label: "Groups Invite",
+                desc: "Invite groups to your space",
+                icon: "users" as const,
+                route: "/waivers/groups",
+              },
+              {
+                label: "Reports",
+                desc: "View waiver reports",
+                icon: "bar-chart-2" as const,
+                route: "/waivers/reports",
+              },
+              {
+                label: "Deletion Log",
+                desc: "View deletion log",
+                icon: "trash-2" as const,
+                route: "/waivers/deletion-log",
+              },
+            ].map((item) => (
+              <View key={item.route} className="w-1/2 px-1.5 mb-3">
+                <Pressable
+                  onPress={() => router.push(item.route as never)}
+                  className="bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+                  style={{
+                    shadowColor: "#424242",
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.04,
+                    shadowRadius: 6,
+                    elevation: 1,
+                  }}
+                >
+                  <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                    <Feather name={item.icon} size={20} color="#0644C7" />
+                  </View>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+                    {item.label}
+                  </Text>
+                  <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                    {item.desc}
+                  </Text>
+                  <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                    <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                      View
+                    </Text>
+                    <Feather name="chevron-right" size={16} color="#0644C7" />
+                  </View>
+                </Pressable>
+              </View>
+            ))}
           </View>
 
-          {/* Sub-navigation (managers + admins) */}
-          {canManageSubModules && (
-            <View className="flex-row gap-3 mb-5">
-              <Pressable
-                onPress={() => router.push("/waivers/templates" as never)}
-                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-              >
-                <Feather name="layout" size={16} color={PRIMARY} />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                  numberOfLines={1}
-                >
-                  Templates
-                </Text>
-                <Feather name="chevron-right" size={14} color="#9CA3AF" />
-              </Pressable>
-
-              <Pressable
-                onPress={() => router.push("/waivers/group-invites" as never)}
-                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-              >
-                <Feather name="users" size={16} color={PRIMARY} />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                  numberOfLines={1}
-                >
-                  Group Invites
-                </Text>
-                <Feather name="chevron-right" size={14} color="#9CA3AF" />
-              </Pressable>
-            </View>
-          )}
+          <Pressable
+            onPress={() => router.push("/waivers/create-waiver")}
+            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text
+              className="text-sm font-semibold text-white"
+              numberOfLines={1}
+            >
+              Assign Waiver
+            </Text>
+          </Pressable>
 
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
 
-          {/* KPI cards (derived from per-status count requests) */}
-          {loading && waivers.length === 0 ? (
-            <WaiversKpiSkeleton />
-          ) : (
-            <View className="flex-row flex-wrap -mx-1.5 mb-3">
-              <View className="w-1/2">
-                <KpiCard
-                  icon="check-circle"
-                  tone={{ bg: "#10B98120", tint: "#10B981" }}
-                  title="Completed"
-                  value={String(stats.completed)}
-                  change="Signed waivers"
-                />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="clock"
-                  tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
-                  title="Pending"
-                  value={String(stats.pending)}
-                  change="Awaiting signature"
-                />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="alert-triangle"
-                  tone={{ bg: "#F43F5E20", tint: "#F43F5E" }}
-                  title="Expired"
-                  value={String(stats.expired)}
-                  change="No longer valid"
-                />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="file-text"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
-                  title="Total"
-                  value={String(stats.total)}
-                  change="Across all dates"
-                />
-              </View>
+          
+
+          {/* Status · Date pill */}
+          <FilterPill>
+            <PillSegment
+              label={statusLabel}
+              active={sheet === "status"}
+              onPress={() => setSheet("status")}
+              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
+            />
+            <PillSegment
+              label={dateLabel}
+              active={sheet === "date"}
+              onPress={() => setSheet("date")}
+              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+            />
+          </FilterPill>
+
+          {/* Filters · Columns · Export pill */}
+          <FilterPill>
+            <PillSegment
+              label="Filters"
+              active={showFilters || filtersActive}
+              onPress={() => setShowFilters((v) => !v)}
+              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Columns"
+              active={showColumns}
+              onPress={() => setShowColumns(true)}
+              renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Export"
+              onPress={exportCsv}
+              renderIcon={(c) =>
+                exporting ? (
+                  <ActivityIndicator size="small" color={c} />
+                ) : (
+                  <Feather name="download" size={15} color={c} />
+                )
+              }
+            />
+          </FilterPill>
+
+          {/* Filters panel */}
+          {showFilters && (
+            <View
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
+              style={CARD_SHADOW}
+            >
+              <ChipRow
+                label="Source"
+                options={SOURCE_OPTIONS}
+                value={sourceFilter}
+                onChange={setSourceFilter}
+              />
+              <ChipRow
+                label="Marketing Consent"
+                options={MARKETING_OPTIONS}
+                value={marketingFilter}
+                onChange={setMarketingFilter}
+              />
+              <ChipRow
+                label="Template"
+                options={templateOptions}
+                value={templateFilter}
+                onChange={setTemplateFilter}
+              />
+              <ChipRow
+                label="Location"
+                options={locationOptions}
+                value={locationFilter}
+                onChange={setLocationFilter}
+              />
+              {filtersActive && (
+                <Pressable onPress={clearFilters} className="self-end mt-1">
+                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    Clear Filters
+                  </Text>
+                </Pressable>
+              )}
             </View>
           )}
 
           {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mt-2 mb-3">
+          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3">
             <Feather name="search" size={16} color="#9CA3AF" />
             <TextInput
               value={search}
@@ -461,37 +798,6 @@ const Waivers = () => {
                 <Feather name="x" size={16} color="#9CA3AF" />
               </Pressable>
             )}
-          </View>
-
-          {/* Filters */}
-          <View className="flex-row gap-3 mb-5">
-            <Pressable
-              onPress={() => setSheet("status")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="check-circle" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {statusLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setSheet("date")}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {dateLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
           </View>
 
           {/* List header */}
@@ -514,7 +820,7 @@ const Waivers = () => {
           {/* List / states */}
           {loading ? (
             <WaiversListSkeleton />
-          ) : !error && waivers.length === 0 ? (
+          ) : !error && displayed.length === 0 ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
                 <Feather name="file-text" size={26} color="#9CA3AF" />
@@ -529,11 +835,12 @@ const Waivers = () => {
           ) : (
             !error && (
               <>
-                {waivers.map((w) => (
+                {displayed.map((w) => (
                   <WaiverCard
                     key={w.id}
                     waiver={w}
                     showLocation={isCompanyAdmin}
+                    cols={cols}
                     onPress={() => setSelectedId(w.id)}
                   />
                 ))}
@@ -560,7 +867,9 @@ const Waivers = () => {
                             >
                               <Text
                                 className={`text-xs font-medium ${
-                                  isActive ? "text-white" : "text-gray-600 dark:text-gray-300"
+                                  isActive
+                                    ? "text-white"
+                                    : "text-gray-600 dark:text-gray-300"
                                 }`}
                               >
                                 {option}
@@ -740,6 +1049,49 @@ const Waivers = () => {
         </View>
       </BottomSheet>
 
+      {/* Toggle Columns */}
+      <BottomSheet
+        visible={showColumns}
+        onClose={() => setShowColumns(false)}
+        title="Toggle Columns"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {WCOLUMN_META.map((col) => {
+            const on = cols[col.key];
+            return (
+              <Pressable
+                key={col.key}
+                onPress={() => toggleCol(col.key)}
+                className="flex-row items-center gap-3 px-2 py-3.5"
+              >
+                <View
+                  className={`w-6 h-6 rounded-md items-center justify-center border ${
+                    on
+                      ? "bg-[#0644C7] border-[#0644C7]"
+                      : "border-gray-300 dark:border-neutral-600"
+                  }`}
+                >
+                  {on && (
+                    <Feather name="check" size={14} color="#FFFFFF" strokeWidth={3} />
+                  )}
+                </View>
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
+                  {col.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          <Pressable
+            onPress={() => setCols(DEFAULT_WCOLS)}
+            className="mt-2 pt-4 border-t border-gray-100 dark:border-neutral-800 px-2"
+          >
+            <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+              Show All
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </BottomSheet>
+
       {/* Waiver detail */}
       <WaiverDetailSheet
         waiverId={selectedId}
@@ -751,28 +1103,6 @@ const Waivers = () => {
           setStatsNonce((n) => n + 1);
         }}
       />
-
-      {/* FAB — Assign Waiver (admins + managers only) */}
-      {canAssign && (
-        <Pressable
-          onPress={() => router.push("/waivers/create-waiver" as never)}
-          accessibilityRole="button"
-          accessibilityLabel="Assign waiver"
-          style={{
-            position: "absolute",
-            right: 20,
-            bottom: insets.bottom + 20,
-            shadowColor: PRIMARY,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.4,
-            shadowRadius: 12,
-            elevation: 8,
-          }}
-          className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-        >
-          <Feather name="plus" size={26} color="#FFFFFF" />
-        </Pressable>
-      )}
     </View>
   );
 };

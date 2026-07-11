@@ -179,3 +179,108 @@ export async function deleteSpecialPricing(
     token,
   });
 }
+
+/** Fields for POST /api/special-pricings — mirrors the web create form. */
+export type SpecialPricingInput = {
+  name: string;
+  description?: string | null;
+  location_id?: number | null;
+  discount_type: DiscountType;
+  discount_amount: number;
+  recurrence_type: RecurrenceType;
+  /** 0 (Sun) – 6 (Sat); only for weekly recurrence. */
+  day_of_week?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  time_from?: string | null;
+  time_to?: string | null;
+  entity_type: SpecialPricingEntityType;
+  /** Specific items this applies to; empty = all of that entity type. */
+  entity_ids: number[];
+  priority: number;
+  is_stackable: boolean;
+  is_active: boolean;
+};
+
+/** POST /api/special-pricings — create a special pricing rule. */
+export async function createSpecialPricing(
+  token: string,
+  input: SpecialPricingInput,
+): Promise<void> {
+  await apiRequest<{ success?: boolean }>("/api/special-pricings", {
+    method: "POST",
+    token,
+    body: input,
+  });
+}
+
+/** Editable detail for one special pricing (prefills the edit form). */
+export type SpecialPricingDetail = {
+  name: string;
+  description: string;
+  locationId: number | null;
+  discountType: DiscountType;
+  discountAmount: number;
+  recurrenceType: RecurrenceType;
+  dayOfWeek: number | null;
+  startDate: string;
+  endDate: string;
+  timeFrom: string;
+  timeTo: string;
+  entityType: SpecialPricingEntityType;
+  entityIds: number[];
+  priority: number;
+  isStackable: boolean;
+  isActive: boolean;
+};
+
+const asDate = (v: unknown) => (v ? String(v).substring(0, 10) : "");
+const asTime = (v: unknown) => (v ? String(v).substring(0, 5) : "");
+
+/** GET /api/special-pricings/{id} — full record for the edit form. */
+export async function fetchSpecialPricing(
+  token: string,
+  id: number,
+): Promise<SpecialPricingDetail> {
+  const res = await apiRequest<{ data?: unknown } | unknown>(
+    `/api/special-pricings/${id}`,
+    { token },
+  );
+  const r = ((res as { data?: unknown })?.data ?? res) as Record<string, unknown>;
+  return {
+    name: String(r.name ?? "").trim(),
+    description: String(r.description ?? "").trim(),
+    locationId:
+      r.location_id != null
+        ? Number(r.location_id)
+        : (r.location as { id?: number })?.id ?? null,
+    discountType: normalizeDiscountType(r.discount_type as string),
+    discountAmount: Number(r.discount_amount ?? 0),
+    recurrenceType: normalizeRecurrenceType(r.recurrence_type as string),
+    dayOfWeek: r.day_of_week != null ? Number(r.day_of_week) : null,
+    startDate: asDate(r.start_date),
+    endDate: asDate(r.end_date),
+    timeFrom: asTime(r.time_from),
+    timeTo: asTime(r.time_to),
+    entityType: normalizeEntityType(r.entity_type as string),
+    entityIds: Array.isArray(r.entity_ids)
+      ? (r.entity_ids as unknown[]).map((x) => Number(x))
+      : [],
+    priority: Number(r.priority ?? 0),
+    isStackable: !!r.is_stackable,
+    isActive: r.is_active == null ? true : !!r.is_active,
+  };
+}
+
+/** PUT /api/special-pricings/{id} — update a special pricing rule. */
+export async function updateSpecialPricing(
+  token: string,
+  id: number,
+  input: SpecialPricingInput,
+): Promise<void> {
+  await apiRequest<{ success?: boolean }>(`/api/special-pricings/${id}`, {
+    method: "PUT",
+    token,
+    body: input,
+  });
+}

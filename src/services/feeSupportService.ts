@@ -175,3 +175,89 @@ export async function deleteFeeSupport(
     token,
   });
 }
+
+/** Fields for POST /api/fee-supports — mirrors the web create form. */
+export type FeeSupportInput = {
+  fee_name: string;
+  location_id?: number | null;
+  fee_calculation_type: FeeCalculationType;
+  fee_amount: number;
+  fee_application_type: FeeApplicationType;
+  entity_type: FeeSupportEntityType;
+  entity_ids: number[];
+  is_active: boolean;
+};
+
+/** POST /api/fee-supports — create a fee support rule. */
+export async function createFeeSupport(
+  token: string,
+  input: FeeSupportInput,
+): Promise<void> {
+  await apiRequest<{ success?: boolean }>("/api/fee-supports", {
+    method: "POST",
+    token,
+    body: input,
+  });
+}
+
+/** Editable detail for one fee support (prefills the edit form). */
+export type FeeSupportDetail = {
+  feeName: string;
+  locationId: number | null;
+  calculationType: FeeCalculationType;
+  feeAmount: number;
+  applicationType: FeeApplicationType;
+  entityType: FeeSupportEntityType;
+  entityIds: number[];
+  isActive: boolean;
+};
+
+/** GET /api/fee-supports/{id} — full record for the edit form. */
+export async function fetchFeeSupport(
+  token: string,
+  id: number,
+): Promise<FeeSupportDetail> {
+  const res = await apiRequest<{ data?: unknown } | unknown>(
+    `/api/fee-supports/${id}`,
+    { token },
+  );
+  const r = ((res as { data?: unknown })?.data ?? res) as Record<string, unknown>;
+  return {
+    feeName: String(r.fee_name ?? "").trim(),
+    locationId:
+      r.location_id != null
+        ? Number(r.location_id)
+        : (r.location as { id?: number })?.id ?? null,
+    calculationType:
+      (r.fee_calculation_type as string) === "percentage"
+        ? "percentage"
+        : "fixed",
+    feeAmount: Number(r.fee_amount ?? 0),
+    applicationType:
+      (r.fee_application_type as string) === "inclusive"
+        ? "inclusive"
+        : "additive",
+    entityType: ((): FeeSupportEntityType => {
+      const t = r.entity_type as string;
+      if (t === "attraction" || t === "event" || t === "membership") return t;
+      return "package";
+    })(),
+    entityIds: Array.isArray(r.entity_ids)
+      ? (r.entity_ids as unknown[]).map((x) => Number(x))
+      : [],
+    isActive: r.is_active == null ? true : !!r.is_active,
+  };
+}
+
+/** PUT /api/fee-supports/{id} — update a fee support rule. */
+export async function updateFeeSupport(
+  token: string,
+  id: number,
+  input: FeeSupportInput,
+): Promise<void> {
+  await apiRequest<{ success?: boolean }>(`/api/fee-supports/${id}`, {
+    method: "PUT",
+    token,
+    body: input,
+  });
+}

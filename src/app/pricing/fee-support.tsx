@@ -20,10 +20,16 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import {
   FeeSupportKpiSkeleton,
   FeeSupportListSkeleton,
 } from "../../components/ui/skeleton/FeeSupportSkeleton";
+import {
+  fetchLocations,
+  type LocationOption,
+} from "../../services/locationsService";
 import {
   consumeFeeSupportsStale,
   markFeeSupportsStale,
@@ -135,15 +141,119 @@ const Field = ({
   </View>
 );
 
+type CalcFilter = "all" | "fixed" | "percentage";
+type AppFilter = "all" | "additive" | "inclusive";
+type EntityFilter = "all" | FeeSupportEntityType;
+type StatusFilter = "all" | "active" | "inactive";
+
+const CALC_OPTIONS: { label: string; value: CalcFilter }[] = [
+  { label: "All", value: "all" },
+  { label: "Fixed", value: "fixed" },
+  { label: "Percentage", value: "percentage" },
+];
+const APP_OPTIONS: { label: string; value: AppFilter }[] = [
+  { label: "All", value: "all" },
+  { label: "Additive", value: "additive" },
+  { label: "Inclusive", value: "inclusive" },
+];
+const ENTITY_OPTIONS: { label: string; value: EntityFilter }[] = [
+  { label: "All Types", value: "all" },
+  { label: "Packages", value: "package" },
+  { label: "Attractions", value: "attraction" },
+  { label: "Events", value: "event" },
+  { label: "Memberships", value: "membership" },
+];
+const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
+  { label: "All Statuses", value: "all" },
+  { label: "Active", value: "active" },
+  { label: "Inactive", value: "inactive" },
+];
+
+/** Toggleable card fields (mirrors the web "Columns" menu). */
+type ColKey =
+  | "amount"
+  | "calculation"
+  | "application"
+  | "entityType"
+  | "entities"
+  | "location"
+  | "status";
+type Cols = Record<ColKey, boolean>;
+const DEFAULT_COLS: Cols = {
+  amount: true,
+  calculation: true,
+  application: true,
+  entityType: true,
+  entities: true,
+  location: true,
+  status: true,
+};
+const COLUMN_META: { key: ColKey; label: string }[] = [
+  { key: "amount", label: "Amount" },
+  { key: "calculation", label: "Calculation" },
+  { key: "application", label: "Application" },
+  { key: "entityType", label: "Entity Type" },
+  { key: "entities", label: "Entities" },
+  { key: "location", label: "Location" },
+  { key: "status", label: "Status" },
+];
+
+/** A row of chip choices used inside the collapsible Filters panel. */
+function ChipRow<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View className="mb-3">
+      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+        {label}
+      </Text>
+      <View className="flex-row flex-wrap gap-2">
+        {options.map((opt) => {
+          const on = value === opt.value;
+          return (
+            <Pressable
+              key={opt.value}
+              onPress={() => onChange(opt.value)}
+              className={`px-3.5 py-2 rounded-lg border ${
+                on
+                  ? "bg-[#0644C7] border-[#0644C7]"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+              }`}
+            >
+              <Text
+                className={`text-xs font-medium ${
+                  on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                }`}
+              >
+                {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 const FeeSupportCard = ({
   row,
   busy,
+  cols,
   onToggle,
   onEdit,
   onDelete,
 }: {
   row: FeeSupportRow;
   busy: boolean;
+  cols: Cols;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -167,40 +277,47 @@ const FeeSupportCard = ({
         >
           {row.feeName}
         </Text>
-        <StatusBadge status={row.status} busy={busy} onPress={onToggle} />
+        {cols.status && (
+          <StatusBadge status={row.status} busy={busy} onPress={onToggle} />
+        )}
       </View>
 
       {/* Labeled field grid - improved layout and text clarity */}
       <View className="flex-row flex-wrap -mx-1 mb-1">
-        <Field
-          label="Amount"
-          value={row.amountLabel}
-          icon={isPercent ? "percent" : "dollar-sign"}
-          valueClassName="text-[#0644C7] dark:text-blue-300 font-bold"
-        />
-        <Field
-          label="Calculation"
-          value={isPercent ? "Percentage" : "Fixed"}
-        />
-        <Field
-          label="Application"
-          value={row.applicationType === "additive" ? "Additive" : "Inclusive"}
-        />
-        <Field
-          label="Entity Type"
-          value={entity.label}
-          icon={entity.icon}
-        />
-        <Field
-          label="Entities"
-          value={`${row.entityCount} item${row.entityCount === 1 ? "" : "s"}`}
-        />
-        <Field 
-          label="Location" 
-          value={locationLabel} 
-          icon="map-pin" 
-          valueClassName="text-gray-700 dark:text-gray-200 font-normal"
-        />
+        {cols.amount && (
+          <Field
+            label="Amount"
+            value={row.amountLabel}
+            icon={isPercent ? "percent" : "dollar-sign"}
+            valueClassName="text-[#0644C7] dark:text-blue-300 font-bold"
+          />
+        )}
+        {cols.calculation && (
+          <Field label="Calculation" value={isPercent ? "Percentage" : "Fixed"} />
+        )}
+        {cols.application && (
+          <Field
+            label="Application"
+            value={row.applicationType === "additive" ? "Additive" : "Inclusive"}
+          />
+        )}
+        {cols.entityType && (
+          <Field label="Entity Type" value={entity.label} icon={entity.icon} />
+        )}
+        {cols.entities && (
+          <Field
+            label="Entities"
+            value={`${row.entityCount} item${row.entityCount === 1 ? "" : "s"}`}
+          />
+        )}
+        {cols.location && (
+          <Field
+            label="Location"
+            value={locationLabel}
+            icon="map-pin"
+            valueClassName="text-gray-700 dark:text-gray-200 font-normal"
+          />
+        )}
       </View>
 
       {/* Actions - improved button styling */}
@@ -280,6 +397,36 @@ const FeeSupport = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
 
+  // Filters / columns
+  const [showFilters, setShowFilters] = useState(false);
+  const [showColumns, setShowColumns] = useState(false);
+  const [calcFilter, setCalcFilter] = useState<CalcFilter>("all");
+  const [appFilter, setAppFilter] = useState<AppFilter>("all");
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
+  const [cols, setCols] = useState<Cols>(DEFAULT_COLS);
+  const [exporting, setExporting] = useState(false);
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+
+  const loadLocations = useCallback(async () => {
+    const token = getToken();
+    if (!token || locations.length > 0) return;
+    setLocationsLoading(true);
+    try {
+      setLocations(await fetchLocations(token));
+    } catch {
+      // Non-fatal.
+    } finally {
+      setLocationsLoading(false);
+    }
+  }, [locations.length]);
+
+  useEffect(() => {
+    loadLocations();
+  }, [loadLocations]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -313,12 +460,28 @@ const FeeSupport = () => {
     };
   }, [feeSupports]);
 
-  // Search over fee name (matches the web search box).
+  // Search + filter panel.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return feeSupports;
-    return feeSupports.filter((f) => f.feeName.toLowerCase().includes(term));
-  }, [feeSupports, search]);
+    return feeSupports.filter((f) => {
+      if (term && !f.feeName.toLowerCase().includes(term)) return false;
+      if (calcFilter !== "all" && f.calculationType !== calcFilter) return false;
+      if (appFilter !== "all" && f.applicationType !== appFilter) return false;
+      if (entityFilter !== "all" && f.entityType !== entityFilter) return false;
+      if (statusFilter !== "all" && f.status !== statusFilter) return false;
+      if (locationFilter !== "all" && f.locationId !== locationFilter)
+        return false;
+      return true;
+    });
+  }, [
+    feeSupports,
+    search,
+    calcFilter,
+    appFilter,
+    entityFilter,
+    statusFilter,
+    locationFilter,
+  ]);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
@@ -328,7 +491,80 @@ const FeeSupport = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, perPage]);
+  }, [
+    search,
+    perPage,
+    calcFilter,
+    appFilter,
+    entityFilter,
+    statusFilter,
+    locationFilter,
+  ]);
+
+  const filtersActive =
+    calcFilter !== "all" ||
+    appFilter !== "all" ||
+    entityFilter !== "all" ||
+    statusFilter !== "all" ||
+    locationFilter !== "all";
+
+  const clearFilters = () => {
+    setCalcFilter("all");
+    setAppFilter("all");
+    setEntityFilter("all");
+    setStatusFilter("all");
+    setLocationFilter("all");
+  };
+
+  const toggleCol = (key: ColKey) =>
+    setCols((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const exportCsv = useCallback(async () => {
+    if (filtered.length === 0) {
+      Alert.alert("Nothing to export", "There are no fees to export.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const header = [
+        "ID", "Fee Name", "Amount", "Calculation", "Application",
+        "Entity Type", "Entities", "Location", "Status",
+      ];
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const lines = filtered.map((f) =>
+        [
+          f.id, f.feeName, f.amountLabel, f.calculationType, f.applicationType,
+          f.entityType, f.entityCount, f.locationName, f.status,
+        ]
+          .map(esc)
+          .join(","),
+      );
+      const csv = [header.map(esc).join(","), ...lines].join("\n");
+      const date = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}fee-supports-export-${date}.csv`;
+      await FileSystem.writeAsStringAsync(uri, csv, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Fee Supports",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+      }
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [filtered]);
 
   const hasResults = filtered.length > 0;
 
@@ -438,16 +674,132 @@ const FeeSupport = () => {
         }
       >
         <View className="px-5">
-          {/* Overview intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Fee Supports
+
+          <Pressable
+            onPress={() => router.push("/pricing/create-fee-support")}
+            className="flex-row mt-5 mb-3 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Create Fee Support
             </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Manage additional fees for packages, attractions, events, and
-              memberships
-            </Text>
-          </View>
+          </Pressable>
+
+          {/* Controls — segmented pill (Filters · Columns · Export CSV) */}
+          <FilterPill>
+            <PillSegment
+              label="Filters"
+              active={showFilters || filtersActive}
+              onPress={() => setShowFilters((v) => !v)}
+              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Columns"
+              active={showColumns}
+              onPress={() => setShowColumns(true)}
+              renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Export CSV"
+              onPress={exportCsv}
+              renderIcon={(c) =>
+                exporting ? (
+                  <ActivityIndicator size="small" color={c} />
+                ) : (
+                  <Feather name="download" size={15} color={c} />
+                )
+              }
+            />
+          </FilterPill>
+
+          {/* Filters panel */}
+          {showFilters && (
+            <View
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
+              style={CARD_SHADOW}
+            >
+              <ChipRow
+                label="Calculation"
+                options={CALC_OPTIONS}
+                value={calcFilter}
+                onChange={setCalcFilter}
+              />
+              <ChipRow
+                label="Application"
+                options={APP_OPTIONS}
+                value={appFilter}
+                onChange={setAppFilter}
+              />
+              <ChipRow
+                label="Entity Type"
+                options={ENTITY_OPTIONS}
+                value={entityFilter}
+                onChange={setEntityFilter}
+              />
+              <ChipRow
+                label="Status"
+                options={STATUS_OPTIONS}
+                value={statusFilter}
+                onChange={setStatusFilter}
+              />
+              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+                Location
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
+                <Pressable
+                  onPress={() => setLocationFilter("all")}
+                  className={`px-3.5 py-2 rounded-lg border ${
+                    locationFilter === "all"
+                      ? "bg-[#0644C7] border-[#0644C7]"
+                      : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                  }`}
+                >
+                  <Text
+                    className={`text-xs font-medium ${
+                      locationFilter === "all"
+                        ? "text-white"
+                        : "text-gray-600 dark:text-gray-300"
+                    }`}
+                  >
+                    All Locations
+                  </Text>
+                </Pressable>
+                {locationsLoading && locations.length === 0 && (
+                  <ActivityIndicator color={PRIMARY} />
+                )}
+                {locations.map((loc) => {
+                  const on = locationFilter === loc.id;
+                  return (
+                    <Pressable
+                      key={loc.id}
+                      onPress={() => setLocationFilter(loc.id)}
+                      className={`px-3.5 py-2 rounded-lg border ${
+                        on
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-medium ${
+                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                        }`}
+                        numberOfLines={1}
+                      >
+                        {loc.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {filtersActive && (
+                <Pressable onPress={clearFilters} className="self-end mt-3">
+                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    Clear Filters
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           {/* Error state */}
           {!loading && error && (
@@ -571,6 +923,7 @@ const FeeSupport = () => {
                     key={row.id}
                     row={row}
                     busy={busyId === row.id}
+                    cols={cols}
                     onToggle={() => handleToggle(row)}
                     onEdit={() => handleEdit(row)}
                     onDelete={() => handleDelete(row)}
@@ -665,26 +1018,47 @@ const FeeSupport = () => {
         </View>
       </ScrollView>
 
-      {/* Floating Action Button — Create Fee (mirrors the web "Create Fee"
-          button). */}
-      <Pressable
-        onPress={() => router.push("/pricing/create-fee-support")}
-        accessibilityRole="button"
-        accessibilityLabel="Create fee"
-        style={{
-          position: "absolute",
-          right: 20,
-          bottom: insets.bottom + 20,
-          shadowColor: PRIMARY,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.4,
-          shadowRadius: 12,
-          elevation: 8,
-        }}
-        className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+      {/* Toggle Columns */}
+      <BottomSheet
+        visible={showColumns}
+        onClose={() => setShowColumns(false)}
+        title="Toggle Columns"
       >
-        <Feather name="plus" size={26} color="#FFFFFF" />
-      </Pressable>
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {COLUMN_META.map((col) => {
+            const on = cols[col.key];
+            return (
+              <Pressable
+                key={col.key}
+                onPress={() => toggleCol(col.key)}
+                className="flex-row items-center gap-3 px-2 py-3.5"
+              >
+                <View
+                  className={`w-6 h-6 rounded-md items-center justify-center border ${
+                    on
+                      ? "bg-[#0644C7] border-[#0644C7]"
+                      : "border-gray-300 dark:border-neutral-600"
+                  }`}
+                >
+                  {on && (
+                    <Feather name="check" size={14} color="#FFFFFF" strokeWidth={3} />
+                  )}
+                </View>
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
+                  {col.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          <View className="flex-row gap-4 mt-2 pt-4 border-t border-gray-100 dark:border-neutral-800 px-2">
+            <Pressable onPress={() => setCols(DEFAULT_COLS)}>
+              <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                Show All
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 };
