@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { StatTile } from "../../components/ui/StatTile";
 import { getToken } from "../../lib/session";
 import {
@@ -64,9 +64,6 @@ function statusPill(status: string): { pill: string; text: string } {
   }
 }
 
-const comingSoon = () =>
-  Alert.alert("Coming soon", "Creating campaigns from the app is coming soon.");
-
 const EmailCampaigns = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -79,6 +76,8 @@ const EmailCampaigns = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -112,14 +111,34 @@ const EmailCampaigns = () => {
     setRefreshing(false);
   }, [load]);
 
+  const statusOptions = useMemo(
+    () => [
+      { label: "All Statuses", value: "all" },
+      ...Array.from(new Set(campaigns.map((c) => c.status).filter(Boolean)))
+        .sort()
+        .map((s) => ({
+          label:
+            campaigns.find((c) => c.status === s)?.statusLabel ??
+            s.charAt(0).toUpperCase() + s.slice(1),
+          value: s,
+        })),
+    ],
+    [campaigns],
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return campaigns;
-    return campaigns.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) || c.subject.toLowerCase().includes(q),
-    );
-  }, [campaigns, search]);
+    return campaigns.filter((c) => {
+      if (statusFilter !== "all" && c.status !== statusFilter) return false;
+      if (
+        q &&
+        !c.name.toLowerCase().includes(q) &&
+        !c.subject.toLowerCase().includes(q)
+      )
+        return false;
+      return true;
+    });
+  }, [campaigns, search, statusFilter]);
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -165,28 +184,29 @@ const EmailCampaigns = () => {
             </Text>
           </View>
 
-          {/* Templates + New Campaign (coming soon) */}
-          <View className="flex-row gap-3">
-            <Pressable
+          {/* Nav: Templates · Notifications pill */}
+          <FilterPill>
+            <PillSegment
+              label="Templates"
               onPress={() => router.push("/email-campaign/email-templates")}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-            >
-              <Feather name="mail" size={16} color="#6B7280" />
-              <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                Templates
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={comingSoon}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text className="text-sm font-semibold text-white">New</Text>
-              <View className="bg-white/20 px-2 py-0.5 rounded-full">
-                <Text className="text-[10px] font-semibold text-white">Soon</Text>
-              </View>
-            </Pressable>
-          </View>
+              renderIcon={(c) => <Feather name="mail" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Notifications"
+              onPress={() => router.push("/email-campaign/email-notification")}
+              renderIcon={(c) => <Feather name="bell" size={15} color={c} />}
+            />
+          </FilterPill>
+
+          <Pressable
+            onPress={() => router.push("/email-campaign/create-campaign")}
+            className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Create Campaign
+            </Text>
+          </Pressable>
 
           {/* Stats */}
           <View className="flex-row flex-wrap gap-3">
@@ -208,6 +228,60 @@ const EmailCampaigns = () => {
               style={{ paddingVertical: 0 }}
             />
           </View>
+
+          {/* Filters pill */}
+          <FilterPill>
+            <PillSegment
+              label="Filters"
+              active={showFilters || statusFilter !== "all"}
+              onPress={() => setShowFilters((v) => !v)}
+              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+            />
+          </FilterPill>
+          {showFilters && (
+            <View
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
+              style={CARD_SHADOW}
+            >
+              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+                Status
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
+                {statusOptions.map((opt) => {
+                  const on = statusFilter === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => setStatusFilter(opt.value)}
+                      className={`px-3.5 py-2 rounded-lg border ${
+                        on
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-medium ${
+                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {statusFilter !== "all" && (
+                <Pressable
+                  onPress={() => setStatusFilter("all")}
+                  className="self-end mt-3"
+                >
+                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    Clear Filters
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           {/* States */}
           {loading && campaigns.length === 0 && (

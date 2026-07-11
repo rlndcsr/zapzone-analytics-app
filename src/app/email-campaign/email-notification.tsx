@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { getToken } from "../../lib/session";
@@ -32,9 +32,6 @@ const CARD_SHADOW = {
 
 const PRIMARY = "#0644C7";
 
-const comingSoon = () =>
-  Alert.alert("Coming soon", "Creating notifications from the app is coming soon.");
-
 const EmailNotifications = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -49,6 +46,11 @@ const EmailNotifications = () => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
+  const [showFilters, setShowFilters] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
+    "all",
+  );
+  const [triggerFilter, setTriggerFilter] = useState("all");
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -79,16 +81,34 @@ const EmailNotifications = () => {
     setRefreshing(false);
   }, [load]);
 
+  const triggerOptions = useMemo(
+    () => [
+      { label: "All Triggers", value: "all" },
+      ...Array.from(new Set(rows.map((n) => n.triggerLabel).filter(Boolean)))
+        .sort()
+        .map((t) => ({ label: t, value: t })),
+    ],
+    [rows],
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((n) => n.name.toLowerCase().includes(q));
-  }, [rows, search]);
+    return rows.filter((n) => {
+      if (statusFilter === "active" && !n.isActive) return false;
+      if (statusFilter === "inactive" && n.isActive) return false;
+      if (triggerFilter !== "all" && n.triggerLabel !== triggerFilter)
+        return false;
+      if (q && !n.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [rows, search, statusFilter, triggerFilter]);
 
-  // Reset to page 1 when the search changes the result set.
+  const filtersActive = statusFilter !== "all" || triggerFilter !== "all";
+
+  // Reset to page 1 when the result set changes.
   useEffect(() => {
     setPage(1);
-  }, [search]);
+  }, [search, statusFilter, triggerFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage));
   const currentPage = Math.min(page, pageCount);
@@ -141,16 +161,28 @@ const EmailNotifications = () => {
             </Text>
           </View>
 
-          {/* Create (coming soon) */}
+          {/* Nav: Templates · Campaigns pill */}
+          <FilterPill>
+            <PillSegment
+              label="Templates"
+              onPress={() => router.push("/email-campaign/email-templates")}
+              renderIcon={(c) => <Feather name="mail" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Campaigns"
+              onPress={() => router.push("/email-campaign/campaigns")}
+              renderIcon={(c) => <Feather name="send" size={15} color={c} />}
+            />
+          </FilterPill>
+
           <Pressable
-            onPress={comingSoon}
+            onPress={() => router.push("/email-campaign/create-notification")}
             className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">Create Notification</Text>
-            <View className="bg-white/20 px-2 py-0.5 rounded-full">
-              <Text className="text-[10px] font-semibold text-white">Soon</Text>
-            </View>
+            <Text className="text-sm font-semibold text-white">
+              Create Notification
+            </Text>
           </Pressable>
 
           {/* Stats */}
@@ -173,6 +205,94 @@ const EmailNotifications = () => {
               style={{ paddingVertical: 0 }}
             />
           </View>
+
+          {/* Filters pill */}
+          <FilterPill>
+            <PillSegment
+              label="Filters"
+              active={showFilters || filtersActive}
+              onPress={() => setShowFilters((v) => !v)}
+              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+            />
+          </FilterPill>
+          {showFilters && (
+            <View
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
+              style={CARD_SHADOW}
+            >
+              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+                Status
+              </Text>
+              <View className="flex-row flex-wrap gap-2 mb-3">
+                {[
+                  { label: "All Statuses", value: "all" as const },
+                  { label: "Active", value: "active" as const },
+                  { label: "Inactive", value: "inactive" as const },
+                ].map((opt) => {
+                  const on = statusFilter === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => setStatusFilter(opt.value)}
+                      className={`px-3.5 py-2 rounded-lg border ${
+                        on
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-medium ${
+                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+                Trigger
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
+                {triggerOptions.map((opt) => {
+                  const on = triggerFilter === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => setTriggerFilter(opt.value)}
+                      className={`px-3.5 py-2 rounded-lg border ${
+                        on
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-medium ${
+                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {filtersActive && (
+                <Pressable
+                  onPress={() => {
+                    setStatusFilter("all");
+                    setTriggerFilter("all");
+                  }}
+                  className="self-end mt-3"
+                >
+                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    Clear Filters
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           {/* States */}
           {loading && rows.length === 0 && (

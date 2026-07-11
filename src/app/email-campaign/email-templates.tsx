@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +12,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { StatTile } from "../../components/ui/StatTile";
 import { getToken } from "../../lib/session";
 import {
@@ -73,8 +74,73 @@ const STATUS_PILL: Record<
   },
 };
 
-const comingSoon = () =>
-  Alert.alert("Coming soon", "Creating templates from the app is coming soon.");
+type StatusFilter = "all" | EmailTemplateStatus;
+const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
+  { label: "All Statuses", value: "all" },
+  { label: "Active", value: "active" },
+  { label: "Draft", value: "draft" },
+  { label: "Archived", value: "archived" },
+];
+
+type TColKey = "subject" | "category" | "date" | "status";
+type TCols = Record<TColKey, boolean>;
+const DEFAULT_TCOLS: TCols = {
+  subject: true,
+  category: true,
+  date: true,
+  status: true,
+};
+const TCOLUMN_META: { key: TColKey; label: string }[] = [
+  { key: "subject", label: "Subject" },
+  { key: "category", label: "Category" },
+  { key: "date", label: "Created Date" },
+  { key: "status", label: "Status" },
+];
+
+/** A row of chip choices used inside the Filters panel. */
+function ChipRow<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View className="mb-3">
+      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+        {label}
+      </Text>
+      <View className="flex-row flex-wrap gap-2">
+        {options.map((opt) => {
+          const on = value === opt.value;
+          return (
+            <Pressable
+              key={opt.value}
+              onPress={() => onChange(opt.value)}
+              className={`px-3.5 py-2 rounded-lg border ${
+                on
+                  ? "bg-[#0644C7] border-[#0644C7]"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+              }`}
+            >
+              <Text
+                className={`text-xs font-medium ${
+                  on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                }`}
+              >
+                {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 const EmailTemplates = () => {
   const router = useRouter();
@@ -88,6 +154,13 @@ const EmailTemplates = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [showColumns, setShowColumns] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [cols, setCols] = useState<TCols>(DEFAULT_TCOLS);
+  const toggleCol = (key: TColKey) =>
+    setCols((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -128,14 +201,32 @@ const EmailTemplates = () => {
     [templates, total],
   );
 
+  const categoryOptions = useMemo(
+    () => [
+      { label: "All Categories", value: "all" },
+      ...Array.from(new Set(templates.map((t) => t.category).filter(Boolean)))
+        .sort()
+        .map((c) => ({ label: c, value: c })),
+    ],
+    [templates],
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter(
-      (t) =>
-        t.name.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q),
-    );
-  }, [templates, search]);
+    return templates.filter((t) => {
+      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      if (categoryFilter !== "all" && t.category !== categoryFilter) return false;
+      if (
+        q &&
+        !t.name.toLowerCase().includes(q) &&
+        !t.subject.toLowerCase().includes(q)
+      )
+        return false;
+      return true;
+    });
+  }, [templates, search, statusFilter, categoryFilter]);
+
+  const filtersActive = statusFilter !== "all" || categoryFilter !== "all";
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -186,49 +277,29 @@ const EmailTemplates = () => {
             </Text>
           </View>
 
-          {/* Create (coming soon) */}
-          <View className="gap-3 mb-5">
-            <View className="flex-row gap-3">
-              <Pressable
-                onPress={() => router.push("/email-campaign/campaigns")}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-                accessibilityRole="button"
-                accessibilityLabel="Scan member"
-              >
-                <Feather name="send" size={16} color="#6B7280" />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                  numberOfLines={1}
-                >
-                  Campaigns
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push("/email-campaign/email-notification")}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-                accessibilityRole="button"
-                accessibilityLabel="Plans"
-              >
-                <Feather name="bell" size={16} color="#6B7280" />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                  numberOfLines={1}
-                >
-                  Email Notifications
-                </Text>
-              </Pressable>
-            </View>
+          {/* Nav: Campaigns · Notifications pill */}
+          <FilterPill>
+            <PillSegment
+              label="Campaigns"
+              onPress={() => router.push("/email-campaign/campaigns")}
+              renderIcon={(c) => <Feather name="send" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Notifications"
+              onPress={() => router.push("/email-campaign/email-notification")}
+              renderIcon={(c) => <Feather name="bell" size={15} color={c} />}
+            />
+          </FilterPill>
 
-            <Pressable
-              onPress={() => router.push("/email-campaign/create-template")}
-              className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text className="text-sm font-semibold text-white">
-                Create Template
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => router.push("/email-campaign/create-template")}
+            className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Create Template
+            </Text>
+          </Pressable>
 
           {/* Stats */}
           <View className="flex-row flex-wrap gap-3">
@@ -279,6 +350,56 @@ const EmailTemplates = () => {
             />
           </View>
 
+          {/* Filters · Columns pill */}
+          <FilterPill>
+            <PillSegment
+              label="Filters"
+              active={showFilters || filtersActive}
+              onPress={() => setShowFilters((v) => !v)}
+              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Columns"
+              active={showColumns}
+              onPress={() => setShowColumns(true)}
+              renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
+            />
+          </FilterPill>
+
+          {/* Filters panel */}
+          {showFilters && (
+            <View
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
+              style={CARD_SHADOW}
+            >
+              <ChipRow
+                label="Status"
+                options={STATUS_OPTIONS}
+                value={statusFilter}
+                onChange={setStatusFilter}
+              />
+              <ChipRow
+                label="Category"
+                options={categoryOptions}
+                value={categoryFilter}
+                onChange={setCategoryFilter}
+              />
+              {filtersActive && (
+                <Pressable
+                  onPress={() => {
+                    setStatusFilter("all");
+                    setCategoryFilter("all");
+                  }}
+                  className="self-end"
+                >
+                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    Clear Filters
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+
           {/* States */}
           {loading && templates.length === 0 && (
             <Text className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
@@ -314,7 +435,7 @@ const EmailTemplates = () => {
                     <Text className="text-base font-bold text-gray-900 dark:text-white">
                       {t.name}
                     </Text>
-                    {!!t.subject && (
+                    {cols.subject && !!t.subject && (
                       <Text
                         className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
                         numberOfLines={1}
@@ -323,22 +444,32 @@ const EmailTemplates = () => {
                       </Text>
                     )}
                   </View>
-                  <View className={`px-3 py-1 rounded-full ${pill.pill}`}>
-                    <Text className={`text-xs font-semibold ${pill.text}`}>
-                      {pill.label}
-                    </Text>
-                  </View>
+                  {cols.status && (
+                    <View className={`px-3 py-1 rounded-full ${pill.pill}`}>
+                      <Text className={`text-xs font-semibold ${pill.text}`}>
+                        {pill.label}
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-                  <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-md">
-                    <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                      {t.category}
-                    </Text>
+                {(cols.category || cols.date) && (
+                  <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                    {cols.category ? (
+                      <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-md">
+                        <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+                          {t.category}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View />
+                    )}
+                    {cols.date && (
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        {fmtDate(t.createdAt)}
+                      </Text>
+                    )}
                   </View>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {fmtDate(t.createdAt)}
-                  </Text>
-                </View>
+                )}
               </View>
             );
           })}
@@ -355,6 +486,49 @@ const EmailTemplates = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Toggle Columns */}
+      <BottomSheet
+        visible={showColumns}
+        onClose={() => setShowColumns(false)}
+        title="Toggle Columns"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {TCOLUMN_META.map((col) => {
+            const on = cols[col.key];
+            return (
+              <Pressable
+                key={col.key}
+                onPress={() => toggleCol(col.key)}
+                className="flex-row items-center gap-3 px-2 py-3.5"
+              >
+                <View
+                  className={`w-6 h-6 rounded-md items-center justify-center border ${
+                    on
+                      ? "bg-[#0644C7] border-[#0644C7]"
+                      : "border-gray-300 dark:border-neutral-600"
+                  }`}
+                >
+                  {on && (
+                    <Feather name="check" size={14} color="#FFFFFF" strokeWidth={3} />
+                  )}
+                </View>
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
+                  {col.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          <Pressable
+            onPress={() => setCols(DEFAULT_TCOLS)}
+            className="mt-2 pt-4 border-t border-gray-100 dark:border-neutral-800 px-2"
+          >
+            <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+              Show All
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 };

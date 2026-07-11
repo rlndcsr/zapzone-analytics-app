@@ -21,6 +21,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { SelectField } from "../../components/ui/FormControls";
 import { MembershipsListSkeleton } from "../../components/ui/skeleton/MembershipsSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -265,68 +266,36 @@ const Memberships = () => {
             </Text>
           </View>
 
-          {/* Actions: Scan + Plans, then Add Member */}
-          <View className="gap-3 mb-5">
-            <View className="flex-row gap-3">
-              <Pressable
-                onPress={() => router.push("/memberships/membership-check-in")}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-                accessibilityRole="button"
-                accessibilityLabel="Scan member"
-              >
-                <Feather name="maximize" size={16} color="#6B7280" />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                  numberOfLines={1}
-                >
-                  Scan Member
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push("/memberships/membership-plan")}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-                accessibilityRole="button"
-                accessibilityLabel="Plans"
-              >
-                <Feather name="layers" size={16} color="#6B7280" />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                  numberOfLines={1}
-                >
-                  Plans
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push("/memberships/membership-reports")}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-                accessibilityRole="button"
-                accessibilityLabel="Reports"
-              >
-                <Feather name="bar-chart-2" size={16} color="#6B7280" />
-                <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                  numberOfLines={1}
-                >
-                  Reports
-                </Text>
-              </Pressable>
-            </View>
+          {/* Actions: Scan · Plans · Reports pill, then Add Member */}
+          <FilterPill>
+            <PillSegment
+              label="Scan Member"
+              onPress={() => router.push("/memberships/membership-check-in")}
+              renderIcon={(c) => <Feather name="maximize" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Plans"
+              onPress={() => router.push("/memberships/membership-plan")}
+              renderIcon={(c) => <Feather name="layers" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Reports"
+              onPress={() => router.push("/memberships/membership-reports")}
+              renderIcon={(c) => <Feather name="bar-chart-2" size={15} color={c} />}
+            />
+          </FilterPill>
 
-            <Pressable
-              onPress={() => setShowAdd(true)}
-              className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
-              accessibilityRole="button"
-              accessibilityLabel="Add member"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                className="text-sm font-semibold text-white"
-                numberOfLines={1}
-              >
-                Add Member
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => setShowAdd(true)}
+            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-5"
+            accessibilityRole="button"
+            accessibilityLabel="Add member"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white" numberOfLines={1}>
+              Add Member
+            </Text>
+          </Pressable>
 
           {/* Stat cards */}
           <View className="flex-row flex-wrap gap-3 mb-5">
@@ -360,49 +329,38 @@ const Memberships = () => {
             />
           </View>
 
-          {/* Search + filter controls */}
-          <View className="flex-row items-center gap-2">
-            <View className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-              <Feather name="search" size={18} color="#9CA3AF" />
-              <TextInput
-                value={search}
-                onChangeText={setSearch}
-                placeholder="Search by name, email, or QR token..."
-                placeholderTextColor="#9CA3AF"
-                className="flex-1 text-sm text-gray-900 dark:text-white"
-                style={{ paddingVertical: 0 }}
-              />
-              {search.length > 0 && (
-                <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                  <Feather name="x" size={16} color="#9CA3AF" />
-                </Pressable>
-              )}
-            </View>
-            <Pressable
-              onPress={() => setShowFilters(true)}
-              className={`p-3 rounded-xl border ${
-                filterActive
-                  ? "bg-[#0644C7] border-[#0644C7]"
-                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
-              }`}
-              accessibilityRole="button"
-              accessibilityLabel="Filters"
-            >
-              <Feather
-                name="filter"
-                size={18}
-                color={filterActive ? "#FFFFFF" : "#6B7280"}
-              />
-            </Pressable>
-            <Pressable
-              onPress={onRefresh}
-              className="p-3 rounded-xl border bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
-              accessibilityRole="button"
-              accessibilityLabel="Refresh"
-            >
-              <Feather name="refresh-cw" size={18} color="#6B7280" />
-            </Pressable>
+          {/* Search */}
+          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 mb-3">
+            <Feather name="search" size={18} color="#9CA3AF" />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search by name, email, or QR token..."
+              placeholderTextColor="#9CA3AF"
+              className="flex-1 text-sm text-gray-900 dark:text-white"
+              style={{ paddingVertical: 0 }}
+            />
+            {search.length > 0 && (
+              <Pressable onPress={() => setSearch("")} hitSlop={8}>
+                <Feather name="x" size={16} color="#9CA3AF" />
+              </Pressable>
+            )}
           </View>
+
+          {/* Filters · Refresh pill */}
+          <FilterPill>
+            <PillSegment
+              label="Filters"
+              active={showFilters || filterActive}
+              onPress={() => setShowFilters(true)}
+              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+            />
+            <PillSegment
+              label="Refresh"
+              onPress={onRefresh}
+              renderIcon={(c) => <Feather name="refresh-cw" size={15} color={c} />}
+            />
+          </FilterPill>
 
           {/* Count */}
           {!showInitialLoader && !showError && (
