@@ -431,7 +431,7 @@ const Attractions = () => {
       >
         <View className="px-5 mt-5">
           {/* Overview intro */}
-          <View className="flex-row items-center justify-between gap-3 mb-5">
+          <View className="flex-row items-stretch gap-3 mb-5">
             {/* Space Schedule Card */}
             <Pressable
               onPress={() => router.push("/attractions/purchases")}
@@ -447,13 +447,17 @@ const Attractions = () => {
               <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
                 <Feather name="shopping-bag" size={20} color="#0644C7" />
               </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
                 Manage Purchases
               </Text>
-              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+              <Text
+                numberOfLines={2}
+                style={{ minHeight: 28 }}
+                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+              >
                 View customers attraction
               </Text>
-              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
                 <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
                   View All
                 </Text>
@@ -476,13 +480,17 @@ const Attractions = () => {
               <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
                 <Feather name="camera" size={20} color="#0644C7" />
               </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
                 Check-in
               </Text>
-              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+              <Text
+                numberOfLines={2}
+                style={{ minHeight: 28 }}
+                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+              >
                 Checking in customers
               </Text>
-              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
                 <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
                   Scan QR Code
                 </Text>
@@ -492,11 +500,10 @@ const Attractions = () => {
           </View>
 
          
-          {/* Header controls — full-width segmented pill (Location · More ·
-              Scanner). The location selector is company-admin only; managers are
-              scoped to their own location by the backend. */}
-          <FilterPill>
-            {isCompanyAdmin && (
+          {/* Location selector — company-admin only; managers are scoped to
+              their own location by the backend. */}
+          {isCompanyAdmin && (
+            <FilterPill>
               <PillSegment
                 label={locationLabel}
                 active={showLocationSheet}
@@ -505,26 +512,32 @@ const Attractions = () => {
                   <Feather name="map-pin" size={15} color={c} />
                 )}
               />
-            )}
-            <PillSegment
-              label="More"
-              active={showMoreSheet}
-              onPress={() => setShowMoreSheet(true)}
-              renderIcon={(c) => (
-                <Feather name="more-horizontal" size={15} color={c} />
-              )}
-            />
-          </FilterPill>
+            </FilterPill>
+          )}
 
-           <Pressable
-            onPress={() => router.push("/attractions/create-attraction")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              New Attraction
-            </Text>
-          </Pressable>
+          {/* Secondary "More" + primary "New Attraction" on one row. "More"
+              stays subordinate (outlined, ~38% width); "New Attraction" is the
+              primary filled CTA taking the remaining width. */}
+          <View className="flex-row items-center gap-3 mb-5">
+            <Pressable
+              onPress={() => setShowMoreSheet(true)}
+              className="flex-[0.62] flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              <Feather name="more-horizontal" size={16} color="#6B7280" />
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                More
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/attractions/create-attraction")}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text className="text-sm font-semibold text-white">
+                New Attraction
+              </Text>
+            </Pressable>
+          </View>
 
 
           {/* Error state */}
