@@ -821,3 +821,79 @@ export async function fetchWaiverSettings(
     searchAutoRefreshSeconds: d.search_auto_refresh_seconds ?? 30,
   };
 }
+
+/* --------------------------------------------- Entity waiver connections -- */
+
+/** The entity kinds a waiver can be connected to (mirrors the web panel). */
+export type WaiverEntityType =
+  | "booking"
+  | "attraction_purchase"
+  | "event_purchase"
+  | "customer";
+
+/** One waiver connected to an entity (flattened GET /api/waivers/for row). */
+export type ConnectedWaiver = {
+  id: number;
+  status: WaiverStatus;
+  adultName: string;
+  template: string | null;
+  selectedDate: string | null;
+  submittedAt: string | null;
+  minors: string[];
+};
+
+/** Connected-waiver summary + list for one entity. */
+export type EntityWaivers = {
+  waivers: ConnectedWaiver[];
+  summary: { total: number; completed: number; pending: number };
+};
+
+type RawConnectedWaiver = {
+  id: number;
+  status?: string | null;
+  adult_name?: string | null;
+  template?: string | null;
+  selected_date?: string | null;
+  submitted_at?: string | null;
+  minors?: string[] | null;
+};
+
+/**
+ * GET /api/waivers/for?type=&id= — waivers connected to an entity (the same
+ * endpoint the web `WaiverConnectionPanel` uses). Returns the list + summary so
+ * the details screen can mirror the web "Waivers" section.
+ */
+export async function fetchEntityWaivers(
+  token: string,
+  type: WaiverEntityType,
+  id: number,
+  signal?: AbortSignal,
+): Promise<EntityWaivers> {
+  const params = new URLSearchParams({ type, id: String(id) });
+  const res = await apiRequest<{
+    success: boolean;
+    data: {
+      waivers?: RawConnectedWaiver[];
+      summary?: { total?: number; completed?: number; pending?: number };
+    };
+  }>(`/api/waivers/for?${params.toString()}`, { token, signal });
+
+  const waivers = (res?.data?.waivers ?? []).map((w) => ({
+    id: w.id,
+    status: (w.status ?? "pending") as WaiverStatus,
+    adultName: w.adult_name?.trim() || "Unnamed",
+    template: w.template?.trim() || null,
+    selectedDate: w.selected_date ?? null,
+    submittedAt: w.submitted_at ?? null,
+    minors: w.minors ?? [],
+  }));
+  const s = res?.data?.summary ?? {};
+  return {
+    waivers,
+    summary: {
+      total: s.total ?? waivers.length,
+      completed: s.completed ?? 0,
+      pending: s.pending ?? 0,
+    },
+  };
+}

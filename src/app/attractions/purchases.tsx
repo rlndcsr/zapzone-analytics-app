@@ -154,12 +154,21 @@ const Stat = ({ label, value, valueClass = "" }: { label: string; value: string;
   </View>
 );
 
-const PurchaseCard = ({ purchase }: { purchase: PurchaseRow }) => {
+const PurchaseCard = ({
+  purchase,
+  onPress,
+}: {
+  purchase: PurchaseRow;
+  onPress: () => void;
+}) => {
   const paidInFull = purchase.amountPaid >= purchase.totalAmount;
   return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
+    <Pressable
+      onPress={onPress}
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
       style={CARD_SHADOW}
+      accessibilityRole="button"
+      accessibilityLabel={`View purchase for ${purchase.customerName}`}
     >
       {/* Customer + status */}
       <View className="flex-row items-start justify-between mb-2">
@@ -234,7 +243,7 @@ const PurchaseCard = ({ purchase }: { purchase: PurchaseRow }) => {
           </Text>
         </View>
       )}
-    </View>
+    </Pressable>
   );
 };
 
@@ -533,40 +542,49 @@ const ManagePurchases = () => {
           
        
 
-          {/* Header controls — full-width segmented pill (Location · View
-              Deleted · Export CSV), mirrors the web header controls. */}
-          <FilterPill>
-            {isCompanyAdmin && (
+          {/* Location selector — company-admin only; managers are scoped to
+              their own location by the backend. */}
+          {isCompanyAdmin && (
+            <FilterPill>
               <PillSegment
                 label={locationLabel}
                 active={sheet === "location"}
                 onPress={() => setSheet("location")}
                 renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
               />
-            )}
-            
-            <PillSegment
-              label="Export CSV"
-              onPress={exportCsv}
-              renderIcon={(c) =>
-                exporting ? (
-                  <ActivityIndicator size="small" color={c} />
-                ) : (
-                  <Feather name="download" size={15} color={c} />
-                )
-              }
-            />
-          </FilterPill>
+            </FilterPill>
+          )}
 
-          <Pressable
-            onPress={() => router.push("/attractions/create-purchase")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              New Purchase
-            </Text>
-          </Pressable>
+          {/* Secondary "Export CSV" + primary "New Purchase" on one row (~50/50)
+              to save vertical space. Export stays outlined/secondary; New
+              Purchase remains the primary filled CTA. */}
+          <View className="flex-row items-center gap-3 mb-5">
+            <Pressable
+              onPress={exportCsv}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color="#6B7280" />
+              ) : (
+                <Feather name="download" size={16} color="#6B7280" />
+              )}
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Export CSV
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/attractions/create-purchase")}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text numberOfLines={1} className="text-sm font-semibold text-white">
+                New Purchase
+              </Text>
+            </Pressable>
+          </View>
 
           {/* Error state */}
           {!listLoading && listError && (
@@ -717,7 +735,16 @@ const ManagePurchases = () => {
             !listError && (
               <>
                 {paged.map((purchase) => (
-                  <PurchaseCard key={purchase.id} purchase={purchase} />
+                  <PurchaseCard
+                    key={purchase.id}
+                    purchase={purchase}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/attractions/purchase-details",
+                        params: { id: String(purchase.id) },
+                      })
+                    }
+                  />
                 ))}
 
                 {/* Pagination */}

@@ -521,7 +521,7 @@ const Attractions = () => {
           <View className="flex-row items-center gap-3 mb-5">
             <Pressable
               onPress={() => setShowMoreSheet(true)}
-              className="flex-[0.62] flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
             >
               <Feather name="more-horizontal" size={16} color="#6B7280" />
               <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">

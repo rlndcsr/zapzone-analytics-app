@@ -203,6 +203,159 @@ export async function createAttractionPurchase(
   return { id: res.data.id };
 }
 
+/* ----------------------------------------------------- purchase detail --- */
+
+/** A fee line applied to a purchase (mirrors web `applied_fees`). */
+export type AppliedFee = {
+  name: string;
+  amount: number;
+  applicationType: "additive" | "inclusive";
+};
+
+/** One purchased add-on line on the detail screen. */
+export type PurchaseAddonLine = {
+  id: number;
+  name: string;
+  quantity: number;
+  priceAtPurchase: number;
+};
+
+/**
+ * Full attraction-purchase record backing the Purchase Details screen — the
+ * flattened form of GET /api/attraction-purchases/{id} (the same endpoint the
+ * web PurchaseDetails page uses).
+ */
+export type AttractionPurchaseDetail = {
+  id: number;
+  status: PurchaseStatus;
+  customerName: string;
+  email: string;
+  phone: string;
+  quantity: number;
+  totalAmount: number;
+  amountPaid: number;
+  paymentMethod: string;
+  transactionId: string | null;
+  paymentId: string | null;
+  createdAt: string;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  notes: string;
+  locationId: number | null;
+  attractionName: string;
+  category: string;
+  /** 0/null means "Unlimited". */
+  duration: number | null;
+  durationUnit: string;
+  addOns: PurchaseAddonLine[];
+  appliedFees: AppliedFee[];
+};
+
+type RawAddonLine = {
+  id?: number;
+  name?: string | null;
+  price?: number | string | null;
+  price_at_purchase?: number | string | null;
+  quantity?: number | string | null;
+  add_on?: { name?: string | null } | null;
+  pivot?: {
+    quantity?: number | string | null;
+    price_at_purchase?: number | string | null;
+  } | null;
+};
+
+type RawPurchaseDetail = RawPurchase & {
+  transaction_id?: string | null;
+  payment_id?: string | null;
+  total_amount?: number | string | null;
+  notes?: string | null;
+  attraction?: {
+    name?: string | null;
+    category?: string | null;
+    duration?: number | string | null;
+    duration_unit?: string | null;
+  } | null;
+  add_ons?: RawAddonLine[] | null;
+  applied_fees?:
+    | {
+        fee_name?: string | null;
+        fee_amount?: number | string | null;
+        fee_application_type?: "additive" | "inclusive" | null;
+      }[]
+    | null;
+};
+
+function mapDetail(raw: RawPurchaseDetail): AttractionPurchaseDetail {
+  const base = mapPurchase(raw);
+  const durationRaw =
+    raw.attraction?.duration == null ? null : Number(raw.attraction.duration);
+  return {
+    id: base.id,
+    status: base.status,
+    customerName: base.customerName,
+    email: base.email,
+    phone: base.phone,
+    quantity: base.quantity,
+    totalAmount: base.totalAmount,
+    amountPaid: base.amountPaid,
+    paymentMethod: base.paymentMethod,
+    transactionId: raw.transaction_id ?? null,
+    paymentId: raw.payment_id ?? null,
+    createdAt: base.createdAt,
+    scheduledDate: base.scheduledDate,
+    scheduledTime: base.scheduledTime,
+    notes: raw.notes?.trim() || "",
+    locationId: base.locationId,
+    attractionName: base.attractionName,
+    category: raw.attraction?.category?.trim() || "",
+    duration: durationRaw && !Number.isNaN(durationRaw) ? durationRaw : null,
+    durationUnit: raw.attraction?.duration_unit ?? "minutes",
+    addOns: (raw.add_ons ?? []).map((a, i) => ({
+      id: a.id ?? i,
+      name: a.name?.trim() || a.add_on?.name?.trim() || "Add-on",
+      quantity: Number(a.quantity ?? a.pivot?.quantity ?? 1),
+      priceAtPurchase: Number(
+        a.price_at_purchase ?? a.pivot?.price_at_purchase ?? a.price ?? 0,
+      ),
+    })),
+    appliedFees: (raw.applied_fees ?? []).map((f) => ({
+      name: f.fee_name?.trim() || "Fee",
+      amount: Number(f.fee_amount ?? 0),
+      applicationType: f.fee_application_type ?? "additive",
+    })),
+  };
+}
+
+/**
+ * GET /api/attraction-purchases/{id} — full purchase record for the details
+ * screen. Same endpoint the web PurchaseDetails page calls.
+ */
+export async function fetchAttractionPurchaseDetail(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<AttractionPurchaseDetail | null> {
+  const res = await apiRequest<{ success: boolean; data: RawPurchaseDetail | null }>(
+    `/api/attraction-purchases/${id}`,
+    { token, signal },
+  );
+  return res?.data ? mapDetail(res.data) : null;
+}
+
+/**
+ * DELETE /api/attraction-purchases/{id} — soft-delete a purchase. Same endpoint
+ * the web Manage Purchases uses (`deletePurchase`); no dedicated mobile route.
+ */
+export async function deleteAttractionPurchase(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/attraction-purchases/${id}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
 /** Envelope for a single-purchase response (verify / check-in). */
 type SinglePurchaseResponse = {
   success: boolean;
