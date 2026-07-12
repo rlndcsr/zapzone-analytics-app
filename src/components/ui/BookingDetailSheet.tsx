@@ -554,7 +554,7 @@ export function BookingDetailSheet({
                             remaining <= 0 ? "text-gray-400" : "text-amber-600"
                           }`}
                         >
-                          {remaining <= 0 ? "Fully Paid" : "Process Payment"}
+                          {remaining <= 0 ? "Fully Paid" : "Payment"}
                         </Text>
                       </>
                     )}

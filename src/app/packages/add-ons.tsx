@@ -140,6 +140,11 @@ const AddOns = () => {
   const headerIcon = colorScheme === "dark" ? "#ffffff" : "#000000";
   const insets = useSafeAreaInsets();
 
+  // Only company admins pick/switch locations; location managers are scoped to
+  // their own location by the backend (mirrors the web admin + every other
+  // role-gated screen, e.g. Attractions / Manage Attractions / User Management).
+  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [showLocationSheet, setShowLocationSheet] = useState(false);
@@ -174,7 +179,8 @@ const AddOns = () => {
 
   const loadLocations = useCallback(async () => {
     const token = getToken();
-    if (!token || locations.length > 0) return;
+    // Managers never see a location picker/filter, so skip the fetch entirely.
+    if (!token || !isCompanyAdmin || locations.length > 0) return;
     setLocationsLoading(true);
     try {
       setLocations(await fetchLocations(token));
@@ -183,7 +189,7 @@ const AddOns = () => {
     } finally {
       setLocationsLoading(false);
     }
-  }, [locations.length]);
+  }, [locations.length, isCompanyAdmin]);
 
   useEffect(() => {
     loadLocations();
@@ -460,14 +466,17 @@ const AddOns = () => {
             )}
           </View>
 
-          {/* Controls — full-width segmented pill (Location · Import · Export) */}
+          {/* Controls — segmented pill. Location is company-admin only; managers
+              are scoped to their own location by the backend (like the web). */}
           <FilterPill>
-            <PillSegment
-              label={locationLabel}
-              active={showLocationSheet}
-              onPress={() => setShowLocationSheet(true)}
-              renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
-            />
+            {isCompanyAdmin && (
+              <PillSegment
+                label={locationLabel}
+                active={showLocationSheet}
+                onPress={() => setShowLocationSheet(true)}
+                renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
+              />
+            )}
             <PillSegment
               label="Import"
               onPress={onImport}
@@ -549,53 +558,61 @@ const AddOns = () => {
         title={isEditing ? "Edit Add-on" : "Add New Add-on"}
       >
         <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
-          {/* Location */}
-          <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
-            Location *
-          </Text>
-          {locationsLoading && locations.length === 0 ? (
-            <View className="py-6 items-center">
-              <ActivityIndicator color={PRIMARY} />
-            </View>
-          ) : (
-            <View className="flex-row flex-wrap -mx-1 mb-4">
-              {locations.map((loc) => {
-                const active = fLocationId === loc.id;
-                return (
-                  <View key={loc.id} className="w-1/2 px-1 mb-2">
-                    <Pressable
-                      onPress={() => setFLocationId(loc.id)}
-                      className={`flex-row items-center gap-1.5 p-2 rounded-xl border ${
-                        active
-                          ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
-                          : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-                      }`}
-                    >
-                      <View className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-                        <Feather name="map-pin" size={13} color={PRIMARY} />
-                      </View>
-                      <View className="flex-1">
-                        <Text
-                          className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                          numberOfLines={1}
+          {/* Location — company-admin only. Managers' add-ons belong to their
+              assigned location automatically (fLocationId is seeded from the
+              user / existing add-on), matching the web admin. */}
+          {isCompanyAdmin && (
+            <>
+              <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
+                Location *
+              </Text>
+              {locationsLoading && locations.length === 0 ? (
+                <View className="py-6 items-center">
+                  <ActivityIndicator color={PRIMARY} />
+                </View>
+              ) : (
+                <View className="flex-row flex-wrap -mx-1 mb-4">
+                  {locations.map((loc) => {
+                    const active = fLocationId === loc.id;
+                    return (
+                      <View key={loc.id} className="w-1/2 px-1 mb-2">
+                        <Pressable
+                          onPress={() => setFLocationId(loc.id)}
+                          className={`flex-row items-center gap-1.5 p-2 rounded-xl border ${
+                            active
+                              ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
+                              : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                          }`}
                         >
-                          {loc.name}
-                        </Text>
-                        {!!loc.address && (
-                          <Text
-                            className="text-[10px] text-gray-400 dark:text-gray-500"
-                            numberOfLines={1}
-                          >
-                            {loc.address}
-                          </Text>
-                        )}
+                          <View className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
+                            <Feather name="map-pin" size={13} color={PRIMARY} />
+                          </View>
+                          <View className="flex-1">
+                            <Text
+                              className="text-xs font-medium text-gray-700 dark:text-gray-200"
+                              numberOfLines={1}
+                            >
+                              {loc.name}
+                            </Text>
+                            {!!loc.address && (
+                              <Text
+                                className="text-[10px] text-gray-400 dark:text-gray-500"
+                                numberOfLines={1}
+                              >
+                                {loc.address}
+                              </Text>
+                            )}
+                          </View>
+                          {active && (
+                            <Feather name="check" size={13} color={PRIMARY} />
+                          )}
+                        </Pressable>
                       </View>
-                      {active && <Feather name="check" size={13} color={PRIMARY} />}
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </View>
+                    );
+                  })}
+                </View>
+              )}
+            </>
           )}
 
           {/* Image */}
