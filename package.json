@@ -19,6 +19,7 @@
     "expo": "~55.0.26",
     "expo-blur": "~55.0.15",
     "expo-camera": "~55.0.20",
+    "expo-clipboard": "~55.0.14",
     "expo-constants": "~55.0.16",
     "expo-device": "~55.0.17",
     "expo-document-picker": "~55.0.14",

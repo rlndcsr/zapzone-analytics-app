@@ -54,9 +54,11 @@ type RawAttraction = {
   display_order?: number | null;
   display_capacity_to_customers?: boolean | null;
   location?: { id?: number; name?: string | null } | null;
+  location_id?: number | null;
   image?: string | string[] | null;
   add_ons?: RawAddOn[] | null;
   add_ons_order?: string[] | null;
+  availability?: AvailabilitySchedule[] | Record<string, unknown> | null;
 };
 
 type RawAddOn = {
@@ -164,6 +166,106 @@ export async function createAttraction(
     body: input,
   });
   return mapAttraction(res.data);
+}
+
+/** Full attraction record (list row + availability schedules) as returned by
+ *  GET /api/attractions/{id}. Backs the View / Edit / Duplicate flows. */
+export type AttractionDetail = AttractionRow & {
+  availability: AvailabilitySchedule[];
+};
+
+/** Coerce the raw `availability` field into the array form the create/update
+ *  endpoints expect. The API may return an array of schedules, a weekday->bool
+ *  object (legacy), or null; anything non-array collapses to no schedules. */
+function mapAvailability(
+  raw: RawAttraction["availability"],
+): AvailabilitySchedule[] {
+  if (Array.isArray(raw)) {
+    return raw.filter(
+      (s): s is AvailabilitySchedule =>
+        !!s && Array.isArray((s as AvailabilitySchedule).days),
+    );
+  }
+  return [];
+}
+
+function mapDetail(raw: RawAttraction): AttractionDetail {
+  return { ...mapAttraction(raw), availability: mapAvailability(raw.availability) };
+}
+
+type DetailResponse = { success: boolean; data: RawAttraction };
+
+/** GET /api/attractions/{id} — the same endpoint the web detail/edit pages use. */
+export async function fetchAttractionDetail(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<AttractionDetail> {
+  const res = await apiRequest<DetailResponse>(`/api/attractions/${id}`, {
+    token,
+    signal,
+  });
+  return mapDetail(res.data);
+}
+
+/** Partial update payload for PUT /api/attractions/{id} (web UpdateAttractionData). */
+export type UpdateAttractionInput = Partial<CreateAttractionInput>;
+
+/** PUT /api/attractions/{id} — update an attraction (same endpoint as the web). */
+export async function updateAttraction(
+  token: string,
+  id: number,
+  input: UpdateAttractionInput,
+): Promise<AttractionRow> {
+  const res = await apiRequest<CreateAttractionResponse>(
+    `/api/attractions/${id}`,
+    { method: "PUT", token, body: input },
+  );
+  return mapAttraction(res.data);
+}
+
+/** DELETE /api/attractions/{id} — delete an attraction (same endpoint as the web). */
+export async function deleteAttraction(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/attractions/${id}`, { method: "DELETE", token });
+}
+
+/**
+ * Duplicate an attraction. Mirrors the web ManageAttractions flow exactly: fetch
+ * the full record, then POST a copy named "<name> (Copy)" that starts inactive.
+ * There is no dedicated duplicate endpoint on either platform — this reuses
+ * GET /api/attractions/{id} + POST /api/attractions.
+ *
+ * @param destinationLocationId Optional target location (company admins); when
+ *   omitted the copy is created in the original attraction's location.
+ */
+export async function duplicateAttraction(
+  token: string,
+  id: number,
+  destinationLocationId?: number | null,
+): Promise<AttractionRow> {
+  const original = await fetchAttractionDetail(token, id);
+  const input: CreateAttractionInput = {
+    location_id: destinationLocationId ?? original.locationId ?? 0,
+    name: `${original.name} (Copy)`,
+    description: original.description,
+    category: original.category,
+    price: original.price,
+    pricing_type: original.pricingType,
+    max_capacity: original.maxCapacity,
+    duration: original.duration ?? 0,
+    duration_unit: original.durationUnit === "hours" ? "hours" : "minutes",
+    availability: original.availability,
+    image: original.images.length > 0 ? original.images : undefined,
+    is_active: false,
+    addon_ids: original.addOns.map((a) => a.id),
+    add_ons_order: original.addOnsOrder,
+    display_capacity_to_customers: original.displayCapacityToCustomers,
+    display_order: original.displayOrder,
+  };
+  return createAttraction(token, input);
 }
 
 type FetchParams = {

@@ -14,6 +14,20 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
+// Public web (Zappoint) origin where customers open purchase pages. The web app
+// uses `window.location.origin`; the mobile app has no equivalent, so it reads
+// the frontend host from EXPO_PUBLIC_WEB_URL. Falls back to the API origin when
+// unset — links stay structurally correct but point at the wrong host until the
+// var is configured.
+const WEB_BASE_URL = (
+  process.env.EXPO_PUBLIC_WEB_URL?.trim() || API_BASE_URL
+).replace(/\/+$/, "");
+
+/** Absolute URL on the public web frontend (e.g. a customer purchase page). */
+export function webUrl(path: string): string {
+  return `${WEB_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 /**
  * Resolve a stored image reference to something `<Image>` can load. Passes
  * through absolute URLs and base64 data URIs; prefixes the API host for

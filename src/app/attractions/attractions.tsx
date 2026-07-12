@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import { AttractionActionsSheet } from "../../components/ui/AttractionActionsSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import {
@@ -115,17 +116,26 @@ const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
-const AttractionCard = ({ attraction }: { attraction: AttractionRow }) => {
+const AttractionCard = ({
+  attraction,
+  onActions,
+}: {
+  attraction: AttractionRow;
+  onActions: () => void;
+}) => {
   const isCopy = attraction.name.includes("(Copy)");
   const suffix = PRICING_SUFFIX[attraction.pricingType] ?? "";
   const created = formatCreatedAt(attraction.createdAt);
 
   return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
+    <Pressable
+      onPress={onActions}
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
       style={CARD_SHADOW}
+      accessibilityRole="button"
+      accessibilityLabel={`Actions for ${attraction.name}`}
     >
-      {/* Header: name + location (left), status (right) */}
+      {/* Header: name + location (left), status + actions (right) */}
       <View className="flex-row items-start justify-between mb-2">
         <View className="flex-1 mr-3">
           <View className="flex-row items-center gap-2 flex-wrap">
@@ -153,7 +163,18 @@ const AttractionCard = ({ attraction }: { attraction: AttractionRow }) => {
             </View>
           )}
         </View>
-        <StatusBadge status={attraction.status} />
+        <View className="flex-row items-center gap-2">
+          <StatusBadge status={attraction.status} />
+          <Pressable
+            onPress={onActions}
+            hitSlop={6}
+            className="w-8 h-8 rounded-lg items-center justify-center bg-gray-100 dark:bg-neutral-800"
+            accessibilityRole="button"
+            accessibilityLabel={`Actions for ${attraction.name}`}
+          >
+            <Feather name="more-vertical" size={16} color="#6B7280" />
+          </Pressable>
+        </View>
       </View>
 
       {/* Description */}
@@ -192,7 +213,7 @@ const AttractionCard = ({ attraction }: { attraction: AttractionRow }) => {
         <Stat icon="clock" label={durationLabel(attraction)} />
         {!!created && <Stat icon="calendar" label={created} />}
       </View>
-    </View>
+    </Pressable>
   );
 };
 
@@ -252,6 +273,8 @@ const Attractions = () => {
   const [showCategorySheet, setShowCategorySheet] = useState(false);
   const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
+  const [actionsAttraction, setActionsAttraction] =
+    useState<AttractionRow | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -631,7 +654,11 @@ const Attractions = () => {
             !error && (
               <>
                 {paged.map((attraction) => (
-                  <AttractionCard key={attraction.id} attraction={attraction} />
+                  <AttractionCard
+                    key={attraction.id}
+                    attraction={attraction}
+                    onActions={() => setActionsAttraction(attraction)}
+                  />
                 ))}
 
                 {/* Pagination */}
@@ -880,6 +907,13 @@ const Attractions = () => {
         </ScrollView>
       </BottomSheet>
 
+      {/* Per-card actions: Copy Link / Open Link / View / Edit / Duplicate / Delete */}
+      <AttractionActionsSheet
+        visible={actionsAttraction !== null}
+        attraction={actionsAttraction}
+        onClose={() => setActionsAttraction(null)}
+        onChanged={refetch}
+      />
     </View>
   );
 };
