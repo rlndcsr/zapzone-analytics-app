@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   Cake,
   Calendar,
   CheckCircle,
@@ -11,13 +12,15 @@ import {
   QrCode,
   StickyNote,
   Tag,
+  Trash2,
   User,
   Users,
   Wallet,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import type { BookingDetail } from "../../services/bookingsService";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { getToken } from "../../lib/session";
+import { deleteBooking, type BookingDetail } from "../../services/bookingsService";
 import { BookingQRModal } from "./BookingQRModal";
 import { BottomSheet } from "./BottomSheet";
 
@@ -147,6 +150,8 @@ type Props = {
   visible: boolean;
   detail: BookingDetail | null;
   onClose: () => void;
+  /** Called after a successful delete so the caller can refresh + dismiss. */
+  onDeleted?: () => void;
 };
 
 /**
@@ -154,13 +159,53 @@ type Props = {
  * View button. Presents the booking as icon-tile sections and offers a
  * scannable/downloadable QR code. Editing lives in the Booking Details sheet.
  */
-export function BookingFullView({ visible, detail, onClose }: Props) {
+export function BookingFullView({ visible, detail, onClose, onDeleted }: Props) {
   const [showQR, setShowQR] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Never leave the QR overlay open across opens/closes of this view.
   useEffect(() => {
     if (!visible) setShowQR(false);
   }, [visible]);
+
+  // Delete this booking (soft-delete, mirrors the web/list action). Native
+  // confirm → DELETE /api/bookings/{id} → hand back to the caller to refresh
+  // the list and dismiss. Reuses the same pattern as the purchase details.
+  const confirmDelete = () => {
+    if (!detail) return;
+    Alert.alert(
+      "Delete booking",
+      "Are you sure you want to delete this booking? This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) {
+              Alert.alert("Not signed in", "Please sign in again.");
+              return;
+            }
+            setDeleting(true);
+            try {
+              await deleteBooking(token, detail.id);
+              onDeleted?.();
+            } catch (err) {
+              Alert.alert(
+                "Delete failed",
+                err instanceof Error
+                  ? err.message
+                  : "Could not delete the booking.",
+              );
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   if (!detail) return null;
 
@@ -388,6 +433,31 @@ export function BookingFullView({ visible, detail, onClose }: Props) {
             </View>
           </Section>
 
+          {/* Internal Staff Notes — staff-only, read-only (mirrors the web
+              ViewBooking "Internal Staff Notes" block; editing is in Edit). */}
+          <Text className="text-base font-bold text-gray-900 dark:text-white mt-6 mb-2">
+            Internal Staff Notes
+          </Text>
+          <View className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-2xl px-4 py-3">
+            <View className="flex-row items-center gap-1.5 mb-1.5">
+              <AlertCircle size={14} color="#d97706" />
+              <View className="bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded">
+                <Text className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                  Staff Only
+                </Text>
+              </View>
+            </View>
+            <Text
+              className={`text-sm ${
+                detail.internalNotes
+                  ? "text-gray-800 dark:text-gray-100"
+                  : "text-gray-400 dark:text-gray-500 italic"
+              }`}
+            >
+              {detail.internalNotes ?? "No internal notes."}
+            </Text>
+          </View>
+
           {/* Created */}
           {!!detail.createdAt && (
             <View className="flex-row items-center gap-1.5 mt-5">
@@ -398,10 +468,28 @@ export function BookingFullView({ visible, detail, onClose }: Props) {
             </View>
           )}
 
+          {/* Delete Booking — destructive, mirrors the web/list delete action. */}
+          <Pressable
+            onPress={confirmDelete}
+            disabled={deleting}
+            className="mt-6 py-3 rounded-xl border border-red-200 dark:border-red-900/50 bg-white dark:bg-neutral-900 items-center flex-row justify-center gap-2 active:opacity-70"
+          >
+            {deleting ? (
+              <ActivityIndicator size="small" color="#dc2626" />
+            ) : (
+              <>
+                <Trash2 size={16} color="#dc2626" />
+                <Text className="text-sm font-semibold text-red-600">
+                  Delete Booking
+                </Text>
+              </>
+            )}
+          </Pressable>
+
           {/* Close */}
           <Pressable
             onPress={onClose}
-            className="mt-6 mb-2 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center active:opacity-80"
+            className="mt-3 mb-2 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center active:opacity-80"
           >
             <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
               Close

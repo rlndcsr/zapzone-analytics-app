@@ -28,11 +28,27 @@ import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
 
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 const WEEKDAY_FULL = [
-  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
 ];
 
 const STATUS_BADGE: Record<string, string> = {
@@ -70,7 +86,8 @@ function formatDate(date: string): string {
   return `${WEEKDAY_FULL[d.getDay()]}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
-const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+const capitalize = (s: string) =>
+  s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <Text className="text-xs font-bold tracking-wide text-gray-500 dark:text-gray-400 uppercase mt-5 mb-2">
@@ -79,7 +96,9 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
 );
 
 const Card = ({ children }: { children: React.ReactNode }) => (
-  <View className="bg-gray-50 dark:bg-neutral-800 rounded-2xl p-4">{children}</View>
+  <View className="bg-gray-50 dark:bg-neutral-800 rounded-2xl p-4">
+    {children}
+  </View>
 );
 
 const Row = ({
@@ -93,7 +112,9 @@ const Row = ({
 }) => (
   <View className="flex-row items-center justify-between py-1">
     <Text className="text-sm text-gray-500 dark:text-gray-400">{label}</Text>
-    <Text className={`text-sm font-medium text-gray-900 dark:text-white ${valueClass}`}>
+    <Text
+      className={`text-sm font-medium text-gray-900 dark:text-white ${valueClass}`}
+    >
       {value}
     </Text>
   </View>
@@ -203,11 +224,16 @@ export function BookingDetailSheet({
               });
               await load();
               onChanged?.();
-              Alert.alert("Payment recorded", `${formatMoney(remainingDue)} recorded.`);
+              Alert.alert(
+                "Payment recorded",
+                `${formatMoney(remainingDue)} recorded.`,
+              );
             } catch (err) {
               Alert.alert(
                 "Payment failed",
-                err instanceof Error ? err.message : "Could not record payment.",
+                err instanceof Error
+                  ? err.message
+                  : "Could not record payment.",
               );
             } finally {
               setProcessing(false);
@@ -219,7 +245,9 @@ export function BookingDetailSheet({
   };
 
   const typeLabel =
-    detail?.type === "package" ? "Package Booking" : capitalize(detail?.type ?? "");
+    detail?.type === "package"
+      ? "Package Booking"
+      : capitalize(detail?.type ?? "");
   const remaining = detail
     ? Math.max(0, detail.totalAmount - detail.amountPaid)
     : 0;
@@ -281,17 +309,29 @@ export function BookingDetailSheet({
               {/* Booking info */}
               <SectionTitle>Booking Information</SectionTitle>
               <Card>
-                <Row label="Reference Number" value={detail.referenceNumber ?? "—"} />
+                <Row
+                  label="Reference Number"
+                  value={detail.referenceNumber ?? "—"}
+                />
                 <View className="flex-row items-center justify-between py-1">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">Status</Text>
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
+                    Status
+                  </Text>
                   <Badge
                     text={capitalize(detail.status)}
-                    className={STATUS_BADGE[detail.status] ?? PAYMENT_BADGE.pending}
+                    className={
+                      STATUS_BADGE[detail.status] ?? PAYMENT_BADGE.pending
+                    }
                   />
                 </View>
                 <View className="flex-row items-center justify-between py-1">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">Type</Text>
-                  <Badge text={typeLabel} className="bg-blue-100 text-blue-700" />
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
+                    Type
+                  </Text>
+                  <Badge
+                    text={typeLabel}
+                    className="bg-blue-100 text-blue-700"
+                  />
                 </View>
               </Card>
 
@@ -382,13 +422,17 @@ export function BookingDetailSheet({
                   <SectionTitle>Add-ons</SectionTitle>
                   <Card>
                     {detail.addOns.map((a, i) => (
-                      <View 
+                      <View
                         key={a.id}
                         className={`flex-row items-center justify-between py-1 ${
-                          i > 0 ? "border-t border-gray-200 dark:border-neutral-700" : ""
+                          i > 0
+                            ? "border-t border-gray-200 dark:border-neutral-700"
+                            : ""
                         }`}
                       >
-                        <Text className="text-sm text-gray-900 dark:text-white">{a.name}</Text>
+                        <Text className="text-sm text-gray-900 dark:text-white">
+                          {a.name}
+                        </Text>
                         <Text className="text-sm text-gray-500 dark:text-gray-400">
                           Qty: {a.quantity}
                         </Text>
@@ -402,7 +446,9 @@ export function BookingDetailSheet({
               <SectionTitle>Payment</SectionTitle>
               <Card>
                 <View className="flex-row items-center justify-between py-1">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">Total Amount</Text>
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
+                    Total Amount
+                  </Text>
                   <Text className="text-lg font-bold text-gray-900 dark:text-white">
                     {formatMoney(detail.totalAmount)}
                   </Text>
@@ -413,14 +459,19 @@ export function BookingDetailSheet({
                   </Text>
                   <Badge
                     text={capitalize(detail.paymentStatus)}
-                    className={PAYMENT_BADGE[detail.paymentStatus] ?? PAYMENT_BADGE.pending}
+                    className={
+                      PAYMENT_BADGE[detail.paymentStatus] ??
+                      PAYMENT_BADGE.pending
+                    }
                   />
                 </View>
                 {!!detail.paymentMethod && (
                   <Row label="Payment Method" value={detail.paymentMethod} />
                 )}
-                <Row label="Amount Paid" value={formatMoney(detail.amountPaid)} />
-                
+                <Row
+                  label="Amount Paid"
+                  value={formatMoney(detail.amountPaid)}
+                />
 
                 {detail.appliedFees.length > 0 && (
                   <View className="border-t border-gray-200 dark:border-neutral-700 mt-2 pt-2">
@@ -531,6 +582,12 @@ export function BookingDetailSheet({
         visible={showFull}
         detail={detail}
         onClose={() => setShowFull(false)}
+        onDeleted={() => {
+          // Dismiss both surfaces and refresh the list after a delete.
+          setShowFull(false);
+          onClose();
+          onChanged?.();
+        }}
       />
     </>
   );

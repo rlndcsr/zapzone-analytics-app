@@ -1,7 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   Alert,
   Pressable,
@@ -91,8 +97,12 @@ type ExportRow = {
   payment_status?: string | null;
   total_amount?: number | string | null;
   amount_paid?: number | string | null;
-  attractions?: { name?: string | null; pivot?: { quantity?: number | null } | null }[] | null;
-  add_ons?: { name?: string | null; pivot?: { quantity?: number | null } | null }[] | null;
+  attractions?:
+    | { name?: string | null; pivot?: { quantity?: number | null } | null }[]
+    | null;
+  add_ons?:
+    | { name?: string | null; pivot?: { quantity?: number | null } | null }[]
+    | null;
   notes?: string | null;
   created_at?: string | null;
 };
@@ -100,20 +110,38 @@ type ExportRow = {
 /** Build the same CSV the web admin exports (identical column order). */
 function buildBookingsCsv(rows: ExportRow[]): string {
   const headers = [
-    "Reference Number", "Customer Name", "Email", "Phone", "Package", "Room",
-    "Location", "Date", "Time", "Participants", "Duration", "Status",
-    "Payment Method", "Payment Status", "Total Amount", "Amount Paid",
-    "Attractions", "Add-ons", "Notes", "Created At",
+    "Reference Number",
+    "Customer Name",
+    "Email",
+    "Phone",
+    "Package",
+    "Room",
+    "Location",
+    "Date",
+    "Time",
+    "Participants",
+    "Duration",
+    "Status",
+    "Payment Method",
+    "Payment Status",
+    "Total Amount",
+    "Amount Paid",
+    "Attractions",
+    "Add-ons",
+    "Notes",
+    "Created At",
   ];
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const items = (list: ExportRow["attractions"]) =>
-    (list ?? []).map((a) => `${a.name ?? ""} (${a.pivot?.quantity ?? 1})`).join("; ");
+    (list ?? [])
+      .map((a) => `${a.name ?? ""} (${a.pivot?.quantity ?? 1})`)
+      .join("; ");
   const line = (b: ExportRow) =>
     [
       b.reference_number ?? "",
       b.customer
         ? `${b.customer.first_name ?? ""} ${b.customer.last_name ?? ""}`.trim()
-        : b.guest_name ?? "",
+        : (b.guest_name ?? ""),
       b.customer?.email ?? b.guest_email ?? "",
       b.customer?.phone ?? b.guest_phone ?? "",
       b.package?.name ?? "",
@@ -187,7 +215,10 @@ function timeToMinutes(time: string | null): number {
  * descending (newest first — booking.date is YYYY-MM-DD, so a lexical compare is
  * chronological), then by time descending (latest first).
  */
-function compareBookingsDefault(a: CalendarBooking, b: CalendarBooking): number {
+function compareBookingsDefault(
+  a: CalendarBooking,
+  b: CalendarBooking,
+): number {
   const aChecked = a.status === "checked-in";
   const bChecked = b.status === "checked-in";
   if (aChecked && !bChecked) return 1;
@@ -196,16 +227,13 @@ function compareBookingsDefault(a: CalendarBooking, b: CalendarBooking): number 
   return timeToMinutes(b.time) - timeToMinutes(a.time);
 }
 
-const Stat = ({
-  icon,
-  label,
-}: {
-  icon: ComponentIconName;
-  label: string;
-}) => (
+const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
   <View className="flex-row items-center gap-1.5">
     <Feather name={icon} size={12} color="#9CA3AF" />
-    <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+    <Text
+      className="text-xs text-gray-500 dark:text-gray-400"
+      numberOfLines={1}
+    >
       {label}
     </Text>
   </View>
@@ -269,7 +297,10 @@ const BookingCard = ({
       {/* Date / time */}
       <View className="flex-row items-center gap-1.5 mt-1">
         <Feather name="calendar" size={12} color="#9CA3AF" />
-        <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+        <Text
+          className="text-xs text-gray-500 dark:text-gray-400"
+          numberOfLines={1}
+        >
           {dateTime}
         </Text>
       </View>
@@ -278,7 +309,10 @@ const BookingCard = ({
       {showLocation && !!booking.locationName && (
         <View className="flex-row items-center gap-1.5 mt-1">
           <Feather name="map-pin" size={12} color="#9CA3AF" />
-          <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+          <Text
+            className="text-xs text-gray-500 dark:text-gray-400"
+            numberOfLines={1}
+          >
             {booking.locationName}
           </Text>
         </View>
@@ -303,8 +337,6 @@ const BookingCard = ({
         </View>
       </View>
     </Pressable>
-
-    
   );
 };
 
@@ -343,7 +375,9 @@ const KpiCard = ({
     >
       {value}
     </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">{change}</Text>
+    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+      {change}
+    </Text>
   </View>
 );
 
@@ -364,13 +398,19 @@ const Bookings = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [locationFilter, setLocationFilter] = useState<string>("all");
-  const [sheet, setSheet] = useState<null | "status" | "date" | "location">(null);
+  const [sheet, setSheet] = useState<null | "status" | "date" | "location">(
+    null,
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
-  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
+    null,
+  );
   // The booking whose "More" actions sheet is open (null = closed).
-  const [actionsBooking, setActionsBooking] = useState<CalendarBooking | null>(null);
+  const [actionsBooking, setActionsBooking] = useState<CalendarBooking | null>(
+    null,
+  );
 
   // Page-level "More" menu (mirrors the web header ActionMenu) + its flows.
   const [moreOpen, setMoreOpen] = useState(false);
@@ -399,7 +439,9 @@ const Bookings = () => {
       });
       setDeletedItems(items);
     } catch (e) {
-      setDeletedError(e instanceof Error ? e.message : "Failed to load deleted bookings");
+      setDeletedError(
+        e instanceof Error ? e.message : "Failed to load deleted bookings",
+      );
     } finally {
       setDeletedLoading(false);
     }
@@ -440,7 +482,10 @@ const Bookings = () => {
       }
       setMoreOpen(false);
     } catch (e) {
-      Alert.alert("Export failed", e instanceof Error ? e.message : "Could not export bookings.");
+      Alert.alert(
+        "Export failed",
+        e instanceof Error ? e.message : "Could not export bookings.",
+      );
     } finally {
       setExporting(false);
     }
@@ -551,9 +596,12 @@ const Bookings = () => {
   }, [search, statusFilter, dateFilter, locationFilter, perPage, showDeleted]);
 
   const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Statuses";
-  const dateLabel = DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
-  const locationLabel = locationFilter === "all" ? "All Locations" : locationFilter;
+    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ??
+    "All Statuses";
+  const dateLabel =
+    DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
+  const locationLabel =
+    locationFilter === "all" ? "All Locations" : locationFilter;
   const hasResults = filtered.length > 0;
 
   return (
@@ -569,7 +617,9 @@ const Bookings = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">Bookings</Text>
+          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+            Bookings
+          </Text>
           {/* Calendar View cross-link (mirrors the web list↔calendar toggle). */}
           <Pressable
             onPress={() => router.push("/bookings/calendar" as never)}
@@ -597,8 +647,7 @@ const Bookings = () => {
         }
       >
         <View className="px-5 mt-5">
-
-          <View className="flex-row items-center justify-between gap-3 mb-5">
+          <View className="flex-row items-stretch gap-3 mb-5">
             {/* Space Schedule Card */}
             <Pressable
               onPress={() => router.push("/bookings/space-schedule")}
@@ -614,13 +663,17 @@ const Bookings = () => {
               <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
                 <Feather name="grid" size={20} color="#0644C7" />
               </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
                 Space Schedule
               </Text>
-              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+              <Text
+                numberOfLines={2}
+                style={{ minHeight: 28 }}
+                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+              >
                 View all customer bookings
               </Text>
-              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
                 <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
                   View All
                 </Text>
@@ -643,13 +696,17 @@ const Bookings = () => {
               <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
                 <Feather name="camera" size={20} color="#0644C7" />
               </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
                 Check-in
               </Text>
-              <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+              <Text
+                numberOfLines={2}
+                style={{ minHeight: 28 }}
+                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+              >
                 Checking in customers
               </Text>
-              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
                 <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
                   Scan QR Code
                 </Text>
@@ -658,43 +715,51 @@ const Bookings = () => {
             </Pressable>
           </View>
 
-          {/* Header controls — separate full-width segmented pill (Location ·
-              More). The location selector is company-admin only; managers are
-              scoped to their own location by the backend. */}
-          <FilterPill>
-            {isCompanyAdmin && (
+          {/* Location selector — company-admin only; managers are scoped to
+              their own location by the backend. */}
+          {isCompanyAdmin && (
+            <FilterPill>
               <PillSegment
                 label={locationLabel}
                 active={sheet === "location"}
                 onPress={() => setSheet("location")}
-                renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
+                renderIcon={(c) => (
+                  <Feather name="map-pin" size={15} color={c} />
+                )}
               />
-            )}
-            <PillSegment
-              label="More"
-              active={moreOpen}
+            </FilterPill>
+          )}
+
+          {/* Secondary "More" + primary "Create New Booking" on one row, equal
+              width. "More" stays outlined/secondary; "Create New Booking" is
+              the primary filled CTA. */}
+          <View className="flex-row items-center gap-3 mb-5">
+            <Pressable
               onPress={() => setMoreOpen(true)}
-              renderIcon={(c) => (
-                <Feather name="more-horizontal" size={15} color={c} />
-              )}
-            />
-          </FilterPill>
-
-          <Pressable
-            onPress={() => router.push("/bookings/create-booking")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create New Booking
-            </Text>
-          </Pressable>
-
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              <Feather name="more-horizontal" size={16} color="#6B7280" />
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                More
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/bookings/create-booking")}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text className="text-sm font-semibold text-white">
+                New Booking
+              </Text>
+            </Pressable>
+          </View>
 
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -775,13 +840,17 @@ const Bookings = () => {
               label={statusLabel}
               active={sheet === "status"}
               onPress={() => setSheet("status")}
-              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
+              renderIcon={(c) => (
+                <Feather name="check-circle" size={15} color={c} />
+              )}
             />
             <PillSegment
               label={dateLabel}
               active={sheet === "date"}
               onPress={() => setSheet("date")}
-              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+              renderIcon={(c) => (
+                <Feather name="calendar" size={15} color={c} />
+              )}
             />
           </FilterPill>
 
@@ -805,7 +874,9 @@ const Bookings = () => {
           {/* Deleted-list error (active-list error is shown above the KPIs) */}
           {showDeleted && !listLoading && listError && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{listError}</Text>
             </View>
           )}
@@ -816,7 +887,11 @@ const Bookings = () => {
           ) : !listError && !hasResults ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name={showDeleted ? "archive" : "calendar"} size={26} color="#9CA3AF" />
+                <Feather
+                  name={showDeleted ? "archive" : "calendar"}
+                  size={26}
+                  color="#9CA3AF"
+                />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
                 {showDeleted ? "No deleted bookings" : "No bookings found"}
@@ -864,7 +939,9 @@ const Bookings = () => {
                             >
                               <Text
                                 className={`text-xs font-medium ${
-                                  isActive ? "text-white" : "text-gray-600 dark:text-gray-300"
+                                  isActive
+                                    ? "text-white"
+                                    : "text-gray-600 dark:text-gray-300"
                                 }`}
                               >
                                 {option}
