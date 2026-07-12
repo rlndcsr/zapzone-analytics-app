@@ -19,7 +19,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { AttractionActionsSheet } from "../../components/ui/AttractionActionsSheet";
+import {
+  AttractionFiltersSheet,
+  EMPTY_ATTRACTION_FILTERS,
+  countActiveAttractionFilters,
+  type AttractionFilterValues,
+} from "../../components/ui/AttractionFiltersSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import {
   AttractionsKpiSkeleton,
@@ -44,14 +51,6 @@ const CARD_SHADOW = {
   shadowRadius: 8,
   elevation: 2,
 } as const;
-
-type StatusFilter = "all" | AttractionStatus;
-
-const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Status", value: "all" },
-  { label: "Active", value: "active" },
-  { label: "Inactive", value: "inactive" },
-];
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
 
@@ -266,11 +265,12 @@ const Attractions = () => {
   const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [filters, setFilters] = useState<AttractionFilterValues>(
+    EMPTY_ATTRACTION_FILTERS,
+  );
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  const [showStatusSheet, setShowStatusSheet] = useState(false);
-  const [showCategorySheet, setShowCategorySheet] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showCreatedDateSheet, setShowCreatedDateSheet] = useState(false);
   const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
@@ -342,15 +342,52 @@ const Attractions = () => {
     return { total, active, inactive, avgPrice, capacity };
   }, [locationScoped]);
 
-  // Search + status + category over the location-scoped set, sorted by display
-  // order (like the web — the location filter is already applied upstream).
+  // Search + the full web-admin filter set over the location-scoped data,
+  // sorted by display order. Predicate semantics mirror the web `useAdminTable`
+  // exactly (select equality, inclusive numeric ranges with empty = unbounded,
+  // inclusive YYYY-MM-DD created-date range). All client-side, like the web.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
+    const priceMin = filters.priceMin === "" ? null : parseFloat(filters.priceMin);
+    const priceMax = filters.priceMax === "" ? null : parseFloat(filters.priceMax);
+    const capMin =
+      filters.capacityMin === "" ? null : parseFloat(filters.capacityMin);
+    const capMax =
+      filters.capacityMax === "" ? null : parseFloat(filters.capacityMax);
+    const { createdStart, createdEnd } = filters;
+
     return locationScoped
       .filter((a) => {
-        if (statusFilter !== "all" && a.status !== statusFilter) return false;
-        if (categoryFilter !== "all" && a.category !== categoryFilter)
+        if (filters.status !== "all" && a.status !== filters.status) return false;
+        if (filters.category !== "all" && a.category !== filters.category)
           return false;
+        if (filters.pricingType !== "all" && a.pricingType !== filters.pricingType)
+          return false;
+        if (filters.durationType !== "all") {
+          // 0/null duration = "Unlimited" (matches web isUnlimitedDuration).
+          const unlimited = !a.duration;
+          if (filters.durationType === "unlimited" && !unlimited) return false;
+          if (filters.durationType === "timed" && unlimited) return false;
+        }
+        if (filters.capacityVisibility !== "all") {
+          const shown = a.displayCapacityToCustomers !== false;
+          if (filters.capacityVisibility === "shown" && !shown) return false;
+          if (filters.capacityVisibility === "hidden" && shown) return false;
+        }
+        if (priceMin != null && !Number.isNaN(priceMin) && a.price < priceMin)
+          return false;
+        if (priceMax != null && !Number.isNaN(priceMax) && a.price > priceMax)
+          return false;
+        if (capMin != null && !Number.isNaN(capMin) && a.maxCapacity < capMin)
+          return false;
+        if (capMax != null && !Number.isNaN(capMax) && a.maxCapacity > capMax)
+          return false;
+        if (createdStart || createdEnd) {
+          const date = a.createdAt ? a.createdAt.split("T")[0] : null;
+          if (!date) return false;
+          if (createdStart && date < createdStart) return false;
+          if (createdEnd && date > createdEnd) return false;
+        }
         if (term) {
           const haystack =
             `${a.name} ${a.description} ${a.locationName} ${a.category}`.toLowerCase();
@@ -359,7 +396,7 @@ const Attractions = () => {
         return true;
       })
       .sort((a, b) => a.displayOrder - b.displayOrder);
-  }, [locationScoped, search, statusFilter, categoryFilter]);
+  }, [locationScoped, search, filters]);
 
   // Client-side pagination over the filtered list (matches the notifications
   // pagination: 5 / 10 / 15 per page with Previous / Next).
@@ -373,12 +410,27 @@ const Attractions = () => {
   // never land on a now-empty page.
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, categoryFilter, locationFilter, perPage]);
+  }, [search, filters, locationFilter, perPage]);
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Status";
-  const categoryLabel =
-    categoryFilter === "all" ? "All Categories" : categoryFilter;
+  const activeFilterCount = countActiveAttractionFilters(filters);
+
+  // Created Date reuses the shared range calendar. The filter sheet is a native
+  // Modal, so we fully close it before opening the calendar (and reopen it
+  // after) — two stacked native Modals crash Android's new architecture.
+  const openCreatedDate = useCallback(() => {
+    setShowFilterSheet(false);
+    setTimeout(() => setShowCreatedDateSheet(true), 280);
+  }, []);
+  const closeCreatedDate = useCallback(() => {
+    setShowCreatedDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+  const applyCreatedDate = useCallback((start: string, end: string) => {
+    setFilters((f) => ({ ...f, createdStart: start, createdEnd: end }));
+    setShowCreatedDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+
   const locationLabel =
     locationFilter === "all"
       ? "All Locations"
@@ -611,21 +663,17 @@ const Attractions = () => {
             )}
           </View>
 
-          {/* Filters — full-width segmented pill (Status · Categories) */}
+          {/* Filters — opens the full filter panel (all web-admin filters). */}
           <FilterPill>
             <PillSegment
-              label={statusLabel}
-              active={showStatusSheet}
-              onPress={() => setShowStatusSheet(true)}
-              renderIcon={(c) => (
-                <Feather name="check-circle" size={15} color={c} />
-              )}
-            />
-            <PillSegment
-              label={categoryLabel}
-              active={showCategorySheet}
-              onPress={() => setShowCategorySheet(true)}
-              renderIcon={(c) => <Feather name="tag" size={15} color={c} />}
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={showFilterSheet || activeFilterCount > 0}
+              onPress={() => setShowFilterSheet(true)}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
           </FilterPill>
 
@@ -762,89 +810,26 @@ const Attractions = () => {
         </View>
       </ScrollView>
 
-      {/* Status filter */}
-      <BottomSheet
-        visible={showStatusSheet}
-        onClose={() => setShowStatusSheet(false)}
-        title="Filter by Status"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {STATUS_OPTIONS.map((option) => {
-            const isSelected = statusFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setStatusFilter(option.value);
-                  setShowStatusSheet(false);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+      {/* Full filter panel — every web-admin filter in one sheet. */}
+      <AttractionFiltersSheet
+        visible={showFilterSheet}
+        values={filters}
+        categories={categories}
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_ATTRACTION_FILTERS)}
+        onClose={() => setShowFilterSheet(false)}
+        onOpenCreatedDate={openCreatedDate}
+      />
 
-      {/* Category filter */}
-      <BottomSheet
-        visible={showCategorySheet}
-        onClose={() => setShowCategorySheet(false)}
-        title="Filter by Category"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[
-            { label: "All Categories", value: "all" },
-            ...categories.map((c) => ({ label: c, value: c })),
-          ].map((option) => {
-            const isSelected = categoryFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setCategoryFilter(option.value);
-                  setShowCategorySheet(false);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+      {/* Created-date range calendar (shared component), opened after the filter
+          sheet closes so two native Modals are never mounted at once. */}
+      <DateRangeSheet
+        visible={showCreatedDateSheet}
+        initialStart={filters.createdStart || undefined}
+        initialEnd={filters.createdEnd || undefined}
+        onClose={closeCreatedDate}
+        onApply={applyCreatedDate}
+      />
 
       {/* Location filter */}
       <BottomSheet

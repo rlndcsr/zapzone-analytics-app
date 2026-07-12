@@ -2,10 +2,10 @@ import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
-  useCallback,
   type ComponentProps,
 } from "react";
 import {
@@ -367,14 +367,29 @@ const Events = () => {
       const Sharing = await import("expo-sharing");
 
       const header = [
-        "ID", "Name", "Category", "Location", "Price",
-        "Status", "Date Type", "Start Date", "End Date", "Created",
+        "ID",
+        "Name",
+        "Category",
+        "Location",
+        "Price",
+        "Status",
+        "Date Type",
+        "Start Date",
+        "End Date",
+        "Created",
       ];
       const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       const lines = filtered.map((e) =>
         [
-          e.id, e.name, e.dateType, e.locationName, e.price,
-          e.status, e.dateType, e.startDate, e.endDate ?? "",
+          e.id,
+          e.name,
+          e.dateType,
+          e.locationName,
+          e.price,
+          e.status,
+          e.dateType,
+          e.startDate,
+          e.endDate ?? "",
           e.createdAt ? new Date(e.createdAt).toLocaleString() : "",
         ]
           .map(esc)
@@ -393,7 +408,10 @@ const Events = () => {
           UTI: "public.comma-separated-values-text",
         });
       } else {
-        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+        Alert.alert(
+          "Sharing unavailable",
+          "Sharing isn't available on this device.",
+        );
       }
     } catch (err) {
       Alert.alert(
@@ -512,43 +530,59 @@ const Events = () => {
             </Pressable>
           </View>
 
-          {/* Header controls — full-width segmented pill (Location · Export
-              CSV). The location selector is company-admin only; managers are
-              scoped to their own location by the backend. */}
-          <View className="mt-5">
-            <FilterPill>
-              {isCompanyAdmin && (
+          {/* Location selector — company-admin only; managers are scoped to
+              their own location by the backend. */}
+          {isCompanyAdmin && (
+            <View className="mt-5">
+              <FilterPill>
                 <PillSegment
                   label={locationLabel}
                   active={sheet === "location"}
                   onPress={() => setSheet("location")}
-                  renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
+                  renderIcon={(c) => (
+                    <Feather name="map-pin" size={15} color={c} />
+                  )}
                 />
+              </FilterPill>
+            </View>
+          )}
+
+          {/* Secondary "Export CSV" + primary "Create New Event" on one row
+              (~50/50). Export stays outlined/secondary; Create is the primary
+              filled CTA. */}
+          <View
+            className={`flex-row items-center gap-3 mb-5 ${isCompanyAdmin ? "" : "mt-5"}`}
+          >
+            <Pressable
+              onPress={exportCsv}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color="#6B7280" />
+              ) : (
+                <Feather name="download" size={16} color="#6B7280" />
               )}
-              <PillSegment
-                label="Export CSV"
-                onPress={exportCsv}
-                renderIcon={(c) =>
-                  exporting ? (
-                    <ActivityIndicator size="small" color={c} />
-                  ) : (
-                    <Feather name="download" size={15} color={c} />
-                  )
-                }
-              />
-            </FilterPill>
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Export CSV
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/events/create-event")}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-white"
+              >
+                New Event
+              </Text>
+            </Pressable>
           </View>
 
-          <Pressable
-            onPress={() => router.push("/events/create-event")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create New Event
-            </Text>
-          </Pressable>
-          
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
@@ -626,13 +660,17 @@ const Events = () => {
               label={statusLabel}
               active={sheet === "status"}
               onPress={() => setSheet("status")}
-              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
+              renderIcon={(c) => (
+                <Feather name="check-circle" size={15} color={c} />
+              )}
             />
             <PillSegment
               label={dateTypeLabel}
               active={sheet === "dateType"}
               onPress={() => setSheet("dateType")}
-              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+              renderIcon={(c) => (
+                <Feather name="calendar" size={15} color={c} />
+              )}
             />
           </FilterPill>
 
