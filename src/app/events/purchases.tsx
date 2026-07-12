@@ -21,6 +21,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
+import {
+  EMPTY_EVENT_PURCHASE_FILTERS,
+  EventPurchaseFiltersSheet,
+  countActiveEventPurchaseFilters,
+  type EventPurchaseDateTarget,
+  type EventPurchaseFilterValues,
+} from "../../components/ui/EventPurchaseFiltersSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
@@ -48,33 +56,6 @@ const CARD_SHADOW = {
   shadowRadius: 8,
   elevation: 2,
 } as const;
-
-type StatusFilter = "all" | EventPurchaseStatus;
-type DateRange = "all" | "today" | "week" | "month";
-
-const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Status", value: "all" },
-  { label: "Confirmed", value: "confirmed" },
-  { label: "Pending", value: "pending" },
-  { label: "Checked In", value: "checked-in" },
-  { label: "Completed", value: "completed" },
-  { label: "Cancelled", value: "cancelled" },
-];
-
-const PAYMENT_OPTIONS: { label: string; value: string }[] = [
-  { label: "All Methods", value: "all" },
-  { label: "Card", value: "card" },
-  { label: "Authorize.net", value: "authorize.net" },
-  { label: "In-Store", value: "in-store" },
-  { label: "Pay Later", value: "paylater" },
-];
-
-const DATE_OPTIONS: { label: string; value: DateRange }[] = [
-  { label: "All Time", value: "all" },
-  { label: "Today", value: "today" },
-  { label: "Last 7 Days", value: "week" },
-  { label: "Last 30 Days", value: "month" },
-];
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
 
@@ -205,12 +186,21 @@ const Stat = ({ label, value, valueClass = "" }: { label: string; value: string;
   </View>
 );
 
-const PurchaseCard = ({ purchase }: { purchase: EventPurchaseRow }) => {
+const PurchaseCard = ({
+  purchase,
+  onPress,
+}: {
+  purchase: EventPurchaseRow;
+  onPress: () => void;
+}) => {
   const paidInFull = purchase.amountPaid >= purchase.totalAmount;
   return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
+    <Pressable
+      onPress={onPress}
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
       style={CARD_SHADOW}
+      accessibilityRole="button"
+      accessibilityLabel={`View purchase for ${purchase.customerName}`}
     >
       {/* Customer + status */}
       <View className="flex-row items-start justify-between mb-2">
@@ -288,7 +278,7 @@ const PurchaseCard = ({ purchase }: { purchase: EventPurchaseRow }) => {
           </Text>
         </View>
       )}
-    </View>
+    </Pressable>
   );
 };
 
@@ -331,14 +321,6 @@ const KpiCard = ({
   </View>
 );
 
-const startOfRange = (range: Exclude<DateRange, "all">): Date => {
-  const start = new Date();
-  if (range === "today") start.setHours(0, 0, 0, 0);
-  else if (range === "week") start.setDate(start.getDate() - 7);
-  else start.setMonth(start.getMonth() - 1);
-  return start;
-};
-
 const EventPurchases = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -354,12 +336,13 @@ const EventPurchases = () => {
   });
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [paymentFilter, setPaymentFilter] = useState<string>("all");
-  const [dateFilter, setDateFilter] = useState<DateRange>("all");
-  const [sheet, setSheet] = useState<
-    null | "status" | "payment" | "date" | "location"
-  >(null);
+  const [filters, setFilters] = useState<EventPurchaseFilterValues>(
+    EMPTY_EVENT_PURCHASE_FILTERS,
+  );
+  const [sheet, setSheet] = useState<null | "location">(null);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showDateSheet, setShowDateSheet] = useState(false);
+  const [dateTarget, setDateTarget] = useState<EventPurchaseDateTarget>("created");
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -445,17 +428,56 @@ const EventPurchases = () => {
   const listLoading = showDeleted ? deletedLoading : loading;
   const listError = showDeleted ? deletedError : error;
 
+  // Search + the full web-admin filter set over the active/deleted set (already
+  // location-scoped by the fetch). Predicate semantics mirror the web
+  // `useAdminTable` exactly (select equality, guest/balance derivations,
+  // inclusive date ranges on created_at + purchase_date, inclusive amount range
+  // with empty = unbounded). All client-side, like the web.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const rangeStart = dateFilter === "all" ? null : startOfRange(dateFilter);
+    const amountMin = filters.amountMin === "" ? null : parseFloat(filters.amountMin);
+    const amountMax = filters.amountMax === "" ? null : parseFloat(filters.amountMax);
+    const { createdFrom, createdTo, scheduledFrom, scheduledTo } = filters;
+
     return listSource
       .filter((p) => {
-        if (statusFilter !== "all" && p.status !== statusFilter) return false;
-        if (paymentFilter !== "all" && p.paymentMethod !== paymentFilter) return false;
-        if (rangeStart) {
-          const d = new Date(p.createdAt);
-          if (Number.isNaN(d.getTime()) || d < rangeStart) return false;
+        if (filters.status !== "all" && p.status !== filters.status) return false;
+        if (filters.event !== "all" && p.eventName !== filters.event) return false;
+        if (
+          filters.paymentMethod !== "all" &&
+          p.paymentMethod !== filters.paymentMethod
+        )
+          return false;
+        if (
+          filters.paymentStatus !== "all" &&
+          p.paymentStatus !== filters.paymentStatus
+        )
+          return false;
+        if (filters.customerType !== "all") {
+          if (filters.customerType === "guest" && !p.isGuest) return false;
+          if (filters.customerType === "registered" && p.isGuest) return false;
         }
+        if (filters.balance !== "all") {
+          const due = p.amountPaid < p.totalAmount;
+          if (filters.balance === "due" && !due) return false;
+          if (filters.balance === "paid" && due) return false;
+        }
+        if (createdFrom || createdTo) {
+          const d = p.createdAt ? p.createdAt.substring(0, 10) : null;
+          if (!d) return false;
+          if (createdFrom && d < createdFrom) return false;
+          if (createdTo && d > createdTo) return false;
+        }
+        if (scheduledFrom || scheduledTo) {
+          const d = p.purchaseDate ? p.purchaseDate.substring(0, 10) : null;
+          if (!d) return false;
+          if (scheduledFrom && d < scheduledFrom) return false;
+          if (scheduledTo && d > scheduledTo) return false;
+        }
+        if (amountMin != null && !Number.isNaN(amountMin) && p.totalAmount < amountMin)
+          return false;
+        if (amountMax != null && !Number.isNaN(amountMax) && p.totalAmount > amountMax)
+          return false;
         if (term) {
           const haystack =
             `${p.customerName} ${p.email} ${p.eventName} ${p.phone} ${p.referenceNumber}`.toLowerCase();
@@ -470,7 +492,7 @@ const EventPurchases = () => {
         if (priorityDiff !== 0) return priorityDiff;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
-  }, [listSource, search, statusFilter, paymentFilter, dateFilter]);
+  }, [listSource, search, filters]);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
@@ -480,15 +502,7 @@ const EventPurchases = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [
-    search,
-    statusFilter,
-    paymentFilter,
-    dateFilter,
-    locationFilter,
-    showDeleted,
-    perPage,
-  ]);
+  }, [search, filters, locationFilter, showDeleted, perPage]);
 
   const exportCsv = useCallback(async () => {
     if (filtered.length === 0) {
@@ -541,11 +555,43 @@ const EventPurchases = () => {
     }
   }, [filtered]);
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Status";
-  const paymentLabel =
-    PAYMENT_OPTIONS.find((o) => o.value === paymentFilter)?.label ?? "All Methods";
-  const dateLabel = DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Time";
+  const activeFilterCount = countActiveEventPurchaseFilters(filters);
+
+  // Event options for the Event filter — unique event names from the active set
+  // (mirrors the web `eventOptions`).
+  const eventOptions = useMemo(
+    () =>
+      [...new Set(listSource.map((p) => p.eventName).filter(Boolean))].sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [listSource],
+  );
+
+  // Date ranges reuse the shared range calendar. The filter sheet is a native
+  // Modal, so we fully close it before opening the calendar (and reopen after)
+  // — two stacked native Modals crash Android's new architecture.
+  const openDateRange = useCallback((target: EventPurchaseDateTarget) => {
+    setDateTarget(target);
+    setShowFilterSheet(false);
+    setTimeout(() => setShowDateSheet(true), 280);
+  }, []);
+  const closeDateRange = useCallback(() => {
+    setShowDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+  const applyDateRange = useCallback(
+    (start: string, end: string) => {
+      setFilters((f) =>
+        dateTarget === "created"
+          ? { ...f, createdFrom: start, createdTo: end }
+          : { ...f, scheduledFrom: start, scheduledTo: end },
+      );
+      setShowDateSheet(false);
+      setTimeout(() => setShowFilterSheet(true), 280);
+    },
+    [dateTarget],
+  );
+
   const locationLabel =
     locationFilter === "all"
       ? "All Locations"
@@ -711,25 +757,17 @@ const EventPurchases = () => {
             )}
           </View>
 
-          {/* Filters — full-width segmented pill (Status · Payment · Date) */}
+          {/* Filters — opens the full filter panel (all web-admin filters). */}
           <FilterPill>
             <PillSegment
-              label={statusLabel}
-              active={sheet === "status"}
-              onPress={() => setSheet("status")}
-              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
-            />
-            <PillSegment
-              label={paymentLabel}
-              active={sheet === "payment"}
-              onPress={() => setSheet("payment")}
-              renderIcon={(c) => <Feather name="credit-card" size={15} color={c} />}
-            />
-            <PillSegment
-              label={dateLabel}
-              active={sheet === "date"}
-              onPress={() => setSheet("date")}
-              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={showFilterSheet || activeFilterCount > 0}
+              onPress={() => setShowFilterSheet(true)}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
           </FilterPill>
 
@@ -776,7 +814,16 @@ const EventPurchases = () => {
             !listError && (
               <>
                 {paged.map((purchase) => (
-                  <PurchaseCard key={purchase.id} purchase={purchase} />
+                  <PurchaseCard
+                    key={purchase.id}
+                    purchase={purchase}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/events/purchase-details",
+                        params: { id: String(purchase.id) },
+                      })
+                    }
+                  />
                 ))}
 
                 {/* Pagination */}
@@ -865,119 +912,33 @@ const EventPurchases = () => {
         </View>
       </ScrollView>
 
-      {/* Status filter */}
-      <BottomSheet
-        visible={sheet === "status"}
-        onClose={() => setSheet(null)}
-        title="Filter by Status"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {STATUS_OPTIONS.map((option) => {
-            const isSelected = statusFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setStatusFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+      {/* Full filter panel — every web-admin filter in one sheet. */}
+      <EventPurchaseFiltersSheet
+        visible={showFilterSheet}
+        values={filters}
+        events={eventOptions}
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_EVENT_PURCHASE_FILTERS)}
+        onClose={() => setShowFilterSheet(false)}
+        onOpenDateRange={openDateRange}
+      />
 
-      {/* Payment method filter */}
-      <BottomSheet
-        visible={sheet === "payment"}
-        onClose={() => setSheet(null)}
-        title="Filter by Payment Method"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {PAYMENT_OPTIONS.map((option) => {
-            const isSelected = paymentFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setPaymentFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Date range filter */}
-      <BottomSheet
-        visible={sheet === "date"}
-        onClose={() => setSheet(null)}
-        title="Filter by Date"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {DATE_OPTIONS.map((option) => {
-            const isSelected = dateFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setDateFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+      {/* Shared range calendar for Created / Scheduled date, opened after the
+          filter sheet closes so two native Modals are never mounted at once. */}
+      <DateRangeSheet
+        visible={showDateSheet}
+        initialStart={
+          (dateTarget === "created"
+            ? filters.createdFrom
+            : filters.scheduledFrom) || undefined
+        }
+        initialEnd={
+          (dateTarget === "created" ? filters.createdTo : filters.scheduledTo) ||
+          undefined
+        }
+        onClose={closeDateRange}
+        onApply={applyDateRange}
+      />
 
       {/* Location filter (company admins) */}
       <BottomSheet

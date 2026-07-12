@@ -21,16 +21,20 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
+import {
+  EMPTY_EVENT_FILTERS,
+  EventFiltersSheet,
+  countActiveEventFilters,
+  type EventDateTarget,
+  type EventFilterValues,
+} from "../../components/ui/EventFiltersSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
 import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
 import { getCurrentUser } from "../../lib/session";
-import type {
-  EventDateType,
-  EventRow,
-  EventStatus,
-} from "../../services/eventsService";
+import type { EventRow, EventStatus } from "../../services/eventsService";
 
 const PRIMARY = "#0644C7";
 
@@ -44,22 +48,23 @@ const CARD_SHADOW = {
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
-type StatusFilter = "all" | EventStatus;
-type DateTypeFilter = "all" | EventDateType;
-
-const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Status", value: "all" },
-  { label: "Active", value: "active" },
-  { label: "Inactive", value: "inactive" },
-];
-
-const DATE_TYPE_OPTIONS: { label: string; value: DateTypeFilter }[] = [
-  { label: "All Types", value: "all" },
-  { label: "One Time", value: "one_time" },
-  { label: "Date Range", value: "date_range" },
-];
-
 const PER_PAGE_OPTIONS = [5, 10, 15];
+
+/** Local "today" as YYYY-MM-DD (matches the web Events `localToday`). */
+const localToday = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** Schedule bucket for an event, mirroring the web `scheduleState`. */
+const scheduleState = (event: EventRow): "upcoming" | "ongoing" | "past" => {
+  const today = localToday();
+  const start = (event.startDate || "").substring(0, 10);
+  const end = (event.endDate || event.startDate || "").substring(0, 10);
+  if (start > today) return "upcoming";
+  if (end < today) return "past";
+  return "ongoing";
+};
 
 const formatMoney = (value: number) =>
   `$${value.toLocaleString("en-US", {
@@ -258,12 +263,12 @@ const Events = () => {
   const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [dateTypeFilter, setDateTypeFilter] = useState<DateTypeFilter>("all");
+  const [filters, setFilters] = useState<EventFilterValues>(EMPTY_EVENT_FILTERS);
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  const [sheet, setSheet] = useState<null | "status" | "dateType" | "location">(
-    null,
-  );
+  const [sheet, setSheet] = useState<null | "location">(null);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showDateSheet, setShowDateSheet] = useState(false);
+  const [dateTarget, setDateTarget] = useState<EventDateTarget>("start");
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -329,12 +334,55 @@ const Events = () => {
     return { total, active, inactive, avgPrice, upcoming };
   }, [locationScoped]);
 
+  // Search + the full web-admin filter set over the location-scoped data.
+  // Predicate semantics mirror the web `useAdminTable` exactly (select equality,
+  // inclusive numeric/date ranges with empty = unbounded, schedule buckets,
+  // add-ons presence, time-of-day by start hour). All client-side, like the web.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
+    const priceMin = filters.priceMin === "" ? null : parseFloat(filters.priceMin);
+    const priceMax = filters.priceMax === "" ? null : parseFloat(filters.priceMax);
+    const { startFrom, startTo, createdFrom, createdTo } = filters;
+
     return locationScoped.filter((e) => {
-      if (statusFilter !== "all" && e.status !== statusFilter) return false;
-      if (dateTypeFilter !== "all" && e.dateType !== dateTypeFilter)
+      if (filters.status !== "all" && e.status !== filters.status) return false;
+      if (filters.dateType !== "all" && e.dateType !== filters.dateType)
         return false;
+      if (filters.schedule !== "all" && scheduleState(e) !== filters.schedule)
+        return false;
+
+      if (startFrom || startTo) {
+        const d = e.startDate ? e.startDate.substring(0, 10) : null;
+        if (!d) return false;
+        if (startFrom && d < startFrom) return false;
+        if (startTo && d > startTo) return false;
+      }
+      if (createdFrom || createdTo) {
+        const d = e.createdAt ? e.createdAt.substring(0, 10) : null;
+        if (!d) return false;
+        if (createdFrom && d < createdFrom) return false;
+        if (createdTo && d > createdTo) return false;
+      }
+
+      if (priceMin != null && !Number.isNaN(priceMin) && e.price < priceMin)
+        return false;
+      if (priceMax != null && !Number.isNaN(priceMax) && e.price > priceMax)
+        return false;
+
+      if (filters.addOns !== "all") {
+        const hasAddOns = (e.addOns?.length ?? 0) > 0;
+        if (filters.addOns === "with" && !hasAddOns) return false;
+        if (filters.addOns === "without" && hasAddOns) return false;
+      }
+
+      if (filters.timeOfDay !== "all") {
+        const hour = parseInt((e.timeStart || "0").split(":")[0], 10) || 0;
+        if (filters.timeOfDay === "morning" && hour >= 12) return false;
+        if (filters.timeOfDay === "afternoon" && !(hour >= 12 && hour < 17))
+          return false;
+        if (filters.timeOfDay === "evening" && hour < 17) return false;
+      }
+
       if (term) {
         const haystack =
           `${e.name} ${e.description} ${e.locationName}`.toLowerCase();
@@ -342,7 +390,7 @@ const Events = () => {
       }
       return true;
     });
-  }, [locationScoped, search, statusFilter, dateTypeFilter]);
+  }, [locationScoped, search, filters]);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
@@ -352,7 +400,7 @@ const Events = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, dateTypeFilter, locationFilter, perPage]);
+  }, [search, filters, locationFilter, perPage]);
 
   const exportCsv = useCallback(async () => {
     if (filtered.length === 0) {
@@ -423,11 +471,33 @@ const Events = () => {
     }
   }, [filtered]);
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Status";
-  const dateTypeLabel =
-    DATE_TYPE_OPTIONS.find((o) => o.value === dateTypeFilter)?.label ??
-    "All Types";
+  const activeFilterCount = countActiveEventFilters(filters);
+
+  // Date ranges reuse the shared range calendar. The filter sheet is a native
+  // Modal, so we fully close it before opening the calendar (and reopen it
+  // after) — two stacked native Modals crash Android's new architecture.
+  const openDateRange = useCallback((target: EventDateTarget) => {
+    setDateTarget(target);
+    setShowFilterSheet(false);
+    setTimeout(() => setShowDateSheet(true), 280);
+  }, []);
+  const closeDateRange = useCallback(() => {
+    setShowDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+  const applyDateRange = useCallback(
+    (start: string, end: string) => {
+      setFilters((f) =>
+        dateTarget === "start"
+          ? { ...f, startFrom: start, startTo: end }
+          : { ...f, createdFrom: start, createdTo: end },
+      );
+      setShowDateSheet(false);
+      setTimeout(() => setShowFilterSheet(true), 280);
+    },
+    [dateTarget],
+  );
+
   const locationLabel =
     locationFilter === "all"
       ? "All Locations"
@@ -654,23 +724,17 @@ const Events = () => {
             )}
           </View>
 
-          {/* Filters — full-width segmented pill (Status · Date Type) */}
+          {/* Filters — opens the full filter panel (all web-admin filters). */}
           <FilterPill>
             <PillSegment
-              label={statusLabel}
-              active={sheet === "status"}
-              onPress={() => setSheet("status")}
-              renderIcon={(c) => (
-                <Feather name="check-circle" size={15} color={c} />
-              )}
-            />
-            <PillSegment
-              label={dateTypeLabel}
-              active={sheet === "dateType"}
-              onPress={() => setSheet("dateType")}
-              renderIcon={(c) => (
-                <Feather name="calendar" size={15} color={c} />
-              )}
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={showFilterSheet || activeFilterCount > 0}
+              onPress={() => setShowFilterSheet(true)}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
           </FilterPill>
 
@@ -803,85 +867,31 @@ const Events = () => {
         </View>
       </ScrollView>
 
-      {/* Status filter */}
-      <BottomSheet
-        visible={sheet === "status"}
-        onClose={() => setSheet(null)}
-        title="Filter by Status"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {STATUS_OPTIONS.map((option) => {
-            const isSelected = statusFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setStatusFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+      {/* Full filter panel — every web-admin filter in one sheet. */}
+      <EventFiltersSheet
+        visible={showFilterSheet}
+        values={filters}
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_EVENT_FILTERS)}
+        onClose={() => setShowFilterSheet(false)}
+        onOpenDateRange={openDateRange}
+      />
 
-      {/* Date type filter */}
-      <BottomSheet
-        visible={sheet === "dateType"}
-        onClose={() => setSheet(null)}
-        title="Filter by Date Type"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {DATE_TYPE_OPTIONS.map((option) => {
-            const isSelected = dateTypeFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setDateTypeFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+      {/* Shared range calendar for Event Start / Created date, opened after the
+          filter sheet closes so two native Modals are never mounted at once. */}
+      <DateRangeSheet
+        visible={showDateSheet}
+        initialStart={
+          (dateTarget === "start" ? filters.startFrom : filters.createdFrom) ||
+          undefined
+        }
+        initialEnd={
+          (dateTarget === "start" ? filters.startTo : filters.createdTo) ||
+          undefined
+        }
+        onClose={closeDateRange}
+        onApply={applyDateRange}
+      />
 
       {/* Location filter */}
       <BottomSheet

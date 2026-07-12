@@ -37,6 +37,9 @@ export type EventPurchaseRow = {
   purchaseDate: string | null;
   purchaseTime: string | null;
   locationId: number | null;
+  /** True when there's no linked customer (guest / walk-in) — drives the web
+   *  "Customer Type" filter. */
+  isGuest: boolean;
   /** Soft-delete timestamp; only present for trashed purchases. */
   deletedAt: string | null;
 };
@@ -92,6 +95,7 @@ function mapPurchase(raw: RawEventPurchase): EventPurchaseRow {
     purchaseDate: raw.purchase_date ?? null,
     purchaseTime: raw.purchase_time ?? null,
     locationId: raw.location_id ?? null,
+    isGuest: !raw.customer,
     deletedAt: raw.deleted_at ?? null,
   };
 }
@@ -217,4 +221,161 @@ export async function createEventPurchase(
     body: input,
   });
   return { id: res.data.id };
+}
+
+/* ----------------------------------------------- purchase detail + delete -- */
+
+/** A fee line applied to a purchase (mirrors web `applied_fees`). */
+export type EventAppliedFee = { name: string; amount: number };
+/** A discount line applied to a purchase (mirrors web `applied_discounts`). */
+export type EventAppliedDiscount = { name: string; amount: number };
+/** One purchased add-on line on the detail screen. */
+export type EventPurchaseAddonLine = {
+  id: number;
+  name: string;
+  quantity: number;
+  priceAtPurchase: number;
+};
+
+/**
+ * Full event-purchase record backing the details screen — the flattened form of
+ * GET /api/event-purchases/{id} (the same endpoint the web ViewEventPurchase
+ * page uses).
+ */
+export type EventPurchaseDetail = {
+  id: number;
+  referenceNumber: string;
+  status: EventPurchaseStatus;
+  paymentStatus: EventPaymentStatus;
+  customerName: string;
+  email: string;
+  phone: string;
+  isGuest: boolean;
+  eventName: string;
+  locationName: string;
+  quantity: number;
+  createdAt: string;
+  purchaseDate: string | null;
+  purchaseTime: string | null;
+  totalAmount: number;
+  amountPaid: number;
+  discountAmount: number;
+  paymentMethod: string;
+  transactionId: string | null;
+  notes: string;
+  specialRequests: string;
+  addOns: EventPurchaseAddonLine[];
+  appliedFees: EventAppliedFee[];
+  appliedDiscounts: EventAppliedDiscount[];
+};
+
+type RawEventAddonLine = {
+  id?: number;
+  name?: string | null;
+  price?: number | string | null;
+  pivot?: {
+    quantity?: number | string | null;
+    price_at_purchase?: number | string | null;
+  } | null;
+};
+
+type RawEventPurchaseDetail = RawEventPurchase & {
+  transaction_id?: string | null;
+  discount_amount?: number | string | null;
+  notes?: string | null;
+  special_requests?: string | null;
+  location?: { name?: string | null } | null;
+  add_ons?: RawEventAddonLine[] | null;
+  applied_fees?:
+    | { fee_name?: string | null; fee_amount?: number | string | null }[]
+    | null;
+  applied_discounts?:
+    | { discount_name?: string | null; discount_amount?: number | string | null }[]
+    | null;
+};
+
+function mapDetail(raw: RawEventPurchaseDetail): EventPurchaseDetail {
+  const base = mapPurchase(raw);
+  return {
+    id: base.id,
+    referenceNumber: base.referenceNumber,
+    status: base.status,
+    paymentStatus: base.paymentStatus,
+    customerName: base.customerName,
+    email: base.email,
+    phone: base.phone,
+    isGuest: base.isGuest,
+    eventName: base.eventName,
+    locationName: raw.location?.name?.trim() || "",
+    quantity: base.quantity,
+    createdAt: base.createdAt,
+    purchaseDate: base.purchaseDate,
+    purchaseTime: base.purchaseTime,
+    totalAmount: base.totalAmount,
+    amountPaid: base.amountPaid,
+    discountAmount: Number(raw.discount_amount ?? 0),
+    paymentMethod: base.paymentMethod,
+    transactionId: raw.transaction_id ?? null,
+    notes: raw.notes?.trim() || "",
+    specialRequests: raw.special_requests?.trim() || "",
+    addOns: (raw.add_ons ?? []).map((a, i) => ({
+      id: a.id ?? i,
+      name: a.name?.trim() || "Add-on",
+      quantity: Number(a.pivot?.quantity ?? 1),
+      priceAtPurchase: Number(a.pivot?.price_at_purchase ?? a.price ?? 0),
+    })),
+    appliedFees: (raw.applied_fees ?? []).map((f) => ({
+      name: f.fee_name?.trim() || "Fee",
+      amount: Number(f.fee_amount ?? 0),
+    })),
+    appliedDiscounts: (raw.applied_discounts ?? []).map((d) => ({
+      name: d.discount_name?.trim() || "Discount",
+      amount: Number(d.discount_amount ?? 0),
+    })),
+  };
+}
+
+/**
+ * Unwrap a single event-purchase from the show response. The backend `show()`
+ * returns the model DIRECTLY (`response()->json($eventPurchase)`) — a bare
+ * object with no `{ data }` envelope — unlike the attraction-purchase show,
+ * which wraps in `{ success, data }`. Accept both (and a `{ data: {...} }`
+ * fallback), mirroring the web ViewEventPurchase reader
+ * `raw?.data ? raw.data : (raw?.id ? raw : null)`.
+ */
+function extractPurchase(res: unknown): RawEventPurchaseDetail | null {
+  if (!res || typeof res !== "object") return null;
+  const obj = res as Record<string, unknown>;
+  if (obj.data && typeof obj.data === "object") {
+    return obj.data as RawEventPurchaseDetail;
+  }
+  if (typeof obj.id === "number" || typeof obj.id === "string") {
+    return obj as RawEventPurchaseDetail;
+  }
+  return null;
+}
+
+/** GET /api/event-purchases/{id} — full record for the details screen. */
+export async function fetchEventPurchaseDetail(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<EventPurchaseDetail | null> {
+  const res = await apiRequest<unknown>(`/api/event-purchases/${id}`, {
+    token,
+    signal,
+  });
+  const raw = extractPurchase(res);
+  return raw ? mapDetail(raw) : null;
+}
+
+/**
+ * DELETE /api/event-purchases/{id} — soft-delete a purchase. Same endpoint the
+ * web Event Purchases uses (`deletePurchase`); no dedicated mobile route.
+ */
+export async function deleteEventPurchase(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/event-purchases/${id}`, { method: "DELETE", token });
 }
