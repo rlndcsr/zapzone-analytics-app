@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "zapzone-analytics-app",
+    "name": "ZZ Admin",
     "slug": "zapzone-analytics-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/zapzone-assets/zapzone.png",
     "scheme": "zapzoneanalyticsapp",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -13,11 +13,12 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "foregroundImage": "./assets/zapzone-assests/zapzone.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.zapzone.analytics"
     },
     "web": {
       "bundler": "metro",
@@ -50,7 +51,8 @@
           "savePhotosPermission": "Allow ZapZone to save booking QR codes to your photos.",
           "isAccessMediaLocationEnabled": false
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -10,12 +10,6 @@ import { SelectField, type SelectOption } from "./FormControls";
 /** Which of the two date ranges an "open calendar" request targets. */
 export type EventPurchaseDateTarget = "created" | "scheduled";
 
-/**
- * Full set of Event Purchases filter values — one field per web EventPurchases
- * filter (status / event / payment method / payment status / customer type /
- * balance / created range / scheduled range / total amount). Empty strings mean
- * "unbounded"/"any", matching the web `useAdminTable`.
- */
 export type EventPurchaseFilterValues = {
   status: string;
   event: string;
@@ -163,12 +157,6 @@ type Props = {
   onOpenDateRange: (target: EventPurchaseDateTarget) => void;
 };
 
-/**
- * Event Purchases filter panel — one BottomSheet with every web-admin filter.
- * Values apply live to the list behind it (like the web); "Done" closes and
- * "Clear Filters" resets. Date ranges reuse the shared range calendar (opened by
- * the parent to avoid stacking two native Modals).
- */
 export function EventPurchaseFiltersSheet({
   visible,
   values,
@@ -229,7 +217,9 @@ export function EventPurchaseFiltersSheet({
             value={values.customerType}
             options={CUSTOMER_TYPE_OPTS}
             onSelect={(v) =>
-              set({ customerType: v as EventPurchaseFilterValues["customerType"] })
+              set({
+                customerType: v as EventPurchaseFilterValues["customerType"],
+              })
             }
           />
           <SelectField
@@ -263,7 +253,9 @@ export function EventPurchaseFiltersSheet({
               <InputField
                 label=""
                 value={values.amountMin}
-                onChangeText={(t) => set({ amountMin: t.replace(/[^0-9.]/g, "") })}
+                onChangeText={(t) =>
+                  set({ amountMin: t.replace(/[^0-9.]/g, "") })
+                }
                 placeholder="Min"
                 keyboardType="decimal-pad"
                 containerClassName="flex-1"
@@ -271,7 +263,9 @@ export function EventPurchaseFiltersSheet({
               <InputField
                 label=""
                 value={values.amountMax}
-                onChangeText={(t) => set({ amountMax: t.replace(/[^0-9.]/g, "") })}
+                onChangeText={(t) =>
+                  set({ amountMax: t.replace(/[^0-9.]/g, "") })
+                }
                 placeholder="Max"
                 keyboardType="decimal-pad"
                 containerClassName="flex-1"
