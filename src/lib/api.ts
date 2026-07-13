@@ -1,3 +1,5 @@
+import { handleUnauthorized } from "./session";
+
 const API_BASE_URL = (() => {
   const url = process.env.EXPO_PUBLIC_API_URL;
   if (!url) {
@@ -116,6 +118,11 @@ export async function apiRequest<T>(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
+    // A 401 means the session is no longer valid — clear it globally so the
+    // auth guard redirects to Login (401 only; 403 is a role-permission denial).
+    if (response.status === 401) {
+      handleUnauthorized();
+    }
     const message =
       typeof data?.message === "string"
         ? data.message

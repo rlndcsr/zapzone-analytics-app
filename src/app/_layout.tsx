@@ -5,6 +5,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
 
 import "../global.css";
+import { AuthGuard } from "../components/AuthGuard";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
 import { restoreActiveLocation } from "../lib/location/activeLocationStore";
 import { restoreSession } from "../lib/session";
@@ -40,6 +41,7 @@ export default function RootLayout() {
   return (
     <>
       <StatusBar style="auto" />
+      <AuthGuard />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="splash" options={{ animation: "fade" }} />
         <Stack.Screen name="index" />

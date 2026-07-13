@@ -1,6 +1,7 @@
 import { Image } from "expo-image";
 import { Redirect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
   ScrollView,
@@ -12,7 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoginForm } from "../components/auth/LoginForm";
-import { isAuthenticated } from "../lib/session";
+import { consumeSessionExpiredNotice, isAuthenticated } from "../lib/session";
 import { hasPlayedSplash } from "../lib/splashState";
 
 const logo = require("../../assets/zapzone-assests/zapzone.png");
@@ -21,6 +22,13 @@ const LOGIN_BLUE = "#2563EB";
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
+
+  // Show a subtle notice when we arrived here because the session expired or was
+  // rejected (401) — silent for a normal sign-in or intentional sign-out.
+  const [sessionEnded, setSessionEnded] = useState(false);
+  useEffect(() => {
+    if (consumeSessionExpiredNotice()) setSessionEnded(true);
+  }, []);
 
   if (!hasPlayedSplash()) {
     return <Redirect href="/splash" />;
@@ -109,6 +117,14 @@ export default function HomeScreen() {
             <Text className="mt-2 mb-4 self-center max-w-[300px] text-center text-sm leading-5 text-gray-400 dark:text-gray-500">
               Welcome back! Enter your details to get signed in to your account
             </Text>
+
+            {sessionEnded && (
+              <View className="mb-4 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/20 px-4 py-3">
+                <Text className="text-center text-sm font-medium text-amber-700 dark:text-amber-400">
+                  Your session expired. Please sign in again.
+                </Text>
+              </View>
+            )}
 
             <LoginForm />
           </View>
