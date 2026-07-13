@@ -8,15 +8,19 @@ import React, {
 import {
   Animated,
   Dimensions,
+  Easing,
   Modal,
   Pressable,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Text,
   View,
 } from "react-native";
 import { router } from "expo-router";
+import { useColorScheme } from "nativewind";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
@@ -47,7 +51,6 @@ import type {
 } from "../../services/metricsService";
 import {
   Users,
-  MoreVertical,
   Ticket,
   ShoppingCart,
   CreditCard,
@@ -62,20 +65,14 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  LayoutGrid,
+  LayoutList,
   Scan,
   X,
   Zap,
-  Home as HomeIcon,
   BarChart3,
   Clock,
   TrendingUp,
-  DollarSign,
-  User,
-  Settings,
-  HelpCircle,
-  RefreshCw,
-  Mail,
-  Phone,
 } from "lucide-react-native";
 
 type DateFilterType =
@@ -216,7 +213,6 @@ const EventPurchaseRow = ({
     className={`flex-row items-center py-3.5 px-2 ${
       isLast ? "" : "border-b border-gray-50 dark:border-neutral-800/50"
     }`}
-    
   >
     <View className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-900/20 dark:to-blue-900/10 items-center justify-center mr-3">
       <Ticket size={18} color="#0644C7" strokeWidth={1.75} />
@@ -322,6 +318,8 @@ const RecentEventPurchases = ({ rows }: { rows: RecentEventPurchase[] }) => (
 
 const Home = () => {
   const insets = useSafeAreaInsets();
+  const { colorScheme } = useColorScheme();
+  const isDark = colorScheme === "dark";
 
   const dashboardConfig = useMemo(
     () => getDashboardConfig(getCurrentUser()?.role),
@@ -334,6 +332,8 @@ const Home = () => {
   // Show/Hide Cards — keys the user has toggled off (cards still fetch data).
   const [hiddenCards, setHiddenCards] = useState<string[]>([]);
   const [showCardsMenu, setShowCardsMenu] = useState(false);
+  // Card layout: 2-column grid (default) or single-column ("Column Cards").
+  const [gridColumns, setGridColumns] = useState<1 | 2>(2);
   const displayCards = useMemo(
     () => visibleCards.filter((card) => !hiddenCards.includes(card.key)),
     [visibleCards, hiddenCards],
@@ -360,51 +360,49 @@ const Home = () => {
     { id: number; name: string }[]
   >([]);
 
-  // Real-time US time state
-  const [currentTime, setCurrentTime] = useState(new Date());
-
-  // Update time every second
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  // Format time in US format (12-hour with AM/PM)
-  const formatUSTime = (date: Date) => {
-    return date.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: true,
-    });
-  };
-
   const slideAnim = useRef(
     new Animated.Value(Dimensions.get("window").height),
   ).current;
+  // Backdrop opacity animates in lockstep with the sheet so open/close reads as
+  // one smooth motion (no double Modal fade + spring bounce = no perceived lag).
+  const backdrop = useRef(new Animated.Value(0)).current;
 
   const openModal = (key: string) => {
     setSelectedMetric(key);
     slideAnim.setValue(Dimensions.get("window").height);
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      damping: 25,
-      mass: 0.8,
-      useNativeDriver: true,
-    }).start();
+    backdrop.setValue(0);
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdrop, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
   const closeModal = () => {
-    Animated.spring(slideAnim, {
-      toValue: Dimensions.get("window").height,
-      damping: 25,
-      mass: 0.8,
-      useNativeDriver: true,
-    }).start(() => {
-      setSelectedMetric(null);
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: Dimensions.get("window").height,
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdrop, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setSelectedMetric(null);
     });
   };
 
@@ -443,7 +441,7 @@ const Home = () => {
 
   const selectedLocationLabel =
     selectedLocation === "all"
-      ? "All Locations"
+      ? "Locations"
       : (locationOptions.find((loc) => loc.id === selectedLocation)?.name ??
         "All Locations");
 
@@ -472,6 +470,7 @@ const Home = () => {
 
   const dateFilterOptions = [
     { label: "All Time", value: "all_time" as DateFilterType, icon: BarChart3 },
+    { label: "Today", value: "today" as DateFilterType, icon: Calendar },
     {
       label: "Last 24 Hours",
       value: "last_24h" as DateFilterType,
@@ -513,11 +512,30 @@ const Home = () => {
       ? (data?.breakdowns?.[currentMetric.breakdownKey] ?? [])
       : [];
   const isBreakdownEmpty = currentBreakdown.length === 0;
-  const [showMenu, setShowMenu] = useState(false);
 
   return (
     <View className="flex-1 bg-white dark:bg-black">
-      <DashboardHeader unreadCount={unreadNotificationsCount} />
+      {/* Soft gray→white gradient backdrop (light mode). */}
+      {!isDark && (
+        <Svg
+          width="100%"
+          height="100%"
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        >
+          <Defs>
+            <LinearGradient id="homeBg" x1="0" y1="0" x2="0.35" y2="1">
+              <Stop offset="0" stopColor="#E8EDF4" />
+              <Stop offset="0.28" stopColor="#F5F7FB" />
+              <Stop offset="0.6" stopColor="#FFFFFF" />
+              <Stop offset="1" stopColor="#FFFFFF" />
+            </LinearGradient>
+          </Defs>
+          <Rect x={0} y={0} width="100%" height="100%" fill="url(#homeBg)" />
+        </Svg>
+      )}
+
+      <DashboardHeader unreadCount={unreadNotificationsCount} transparent />
 
       <ScrollView
         className="flex-1"
@@ -537,142 +555,64 @@ const Home = () => {
         }
       >
         <View className="px-5 pt-0">
-          {/* Welcome Section with US Time */}
-          <View
-            className="relative overflow-hidden rounded-2xl p-5 mt-6 mb-5 shadow-xl"
-            style={{
-              backgroundColor: "#0644C7",
-              borderColor: "rgba(0, 68, 255, 0.79)",
-              borderWidth: 1,
-            }}
-          >
-            {/* Grid pattern */}
-            <View className="absolute inset-0 opacity-10">
-              <View
-                className="absolute inset-0"
-                style={{
-                  backgroundImage: `
-                    linear-gradient(rgb(3, 49, 197) 1px, transparent 1px),
-                    linear-gradient(90deg, rgb(59, 131, 246) 1px, transparent 1px)
-                  `,
-                  backgroundSize: "20px 20px",
-                }}
-              />
-            </View>
-
-            {/* Glow effect */}
-            <View className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-blue-500/10 blur-3xl" />
-
-            {/* Three dots menu button - Top Right */}
-            <Pressable
-              onPress={() => {
-                setShowMenu(!showMenu);
-              }}
-              className="absolute top-3 right-3 z-10 w-8 h-8 backdrop-blur-sm items-center justify-center"
+          {/* Title */}
+          <View className="mt-3 mb-5">
+            <Text className="text-[44px] leading-[48px] font-medium text-gray-900 dark:text-white tracking-tight">
+              Company
+            </Text>
+            <Text
+              className="text-[44px] leading-[48px] font-extrabold tracking-tight"
+              style={{ color: "#2563EB" }}
             >
-              <MoreVertical size={16} color="rgba(255,255,255,0.7)" />
-            </Pressable>
-
-            {/* Menu Dropdown */}
-            {showMenu && (
-              <View className="absolute top-12 right-3 z-20 bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-gray-100 dark:border-neutral-700 py-2 min-w-[160px]">
-                <Pressable
-                  onPress={() => {
-                    console.log("Settings pressed");
-                    setShowMenu(false);
-                  }}
-                  className="flex-row items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-neutral-700"
-                >
-                  <Settings size={16} color="#6b7280" />
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">
-                    Settings
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    console.log("Help pressed");
-                    setShowMenu(false);
-                  }}
-                  className="flex-row items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-neutral-700"
-                >
-                  <HelpCircle size={16} color="#6b7280" />
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">
-                    Help & Support
-                  </Text>
-                </Pressable>
-                <View className="h-px bg-gray-100 dark:bg-neutral-700 my-1" />
-                <Pressable
-                  onPress={() => {
-                    console.log("Refresh pressed");
-                    setShowMenu(false);
-                    onRefresh();
-                  }}
-                  className="flex-row items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-neutral-700"
-                >
-                  <RefreshCw size={16} color="#6b7280" />
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">
-                    Refresh
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-
-            <Text className="text-blue-300/60 text-[10px] font-medium tracking-wider">
-              Zone Heating
+              Dashboard
             </Text>
-            <Text className="text-xl font-bold text-white tracking-tight">
-              Company Dashboard
-            </Text>
-            <Text className="text-xs text-white/30 mt-1">
+            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
               Multi-location booking overview and management
             </Text>
-
-            <View className="mt-3 pt-3 border-t border-white/5 flex-row items-center justify-between">
-              <View className="flex-row items-center gap-3">
-                <View className="w-7 h-7 rounded-lg bg-white/5 border border-white/10 items-center justify-center">
-                  <Clock size={14} color="rgba(255,255,255,0.3)" />
-                </View>
-                <View>
-                  <Text className="text-[6px] text-white/20 uppercase tracking-wider">
-                    Time
-                  </Text>
-                  <Text className="text-white font-bold text-sm">
-                    {formatUSTime(currentTime)}
-                  </Text>
-                </View>
-              </View>
-              <View className="flex-row items-center gap-1.5">
-                <View className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <Text className="text-[6px] text-white/30 font-medium tracking-wider">
-                  ONLINE
-                </Text>
-              </View>
-            </View>
           </View>
 
-          {/* Filters Row — full-width segmented pill (equal segments) */}
-          <FilterPill>
-            <PillSegment
-              label={dateButtonLabel}
-              active={showDateDropdown}
-              onPress={() => setShowDateDropdown(true)}
-              renderIcon={(c) => <Calendar size={15} color={c} />}
-            />
-            <PillSegment
-              label="Cards"
-              active={showCardsMenu}
-              onPress={() => setShowCardsMenu(true)}
-              renderIcon={(c) => <Eye size={15} color={c} />}
-            />
-            {dashboardConfig.showLocationSelector && (
-              <PillSegment
-                label={selectedLocationLabel}
-                active={showLocationDropdown}
-                onPress={() => setShowLocationDropdown(true)}
-                renderIcon={(c) => <MapPin size={15} color={c} />}
-              />
-            )}
-          </FilterPill>
+          {/* Filters Row — segmented pill + card-layout toggle */}
+          <View className="flex-row items-start gap-2">
+            <View className="flex-1">
+              <FilterPill>
+                <PillSegment
+                  label={dateButtonLabel}
+                  active={showDateDropdown}
+                  onPress={() => setShowDateDropdown(true)}
+                  renderIcon={(c) => <Calendar size={15} color={c} />}
+                />
+                <PillSegment
+                  label="Cards"
+                  active={showCardsMenu}
+                  onPress={() => setShowCardsMenu(true)}
+                  renderIcon={(c) => <Eye size={15} color={c} />}
+                />
+                {dashboardConfig.showLocationSelector && (
+                  <PillSegment
+                    label={selectedLocationLabel}
+                    active={showLocationDropdown}
+                    onPress={() => setShowLocationDropdown(true)}
+                    renderIcon={(c) => <MapPin size={15} color={c} />}
+                  />
+                )}
+              </FilterPill>
+            </View>
+
+            {/* Layout toggle — 2-column grid vs single-column cards */}
+            <Pressable
+              onPress={() => setGridColumns((c) => (c === 2 ? 1 : 2))}
+              className="h-[46px] w-[52px] rounded-2xl items-center justify-center active:opacity-90"
+              style={{ backgroundColor: "#2563EB" }}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle card layout"
+            >
+              {gridColumns === 2 ? (
+                <LayoutList size={20} color="#FFFFFF" />
+              ) : (
+                <LayoutGrid size={20} color="#FFFFFF" />
+              )}
+            </Pressable>
+          </View>
 
           {/* Loading State */}
           {loading && <MetricCardsSkeleton count={visibleCards.length} />}
@@ -691,7 +631,10 @@ const Home = () => {
           {!loading && !error && displayCards.length > 0 && (
             <View className="flex-row flex-wrap -mx-1.5">
               {displayCards.map((metric) => (
-                <View key={metric.key} className="w-1/2">
+                <View
+                  key={metric.key}
+                  className={gridColumns === 2 ? "w-1/2" : "w-full"}
+                >
                   <MetricCard
                     metric={metric}
                     data={data}
@@ -740,10 +683,16 @@ const Home = () => {
         transparent={true}
         statusBarTranslucent
         navigationBarTranslucent
-        animationType="fade"
+        animationType="none"
         onRequestClose={closeModal}
       >
-        <View className="absolute inset-0 bg-black/25" />
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: "#000", opacity: backdrop.interpolate({ inputRange: [0, 1], outputRange: [0, 0.35] }) },
+          ]}
+        />
 
         <View className="flex-1 justify-end">
           <Pressable className="flex-1" onPress={closeModal} />
@@ -977,7 +926,9 @@ const Home = () => {
                       : "bg-transparent border-gray-300 dark:border-neutral-600"
                   }`}
                 >
-                  {isVisible && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
+                  {isVisible && (
+                    <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                  )}
                 </View>
                 <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
                   {card.title}

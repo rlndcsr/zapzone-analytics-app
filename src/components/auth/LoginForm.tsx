@@ -1,14 +1,21 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import { ApiError } from "../../lib/api";
 import { setSession } from "../../lib/session";
 import { login } from "../../services/auth";
 import { InputField } from "../ui/InputField";
 import { PasswordInput } from "../ui/PasswordInput";
-import { PrimaryButton } from "../ui/PrimaryButton";
+
+const LOGIN_BLUE = "#2563EB";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -95,7 +102,7 @@ export function LoginForm() {
   };
 
   return (
-    <View className="mt-8">
+    <View className="mt-7">
       {formError ? (
         <View className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
           <Text className="text-sm text-red-600">{formError}</Text>
@@ -105,6 +112,7 @@ export function LoginForm() {
       <InputField
         label="Email Address"
         icon="mail"
+        pill={false}
         placeholder="Enter your email address"
         value={email}
         onChangeText={handleEmailChange}
@@ -123,6 +131,7 @@ export function LoginForm() {
 
       <PasswordInput
         ref={passwordRef}
+        pill={false}
         placeholder="Enter your password"
         value={password}
         onChangeText={handlePasswordChange}
@@ -133,9 +142,10 @@ export function LoginForm() {
         onSubmitEditing={handleSubmit}
         editable={!submitting}
         containerClassName="mb-4"
+       
       />
 
-      <View className="mb-8 flex-row items-center justify-between">
+      <View className="mb-7 flex-row items-center justify-between">
         <Pressable
           onPress={() => setRememberMe((current) => !current)}
           hitSlop={8}
@@ -144,17 +154,19 @@ export function LoginForm() {
           className="flex-row items-center"
         >
           <View
-            className={`h-5 w-5 items-center justify-center rounded border ${
-              rememberMe
-                ? "border-[#0A2472] bg-[#0A2472]"
-                : "border-gray-300 bg-white dark:border-neutral-700 dark:bg-neutral-900"
-            }`}
+            className="h-5 w-5 items-center justify-center rounded border"
+            style={{
+              borderColor: rememberMe ? LOGIN_BLUE : "#D1D5DB",
+              backgroundColor: rememberMe ? LOGIN_BLUE : "transparent",
+            }}
           >
             {rememberMe ? (
               <Feather name="check" size={13} color="#FFFFFF" />
             ) : null}
           </View>
-          <Text className="ml-2 text-sm text-gray-600 dark:text-gray-300">Remember me</Text>
+          <Text className="ml-2 text-sm text-gray-600 dark:text-gray-300">
+            Remember me
+          </Text>
         </Pressable>
 
         <Pressable
@@ -162,18 +174,49 @@ export function LoginForm() {
           hitSlop={8}
           accessibilityRole="button"
         >
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            Forgot password?
+          <Text
+            className="text-sm font-medium"
+            style={{ color: LOGIN_BLUE }}
+          >
+            Forgot your Password?
           </Text>
         </Pressable>
       </View>
 
-      <PrimaryButton
-        label="Login"
+      <Pressable
         onPress={handleSubmit}
-        loading={submitting}
-        disabled={!canSubmit}
-      />
+        disabled={!canSubmit || submitting}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canSubmit || submitting }}
+        android_ripple={{ color: "#1E3A8A" }}
+        className={`h-14 flex-row items-center justify-center mb-10 rounded-2xl active:opacity-90 ${
+          !canSubmit || submitting ? "opacity-60" : ""
+        }`}
+        style={{ backgroundColor: LOGIN_BLUE }}
+      >
+        {submitting ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text className="text-base font-semibold text-white">Login</Text>
+        )}
+      </Pressable>
+
+      {/* Terms & Conditions */}
+      <View className="mt-7">
+        <Text className="text-sm text-gray-600 dark:text-gray-300">
+          By selecting Agree and continue below,
+        </Text>
+        <Text className="text-sm text-gray-600 dark:text-gray-300">
+          I agree to{" "}
+          <Text
+            className="font-medium italic underline"
+            style={{ color: LOGIN_BLUE }}
+            onPress={() => console.log("Terms pressed")}
+          >
+            Terms and Condition and Privacy Policy
+          </Text>
+        </Text>
+      </View>
     </View>
   );
 }

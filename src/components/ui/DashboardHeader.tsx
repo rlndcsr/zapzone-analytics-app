@@ -1,50 +1,103 @@
-import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { Pressable, Text, View } from "react-native";
 import { Bell, Settings } from "lucide-react-native";
+
+import { getCurrentUser } from "../../lib/session";
+
+/** Friendly labels for the backend staff roles. */
+const ROLE_LABELS: Record<string, string> = {
+  company_admin: "Admin",
+  location_manager: "Manager",
+  attendant: "Attendant",
+};
 
 type DashboardHeaderProps = {
   /** Unread notification count for the badge (hidden when 0). */
   unreadCount: number;
   /** Optional screen title rendered beneath the top row. */
   title?: string;
+  /** Drop the white background + border so a screen gradient shows through. */
+  transparent?: boolean;
 };
 
 /**
- * Shared gradient app header (ZapZone logo + notification badge + settings) used
- * by the Home, Calendar, and Activity tabs. Pass `title` to add a heading below.
+ * Shared app header — avatar + greeting on the left, notifications + settings on
+ * the right. Used by the Home, Calendar, and Activity tabs. Pass `transparent`
+ * to let a screen background (e.g. Home's gradient) show through.
  */
-export function DashboardHeader({ unreadCount, title }: DashboardHeaderProps) {
+export function DashboardHeader({
+  unreadCount,
+  title,
+  transparent,
+}: DashboardHeaderProps) {
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
+
+  const user = getCurrentUser();
+  const roleLabel = user?.role
+    ? ROLE_LABELS[user.role] ??
+      user.role
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+    : "there";
+  const initials =
+    `${user?.first_name?.[0] ?? ""}${user?.last_name?.[0] ?? ""}`
+      .toUpperCase()
+      .trim() || "U";
+
   return (
-    <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-      <View className="flex-row items-center justify-between relative z-10">
-        <Pressable>
-          <Image
-            source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
-            style={{ width: 70, height: 28 }}
-            contentFit="contain"
-          />
-        </Pressable>
-        <View className="flex-row items-center gap-3">
-          {unreadCount > 0 && (
-            <Pressable
-              onPress={() => router.push("/notification/notification")}
-              className="bg-gray-100 dark:bg-neutral-800 rounded-full px-3.5 py-1.5 flex-row items-center gap-2"
+    <View
+      className={`pt-12 pb-4 px-5 w-full relative z-10 ${
+        transparent
+          ? ""
+          : "bg-white dark:bg-neutral-900 border-b border-gray-100 dark:border-neutral-800"
+      }`}
+    >
+      <View className="flex-row items-center justify-between">
+        {/* Left: avatar + greeting */}
+        <View className="flex-row items-center gap-3 flex-1 mr-3">
+          <View className="w-11 h-11 rounded-full bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
+            <Text className="text-sm font-bold text-[#2563EB] dark:text-blue-300">
+              {initials}
+            </Text>
+          </View>
+          <View className="flex-1">
+            <Text
+              className="text-[15px] font-bold text-gray-900 dark:text-white"
+              numberOfLines={1}
             >
-              <Bell size={16} color={headerIcon} />
-              <Text className="text-gray-900 dark:text-white text-xs font-semibold">
+              Hello, {roleLabel}
+            </Text>
+            <Text className="text-xs text-gray-400 dark:text-gray-500">
+              Welcome back
+            </Text>
+          </View>
+        </View>
+
+        {/* Right: notifications + settings */}
+        <View className="flex-row items-center gap-4">
+          <Pressable
+            onPress={() => router.push("/notification/notification")}
+            hitSlop={8}
+            className="flex-row items-center gap-1"
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+          >
+            <Bell size={22} color={headerIcon} />
+            {unreadCount > 0 && (
+              <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </Text>
-            </Pressable>
-          )}
+            )}
+          </Pressable>
           <Pressable
             onPress={() => router.push("/settings/settings")}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
           >
-            <Settings size={20} color={headerIcon} />
+            <Settings size={22} color={headerIcon} />
           </Pressable>
         </View>
       </View>

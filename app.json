@@ -4,7 +4,7 @@
     "slug": "zapzone-analytics-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/zapzone-assets/zapzone.png",
+    "icon": "./assets/zapzone-assests/ZZ-icon.png",
     "scheme": "zapzoneanalyticsapp",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -13,7 +13,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/zapzone-assests/zapzone.png",
+        "foregroundImage": "./assets/zapzone-assests/ZZ-icon.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
