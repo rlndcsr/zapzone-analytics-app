@@ -74,3 +74,13 @@ export async function clearAllNotifications(
     body: { location_id: locationId },
   });
 }
+
+export async function markNotificationAsRead(
+  token: string,
+  id: number
+): Promise<{ success: boolean; message: string }> {
+  return apiRequest<{ success: boolean; message: string }>(`/api/notifications/${id}/read`, {
+    method: 'PATCH',
+    token,
+  });
+}

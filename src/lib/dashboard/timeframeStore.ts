@@ -13,7 +13,7 @@ export type TimeframeSelection = {
 };
 
 let state: TimeframeSelection = {
-  timeframe: "all_time",
+  timeframe: "today",
   dateFrom: "",
   dateTo: "",
 };

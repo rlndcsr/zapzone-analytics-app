@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
 import {
   useCallback,
@@ -407,6 +407,16 @@ const Bookings = () => {
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
     null,
   );
+
+  // Auto-open a booking's detail sheet when navigated here from a
+  // notification (e.g. /bookings/bookings?openId=123).
+  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  useEffect(() => {
+    if (!openId) return;
+    const id = Number(openId);
+    if (!Number.isNaN(id)) setSelectedBookingId(id);
+    router.setParams({ openId: undefined });
+  }, [openId]);
   // The booking whose "More" actions sheet is open (null = closed).
   const [actionsBooking, setActionsBooking] = useState<CalendarBooking | null>(
     null,

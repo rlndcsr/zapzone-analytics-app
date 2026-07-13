@@ -1,7 +1,8 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -165,6 +166,22 @@ const Customers = () => {
   const [sheetContact, setSheetContact] = useState<ContactRow | null | undefined>(
     undefined,
   );
+
+  // Deep link: open a contact's actions sheet directly when navigated here from
+  // a notification (e.g. /customers/customers?openId=123). Wait until the list
+  // has loaded before resolving so we don't clear the param prematurely; if the
+  // record no longer exists, show a friendly message and stay put.
+  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  useEffect(() => {
+    if (!openId || loading) return;
+    const match = allRows.find((c) => String(c.id) === openId);
+    if (match) {
+      setSheetContact(match);
+    } else {
+      Alert.alert("Customer unavailable", "This customer is no longer available.");
+    }
+    router.setParams({ openId: undefined });
+  }, [openId, loading, allRows, router]);
 
   const reqRef = useRef(0);
 

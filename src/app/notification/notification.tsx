@@ -3,6 +3,7 @@ import React from 'react';
 import { router } from 'expo-router';
 import { useNotifications } from '../../lib/hooks/useNotifications';
 import { AppNotification, NotificationFilterType } from '../../services/notificationService';
+import { resolveNotificationRoute } from '../../lib/notifications/notificationRouteMapper';
 import { Bell, ChevronLeft, Check, X, Filter, Bookmark, CreditCard, AlertCircle, BellOff } from 'lucide-react-native';
 
 const Notification = () => {
@@ -13,6 +14,7 @@ const Notification = () => {
     filter,
     updateFilter,
     markAllAsRead,
+    markAsRead,
     clearAll,
     actionLoading,
     page,
@@ -48,7 +50,21 @@ const Notification = () => {
   };
 
   const handleNotificationPress = (item: AppNotification) => {
-    // Add any alternative on-press logic here
+    if (item.status === 'unread') {
+      markAsRead(item.id);
+    }
+
+    const fallback = {
+      pathname: '/notification/notification-details',
+      params: { id: String(item.id), title: item.title, message: item.message },
+    } as never;
+
+    try {
+      const route = resolveNotificationRoute(item);
+      router.push(route ? (route as never) : fallback);
+    } catch {
+      router.push(fallback);
+    }
   };
 
   const renderNotification = (item: AppNotification) => (
@@ -92,6 +108,25 @@ const Notification = () => {
             </View>
           </View>
         </View>
+        {item.status === 'unread' ? (
+          <Pressable
+            onPress={() => markAsRead(item.id)}
+            hitSlop={8}
+            className="flex-row items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30"
+          >
+            <Check size={12} color="#0644C7" />
+            <Text className="text-[11px] font-medium text-[#0644C7]">
+              Mark as Read
+            </Text>
+          </Pressable>
+        ) : (
+          <View className="flex-row items-center gap-1">
+            <Check size={12} color="#9ca3af" />
+            <Text className="text-[11px] font-medium text-gray-400 dark:text-gray-500">
+              Read
+            </Text>
+          </View>
+        )}
       </View>
 
       <View className="ml-13">

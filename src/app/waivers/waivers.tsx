@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
 import {
   useCallback,
@@ -395,6 +395,16 @@ const Waivers = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [statsNonce, setStatsNonce] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  // Auto-open a waiver's detail sheet when navigated here from a
+  // notification (e.g. /waivers/waivers?openId=123).
+  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  useEffect(() => {
+    if (!openId) return;
+    const id = Number(openId);
+    if (!Number.isNaN(id)) setSelectedId(id);
+    router.setParams({ openId: undefined });
+  }, [openId]);
 
   // Extra filters (Source + Marketing are server-side; Template + Location are
   // applied client-side over the current page) + column visibility.

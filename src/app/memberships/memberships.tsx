@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
   useEffect,
@@ -182,6 +182,25 @@ const Memberships = () => {
   const [selectedMember, setSelectedMember] = useState<MembershipRow | null>(
     null,
   );
+
+  // Deep link: open a member's actions sheet directly when navigated here from
+  // a notification (e.g. /memberships/memberships?openId=123). Wait until the
+  // list has loaded before resolving so we don't clear the param prematurely;
+  // if the record no longer exists, show a friendly message and stay put.
+  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  useEffect(() => {
+    if (!openId || loading) return;
+    const match = memberships.find((m) => String(m.id) === openId);
+    if (match) {
+      setSelectedMember(match);
+    } else {
+      Alert.alert(
+        "Membership unavailable",
+        "This membership is no longer available.",
+      );
+    }
+    router.setParams({ openId: undefined });
+  }, [openId, loading, memberships, router]);
 
   // Locations for the filter + Add Member picker come from the dashboard
   // metrics rollup (the /api/locations endpoint is too heavy for mobile).

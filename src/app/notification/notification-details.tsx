@@ -4,7 +4,11 @@ import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 
 const NotificationDetails = () => {
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, title, message } = useLocalSearchParams<{
+    id?: string;
+    title?: string;
+    message?: string;
+  }>();
 
   return (
     <View className="flex-1 bg-background dark:bg-black">
@@ -27,9 +31,22 @@ const NotificationDetails = () => {
       </View>
 
       <View className="flex-1 items-center justify-center px-5">
-        <Text className="text-gray-500 dark:text-gray-400 text-base font-medium">
-          {id ? `Notification #${id}` : "No notification selected."}
-        </Text>
+        {title ? (
+          <View className="w-full">
+            <Text className="text-lg font-bold text-gray-900 dark:text-white text-center mb-2">
+              {title}
+            </Text>
+            {!!message && (
+              <Text className="text-gray-500 dark:text-gray-400 text-base text-center">
+                {message}
+              </Text>
+            )}
+          </View>
+        ) : (
+          <Text className="text-gray-500 dark:text-gray-400 text-base font-medium">
+            {id ? `Notification #${id}` : "No notification selected."}
+          </Text>
+        )}
       </View>
     </View>
   );

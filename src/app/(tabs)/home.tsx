@@ -495,7 +495,7 @@ const Home = () => {
 
   const currentDateLabel =
     dateFilterOptions.find((opt) => opt.value === dateFilter)?.label ||
-    "All Time";
+    "Today";
 
   const dateButtonLabel =
     dateFilter === "custom" && customStartDate && customEndDate

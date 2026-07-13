@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { fetchNotifications, markAllNotificationsAsRead, clearAllNotifications, AppNotification, NotificationFilterType } from '../../services/notificationService';
+import { fetchNotifications, markAllNotificationsAsRead, clearAllNotifications, markNotificationAsRead, AppNotification, NotificationFilterType } from '../../services/notificationService';
 import { getToken, getCurrentUser } from '../session';
 import { Alert } from 'react-native';
 
@@ -73,6 +73,31 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
     }
   };
 
+  // Optimistically flips a single notification to read, reverting on failure.
+  const markAsRead = async (id: number) => {
+    const token = getToken();
+    if (!token) return;
+
+    let wasUnread = false;
+    setNotifications((prev) =>
+      prev.map((n) => {
+        if (n.id !== id) return n;
+        wasUnread = n.status === 'unread';
+        return wasUnread ? { ...n, status: 'read' } : n;
+      })
+    );
+    if (!wasUnread) return;
+
+    try {
+      await markNotificationAsRead(token, id);
+    } catch (err) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, status: 'unread' } : n))
+      );
+      Alert.alert('Error', 'Failed to mark notification as read');
+    }
+  };
+
   const clearAll = async () => {
     try {
       setActionLoading(true);
@@ -104,6 +129,7 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
     updatePerPage,
     refresh,
     markAllAsRead,
+    markAsRead,
     clearAll,
     actionLoading
   };
