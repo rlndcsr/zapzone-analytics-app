@@ -20,7 +20,7 @@ import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { PaymentsListSkeleton } from "../../components/ui/skeleton/PaymentsSkeleton";
 import { getCurrentUser, getToken } from "../../lib/session";
-import { fetchLocations, type LocationOption } from "../../services/locationsService";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { fetchPackages } from "../../services/packagesService";
 import {
   fetchPayments,
@@ -161,14 +161,18 @@ const Payments = () => {
 
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [locations, setLocations] = useState<LocationOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Scope to the global workspace location (company_admin). Payments has no
+  // backend location param, so filtering stays client-side, keyed off the id.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? null : activeLocation.id;
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [locationId, setLocationId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
 
@@ -184,13 +188,9 @@ const Payments = () => {
     }
     setError(null);
     try {
-      const [list, locs] = await Promise.all([
-        fetchPayments(token),
-        fetchLocations(token).catch(() => [] as LocationOption[]),
-      ]);
+      const list = await fetchPayments(token);
       setPayments(list.rows);
       setTotal(list.total);
-      setLocations(locs);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load payments");
     } finally {
@@ -242,15 +242,16 @@ const Payments = () => {
         p.amount.toFixed(2).includes(q);
       const matchesStatus =
         statusFilter === "All" || p.status === statusFilter.toLowerCase();
-      const matchesLocation = locationId == null || p.locationId === locationId;
+      const matchesLocation =
+        activeLocationId == null || p.locationId === activeLocationId;
       return matchesSearch && matchesStatus && matchesLocation;
     });
-  }, [payments, search, statusFilter, locationId]);
+  }, [payments, search, statusFilter, activeLocationId]);
 
   // Reset to page 1 whenever the filters change the result set.
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, locationId]);
+  }, [search, statusFilter, activeLocationId]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage));
   const currentPage = Math.min(page, pageCount);
@@ -299,19 +300,6 @@ const Payments = () => {
               View and manage all payment transactions
             </Text>
           </View>
-
-          {/* Location filter (all company locations) */}
-          {locations.length > 0 && (
-            <SelectField
-              label="Location"
-              value={locationId ?? "all"}
-              options={[
-                { label: "All Locations", value: "all" },
-                ...locations.map((l) => ({ label: l.name, value: l.id })),
-              ]}
-              onSelect={(v) => setLocationId(v === "all" ? null : Number(v))}
-            />
-          )}
 
           {/* Invoices / deleted actions */}
           <View className="flex-row flex-wrap gap-2">

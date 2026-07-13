@@ -1,6 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 
 import type { AuthUser } from "../services/auth";
+import { resetActiveLocation } from "./location/activeLocationStore";
 
 const TOKEN_KEY = "zapzone_auth_token";
 const USER_KEY = "zapzone_auth_user";
@@ -61,6 +62,8 @@ export function isAuthenticated(): boolean {
 export async function clearSession(): Promise<void> {
   authToken = null;
   authUser = null;
+  // Drop the active workspace location so it can't leak into the next account.
+  resetActiveLocation();
   try {
     await Promise.all([
       SecureStore.deleteItemAsync(TOKEN_KEY),

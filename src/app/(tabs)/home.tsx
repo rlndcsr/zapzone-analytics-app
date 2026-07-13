@@ -1,10 +1,31 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { router } from "expo-router";
+import {
+  BarChart3,
+  Calendar,
+  Check,
+  CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  CreditCard,
+  Eye,
+  Info,
+  LayoutGrid,
+  LayoutList,
+  MapPin,
+  Package,
+  PartyPopper,
+  Scan,
+  ShoppingCart,
+  Ticket,
+  TrendingUp,
+  UserPlus,
+  Users,
+  X,
+  Zap,
+} from "lucide-react-native";
+import { useColorScheme } from "nativewind";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -17,19 +38,18 @@ import {
   Text,
   View,
 } from "react-native";
-import { router } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
-import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
+import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
   composeSubtitle,
   formatMetricValue,
@@ -44,36 +64,12 @@ import {
 } from "../../lib/dashboard/timeframeStore";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser } from "../../lib/session";
 import type {
   DashboardData,
   RecentEventPurchase,
 } from "../../services/metricsService";
-import {
-  Users,
-  Ticket,
-  ShoppingCart,
-  CreditCard,
-  UserPlus,
-  CheckCircle,
-  PartyPopper,
-  Package,
-  Calendar,
-  Info,
-  MapPin,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Eye,
-  LayoutGrid,
-  LayoutList,
-  Scan,
-  X,
-  Zap,
-  BarChart3,
-  Clock,
-  TrendingUp,
-} from "lucide-react-native";
 
 type DateFilterType =
   | "today"
@@ -352,13 +348,9 @@ const Home = () => {
   } = useTimeframeSelection();
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [showCustomRange, setShowCustomRange] = useState(false);
-  const [selectedLocation, setSelectedLocation] = useState<number | "all">(
-    "all",
-  );
-  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
-  const [locationOptions, setLocationOptions] = useState<
-    { id: number; name: string }[]
-  >([]);
+  // Location comes from the global workspace store (selected via the header
+  // selector), so the dashboard scopes to the active location automatically.
+  const { id: selectedLocation } = useActiveLocation();
 
   const slideAnim = useRef(
     new Animated.Value(Dimensions.get("window").height),
@@ -428,28 +420,6 @@ const Home = () => {
     }
   }, [refetch, refreshNotifications]);
 
-  useEffect(() => {
-    if (selectedLocation === "all" && data?.locationStats) {
-      setLocationOptions(
-        Object.entries(data.locationStats).map(([id, stats]) => ({
-          id: Number(id),
-          name: stats.name,
-        })),
-      );
-    }
-  }, [data, selectedLocation]);
-
-  const selectedLocationLabel =
-    selectedLocation === "all"
-      ? "Locations"
-      : (locationOptions.find((loc) => loc.id === selectedLocation)?.name ??
-        "All Locations");
-
-  const handleSelectLocation = (id: number | "all") => {
-    setSelectedLocation(id);
-    setShowLocationDropdown(false);
-  };
-
   const handleSelectDate = (value: DateFilterType) => {
     setShowDateDropdown(false);
     if (value === "custom") {
@@ -494,8 +464,7 @@ const Home = () => {
   ];
 
   const currentDateLabel =
-    dateFilterOptions.find((opt) => opt.value === dateFilter)?.label ||
-    "Today";
+    dateFilterOptions.find((opt) => opt.value === dateFilter)?.label || "Today";
 
   const dateButtonLabel =
     dateFilter === "custom" && customStartDate && customEndDate
@@ -556,12 +525,12 @@ const Home = () => {
       >
         <View className="px-5 pt-0">
           {/* Title */}
-          <View className="mt-3 mb-5">
-            <Text className="text-[44px] leading-[48px] font-medium text-gray-900 dark:text-white tracking-tight">
+          <View className="mt-1 mb-5">
+            <Text className="text-[35px] leading-[48px] font-medium text-gray-900 dark:text-white tracking-tight">
               Company
             </Text>
             <Text
-              className="text-[44px] leading-[48px] font-extrabold tracking-tight"
+              className="text-[38px] leading-[37px] font-bold tracking-tight"
               style={{ color: "#2563EB" }}
             >
               Dashboard
@@ -569,6 +538,12 @@ const Home = () => {
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
               Multi-location booking overview and management
             </Text>
+
+            {/* Global workspace location selector (company-admin only; renders
+                null otherwise). Scopes every location-aware module. */}
+            <View className="mt-10">
+              <LocationWorkspaceSelector />
+            </View>
           </View>
 
           {/* Filters Row — segmented pill + card-layout toggle */}
@@ -587,14 +562,6 @@ const Home = () => {
                   onPress={() => setShowCardsMenu(true)}
                   renderIcon={(c) => <Eye size={15} color={c} />}
                 />
-                {dashboardConfig.showLocationSelector && (
-                  <PillSegment
-                    label={selectedLocationLabel}
-                    active={showLocationDropdown}
-                    onPress={() => setShowLocationDropdown(true)}
-                    renderIcon={(c) => <MapPin size={15} color={c} />}
-                  />
-                )}
               </FilterPill>
             </View>
 
@@ -690,7 +657,13 @@ const Home = () => {
           pointerEvents="none"
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: "#000", opacity: backdrop.interpolate({ inputRange: [0, 1], outputRange: [0, 0.35] }) },
+            {
+              backgroundColor: "#000",
+              opacity: backdrop.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 0.35],
+              }),
+            },
           ]}
         />
 
@@ -790,66 +763,6 @@ const Home = () => {
           </Animated.View>
         </View>
       </Modal>
-
-      {/* Location Picker */}
-      <BottomSheet
-        visible={showLocationDropdown}
-        onClose={() => setShowLocationDropdown(false)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          <Pressable
-            onPress={() => handleSelectLocation("all")}
-            className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-              selectedLocation === "all" ? "bg-blue-50 dark:bg-blue-900/20" : ""
-            }`}
-          >
-            <Text
-              className={`text-base font-medium ${
-                selectedLocation === "all"
-                  ? "text-blue-600 dark:text-blue-400"
-                  : "text-gray-700 dark:text-gray-200"
-              }`}
-            >
-              All Locations
-            </Text>
-            {selectedLocation === "all" && (
-              <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
-              </View>
-            )}
-          </Pressable>
-
-          {locationOptions.map((loc) => {
-            const isSelected = selectedLocation === loc.id;
-            return (
-              <Pressable
-                key={loc.id}
-                onPress={() => handleSelectLocation(loc.id)}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {loc.name}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
 
       {/* Timeframe Picker */}
       <BottomSheet

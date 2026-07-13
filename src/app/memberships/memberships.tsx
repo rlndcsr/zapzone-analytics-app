@@ -27,6 +27,7 @@ import { MembershipsListSkeleton } from "../../components/ui/skeleton/Membership
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useMemberships } from "../../lib/hooks/useMemberships";
 import { useMembershipPlans } from "../../lib/hooks/useMembershipPlans";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
 import {
   cancelMembership,
@@ -166,15 +167,23 @@ const Memberships = () => {
   const scheme = useColorScheme();
   const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
-  const { memberships, counts, loading, error, refetch } = useMemberships();
+  // Scope to the global workspace location (company_admin); managers stay
+  // backend-scoped. Reactive so switching location refetches server-side.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
+
+  const { memberships, counts, loading, error, refetch } = useMemberships({
+    locationId: activeLocationId,
+  });
   const { plans } = useMembershipPlans();
+  // Metrics rollup still powers the Add-Member location picker options.
   const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<MembershipStatus | "all">(
     "all",
   );
-  const [locationFilter, setLocationFilter] = useState<string>("All Locations");
   const [refreshing, setRefreshing] = useState(false);
 
   const [showFilters, setShowFilters] = useState(false);
@@ -211,11 +220,6 @@ const Memberships = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [metrics]);
 
-  const locationNames = useMemo(
-    () => ["All Locations", ...locationOptions.map((l) => l.name)],
-    [locationOptions],
-  );
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return memberships.filter((m) => {
@@ -225,12 +229,9 @@ const Memberships = () => {
         m.memberEmail.toLowerCase().includes(q) ||
         (m.qrToken?.toLowerCase().includes(q) ?? false);
       const matchesStatus = statusFilter === "all" || m.status === statusFilter;
-      const matchesLocation =
-        locationFilter === "All Locations" ||
-        m.homeLocationName === locationFilter;
-      return matchesSearch && matchesStatus && matchesLocation;
+      return matchesSearch && matchesStatus;
     });
-  }, [memberships, search, statusFilter, locationFilter]);
+  }, [memberships, search, statusFilter]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -238,8 +239,7 @@ const Memberships = () => {
     setRefreshing(false);
   }, [refetch]);
 
-  const filterActive =
-    statusFilter !== "all" || locationFilter !== "All Locations";
+  const filterActive = statusFilter !== "all";
   const showInitialLoader = loading && memberships.length === 0;
   const showError = !loading && !!error && memberships.length === 0;
 
@@ -501,9 +501,6 @@ const Memberships = () => {
         onClose={() => setShowFilters(false)}
         statusFilter={statusFilter}
         onStatus={setStatusFilter}
-        locationFilter={locationFilter}
-        onLocation={setLocationFilter}
-        locationNames={locationNames}
       />
 
       {/* Add Member sheet */}
@@ -540,17 +537,11 @@ function FiltersSheet({
   onClose,
   statusFilter,
   onStatus,
-  locationFilter,
-  onLocation,
-  locationNames,
 }: {
   visible: boolean;
   onClose: () => void;
   statusFilter: MembershipStatus | "all";
   onStatus: (s: MembershipStatus | "all") => void;
-  locationFilter: string;
-  onLocation: (l: string) => void;
-  locationNames: string[];
 }) {
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Filters">
@@ -583,45 +574,10 @@ function FiltersSheet({
           })}
         </View>
 
-        {locationNames.length > 1 && (
-          <>
-            <Text className="text-sm font-semibold text-gray-900 dark:text-white mt-6 mb-3">
-              Location
-            </Text>
-            <View className="flex-row flex-wrap gap-2">
-              {locationNames.map((loc) => {
-                const active = locationFilter === loc;
-                return (
-                  <Pressable
-                    key={loc}
-                    onPress={() => onLocation(loc)}
-                    className={`px-4 py-2 rounded-lg border ${
-                      active
-                        ? "bg-[#0644C7] border-[#0644C7]"
-                        : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
-                    }`}
-                  >
-                    <Text
-                      className={`text-sm font-medium ${
-                        active
-                          ? "text-white"
-                          : "text-gray-700 dark:text-gray-200"
-                      }`}
-                    >
-                      {loc}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </>
-        )}
-
         <View className="flex-row gap-3 mt-8">
           <Pressable
             onPress={() => {
               onStatus("all");
-              onLocation("All Locations");
             }}
             className="flex-1 items-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
           >

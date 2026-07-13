@@ -34,10 +34,7 @@ import {
   type CustomerDateRange,
   type TopCustomerRow,
 } from "../../services/customersService";
-import {
-  fetchLocations,
-  type LocationOption,
-} from "../../services/locationsService";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 
 const PRIMARY = "#0644C7";
 const CARD_SHADOW = {
@@ -155,35 +152,22 @@ const CustomersAnalytics = () => {
   const headerIcon = dark ? "#fff" : "#111";
 
   const user = getCurrentUser();
-  const isCompanyAdmin = user?.role === "company_admin";
+
+  // Scope to the global workspace location (company_admin); managers stay
+  // backend-scoped. Reactive so switching location refetches server-side.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
 
   const [dateRange, setDateRange] = useState<CustomerDateRange>("30d");
   const [customStart, setCustomStart] = useState<string | undefined>();
   const [customEnd, setCustomEnd] = useState<string | undefined>();
   const [showDateSheet, setShowDateSheet] = useState(false);
-  const [locationId, setLocationId] = useState<number | null>(null);
-  const [locations, setLocations] = useState<LocationOption[]>([]);
 
   const [data, setData] = useState<CustomerAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Company admins can filter by location (managers are backend-scoped).
-  useEffect(() => {
-    if (!isCompanyAdmin) return;
-    const token = getToken();
-    if (!token) return;
-    let active = true;
-    const controller = new AbortController();
-    fetchLocations(token, controller.signal)
-      .then((list) => active && setLocations(list))
-      .catch(() => {});
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [isCompanyAdmin]);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -206,7 +190,7 @@ const CustomersAnalytics = () => {
         dateRange,
         startDate: customStart,
         endDate: customEnd,
-        locationId: locationId ?? undefined,
+        locationId: activeLocationId,
       });
       setData(res);
     } catch (err) {
@@ -214,7 +198,7 @@ const CustomersAnalytics = () => {
     } finally {
       setLoading(false);
     }
-  }, [dateRange, customStart, customEnd, locationId, user?.id]);
+  }, [dateRange, customStart, customEnd, activeLocationId, user?.id]);
 
   useEffect(() => {
     load();
@@ -290,22 +274,6 @@ const CustomersAnalytics = () => {
                 onSelect={(v) => setDateRange(v as CustomerDateRange)}
               />
             </View>
-            {isCompanyAdmin && locations.length > 0 && (
-              <View className="flex-1">
-                <SheetSelect
-                  icon="map-pin"
-                  title="Location"
-                  value={locationId ?? "all"}
-                  options={[
-                    { label: "All Locations", value: "all" },
-                    ...locations.map((l) => ({ label: l.name, value: l.id })),
-                  ]}
-                  onSelect={(v) =>
-                    setLocationId(v === "all" ? null : Number(v))
-                  }
-                />
-              </View>
-            )}
           </View>
 
           {/* Custom range trigger */}

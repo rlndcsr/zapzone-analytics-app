@@ -28,6 +28,7 @@ import {
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import {
   AttractionsKpiSkeleton,
   AttractionsListSkeleton,
@@ -36,7 +37,7 @@ import {
   consumeAttractionsStale,
   useAttractions,
 } from "../../lib/hooks/useAttractions";
-import { getCurrentUser } from "../../lib/session";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import type {
   AttractionRow,
   AttractionStatus,
@@ -257,21 +258,22 @@ const Attractions = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const { attractions, loading, error, refetch } = useAttractions();
+  // Scope to the global workspace location (company_admin); managers stay
+  // backend-scoped. Reactive so switching location refetches server-side.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
 
-  // Company admins can switch locations; location managers are already scoped to
-  // their own location by the backend, so the selector is hidden for them
-  // (mirrors the web ManageAttractions page and the mobile Bookings screen).
-  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+  const { attractions, loading, error, refetch } = useAttractions({
+    locationId: activeLocationId,
+  });
 
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<AttractionFilterValues>(
     EMPTY_ATTRACTION_FILTERS,
   );
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showCreatedDateSheet, setShowCreatedDateSheet] = useState(false);
-  const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
     useState<AttractionRow | null>(null);
@@ -296,37 +298,15 @@ const Attractions = () => {
     }, [refetch]),
   );
 
-  // Attractions scoped to the selected location. This drives the KPI cards and
-  // is the base for the searchable list — mirroring the web, where the location
-  // selector re-scopes the whole dataset while status/category/search only
-  // filter the list below it.
-  const locationScoped = useMemo(
-    () =>
-      locationFilter === "all"
-        ? attractions
-        : attractions.filter((a) => a.locationId === locationFilter),
-    [attractions, locationFilter],
-  );
+  // The global workspace location already scopes the fetch server-side, so the
+  // loaded list is the location-scoped set for the KPIs and the list.
+  const locationScoped = attractions;
 
   // Category options derived from the (location-scoped) data — no extra call.
   const categories = useMemo(() => {
     const set = new Set(locationScoped.map((a) => a.category).filter(Boolean));
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [locationScoped]);
-
-  // Location options derived from the loaded attractions — avoids the heavy
-  // /api/locations endpoint (which OOM-crashes the app).
-  const locations = useMemo(() => {
-    const byId = new Map<number, string>();
-    for (const a of attractions) {
-      if (a.locationId != null && !byId.has(a.locationId)) {
-        byId.set(a.locationId, a.locationName || `Location ${a.locationId}`);
-      }
-    }
-    return [...byId.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((x, y) => x.name.localeCompare(y.name));
-  }, [attractions]);
 
   // KPI values — identical math to the web /attractions metrics, computed over
   // the location-scoped set so the cards react to the location filter.
@@ -410,7 +390,7 @@ const Attractions = () => {
   // never land on a now-empty page.
   useEffect(() => {
     setPage(1);
-  }, [search, filters, locationFilter, perPage]);
+  }, [search, filters, activeLocationId, perPage]);
 
   const activeFilterCount = countActiveAttractionFilters(filters);
 
@@ -431,11 +411,6 @@ const Attractions = () => {
     setTimeout(() => setShowFilterSheet(true), 280);
   }, []);
 
-  const locationLabel =
-    locationFilter === "all"
-      ? "All Locations"
-      : (locations.find((l) => l.id === locationFilter)?.name ??
-        "All Locations");
   const hasResults = filtered.length > 0;
 
   // Mirrors the web "More" action menu; these management actions arrive in a
@@ -482,6 +457,11 @@ const Attractions = () => {
         }
       >
         <View className="px-5 mt-5">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-5">
+            <LocationWorkspaceSelector />
+          </View>
+
           {/* Overview intro */}
           <View className="flex-row items-stretch gap-3 mb-5">
             {/* Space Schedule Card */}
@@ -550,22 +530,6 @@ const Attractions = () => {
               </View>
             </Pressable>
           </View>
-
-         
-          {/* Location selector — company-admin only; managers are scoped to
-              their own location by the backend. */}
-          {isCompanyAdmin && (
-            <FilterPill>
-              <PillSegment
-                label={locationLabel}
-                active={showLocationSheet}
-                onPress={() => setShowLocationSheet(true)}
-                renderIcon={(c) => (
-                  <Feather name="map-pin" size={15} color={c} />
-                )}
-              />
-            </FilterPill>
-          )}
 
           {/* Secondary "More" + primary "New Attraction" on one row. "More"
               stays subordinate (outlined, ~38% width); "New Attraction" is the
@@ -830,49 +794,6 @@ const Attractions = () => {
         onClose={closeCreatedDate}
         onApply={applyCreatedDate}
       />
-
-      {/* Location filter */}
-      <BottomSheet
-        visible={showLocationSheet}
-        onClose={() => setShowLocationSheet(false)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: "all" as const, name: "All Locations" }, ...locations].map(
-            (option) => {
-              const isSelected = locationFilter === option.id;
-              return (
-                <Pressable
-                  key={String(option.id)}
-                  onPress={() => {
-                    setLocationFilter(option.id);
-                    setShowLocationSheet(false);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-base font-medium flex-1 mr-2 ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {option.name}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
-        </ScrollView>
-      </BottomSheet>
 
       {/* More actions (matches the web action menu; wired in a future release) */}
       <BottomSheet

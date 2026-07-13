@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import "../global.css";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
+import { restoreActiveLocation } from "../lib/location/activeLocationStore";
 import { restoreSession } from "../lib/session";
 import { applyStoredTheme } from "../lib/theme";
 
@@ -23,11 +24,13 @@ export default function RootLayout() {
   const [fontsLoaded] = useFonts(montserratFonts);
 
   useEffect(() => {
-    // Restore the saved theme alongside the session so the app paints in the
-    // user's chosen mode from the first frame.
-    Promise.all([restoreSession(), applyStoredTheme()]).finally(() =>
-      setSessionRestored(true),
-    );
+    // Restore the saved theme + active location alongside the session so the
+    // app paints in the user's chosen mode and workspace from the first frame.
+    Promise.all([
+      restoreSession(),
+      applyStoredTheme(),
+      restoreActiveLocation(),
+    ]).finally(() => setSessionRestored(true));
   }, []);
 
   if (!sessionRestored || !fontsLoaded) {

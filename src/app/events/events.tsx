@@ -20,7 +20,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import {
   EMPTY_EVENT_FILTERS,
@@ -32,8 +31,9 @@ import {
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
-import { getCurrentUser } from "../../lib/session";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import type { EventRow, EventStatus } from "../../services/eventsService";
 
 const PRIMARY = "#0644C7";
@@ -255,17 +255,18 @@ const Events = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const { events, loading, error, refetch } = useEvents();
+  // Scope to the global workspace location (company_admin); managers stay
+  // backend-scoped. Reactive so switching location refetches server-side.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
 
-  // Company admins can switch locations; location managers are already scoped to
-  // their own location by the backend, so the selector is hidden for them
-  // (mirrors the web Events page and the mobile Bookings screen).
-  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+  const { events, loading, error, refetch } = useEvents({
+    locationId: activeLocationId,
+  });
 
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<EventFilterValues>(EMPTY_EVENT_FILTERS);
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  const [sheet, setSheet] = useState<null | "location">(null);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showDateSheet, setShowDateSheet] = useState(false);
   const [dateTarget, setDateTarget] = useState<EventDateTarget>("start");
@@ -291,32 +292,11 @@ const Events = () => {
     }, [refetch]),
   );
 
-  // Events scoped to the selected location. Drives the KPI cards and is the
-  // base for the searchable list — mirrors the web location selector.
-  const locationScoped = useMemo(
-    () =>
-      locationFilter === "all"
-        ? events
-        : events.filter((e) => e.locationId === locationFilter),
-    [events, locationFilter],
-  );
+  // The global workspace location already scopes the fetch server-side, so the
+  // loaded list is the location-scoped set for the KPIs and the list.
+  const locationScoped = events;
 
-  // Location options derived from the loaded events — avoids the heavy
-  // /api/locations endpoint (which OOM-crashes the app).
-  const locations = useMemo(() => {
-    const byId = new Map<number, string>();
-    for (const e of events) {
-      if (e.locationId != null && !byId.has(e.locationId)) {
-        byId.set(e.locationId, e.locationName || `Location ${e.locationId}`);
-      }
-    }
-    return [...byId.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((x, y) => x.name.localeCompare(y.name));
-  }, [events]);
-
-  // KPI values, computed over the location-scoped set so the cards react to
-  // the location filter.
+  // KPI values, computed over the location-scoped set.
   const kpis = useMemo(() => {
     const total = locationScoped.length;
     const active = locationScoped.filter((e) => e.status === "active").length;
@@ -400,7 +380,7 @@ const Events = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, filters, locationFilter, perPage]);
+  }, [search, filters, activeLocationId, perPage]);
 
   const exportCsv = useCallback(async () => {
     if (filtered.length === 0) {
@@ -498,11 +478,6 @@ const Events = () => {
     [dateTarget],
   );
 
-  const locationLabel =
-    locationFilter === "all"
-      ? "All Locations"
-      : (locations.find((l) => l.id === locationFilter)?.name ??
-        "All Locations");
   const hasResults = filtered.length > 0;
 
   return (
@@ -540,7 +515,12 @@ const Events = () => {
         }
       >
         <View className="px-5 mt-5">
-          <View className="flex-row items-center justify-between gap-3">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-5">
+            <LocationWorkspaceSelector />
+          </View>
+
+          <View className="flex-row items-stretch gap-3">
             {/* Event Purchases Card */}
             <Pressable
               onPress={() => router.push("/events/purchases")}
@@ -562,7 +542,7 @@ const Events = () => {
               <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
                 View all customer purchases
               </Text>
-              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
                 <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
                   View All
                 </Text>
@@ -591,7 +571,7 @@ const Events = () => {
               <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
                 Create walk-in ticket purchase
               </Text>
-              <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
                 <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
                   View All
                 </Text>
@@ -600,29 +580,10 @@ const Events = () => {
             </Pressable>
           </View>
 
-          {/* Location selector — company-admin only; managers are scoped to
-              their own location by the backend. */}
-          {isCompanyAdmin && (
-            <View className="mt-5">
-              <FilterPill>
-                <PillSegment
-                  label={locationLabel}
-                  active={sheet === "location"}
-                  onPress={() => setSheet("location")}
-                  renderIcon={(c) => (
-                    <Feather name="map-pin" size={15} color={c} />
-                  )}
-                />
-              </FilterPill>
-            </View>
-          )}
-
           {/* Secondary "Export CSV" + primary "Create New Event" on one row
               (~50/50). Export stays outlined/secondary; Create is the primary
               filled CTA. */}
-          <View
-            className={`flex-row items-center gap-3 mb-5 ${isCompanyAdmin ? "" : "mt-5"}`}
-          >
+          <View className="flex-row items-center gap-3 mb-5 mt-5">
             <Pressable
               onPress={exportCsv}
               className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
@@ -893,48 +854,6 @@ const Events = () => {
         onApply={applyDateRange}
       />
 
-      {/* Location filter */}
-      <BottomSheet
-        visible={sheet === "location"}
-        onClose={() => setSheet(null)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: "all" as const, name: "All Locations" }, ...locations].map(
-            (option) => {
-              const isSelected = locationFilter === option.id;
-              return (
-                <Pressable
-                  key={String(option.id)}
-                  onPress={() => {
-                    setLocationFilter(option.id);
-                    setSheet(null);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-base font-medium flex-1 mr-2 ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {option.name}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
-        </ScrollView>
-      </BottomSheet>
     </View>
   );
 };

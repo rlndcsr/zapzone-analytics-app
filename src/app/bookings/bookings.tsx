@@ -26,10 +26,12 @@ import { BookingsMoreSheet } from "../../components/ui/BookingsMoreSheet";
 import { BookingsReportSheet } from "../../components/ui/BookingsReportSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkeleton";
 import { consumeBookingsStale, useBookings } from "../../lib/hooks/useBookings";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   exportBookings,
@@ -392,15 +394,20 @@ const Bookings = () => {
   // so those flows run unscoped / all-locations for them, like the backend allows.
   const scopeLocationId = currentUser?.location_id ?? null;
 
-  const { bookings, loading, error, refetch } = useBookings();
+  // Scope to the global workspace location (company_admin); "all"/managers stay
+  // company-wide / backend-scoped. Reactive so switching location refetches.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
+
+  const { bookings, loading, error, refetch } = useBookings({
+    locationId: activeLocationId,
+  });
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
-  const [locationFilter, setLocationFilter] = useState<string>("all");
-  const [sheet, setSheet] = useState<null | "status" | "date" | "location">(
-    null,
-  );
+  const [sheet, setSheet] = useState<null | "status" | "date">(null);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -518,26 +525,9 @@ const Bookings = () => {
     }, [refetch]),
   );
 
-  // Location options derived from the loaded bookings — avoids the heavy
-  // /api/locations endpoint (which OOM-crashes the app). Company admins load
-  // every location's bookings; managers are scoped to their own by the backend.
-  const locations = useMemo(() => {
-    const names = new Set<string>();
-    for (const b of bookings) {
-      if (b.locationName) names.add(b.locationName);
-    }
-    return [...names].sort((a, b) => a.localeCompare(b));
-  }, [bookings]);
-
-  // Bookings scoped to the selected location. Drives the KPI cards and is the
-  // base for the searchable list — mirrors the web location selector.
-  const locationScoped = useMemo(
-    () =>
-      locationFilter === "all"
-        ? bookings
-        : bookings.filter((b) => b.locationName === locationFilter),
-    [bookings, locationFilter],
-  );
+  // The global workspace location already scopes the fetch server-side, so the
+  // loaded list is the location-scoped set that drives the KPIs and the list.
+  const locationScoped = bookings;
 
   // KPI values, computed client-side over the location-scoped set — mirroring
   // the web's `metrics` array exactly (Bookings.tsx:409-445). The web has no
@@ -562,14 +552,15 @@ const Bookings = () => {
     };
   }, [locationScoped]);
 
-  // Deleted bookings, scoped to the selected location the same way active ones
-  // are. The list uses this when "View Deleted" is on; KPIs always use active.
+  // Deleted bookings, scoped to the active workspace location the same way
+  // active ones are. The list uses this when "View Deleted" is on; KPIs always
+  // use active. Trashed items aren't server-scoped, so filter by name here.
   const deletedScoped = useMemo(
     () =>
-      locationFilter === "all"
+      activeLocation.id === "all"
         ? deletedItems
-        : deletedItems.filter((b) => b.locationName === locationFilter),
-    [deletedItems, locationFilter],
+        : deletedItems.filter((b) => b.locationName === activeLocation.name),
+    [deletedItems, activeLocation],
   );
   const listBase = showDeleted ? deletedScoped : locationScoped;
   const listLoading = showDeleted ? deletedLoading : loading;
@@ -603,15 +594,13 @@ const Bookings = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, dateFilter, locationFilter, perPage, showDeleted]);
+  }, [search, statusFilter, dateFilter, activeLocationId, perPage, showDeleted]);
 
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ??
     "All Statuses";
   const dateLabel =
     DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
-  const locationLabel =
-    locationFilter === "all" ? "All Locations" : locationFilter;
   const hasResults = filtered.length > 0;
 
   return (
@@ -657,6 +646,11 @@ const Bookings = () => {
         }
       >
         <View className="px-5 mt-5">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-5">
+            <LocationWorkspaceSelector />
+          </View>
+
           <View className="flex-row items-stretch gap-3 mb-5">
             {/* Space Schedule Card */}
             <Pressable
@@ -724,21 +718,6 @@ const Bookings = () => {
               </View>
             </Pressable>
           </View>
-
-          {/* Location selector — company-admin only; managers are scoped to
-              their own location by the backend. */}
-          {isCompanyAdmin && (
-            <FilterPill>
-              <PillSegment
-                label={locationLabel}
-                active={sheet === "location"}
-                onPress={() => setSheet("location")}
-                renderIcon={(c) => (
-                  <Feather name="map-pin" size={15} color={c} />
-                )}
-              />
-            </FilterPill>
-          )}
 
           {/* Secondary "More" + primary "Create New Booking" on one row, equal
               width. "More" stays outlined/secondary; "Create New Booking" is
@@ -1083,47 +1062,6 @@ const Bookings = () => {
                   }`}
                 >
                   {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Location filter */}
-      <BottomSheet
-        visible={sheet === "location"}
-        onClose={() => setSheet(null)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {["all", ...locations].map((name) => {
-            const isSelected = locationFilter === name;
-            return (
-              <Pressable
-                key={name}
-                onPress={() => {
-                  setLocationFilter(name);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {name === "all" ? "All Locations" : name}
                 </Text>
                 {isSelected && (
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">

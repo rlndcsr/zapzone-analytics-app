@@ -27,7 +27,9 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { consumePackagesStale, usePackages } from "../../lib/hooks/usePackages";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   togglePackageStatus,
@@ -83,6 +85,10 @@ const Packages = () => {
 
   const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
 
+  // Location comes from the global workspace selector (shown at the top of the
+  // screen), so the list follows the active location without a second control.
+  const activeLocation = useActiveLocation();
+
   const [showMoreSheet, setShowMoreSheet] = useState(false);
 
   const { packages, loading, error, refetch, applyStatus } = usePackages();
@@ -98,7 +104,6 @@ const Packages = () => {
   // Package list state
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
-  const [location, setLocation] = useState("All Locations");
   const [sortKey, setSortKey] = useState<SortKey>("Name");
   const [sortAsc, setSortAsc] = useState(true);
   const [showAll, setShowAll] = useState(false);
@@ -106,7 +111,6 @@ const Packages = () => {
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [showSortSheet, setShowSortSheet] = useState(false);
 
   // Package whose per-card actions sheet (View / Edit / Duplicate / Delete) is open.
@@ -163,16 +167,6 @@ const Packages = () => {
     ],
     [packages],
   );
-  const locationOptions = useMemo(
-    () => [
-      "All Locations",
-      ...Array.from(
-        new Set(packages.map((p) => p.locationName).filter(Boolean)),
-      ).sort(),
-    ],
-    [packages],
-  );
-
   // {id,name} locations derived from the loaded list — feeds the Duplicate
   // destination picker without calling the heavy /api/locations endpoint.
   const locationObjOptions = useMemo(() => {
@@ -197,7 +191,7 @@ const Packages = () => {
       const matchesCategory =
         category === "All Categories" || p.category === category;
       const matchesLocation =
-        location === "All Locations" || p.locationName === location;
+        activeLocation.id === "all" || p.locationName === activeLocation.name;
       return matchesSearch && matchesCategory && matchesLocation;
     });
 
@@ -224,7 +218,7 @@ const Packages = () => {
     });
 
     return result;
-  }, [packages, search, category, location, sortKey, sortAsc]);
+  }, [packages, search, category, activeLocation, sortKey, sortAsc]);
 
   const visible = showAll ? filtered : filtered.slice(0, DEFAULT_VISIBLE);
   const allSelected =
@@ -304,6 +298,11 @@ const Packages = () => {
         }
       >
         <View className="px-5 mt-5">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-5">
+            <LocationWorkspaceSelector />
+          </View>
+
           <View className="flex-row items-stretch gap-3 mb-5">
             {/* Space Schedule Card */}
             <Pressable
@@ -465,9 +464,9 @@ const Packages = () => {
             )}
           </View>
 
-          {/* Controls — full-width segmented pill (More · Location · Sort) with
-              a compact sort-direction toggle. Location selector is company-admin
-              only; hidden for other roles (backend-scoped). */}
+          {/* Controls — full-width segmented pill (More · Sort) with a compact
+              sort-direction toggle. Location is set via the global workspace
+              selector at the top of the screen. */}
           <View className="mt-3">
             <FilterPill>
               <PillSegment
@@ -478,14 +477,6 @@ const Packages = () => {
                   <Feather name="more-horizontal" size={15} color={c} />
                 )}
               />
-              {isCompanyAdmin && (
-                <PillSegment
-                  label={location}
-                  active={showLocationSheet}
-                  onPress={() => setShowLocationSheet(true)}
-                  renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
-                />
-              )}
               <PillSegment
                 label={`Sort: ${sortKey}`}
                 active={showSortSheet}
@@ -792,44 +783,6 @@ const Packages = () => {
           </Text>
         </ScrollView>
       </BottomSheet>
-
-      {/* Location picker (company-admin only) */}
-      {isCompanyAdmin && (
-        <BottomSheet
-          visible={showLocationSheet}
-          onClose={() => setShowLocationSheet(false)}
-          title="Location"
-        >
-          <View className="px-4 pb-6">
-            {locationOptions.map((loc) => {
-              const isActive = location === loc;
-              return (
-                <Pressable
-                  key={loc}
-                  onPress={() => {
-                    setLocation(loc);
-                    setShowLocationSheet(false);
-                  }}
-                  className="flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1"
-                >
-                  <Text
-                    className={`text-base ${
-                      isActive
-                        ? "font-semibold text-[#0644C7]"
-                        : "font-medium text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    {loc}
-                  </Text>
-                  {isActive && (
-                    <Feather name="check" size={18} color={PRIMARY} />
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-        </BottomSheet>
-      )}
 
       {/* Sort picker */}
       <BottomSheet

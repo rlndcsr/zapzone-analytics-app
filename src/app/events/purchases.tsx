@@ -20,7 +20,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import {
   EMPTY_EVENT_PURCHASE_FILTERS,
@@ -36,7 +35,7 @@ import {
   consumeEventPurchasesStale,
   useEventPurchases,
 } from "../../lib/hooks/useEventPurchases";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchTrashedEventPurchases,
@@ -326,20 +325,20 @@ const EventPurchases = () => {
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const user = getCurrentUser();
-  const isCompanyAdmin = user?.role === "company_admin";
 
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  // The location drives the fetch (server-side), exactly like the web — the
-  // purchase's own location_id is unreliable, so we can't filter client-side.
+  // The global workspace location drives the fetch (server-side), exactly like
+  // the web — the purchase's own location_id is unreliable for client filtering.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
   const { purchases, loading, error, refetch } = useEventPurchases({
-    locationId: locationFilter === "all" ? undefined : locationFilter,
+    locationId: activeLocationId,
   });
 
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<EventPurchaseFilterValues>(
     EMPTY_EVENT_PURCHASE_FILTERS,
   );
-  const [sheet, setSheet] = useState<null | "location">(null);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showDateSheet, setShowDateSheet] = useState(false);
   const [dateTarget, setDateTarget] = useState<EventPurchaseDateTarget>("created");
@@ -354,16 +353,6 @@ const EventPurchases = () => {
   const [deletedError, setDeletedError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  // Company admins can scope by location; options come from the dashboard
-  // locationStats (the /api/locations endpoint is too heavy for mobile).
-  const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
-  const locationOptions = useMemo(() => {
-    if (!metrics?.locationStats) return [];
-    return Object.entries(metrics.locationStats)
-      .map(([id, s]) => ({ id: Number(id), name: s.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics]);
-
   const loadDeleted = useCallback(async () => {
     const token = getToken();
     if (!token || !user?.id) return;
@@ -373,7 +362,7 @@ const EventPurchases = () => {
       const data = await fetchTrashedEventPurchases({
         token,
         userId: user.id,
-        locationId: locationFilter === "all" ? undefined : locationFilter,
+        locationId: activeLocationId,
       });
       setDeletedItems(data);
     } catch (err) {
@@ -383,7 +372,7 @@ const EventPurchases = () => {
     } finally {
       setDeletedLoading(false);
     }
-  }, [user?.id, locationFilter]);
+  }, [user?.id, activeLocationId]);
 
   // Load / reload the trashed list whenever it's shown or the location changes.
   useEffect(() => {
@@ -502,7 +491,7 @@ const EventPurchases = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, filters, locationFilter, showDeleted, perPage]);
+  }, [search, filters, activeLocationId, showDeleted, perPage]);
 
   const exportCsv = useCallback(async () => {
     if (filtered.length === 0) {
@@ -592,11 +581,6 @@ const EventPurchases = () => {
     [dateTarget],
   );
 
-  const locationLabel =
-    locationFilter === "all"
-      ? "All Locations"
-      : (locationOptions.find((l) => l.id === locationFilter)?.name ??
-        "All Locations");
   const hasResults = filtered.length > 0;
 
   return (
@@ -645,14 +629,6 @@ const EventPurchases = () => {
           {/* Header controls — full-width segmented pill (Location · View
               Deleted · Export CSV), mirrors the web header controls. */}
           <FilterPill>
-            {isCompanyAdmin && (
-              <PillSegment
-                label={locationLabel}
-                active={sheet === "location"}
-                onPress={() => setSheet("location")}
-                renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
-              />
-            )}
             <PillSegment
               label={showDeleted ? "View Active" : "View Deleted"}
               active={showDeleted}
@@ -939,49 +915,6 @@ const EventPurchases = () => {
         onClose={closeDateRange}
         onApply={applyDateRange}
       />
-
-      {/* Location filter (company admins) */}
-      <BottomSheet
-        visible={sheet === "location"}
-        onClose={() => setSheet(null)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: "all" as const, name: "All Locations" }, ...locationOptions].map(
-            (option) => {
-              const isSelected = locationFilter === option.id;
-              return (
-                <Pressable
-                  key={String(option.id)}
-                  onPress={() => {
-                    setLocationFilter(option.id);
-                    setSheet(null);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-base font-medium flex-1 mr-2 ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {option.name}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
-        </ScrollView>
-      </BottomSheet>
 
     </View>
   );

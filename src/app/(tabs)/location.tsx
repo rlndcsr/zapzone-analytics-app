@@ -18,6 +18,10 @@ import {
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import {
+  setActiveLocation,
+  useActiveLocation,
+} from "../../lib/location/activeLocationStore";
+import {
   MapPin,
   ChevronDown,
   Calendar,
@@ -253,9 +257,10 @@ const Location = () => {
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
   const [showDateDropdown, setShowDateDropdown] = useState(false);
-  const [selectedLocation, setSelectedLocation] = useState<number | "all">(
-    "all",
-  );
+  // Location comes from the global workspace store so this tab stays in sync
+  // with the header selector and every other module.
+  const activeLocation = useActiveLocation();
+  const selectedLocation = activeLocation.id;
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
@@ -347,7 +352,12 @@ const Location = () => {
     dateFilterOptions.find((opt) => opt.value === dateFilter)?.label || "Today";
 
   const handleSelectLocation = (id: number | "all") => {
-    setSelectedLocation(id);
+    const name =
+      id === "all"
+        ? "All Locations"
+        : (locationOptions.find((loc) => loc.id === id)?.name ??
+          "All Locations");
+    setActiveLocation({ id, name });
     setShowLocationDropdown(false);
   };
 

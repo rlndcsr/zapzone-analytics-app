@@ -29,7 +29,7 @@ import {
   consumeAttractionPurchasesStale,
   useAttractionPurchases,
 } from "../../lib/hooks/useAttractionPurchases";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchTrashedAttractionPurchases,
@@ -299,22 +299,23 @@ const ManagePurchases = () => {
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const user = getCurrentUser();
-  const isCompanyAdmin = user?.role === "company_admin";
 
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  // The location drives the fetch (server-side), exactly like the web — the
-  // purchase's own location_id is unreliable, so we can't filter client-side.
+  // The global workspace location drives the fetch (server-side), exactly like
+  // the web — the purchase's own location_id is unreliable for client filtering.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
   const { purchases, loading, error, refetch } = useAttractionPurchases({
-    locationId: locationFilter === "all" ? undefined : locationFilter,
+    locationId: activeLocationId,
   });
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState<DateRange>("all");
-  const [sheet, setSheet] = useState<
-    null | "status" | "payment" | "date" | "location"
-  >(null);
+  const [sheet, setSheet] = useState<null | "status" | "payment" | "date">(
+    null,
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -326,16 +327,6 @@ const ManagePurchases = () => {
   const [deletedError, setDeletedError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  // Company admins can scope by location; options come from the dashboard
-  // locationStats (the /api/locations endpoint is too heavy for mobile).
-  const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
-  const locationOptions = useMemo(() => {
-    if (!metrics?.locationStats) return [];
-    return Object.entries(metrics.locationStats)
-      .map(([id, s]) => ({ id: Number(id), name: s.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics]);
-
   const loadDeleted = useCallback(async () => {
     const token = getToken();
     if (!token || !user?.id) return;
@@ -345,7 +336,7 @@ const ManagePurchases = () => {
       const data = await fetchTrashedAttractionPurchases({
         token,
         userId: user.id,
-        locationId: locationFilter === "all" ? undefined : locationFilter,
+        locationId: activeLocationId,
       });
       setDeletedItems(data);
     } catch (err) {
@@ -355,7 +346,7 @@ const ManagePurchases = () => {
     } finally {
       setDeletedLoading(false);
     }
-  }, [user?.id, locationFilter]);
+  }, [user?.id, activeLocationId]);
 
   // Load / reload the trashed list whenever it's shown or the location changes.
   useEffect(() => {
@@ -437,7 +428,7 @@ const ManagePurchases = () => {
     statusFilter,
     paymentFilter,
     dateFilter,
-    locationFilter,
+    activeLocationId,
     showDeleted,
     perPage,
   ]);
@@ -498,11 +489,6 @@ const ManagePurchases = () => {
   const paymentLabel =
     PAYMENT_OPTIONS.find((o) => o.value === paymentFilter)?.label ?? "All Methods";
   const dateLabel = DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Time";
-  const locationLabel =
-    locationFilter === "all"
-      ? "All Locations"
-      : (locationOptions.find((l) => l.id === locationFilter)?.name ??
-        "All Locations");
   const hasResults = filtered.length > 0;
 
   return (
@@ -538,22 +524,6 @@ const ManagePurchases = () => {
         }
       >
         <View className="px-5 mt-5">
-
-          
-       
-
-          {/* Location selector — company-admin only; managers are scoped to
-              their own location by the backend. */}
-          {isCompanyAdmin && (
-            <FilterPill>
-              <PillSegment
-                label={locationLabel}
-                active={sheet === "location"}
-                onPress={() => setSheet("location")}
-                renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
-              />
-            </FilterPill>
-          )}
 
           {/* Secondary "Export CSV" + primary "New Purchase" on one row (~50/50)
               to save vertical space. Export stays outlined/secondary; New
@@ -947,50 +917,6 @@ const ManagePurchases = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Location filter (company admins) */}
-      <BottomSheet
-        visible={sheet === "location"}
-        onClose={() => setSheet(null)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: "all" as const, name: "All Locations" }, ...locationOptions].map(
-            (option) => {
-              const isSelected = locationFilter === option.id;
-              return (
-                <Pressable
-                  key={String(option.id)}
-                  onPress={() => {
-                    setLocationFilter(option.id);
-                    setSheet(null);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-base font-medium flex-1 mr-2 ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {option.name}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
-        </ScrollView>
-      </BottomSheet>
-
-  
     </View>
   );
 };

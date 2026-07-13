@@ -28,9 +28,15 @@ function deriveCounts(rows: MembershipRow[], total: number): MembershipCounts {
   };
 }
 
-type Cache = { fetchedAt: number; rows: MembershipRow[]; counts: MembershipCounts };
+type Cache = {
+  key: string;
+  fetchedAt: number;
+  rows: MembershipRow[];
+  counts: MembershipCounts;
+};
 let cache: Cache | null = null;
 const CACHE_TTL_MS = 2 * 60 * 1000;
+const cacheKey = (locationId?: number) => String(locationId ?? "all");
 
 /**
  * Loads the membership list and status counts together. The list is fetched
@@ -38,18 +44,26 @@ const CACHE_TTL_MS = 2 * 60 * 1000;
  * summary so they aren't capped by pagination. Returns `refetch` for pull-to-
  * refresh and after mutations.
  */
-export function useMemberships() {
-  const cacheFresh = !!cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+export function useMemberships({ locationId }: { locationId?: number } = {}) {
+  const key = cacheKey(locationId);
+  const cacheFresh =
+    !!cache && cache.key === key && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
 
-  const [memberships, setMemberships] = useState<MembershipRow[]>(cache?.rows ?? []);
-  const [counts, setCounts] = useState<MembershipCounts>(cache?.counts ?? EMPTY_COUNTS);
+  const [memberships, setMemberships] = useState<MembershipRow[]>(
+    cache && cache.key === key ? cache.rows : [],
+  );
+  const [counts, setCounts] = useState<MembershipCounts>(
+    cache && cache.key === key ? cache.counts : EMPTY_COUNTS,
+  );
   const [loading, setLoading] = useState(!cacheFresh);
   const [error, setError] = useState<string | null>(null);
 
   const requestIdRef = useRef(0);
 
   const sync = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    const fresh = !!cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+    const k = cacheKey(locationId);
+    const fresh =
+      !!cache && cache.key === k && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
     if (fresh && !force) {
       setMemberships(cache!.rows);
       setCounts(cache!.counts);
@@ -70,7 +84,7 @@ export function useMemberships() {
       return;
     }
 
-    if (cache && !force) {
+    if (cache && cache.key === k && !force) {
       setMemberships(cache.rows);
       setCounts(cache.counts);
       setLoading(false);
@@ -82,8 +96,8 @@ export function useMemberships() {
       // The list is required; the summary is best-effort (fall back to derived
       // counts if it fails) so a reports permission gap can't blank the screen.
       const [list, summary] = await Promise.all([
-        fetchMemberships({ token }),
-        fetchMembershipSummary({ token }).catch(() => null),
+        fetchMemberships({ token, filters: { locationId } }),
+        fetchMembershipSummary({ token, locationId }).catch(() => null),
       ]);
 
       const nextCounts: MembershipCounts = summary
@@ -95,7 +109,7 @@ export function useMemberships() {
           }
         : deriveCounts(list.rows, list.total);
 
-      cache = { fetchedAt: Date.now(), rows: list.rows, counts: nextCounts };
+      cache = { key: k, fetchedAt: Date.now(), rows: list.rows, counts: nextCounts };
       if (isCurrent()) {
         setMemberships(list.rows);
         setCounts(nextCounts);
@@ -113,7 +127,7 @@ export function useMemberships() {
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, []);
+  }, [locationId]);
 
   useEffect(() => {
     sync();

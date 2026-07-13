@@ -16,9 +16,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { KpiCard } from "../../components/ui/KpiCard";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
 import { useActivityLogs, useActivityStats } from "../../lib/hooks/useActivityLogs";
-import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   CATEGORY_TONE,
@@ -618,7 +619,6 @@ const ActivityLogs = () => {
   const [resourceTypeFilter, setResourceTypeFilter] = useState("all");
   const [attendantFilter, setAttendantFilter] = useState("all");
   const [dateRange, setDateRange] = useState("all");
-  const [locationFilter, setLocationFilter] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sheet, setSheet] = useState<
@@ -631,7 +631,13 @@ const ActivityLogs = () => {
   const [selected, setSelected] = useState<ActivityLogEntry | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  const { locations } = useLocationOptions();
+  // Location comes from the global workspace selector (shown below the header),
+  // so Activity Log follows the active location like every other module.
+  const globalLocation = useActiveLocation();
+  const activeLocationId =
+    isCompanyAdmin && globalLocation.id !== "all"
+      ? globalLocation.id
+      : undefined;
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -645,13 +651,10 @@ const ActivityLogs = () => {
     resourceTypeFilter,
     attendantFilter,
     dateRange,
-    locationFilter,
+    activeLocationId,
     debouncedSearch,
     perPage,
   ]);
-
-  const activeLocationId =
-    isCompanyAdmin && locationFilter != null ? locationFilter : undefined;
 
   const dateFilter = useMemo(() => dateRangeToFilter(dateRange), [dateRange]);
 
@@ -843,62 +846,11 @@ const ActivityLogs = () => {
             </Text>
           </View>
 
-          {/* Location filter (company admin) — below the header, above the KPIs */}
-          {isCompanyAdmin && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              className="mb-5 -mx-5 px-5"
-              contentContainerStyle={{ gap: 8 }}
-            >
-              <Pressable
-                onPress={() => setLocationFilter(null)}
-                className={`flex-row items-center gap-1.5 px-4 py-2 rounded-lg ${
-                  locationFilter == null
-                    ? "bg-[#0644C7]"
-                    : "bg-gray-100 dark:bg-neutral-800"
-                }`}
-              >
-                <Feather
-                  name="map-pin"
-                  size={14}
-                  color={locationFilter == null ? "#FFFFFF" : "#6B7280"}
-                />
-                <Text
-                  className={`text-sm font-medium ${
-                    locationFilter == null
-                      ? "text-white"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  All Locations
-                </Text>
-              </Pressable>
-              {locations.map((l) => {
-                const active = locationFilter === l.id;
-                return (
-                  <Pressable
-                    key={l.id}
-                    onPress={() => setLocationFilter(l.id)}
-                    className={`px-4 py-2 rounded-lg ${
-                      active ? "bg-[#0644C7]" : "bg-gray-100 dark:bg-neutral-800"
-                    }`}
-                  >
-                    <Text
-                      className={`text-sm font-medium ${
-                        active
-                          ? "text-white"
-                          : "text-gray-700 dark:text-gray-200"
-                      }`}
-                      numberOfLines={1}
-                    >
-                      {l.name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          )}
+          {/* Global workspace location selector (company-admin only) — below the
+              header, above the KPIs. Displays + switches the active location. */}
+          <View className="mb-5">
+            <LocationWorkspaceSelector />
+          </View>
 
           {/* Error state */}
           {!loading && error && (

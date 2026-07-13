@@ -27,6 +27,7 @@ import {
   TextField,
 } from "../../components/ui/FormControls";
 import { KpiCard } from "../../components/ui/KpiCard";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
@@ -525,7 +526,6 @@ const ManageAccounts = () => {
     | "view"
     | "form"
     | "invite"
-    | "locations"
   >(null);
   const [selected, setSelected] = useState<StaffUser | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
@@ -1101,6 +1101,11 @@ const ManageAccounts = () => {
             </Text>
           </View>
 
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-5">
+            <LocationWorkspaceSelector />
+          </View>
+
           {/* Sub-navigation */}
           <View className="flex-row gap-3 mb-3">
             <Pressable
@@ -1183,19 +1188,6 @@ const ManageAccounts = () => {
                 </Text>
               </Pressable>
             </View>
-          )}
-
-          {/* Locations (company admin) */}
-          {isCompanyAdmin && (
-            <Pressable
-              onPress={() => setSheet("locations")}
-              className="flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
-            >
-              <Feather name="map-pin" size={16} color={PRIMARY} />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                Locations
-              </Text>
-            </Pressable>
           )}
 
           {/* Error state */}
@@ -1525,48 +1517,6 @@ const ManageAccounts = () => {
           setSheet("more");
         }}
       />
-
-      {/* Locations view (company admin) */}
-      <BottomSheet
-        visible={sheet === "locations"}
-        onClose={() => setSheet(null)}
-        title="Locations"
-      >
-        <ScrollView className="px-5 pb-8" showsVerticalScrollIndicator={false}>
-          {locations.length === 0 ? (
-            <Text className="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">
-              No locations found.
-            </Text>
-          ) : (
-            locations.map((l) => (
-              <View
-                key={l.id}
-                className="flex-row items-center gap-3 py-3 border-b border-gray-100 dark:border-neutral-800"
-              >
-                <View className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/20 items-center justify-center">
-                  <Feather name="map-pin" size={16} color={PRIMARY} />
-                </View>
-                <View className="flex-1">
-                  <Text
-                    className="text-sm font-semibold text-gray-900 dark:text-white"
-                    numberOfLines={1}
-                  >
-                    {l.name}
-                  </Text>
-                  {!!l.address && (
-                    <Text
-                      className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-                      numberOfLines={1}
-                    >
-                      {l.address}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            ))
-          )}
-        </ScrollView>
-      </BottomSheet>
 
       {/* Actions sheet */}
       <BottomSheet

@@ -33,6 +33,7 @@ import {
   useWaivers,
   useWaiverStats,
 } from "../../lib/hooks/useWaivers";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
 import { getCurrentUser } from "../../lib/session";
 import {
@@ -396,6 +397,11 @@ const Waivers = () => {
   const [statsNonce, setStatsNonce] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  // Global workspace location (company_admin). Waivers has no backend location
+  // field, so — as before — location is applied client-side over the current
+  // page, now sourced from the shared store instead of a per-screen filter.
+  const activeLocation = useActiveLocation();
+
   // Auto-open a waiver's detail sheet when navigated here from a
   // notification (e.g. /waivers/waivers?openId=123).
   const { openId } = useLocalSearchParams<{ openId?: string }>();
@@ -413,7 +419,6 @@ const Waivers = () => {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [marketingFilter, setMarketingFilter] = useState<MarketingFilter>("all");
   const [templateFilter, setTemplateFilter] = useState<string>("all");
-  const [locationFilter, setLocationFilter] = useState<string>("all");
   const [cols, setCols] = useState<WCols>(DEFAULT_WCOLS);
   const [exporting, setExporting] = useState(false);
   const toggleCol = (key: WColKey) =>
@@ -493,41 +498,31 @@ const Waivers = () => {
       ...Array.from(set.keys()).map((t) => ({ label: t, value: t })),
     ];
   }, [waivers]);
-  const locationOptions = useMemo(() => {
-    const set = new Map<string, string>();
-    waivers.forEach((w) => {
-      if (w.locationName) set.set(w.locationName, w.locationName);
-    });
-    return [
-      { label: "Any location", value: "all" },
-      ...Array.from(set.keys()).map((l) => ({ label: l, value: l })),
-    ];
-  }, [waivers]);
-
-  // Apply the client-side Template / Location filters over the fetched page.
+  // Apply the client-side Template filter + the global location over the page.
   const displayed = useMemo(
     () =>
       waivers.filter((w) => {
         if (templateFilter !== "all" && w.templateTitle !== templateFilter)
           return false;
-        if (locationFilter !== "all" && w.locationName !== locationFilter)
+        if (
+          activeLocation.id !== "all" &&
+          w.locationName !== activeLocation.name
+        )
           return false;
         return true;
       }),
-    [waivers, templateFilter, locationFilter],
+    [waivers, templateFilter, activeLocation],
   );
 
   const filtersActive =
     sourceFilter !== "all" ||
     marketingFilter !== "all" ||
-    templateFilter !== "all" ||
-    locationFilter !== "all";
+    templateFilter !== "all";
 
   const clearFilters = () => {
     setSourceFilter("all");
     setMarketingFilter("all");
     setTemplateFilter("all");
-    setLocationFilter("all");
   };
 
   const exportCsv = useCallback(async () => {
@@ -776,12 +771,6 @@ const Waivers = () => {
                 options={templateOptions}
                 value={templateFilter}
                 onChange={setTemplateFilter}
-              />
-              <ChipRow
-                label="Location"
-                options={locationOptions}
-                value={locationFilter}
-                onChange={setLocationFilter}
               />
               {filtersActive && (
                 <Pressable onPress={clearFilters} className="self-end mt-1">
