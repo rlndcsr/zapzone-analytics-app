@@ -189,7 +189,7 @@ export function LoginForm() {
         accessibilityRole="button"
         accessibilityState={{ disabled: !canSubmit || submitting }}
         android_ripple={{ color: "#1E3A8A" }}
-        className={`h-14 flex-row items-center justify-center mb-10 rounded-2xl active:opacity-90 ${
+        className={`h-14 flex-row items-center justify-center rounded-2xl active:opacity-90 ${
           !canSubmit || submitting ? "opacity-60" : ""
         }`}
         style={{ backgroundColor: LOGIN_BLUE }}
@@ -200,23 +200,6 @@ export function LoginForm() {
           <Text className="text-base font-semibold text-white">Login</Text>
         )}
       </Pressable>
-
-      {/* Terms & Conditions */}
-      <View className="mt-7">
-        <Text className="text-sm text-gray-600 dark:text-gray-300">
-          By selecting Agree and continue below,
-        </Text>
-        <Text className="text-sm text-gray-600 dark:text-gray-300">
-          I agree to{" "}
-          <Text
-            className="font-medium italic underline"
-            style={{ color: LOGIN_BLUE }}
-            onPress={() => console.log("Terms pressed")}
-          >
-            Terms and Condition and Privacy Policy
-          </Text>
-        </Text>
-      </View>
     </View>
   );
 }

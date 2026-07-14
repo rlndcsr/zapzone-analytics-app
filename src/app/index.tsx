@@ -3,13 +3,16 @@ import { Redirect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
-  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from "react-native";
+import Animated, {
+  useAnimatedKeyboard,
+  useAnimatedStyle,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoginForm } from "../components/auth/LoginForm";
@@ -22,6 +25,17 @@ const LOGIN_BLUE = "#2563EB";
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
+
+  // Keyboard-follow: shrink the blue header 1:1 with the keyboard height (down to
+  // a compact floor that keeps the logo visible) so the white card + form glide
+  // up in lockstep with the keyboard, instead of being covered. Driven by
+  // useAnimatedKeyboard on the UI thread → smooth, no jump, no big empty space.
+  const keyboard = useAnimatedKeyboard();
+  const RESTING_HEADER_H = height * 0.42;
+  const COMPACT_HEADER_H = Math.max(height * 0.22, insets.top + 96);
+  const headerAnimatedStyle = useAnimatedStyle(() => ({
+    height: Math.max(RESTING_HEADER_H - keyboard.height.value, COMPACT_HEADER_H),
+  }));
 
   // Show a subtle notice when we arrived here because the session expired or was
   // rejected (401) — silent for a normal sign-in or intentional sign-out.
@@ -45,11 +59,12 @@ export default function HomeScreen() {
     <View className="flex-1" style={{ backgroundColor: "#ffffff" }}>
       <StatusBar style="light" />
 
-      {/* "padding" on both platforms is JS-only (no native window resize), so it
-          works in Expo Go and dev builds, and on Android edge-to-edge where the
-          default resize mode no longer pushes content above the keyboard. */}
-      <KeyboardAvoidingView className="flex-1" behavior="padding">
-        <ScrollView
+      {/* Keyboard handling: rather than padding the whole view (which just forces
+          scrolling and leaves the form under the keyboard), we shrink the blue
+          header as the keyboard rises (headerAnimatedStyle) so the card + form
+          glide up in lockstep. The ScrollView stays so any overflow is still
+          reachable on small screens. */}
+      <ScrollView
           className="flex-1"
           style={{ backgroundColor: LOGIN_BLUE }}
           contentContainerClassName="grow"
@@ -60,13 +75,12 @@ export default function HomeScreen() {
           {/* Blue header — radial gradient + decorative opacity circles.
               Fixed to ~42% of the screen so the white card starts lower down,
               matching the design. */}
-          <View
+          <Animated.View
             className="items-center justify-center overflow-hidden"
-            style={{
-              backgroundColor: LOGIN_BLUE,
-              height: height * 0.42,
-              paddingTop: insets.top,
-            }}
+            style={[
+              { backgroundColor: LOGIN_BLUE, paddingTop: insets.top },
+              headerAnimatedStyle,
+            ]}
           >
             
 
@@ -98,7 +112,7 @@ export default function HomeScreen() {
               style={{ width: 104, height: 80 }}
               contentFit="contain"
             />
-          </View>
+          </Animated.View>
 
 
           {/* White card overlapping the blue header */}
@@ -129,7 +143,6 @@ export default function HomeScreen() {
             <LoginForm />
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
     </View>
   );
 }

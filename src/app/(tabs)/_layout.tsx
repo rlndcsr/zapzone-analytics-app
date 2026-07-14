@@ -21,6 +21,10 @@ import {
   FabRect,
   MorphingFabMenu,
 } from "../../components/navigation/MorphingFabMenu";
+import {
+  forDirectionalSlide,
+  TAB_TRANSITION_SPEC,
+} from "../../components/navigation/tabTransition";
 import { getRoleTabs } from "../../lib/navigation/navConfig";
 import { getCurrentUser } from "../../lib/session";
 
@@ -276,7 +280,14 @@ const TabLayout = () => {
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        // Premium, direction-aware slide between bottom-tab screens. Providing a
+        // transitionSpec (with no `animation` preset) enables the custom scene
+        // interpolator; both run on the native driver for 60fps transitions.
+        transitionSpec: TAB_TRANSITION_SPEC,
+        sceneStyleInterpolator: forDirectionalSlide,
+      }}
     >
       <Tabs.Screen
         name="home"

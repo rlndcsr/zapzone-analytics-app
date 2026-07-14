@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import "../global.css";
 import { AuthGuard } from "../components/AuthGuard";
+import { STACK_SCREEN_TRANSITION } from "../components/navigation/tabTransition";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
 import { restoreActiveLocation } from "../lib/location/activeLocationStore";
 import { restoreSession } from "../lib/session";
@@ -43,7 +44,10 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="auto" />
       <AuthGuard />
-      <Stack screenOptions={{ headerShown: false }}>
+      {/* Directional slide for every pushed screen (incl. all Quick-Navigation
+          modules), reusing the tabs' motion language via the shared transition
+          config. Splash keeps its own fade below. */}
+      <Stack screenOptions={{ headerShown: false, ...STACK_SCREEN_TRANSITION }}>
         <Stack.Screen name="splash" options={{ animation: "fade" }} />
         <Stack.Screen name="index" />
         <Stack.Screen name="(tabs)" />
