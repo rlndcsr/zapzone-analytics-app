@@ -84,16 +84,36 @@ const FloatingTabBar = ({
   const [fabRect, setFabRect] = useState<FabRect | null>(null);
   const fabRef = useRef<View>(null);
 
+  // Cache the FAB's window box as it lays out so opening can be synchronous.
+  // measureInWindow is an async native round-trip; doing it on tap delays the
+  // sheet by a frame or two, which reads as lag. The floating tab bar never
+  // moves, so a layout-time measure stays accurate for the tap path.
+  const measureFab = () => {
+    fabRef.current?.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) {
+        setFabRect({ x, y, width, height });
+      }
+    });
+  };
+
   const toggleMenu = () => {
     if (menuOpen) {
       setMenuOpen(false);
       return;
     }
-    fabRef.current?.measureInWindow((x, y, width, height) => {
-      setFabRect({ x, y, width, height });
+    if (fabRect) {
+      // Cached rect → open immediately so the sheet reacts on the same frame
+      // as the tap (no measure round-trip in the critical path).
       setMenuMounted(true);
       setMenuOpen(true);
-    });
+    } else {
+      // First open before layout settled: measure once, then open.
+      fabRef.current?.measureInWindow((x, y, width, height) => {
+        setFabRect({ x, y, width, height });
+        setMenuMounted(true);
+        setMenuOpen(true);
+      });
+    }
   };
 
   const fabScale = useSharedValue(1);
@@ -217,7 +237,7 @@ const FloatingTabBar = ({
           >
             {/* Ref sits outside the press-scale Animated.View so measureInWindow
                 returns the FAB's true resting box, not the shrunk-while-pressed size. */}
-            <View ref={fabRef} collapsable={false}>
+            <View ref={fabRef} collapsable={false} onLayout={measureFab}>
               <Animated.View style={fabPressStyle}>
                 <View
                   className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7]"

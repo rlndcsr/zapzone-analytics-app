@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Modal,
   Platform,
@@ -67,7 +67,10 @@ const COLUMN_GAP = 12;
 const ROW_GAP = 16;
 const PANEL_PADDING = 16;
 const HEADER_HEIGHT = 52;
-const CELL_HEIGHT = 84;
+// One cell's content height: icon square (h-12 = 48) + label gap (mt-1.5 = 6) +
+// single-line label (~16). Kept just above the real content so the height math
+// never clips a row, without reserving the dead space the old 84 did.
+const CELL_HEIGHT = 74;
 const MAX_PANEL_WIDTH = 440;
 
 export type FabRect = {
@@ -154,8 +157,10 @@ export function MorphingFabMenu({
 
   // Quick Navigation is role-aware: the management entry swaps between User
   // Management (company_admin) and Attendants Management (location_manager),
-  // mirroring the Web Admin sidebar.
-  const items = getNavMenuItems(getCurrentUser()?.role);
+  // mirroring the Web Admin sidebar. Memoized so the list isn't rebuilt on the
+  // re-renders that bracket the open/close animation (role is stable while the
+  // menu is mounted).
+  const items = useMemo(() => getNavMenuItems(getCurrentUser()?.role), []);
 
   const progress = useSharedValue(0);
   const itemsProgress = useSharedValue(0);
@@ -377,7 +382,13 @@ export function MorphingFabMenu({
   };
 
   const grid = (
-    <View className="flex-row flex-wrap justify-between">
+    // Each GridItem carries a bottom margin (ROW_GAP) for row spacing; the
+    // negative margin here cancels the last row's trailing one so the grid
+    // measures to its true content height and centers cleanly.
+    <View
+      className="flex-row flex-wrap justify-between"
+      style={{ marginBottom: -ROW_GAP }}
+    >
       {items.map((item, i) => (
         <GridItem
           key={item.key}
@@ -468,7 +479,20 @@ export function MorphingFabMenu({
                     {grid}
                   </ScrollView>
                 ) : (
-                  <View style={{ paddingTop: PANEL_PADDING }}>{grid}</View>
+                  // Center the grid in the space between the header and the
+                  // footer so any leftover height is split evenly above and
+                  // below the icons instead of pooling into one gap at the
+                  // bottom. paddingTop keeps a comfortable margin under the
+                  // title so the grid never crowds the header.
+                  <View
+                    style={{
+                      flex: 1,
+                      justifyContent: "center",
+                      paddingTop: PANEL_PADDING,
+                    }}
+                  >
+                    {grid}
+                  </View>
                 )}
               </View>
             </Animated.View>

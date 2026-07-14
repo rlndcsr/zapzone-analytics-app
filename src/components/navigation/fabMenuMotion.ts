@@ -1,20 +1,20 @@
 import { Easing } from "react-native-reanimated";
 
-// Open and close share the same well-damped spring profile so the morph
-// glides to rest with matching smoothness in both directions.
+// Reanimated 4 duration-based springs. dampingRatio 1 is critically damped: the
+// morph glides to rest with zero overshoot, which reads as confident rather than
+// playful. Open runs a hair longer for a graceful entrance; close is quicker so
+// dismissals feel instant and responsive.
 export const MORPH_OPEN_SPRING = {
-  damping: 26,
-  stiffness: 240,
-  mass: 0.85,
+  dampingRatio: 1,
+  duration: 400,
 } as const;
 
 export const MORPH_CLOSE_SPRING = {
-  damping: 26,
-  stiffness: 240,
-  mass: 0.85,
+  dampingRatio: 1,
+  duration: 300,
 } as const;
 
-export const CLOSE_COLLAPSE_LEAD = 70;
+export const CLOSE_COLLAPSE_LEAD = 40;
 
 export const PANEL_RADIUS = 28;
 
@@ -37,9 +37,11 @@ export const ICON_MIN_SCALE = 0.6;
 export const BACKDROP_COLOR = "#0B1220";
 export const BACKDROP_MAX_OPACITY = 0.35;
 
-export const ITEMS_OPEN_DELAY = 70;
-export const ITEMS_OPEN_DURATION = 420;
-export const ITEMS_CLOSE_DURATION = 120;
+// Icons start rising just after the sheet begins its glide (short delay), then
+// fade/lift in over a snappy window so the reveal feels immediate, not drawn out.
+export const ITEMS_OPEN_DELAY = 40;
+export const ITEMS_OPEN_DURATION = 300;
+export const ITEMS_CLOSE_DURATION = 110;
 export const ITEM_STAGGER = 0.05;
 export const ITEM_WINDOW = 0.5;
 export const ITEM_TRANSLATE_Y = 10;

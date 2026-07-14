@@ -1,11 +1,12 @@
-import { View, Text, Pressable, ScrollView, ActivityIndicator, Alert } from 'react-native';
-import React from 'react';
+import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import React, { useCallback, useRef } from 'react';
 import { router } from 'expo-router';
 import { useNotifications } from '../../lib/hooks/useNotifications';
 import { AppNotification, NotificationFilterType } from '../../services/notificationService';
 import { resolveNotificationRoute } from '../../lib/notifications/notificationRouteMapper';
 import { SwipeableNotificationCard } from '../../components/ui/SwipeableNotificationCard';
 import { UndoSnackbar } from '../../components/ui/UndoSnackbar';
+import { NotificationsListSkeleton } from '../../components/ui/skeleton/NotificationsSkeleton';
 import { Bell, ChevronLeft, Check, X, Filter, Bookmark, CreditCard, AlertCircle, BellOff } from 'lucide-react-native';
 
 const Notification = () => {
@@ -29,6 +30,30 @@ const Notification = () => {
     lastPage,
     totalCount
   } = useNotifications('all');
+
+  // Horizontal filter-tab bar: keep the tapped tab in view by centering it.
+  // Layouts are captured via onLayout into refs (no state) so scrolling and tab
+  // measurement never trigger re-renders.
+  const filterScrollRef = useRef<ScrollView>(null);
+  const tabLayoutsRef = useRef<Record<string, { x: number; width: number }>>({});
+  const barWidthRef = useRef(0);
+
+  const centerTab = useCallback((value: string) => {
+    const layout = tabLayoutsRef.current[value];
+    const barWidth = barWidthRef.current;
+    if (!layout || !barWidth) return;
+    // Center the tab in the viewport; clamp so we never scroll past the start.
+    const target = Math.max(0, layout.x - (barWidth - layout.width) / 2);
+    filterScrollRef.current?.scrollTo({ x: target, animated: true });
+  }, []);
+
+  const handleSelectFilter = useCallback(
+    (value: NotificationFilterType) => {
+      updateFilter(value);
+      centerTab(value);
+    },
+    [updateFilter, centerTab],
+  );
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -234,24 +259,40 @@ const Notification = () => {
             </Pressable>
           </View>
 
-          {/* Filter Bar */}
-          <View className="flex-row gap-2 mb-5 overflow-x-auto pb-1">
+          {/* Filter Bar — horizontally scrollable so any number of category
+              tabs stays reachable; the tapped tab auto-centers into view. */}
+          <ScrollView
+            ref={filterScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            onLayout={(e) => {
+              barWidthRef.current = e.nativeEvent.layout.width;
+            }}
+            className="mb-5"
+            contentContainerStyle={{ gap: 8, paddingBottom: 4 }}
+          >
             {filterOptions.map((opt) => {
               const isActive = filter === opt.value;
               const IconComponent = opt.icon;
               return (
                 <Pressable
                   key={opt.value}
-                  onPress={() => updateFilter(opt.value)}
+                  onLayout={(e) => {
+                    tabLayoutsRef.current[opt.value] = {
+                      x: e.nativeEvent.layout.x,
+                      width: e.nativeEvent.layout.width,
+                    };
+                  }}
+                  onPress={() => handleSelectFilter(opt.value)}
                   className={`flex-row items-center gap-2 px-4 py-2.5 rounded-xl border ${
-                    isActive 
-                      ? 'bg-[#0644C7] border-[#0644C7]' 
+                    isActive
+                      ? 'bg-[#0644C7] border-[#0644C7]'
                       : 'bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700'
                   }`}
                 >
-                  <IconComponent 
-                    size={16} 
-                    color={isActive ? '#FFFFFF' : '#6b7280'} 
+                  <IconComponent
+                    size={16}
+                    color={isActive ? '#FFFFFF' : '#6b7280'}
                   />
                   <Text className={`text-xs font-medium ${
                     isActive ? 'text-white' : 'text-gray-600 dark:text-gray-300'
@@ -261,17 +302,11 @@ const Notification = () => {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
-          {/* Loading State */}
-          {(loading || actionLoading) && (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-12 items-center shadow-sm border border-gray-100 dark:border-neutral-800">
-              <ActivityIndicator size="large" color="#0644C7" />
-              <Text className="text-gray-500 dark:text-gray-400 mt-4 text-sm font-medium">
-                {actionLoading ? 'Processing...' : 'Loading notifications...'}
-              </Text>
-            </View>
-          )}
+          {/* Loading State — skeleton placeholders that mirror the notification
+              cards, so the swap to real content produces no layout shift. */}
+          {(loading || actionLoading) && <NotificationsListSkeleton />}
 
           {/* Error State */}
           {error && !loading && (
