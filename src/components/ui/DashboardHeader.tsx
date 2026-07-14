@@ -1,5 +1,6 @@
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
+import { type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Bell, Settings } from "lucide-react-native";
 
@@ -14,22 +15,29 @@ const ROLE_LABELS: Record<string, string> = {
 
 type DashboardHeaderProps = {
   /** Unread notification count for the badge (hidden when 0). */
-  unreadCount: number;
+  unreadCount?: number;
   /** Optional screen title rendered beneath the top row. */
   title?: string;
   /** Drop the white background + border so a screen gradient shows through. */
   transparent?: boolean;
+  /**
+   * Replaces the default notifications + settings actions on the right (e.g. a
+   * Logout button on the Profile tab). When set, `unreadCount` is ignored.
+   */
+  rightSlot?: ReactNode;
 };
 
 /**
  * Shared app header — avatar + greeting on the left, notifications + settings on
- * the right. Used by the Home, Calendar, and Activity tabs. Pass `transparent`
- * to let a screen background (e.g. Home's gradient) show through.
+ * the right. Used by the Home, Calendar, Activity, Location, and Profile tabs.
+ * Pass `transparent` to let a screen background (e.g. Home's gradient) show
+ * through, or `rightSlot` to swap the default actions (e.g. Profile's Logout).
  */
 export function DashboardHeader({
-  unreadCount,
+  unreadCount = 0,
   title,
   transparent,
+  rightSlot,
 }: DashboardHeaderProps) {
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
@@ -75,30 +83,34 @@ export function DashboardHeader({
           </View>
         </View>
 
-        {/* Right: notifications + settings */}
+        {/* Right: notifications + settings, or a custom action (e.g. Logout) */}
         <View className="flex-row items-center gap-4">
-          <Pressable
-            onPress={() => router.push("/notification/notification")}
-            hitSlop={8}
-            className="flex-row items-center gap-1"
-            accessibilityRole="button"
-            accessibilityLabel="Notifications"
-          >
-            <Bell size={22} color={headerIcon} />
-            {unreadCount > 0 && (
-              <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </Text>
-            )}
-          </Pressable>
-          <Pressable
-            onPress={() => router.push("/settings/settings")}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-          >
-            <Settings size={22} color={headerIcon} />
-          </Pressable>
+          {rightSlot ?? (
+            <>
+              <Pressable
+                onPress={() => router.push("/notification/notification")}
+                hitSlop={8}
+                className="flex-row items-center gap-1"
+                accessibilityRole="button"
+                accessibilityLabel="Notifications"
+              >
+                <Bell size={22} color={headerIcon} />
+                {unreadCount > 0 && (
+                  <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={() => router.push("/settings/settings")}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Settings"
+              >
+                <Settings size={22} color={headerIcon} />
+              </Pressable>
+            </>
+          )}
         </View>
       </View>
 

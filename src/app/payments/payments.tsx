@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -179,6 +179,14 @@ const Payments = () => {
   const [showInvoices, setShowInvoices] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
 
+  // The payment whose detail sheet is open (null = closed). Opened by tapping a
+  // card or by deep link from a notification (/payments/payments?openId=123).
+  const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
+  const selectedPayment = useMemo(
+    () => payments.find((p) => p.id === selectedPaymentId) ?? null,
+    [payments, selectedPaymentId],
+  );
+
   const load = useCallback(async () => {
     const token = getToken();
     if (!token) {
@@ -207,6 +215,21 @@ const Payments = () => {
     await load();
     setRefreshing(false);
   }, [load]);
+
+  // Deep link: open a payment's detail sheet directly when navigated here from a
+  // notification (e.g. /payments/payments?openId=123). Wait until the list has
+  // loaded before resolving; if the record is gone, tell the user and stay put.
+  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  useEffect(() => {
+    if (!openId || loading) return;
+    const match = payments.find((p) => String(p.id) === openId);
+    if (match) {
+      setSelectedPaymentId(match.id);
+    } else {
+      Alert.alert("Payment unavailable", "This payment is no longer available.");
+    }
+    router.setParams({ openId: undefined });
+  }, [openId, loading, payments, router]);
 
   // Stat cards — counts + revenue over the full fetched set.
   const stats = useMemo(() => {
@@ -395,7 +418,14 @@ const Payments = () => {
 
               {/* List */}
               {visible.map((p) => (
-                <PaymentCard key={p.id} p={p} />
+                <Pressable
+                  key={p.id}
+                  onPress={() => setSelectedPaymentId(p.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View payment ${p.reference}`}
+                >
+                  <PaymentCard p={p} />
+                </Pressable>
               ))}
 
               {filtered.length === 0 && (
@@ -423,6 +453,11 @@ const Payments = () => {
         </View>
       </ScrollView>
 
+      <PaymentDetailSheet
+        payment={selectedPayment}
+        visible={selectedPaymentId != null}
+        onClose={() => setSelectedPaymentId(null)}
+      />
       <PackageInvoicesSheet visible={showInvoices} onClose={() => setShowInvoices(false)} />
       <DeletedPaymentsSheet
         visible={showDeleted}
@@ -432,6 +467,96 @@ const Payments = () => {
     </View>
   );
 };
+
+/* ------------------------------------------------------------------ */
+/* Payment detail sheet                                               */
+/* ------------------------------------------------------------------ */
+
+/** Read-only detail row used inside the payment detail sheet. */
+function DetailRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  label: string;
+  value: string;
+}) {
+  return (
+    <View className="flex-row items-start justify-between gap-3 py-2.5 border-b border-gray-100 dark:border-neutral-800">
+      <View className="flex-row items-center gap-2">
+        <Feather name={icon} size={14} color="#9CA3AF" />
+        <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</Text>
+      </View>
+      <Text className="text-sm text-gray-900 dark:text-white text-right flex-1" numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function PaymentDetailSheet({
+  payment,
+  visible,
+  onClose,
+}: {
+  payment: PaymentRow | null;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const pill = payment ? statusPill(payment.status) : null;
+  return (
+    <BottomSheet visible={visible} onClose={onClose} title="Payment Details">
+      <ScrollView className="px-6 pb-6" showsVerticalScrollIndicator={false}>
+        {payment ? (
+          <View>
+            {/* Amount + status hero */}
+            <View className="items-center py-4">
+              <Text className="text-3xl font-bold text-gray-900 dark:text-white">
+                {money(payment.amount)}
+              </Text>
+              {pill && (
+                <View className={`mt-2 px-3 py-1 rounded-full ${pill.pill}`}>
+                  <Text className={`text-xs font-semibold ${pill.text}`}>
+                    {payment.statusLabel}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <DetailRow icon="hash" label="Transaction" value={payment.reference} />
+            <DetailRow icon="credit-card" label="Method" value={payment.methodLabel} />
+            <DetailRow
+              icon="tag"
+              label="Type"
+              value={
+                payment.typeLabel + (payment.countLabel ? ` • ${payment.countLabel}` : "")
+              }
+            />
+            {!!payment.payableReference && (
+              <DetailRow icon="file-text" label="Reference" value={payment.payableReference} />
+            )}
+            <DetailRow icon="user" label="Customer" value={payment.customerName} />
+            {!!payment.customerEmail && (
+              <DetailRow icon="mail" label="Email" value={payment.customerEmail} />
+            )}
+            {!!payment.locationName && (
+              <DetailRow icon="map-pin" label="Location" value={payment.locationName} />
+            )}
+            <DetailRow icon="calendar" label="Date" value={fmtDateTime(payment.createdAt)} />
+          </View>
+        ) : (
+          <View className="items-center py-10">
+            <Feather name="credit-card" size={36} color="#D1D5DB" />
+            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
+              Payment details unavailable.
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </BottomSheet>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Package Invoices sheet                                              */

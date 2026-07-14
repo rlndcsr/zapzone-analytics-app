@@ -2,17 +2,13 @@ import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
   useState,
   type ComponentProps,
 } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Easing,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -115,36 +111,6 @@ const Packages = () => {
 
   // Package whose per-card actions sheet (View / Edit / Duplicate / Delete) is open.
   const [actionsPkg, setActionsPkg] = useState<PackageRow | null>(null);
-
-  // Animation values
-  const spinValue = useRef(new Animated.Value(0)).current;
-  const pulseValue = useRef(new Animated.Value(1)).current;
-  const translateYValue = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    // Floating animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(translateYValue, {
-          toValue: -10,
-          duration: 1500,
-          easing: Easing.ease,
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateYValue, {
-          toValue: 0,
-          duration: 1500,
-          easing: Easing.ease,
-          useNativeDriver: true,
-        }),
-      ]),
-    ).start();
-  }, [spinValue, pulseValue, translateYValue]);
-
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
-  });
 
   // Mirrors the web "More" action menu; these management actions arrive in a
   // future release, so they're shown but not yet actionable.
@@ -371,8 +337,9 @@ const Packages = () => {
             </Pressable>
           </View>
 
-          {/* Catalog sub-features (Space · Add-ons · Promos · Gift Cards) */}
-          <View className="flex-row flex-wrap -mx-1.5 mb-2">
+          {/* Catalog sub-features (Space · Add-ons · Promos) — compact list rows
+              so the section stays balanced regardless of item count. */}
+          <View className="gap-3 mb-2">
             {[
               {
                 label: "Space",
@@ -392,41 +359,35 @@ const Packages = () => {
                 icon: "tag" as const,
                 route: "/packages/promos",
               },
-              
             ].map((item) => (
-              <View key={item.route} className="w-1/2 px-1.5 mb-3">
-                <Pressable
-                  onPress={() => router.push(item.route as never)}
-                  className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-                  style={{
-                    shadowColor: "#424242",
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.04,
-                    shadowRadius: 6,
-                    elevation: 1,
-                  }}
-                >
-                  <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                    <Feather name={item.icon} size={20} color="#0644C7" />
-                  </View>
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
+              <Pressable
+                key={item.route}
+                onPress={() => router.push(item.route as never)}
+                className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+                style={{
+                  shadowColor: "#424242",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.04,
+                  shadowRadius: 6,
+                  elevation: 1,
+                }}
+              >
+                <View className="w-11 h-11 rounded-xl bg-[#0644C7]/10 items-center justify-center">
+                  <Feather name={item.icon} size={20} color="#0644C7" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
                     {item.label}
                   </Text>
                   <Text
-                    numberOfLines={2}
-                    style={{ minHeight: 28 }}
-                    className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+                    numberOfLines={1}
+                    className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
                   >
                     {item.desc}
                   </Text>
-                  <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                    <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                      View
-                    </Text>
-                    <Feather name="chevron-right" size={16} color="#0644C7" />
-                  </View>
-                </Pressable>
-              </View>
+                </View>
+                <Feather name="chevron-right" size={18} color="#0644C7" />
+              </Pressable>
             ))}
           </View>
 

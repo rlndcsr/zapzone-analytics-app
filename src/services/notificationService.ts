@@ -84,3 +84,13 @@ export async function markNotificationAsRead(
     token,
   });
 }
+
+export async function deleteNotification(
+  token: string,
+  id: number
+): Promise<{ success: boolean; message: string }> {
+  return apiRequest<{ success: boolean; message: string }>(`/api/notifications/${id}`, {
+    method: 'DELETE',
+    token,
+  });
+}

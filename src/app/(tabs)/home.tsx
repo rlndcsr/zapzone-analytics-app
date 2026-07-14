@@ -25,7 +25,7 @@ import {
   Zap,
 } from "lucide-react-native";
 import { useColorScheme } from "nativewind";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -38,6 +38,12 @@ import {
   Text,
   View,
 } from "react-native";
+import Reanimated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSpring,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { BottomSheet } from "../../components/ui/BottomSheet";
@@ -98,17 +104,84 @@ const ICON_MAP: { [key: string]: any } = {
 
 const getIcon = (iconName: string) => ICON_MAP[iconName] || null;
 
-const MetricIconBadge = ({ metric }: { metric: MetricCardDef }) => {
+const MetricIconBadge = ({
+  metric,
+  layoutKey,
+  index,
+}: {
+  metric: MetricCardDef;
+  // Bumps whenever the grid re-lays out (column toggle) — drives the animation.
+  layoutKey: number;
+  // Position in the grid, used to stagger the pop into a cascade.
+  index: number;
+}) => {
   const IconComponent = getIcon(metric.icon);
+  const scale = useSharedValue(0.6);
+  const rotate = useSharedValue(-8);
+
+  // Pop + settle the icon on first mount and every time the layout changes,
+  // staggered by position so the whole grid animates as a cascade.
+  useEffect(() => {
+    const delay = Math.min(index * 45, 270);
+    const spring = { damping: 10, stiffness: 170 };
+    scale.value = 0.6;
+    rotate.value = -8;
+    scale.value = withDelay(delay, withSpring(1, spring));
+    rotate.value = withDelay(delay, withSpring(0, spring));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutKey]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }, { rotate: `${rotate.value}deg` }],
+  }));
+
   return (
-    <View
+    <Reanimated.View
       className="w-10 h-10 rounded-xl items-center justify-center"
-      style={{ backgroundColor: metric.gradient[0] + "20" }}
+      style={[{ backgroundColor: metric.gradient[0] + "20" }, animatedStyle]}
     >
       {IconComponent && (
         <IconComponent size={20} color={metric.color} strokeWidth={1.5} />
       )}
-    </View>
+    </Reanimated.View>
+  );
+};
+
+// The grid/list layout toggle glyph. Spins a fast, smooth half-turn each time
+// the layout switches, swapping the icon in the same motion.
+const LayoutToggleIcon = ({ gridColumns }: { gridColumns: 1 | 2 }) => {
+  const spin = useSharedValue(0);
+  // Accumulated target angle; +180° per toggle so the spin is deterministic
+  // even if toggled rapidly mid-animation.
+  const target = useRef(0);
+  const firstRender = useRef(true);
+
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    target.current += 180;
+    spin.value = withSpring(target.current, {
+      damping: 14,
+      stiffness: 260,
+      mass: 0.5,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridColumns]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${spin.value}deg` }],
+  }));
+
+  return (
+    <Reanimated.View style={style}>
+      {gridColumns === 2 ? (
+        <LayoutList size={20} color="#FFFFFF" />
+      ) : (
+        <LayoutGrid size={20} color="#FFFFFF" />
+      )}
+    </Reanimated.View>
   );
 };
 
@@ -119,6 +192,8 @@ const MetricCard = ({
   subtitleFn,
   timeframeLabel,
   onPress,
+  layoutKey,
+  index,
 }: {
   metric: MetricCardDef;
   data: DashboardData | null;
@@ -126,6 +201,8 @@ const MetricCard = ({
   subtitleFn?: (metrics: DashboardData["metrics"]) => string;
   timeframeLabel: string;
   onPress: (key: string) => void;
+  layoutKey: number;
+  index: number;
 }) => {
   const raw = data ? data.metrics[metric.valueField] : undefined;
   const hasValue = raw != null && !Number.isNaN(raw);
@@ -156,7 +233,7 @@ const MetricCard = ({
             {metric.title}
           </Text>
         </View>
-        <MetricIconBadge metric={metric} />
+        <MetricIconBadge metric={metric} layoutKey={layoutKey} index={index} />
       </View>
 
       <Text className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
@@ -539,9 +616,11 @@ const Home = () => {
               Multi-location booking overview and management
             </Text>
 
+          
             {/* Global workspace location selector (company-admin only; renders
                 null otherwise). Scopes every location-aware module. */}
             <View className="mt-10">
+              <Text className="text-sm text-gray-500 mb-2">Note: Location will affect all screens module.</Text>
               <LocationWorkspaceSelector />
             </View>
           </View>
@@ -566,6 +645,7 @@ const Home = () => {
             </View>
 
             {/* Layout toggle — 2-column grid vs single-column cards */}
+            {/* Layout toggle — 2-column grid vs single-column cards */}
             <Pressable
               onPress={() => setGridColumns((c) => (c === 2 ? 1 : 2))}
               className="h-[46px] w-[52px] rounded-2xl items-center justify-center active:opacity-90"
@@ -573,11 +653,7 @@ const Home = () => {
               accessibilityRole="button"
               accessibilityLabel="Toggle card layout"
             >
-              {gridColumns === 2 ? (
-                <LayoutList size={20} color="#FFFFFF" />
-              ) : (
-                <LayoutGrid size={20} color="#FFFFFF" />
-              )}
+              <LayoutToggleIcon gridColumns={gridColumns} />
             </Pressable>
           </View>
 
@@ -597,7 +673,7 @@ const Home = () => {
           {/* Metrics Grid */}
           {!loading && !error && displayCards.length > 0 && (
             <View className="flex-row flex-wrap -mx-1.5">
-              {displayCards.map((metric) => (
+              {displayCards.map((metric, index) => (
                 <View
                   key={metric.key}
                   className={gridColumns === 2 ? "w-1/2" : "w-full"}
@@ -611,6 +687,8 @@ const Home = () => {
                     subtitleFn={getCardSubtitleFn(dashboardConfig, metric)}
                     timeframeLabel={timeframeLabel}
                     onPress={openModal}
+                    layoutKey={gridColumns}
+                    index={index}
                   />
                 </View>
               ))}

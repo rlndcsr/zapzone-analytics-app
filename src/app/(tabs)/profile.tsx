@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import { ProfileSkeleton } from "../../components/ui/skeleton/ProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { getCurrentUser } from "../../lib/session";
@@ -133,40 +134,30 @@ const Profile = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Gradient Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
-          <Image
-            source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
-            style={{ width: 70, height: 28 }}
-            contentFit="contain"
-          />
-
-          <Text
-            pointerEvents="none"
-            className="absolute left-0 right-0 text-center text-xl font-bold text-gray-900 dark:text-white"
+      {/* Header — shared DashboardHeader (same as Home), with Logout only */}
+      <DashboardHeader
+        rightSlot={
+          <Pressable
+            onPress={handleLogout}
+            disabled={loggingOut}
+            className="px-3 py-2 border-red-200 dark:border-red-200 border rounded-full bg-red-100 dark:bg-neutral-800 items-center justify-center flex-row active:opacity-80"
+            accessibilityRole="button"
+            accessibilityLabel="Logout"
           >
-            Profile
-          </Text>
-
-          <View className="flex-row items-center gap-2 ">
-            <Pressable
-              onPress={handleLogout}
-              disabled={loggingOut}
-              className="px-3 py-2 border-red-200 dark:border-red-200 border rounded-full bg-red-100 dark:bg-neutral-800 items-center justify-center flex-row active:opacity-80"
-            >
-              {loggingOut ? (
-                <ActivityIndicator color={headerIcon} size="small" />
-              ) : (
-                <>
-                  <Feather name="log-out" size={16} color={headerIcon} />
-                  <Text className="text-xs font-medium text-red-500 dark:text-white"> Logout</Text>
-                </>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </View>
+            {loggingOut ? (
+              <ActivityIndicator color={headerIcon} size="small" />
+            ) : (
+              <>
+                <Feather name="log-out" size={16} color={headerIcon} />
+                <Text className="text-xs font-medium text-red-500 dark:text-white">
+                  {" "}
+                  Logout
+                </Text>
+              </>
+            )}
+          </Pressable>
+        }
+      />
 
       <ScrollView
         className="flex-1"

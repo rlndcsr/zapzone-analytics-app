@@ -1,16 +1,21 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
+import { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { QrScannerView } from "../../components/checkin/QrScannerView";
+import { VerifyBookingDetails } from "../../components/checkin/VerifyBookingDetails";
+import { BottomSheet } from "../../components/ui/BottomSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
   useBookingCheckIn,
@@ -201,13 +206,46 @@ export default function BookingCheckInScreen() {
   const {
     phase,
     review,
+    reviewDetail,
+    waivers,
     result,
     busy,
+    paying,
+    checkingWaiverId,
     handleScan,
     confirm,
+    addPayment,
+    checkInWaiver,
+    deny,
     cancelReview,
     reset,
   } = useBookingCheckIn();
+
+  // Add Payment sheet (opened from the verify footer).
+  const [showPayment, setShowPayment] = useState(false);
+  const [amountInput, setAmountInput] = useState("");
+
+  const outstanding = reviewDetail
+    ? Math.max(0, reviewDetail.totalAmount - reviewDetail.amountPaid)
+    : 0;
+
+  const openPayment = () => {
+    setAmountInput(outstanding > 0 ? outstanding.toFixed(2) : "");
+    setShowPayment(true);
+  };
+
+  const submitPayment = async () => {
+    const amount = Number(amountInput);
+    if (!(amount > 0)) {
+      Alert.alert("Invalid amount", "Enter a payment amount greater than 0.");
+      return;
+    }
+    const ok = await addPayment(amount);
+    if (ok) {
+      setShowPayment(false);
+      Alert.alert("Payment recorded", `${money(amount)} was added to this booking.`);
+    }
+  };
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -272,8 +310,21 @@ export default function BookingCheckInScreen() {
             </View>
           )}
 
-          {/* Review — a valid, confirmed booking awaiting approval */}
-          {phase === "review" && review && (
+          {/* Review (rich) — full booking detail + waivers from the backend.
+              Deny / Add Payment / Approve live in the fixed footer below. */}
+          {phase === "review" && reviewDetail && (
+            <View className="mt-2">
+              <VerifyBookingDetails
+                detail={reviewDetail}
+                waivers={waivers}
+                onCheckInWaiver={checkInWaiver}
+                checkingWaiverId={checkingWaiverId}
+              />
+            </View>
+          )}
+
+          {/* Review (fallback) — detail fetch failed; show the summary-only card. */}
+          {phase === "review" && review && !reviewDetail && (
             <View
               className="rounded-3xl bg-white p-5 shadow-sm dark:bg-neutral-900"
               style={CARD_SHADOW}
@@ -396,6 +447,135 @@ export default function BookingCheckInScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Verify footer — Deny / Add Payment / Approve */}
+      {phase === "review" && reviewDetail && (
+        <View
+          className="flex-row gap-2.5 border-t border-gray-100 bg-white px-5 pt-3 dark:border-neutral-800 dark:bg-neutral-900"
+          style={{ paddingBottom: insets.bottom + 12 }}
+        >
+          <Pressable
+            onPress={deny}
+            disabled={busy || paying}
+            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-red-500 py-3.5 active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Deny check-in"
+          >
+            <Feather name="x-circle" size={14} color="#FFFFFF" />
+            <Text className="text-xs font-semibold text-white">Deny</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={openPayment}
+            disabled={busy || paying}
+            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-[#0644C7] py-3.5 active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Add payment"
+          >
+            {paying ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <>
+                <Feather name="dollar-sign" size={14} color="#FFFFFF" />
+                <Text className="text-xs font-semibold text-white">
+                  Add Payment
+                </Text>
+              </>
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={confirm}
+            disabled={busy || paying}
+            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-green-600 py-3.5 active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Approve check-in"
+          >
+            {busy ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <>
+                <Feather name="check-circle" size={14} color="#FFFFFF" />
+                <Text className="text-xs font-semibold text-white">Approve</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      )}
+
+      {/* Add Payment sheet */}
+      <BottomSheet
+        visible={showPayment}
+        onClose={() => setShowPayment(false)}
+        title="Add Payment"
+      >
+        <View className="px-6 pb-6">
+          {reviewDetail && (
+            <View className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-900/20">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-sm text-gray-600 dark:text-gray-300">
+                  Total
+                </Text>
+                <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                  {money(reviewDetail.totalAmount)}
+                </Text>
+              </View>
+              <View className="mt-1 flex-row items-center justify-between">
+                <Text className="text-sm text-gray-600 dark:text-gray-300">
+                  Paid
+                </Text>
+                <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                  {money(reviewDetail.amountPaid)}
+                </Text>
+              </View>
+              <View className="mt-2 flex-row items-center justify-between border-t border-amber-200 pt-2 dark:border-amber-900/40">
+                <Text className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                  Outstanding
+                </Text>
+                <Text className="text-base font-bold text-amber-800 dark:text-amber-300">
+                  {money(outstanding)}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+            Payment amount
+          </Text>
+          <View className="flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+            <Feather name="dollar-sign" size={16} color="#9CA3AF" />
+            <TextInput
+              value={amountInput}
+              onChangeText={setAmountInput}
+              placeholder="0.00"
+              placeholderTextColor="#9CA3AF"
+              keyboardType="decimal-pad"
+              className="flex-1 text-sm text-gray-900 dark:text-white"
+              style={{ paddingVertical: 0 }}
+            />
+          </View>
+
+          <Pressable
+            onPress={submitPayment}
+            disabled={paying}
+            className={`mt-4 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] py-3.5 active:opacity-90 ${
+              paying ? "opacity-60" : ""
+            }`}
+            accessibilityRole="button"
+          >
+            {paying ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Feather name="dollar-sign" size={16} color="#FFFFFF" />
+                <Text className="text-sm font-semibold text-white">
+                  Record Payment
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      </BottomSheet>
     </View>
   );
 }

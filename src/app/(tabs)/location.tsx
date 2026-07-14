@@ -1,6 +1,3 @@
-import { Image } from "expo-image";
-import { router } from "expo-router";
-import { useColorScheme } from "nativewind";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   Pressable,
@@ -11,6 +8,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import {
   OverviewCardsSkeleton,
   TopCardsSkeleton,
@@ -26,8 +24,6 @@ import {
   ChevronDown,
   Calendar,
   CheckCircle,
-  Bell,
-  Settings,
   TrendingUp,
   Users,
   Ticket,
@@ -253,8 +249,6 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
 
 const Location = () => {
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const [dateFilter, setDateFilter] = useState<DateFilterType>("all_time");
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   // Location comes from the global workspace store so this tab stays in sync
@@ -370,39 +364,8 @@ const Location = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header - Same as Home */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
-          <Pressable>
-            <Image
-              source={require("../../../assets/zapzone-assests/Zap-Zone.png")}
-              style={{ width: 70, height: 28 }}
-              contentFit="contain"
-            />
-          </Pressable>
-          <View className="flex-row items-center gap-3">
-            {unreadNotificationsCount > 0 && (
-              <Pressable
-                onPress={() => router.push("/notification/notification")}
-                className="bg-gray-100 dark:bg-neutral-800 rounded-full px-3.5 py-1.5 flex-row items-center gap-2"
-              >
-                <Bell size={16} color={headerIcon} />
-                <Text className="text-gray-900 dark:text-white text-xs font-semibold">
-                  {unreadNotificationsCount > 99
-                    ? "99+"
-                    : unreadNotificationsCount}
-                </Text>
-              </Pressable>
-            )}
-            <Pressable
-              onPress={() => router.push("/settings/settings")}
-              className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            >
-              <Settings size={20} color={headerIcon} />
-            </Pressable>
-          </View>
-        </View>
-      </View>
+      {/* Header — shared DashboardHeader (same as Home) */}
+      <DashboardHeader unreadCount={unreadNotificationsCount} />
 
       <ScrollView
         className="flex-1"

@@ -4,6 +4,8 @@ import { router } from 'expo-router';
 import { useNotifications } from '../../lib/hooks/useNotifications';
 import { AppNotification, NotificationFilterType } from '../../services/notificationService';
 import { resolveNotificationRoute } from '../../lib/notifications/notificationRouteMapper';
+import { SwipeableNotificationCard } from '../../components/ui/SwipeableNotificationCard';
+import { UndoSnackbar } from '../../components/ui/UndoSnackbar';
 import { Bell, ChevronLeft, Check, X, Filter, Bookmark, CreditCard, AlertCircle, BellOff } from 'lucide-react-native';
 
 const Notification = () => {
@@ -16,6 +18,9 @@ const Notification = () => {
     markAllAsRead,
     markAsRead,
     clearAll,
+    deleteNotification,
+    undoDelete,
+    pendingDelete,
     actionLoading,
     page,
     setPage,
@@ -68,12 +73,16 @@ const Notification = () => {
   };
 
   const renderNotification = (item: AppNotification) => (
-    <Pressable
+    <SwipeableNotificationCard
       key={item.id}
+      onDelete={() => deleteNotification(item.id)}
+      onSeeDetails={() => handleNotificationPress(item)}
+    >
+    <Pressable
       onPress={() => handleNotificationPress(item)}
-      className={`bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm ${
-        item.status === 'unread' 
-          ? 'bg-blue-50/50 dark:bg-neutral-800/50' 
+      className={`bg-white dark:bg-neutral-900 rounded-2xl p-5 shadow-sm ${
+        item.status === 'unread'
+          ? 'bg-blue-50/50 dark:bg-neutral-800/50'
           : 'border border-gray-100 dark:border-neutral-800'
       }`}
       style={{
@@ -145,6 +154,7 @@ const Notification = () => {
         </Text>
       </View>
     </Pressable>
+    </SwipeableNotificationCard>
   );
 
   const handleClearAll = () => {
@@ -371,6 +381,11 @@ const Notification = () => {
           )}
         </View>
       </ScrollView>
+
+      <UndoSnackbar
+        visible={!!pendingDelete}
+        onUndo={undoDelete}
+      />
     </View>
   );
 };

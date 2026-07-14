@@ -21,10 +21,47 @@ function readId(metadata: Record<string, unknown>, keys: string[]): string | nul
 
 const GENERIC_ID_KEYS = ["resource_id", "model_id", "id"];
 
+// Query-string keys an action_url might use to carry the record id.
+const URL_QUERY_ID_KEYS = [
+  "id",
+  "openId",
+  "booking_id",
+  "purchase_id",
+  "resource_id",
+  "model_id",
+];
+
 function asRecord(metadata: unknown): Record<string, unknown> {
   return metadata && typeof metadata === "object"
     ? (metadata as Record<string, unknown>)
     : {};
+}
+
+// Backends often attach a deep link (`action_url`) pointing straight at the
+// referenced record, e.g. "/bookings/123" or ".../bookings?openId=123". When
+// metadata carries no explicit id, we mine that URL: first any id-like query
+// param, then a trailing numeric path segment. Returns null (never throws) when
+// nothing id-shaped is present, so callers fall back to the parent module.
+function readIdFromActionUrl(actionUrl: string | null | undefined): string | null {
+  if (!actionUrl) return null;
+  try {
+    const [pathPart, queryPart] = actionUrl.split("?");
+
+    if (queryPart) {
+      const params = new URLSearchParams(queryPart);
+      for (const key of URL_QUERY_ID_KEYS) {
+        const value = params.get(key);
+        if (value) return value;
+      }
+    }
+
+    const segments = pathPart.split("/").filter(Boolean);
+    const last = segments[segments.length - 1];
+    if (last && /^\d+$/.test(last)) return last;
+  } catch {
+    // Malformed URL — fall through to null.
+  }
+  return null;
 }
 
 /**
@@ -48,6 +85,11 @@ export function resolveNotificationRoute(
   const is = (needle: string) =>
     type.includes(needle) || entityType.includes(needle);
 
+  // Prefer an explicit id in metadata; fall back to the id embedded in the
+  // notification's action_url so we still open the specific record.
+  const urlId = readIdFromActionUrl(notification.action_url);
+  const pick = (keys: string[]) => readId(meta, keys) ?? urlId;
+
   const noId = (module: string): NotificationRoute => {
     console.warn(
       `[notifications] "${notification.type}" (#${notification.id}) has no resolvable entity id; opening ${module}`,
@@ -57,7 +99,7 @@ export function resolveNotificationRoute(
 
   // Event purchase must be checked before plain "event" (both contain "event").
   if (is("event") && (type.includes("purchase") || entityType.includes("purchase"))) {
-    const id = readId(meta, ["event_purchase_id", "purchase_id", ...GENERIC_ID_KEYS]);
+    const id = pick(["event_purchase_id", "purchase_id", ...GENERIC_ID_KEYS]);
     return id
       ? { pathname: "/events/purchase-details", params: { id } }
       : noId("/events/events");
@@ -66,7 +108,7 @@ export function resolveNotificationRoute(
   // Attraction notifications are purchase-based (the detail screen is the
   // attraction purchase). Check before other entities are considered.
   if (is("attraction")) {
-    const id = readId(meta, [
+    const id = pick([
       "attraction_purchase_id",
       "purchase_id",
       "attraction_id",
@@ -78,28 +120,28 @@ export function resolveNotificationRoute(
   }
 
   if (is("booking")) {
-    const id = readId(meta, ["booking_id", ...GENERIC_ID_KEYS]);
+    const id = pick(["booking_id", ...GENERIC_ID_KEYS]);
     return id
       ? { pathname: "/bookings/bookings", params: { openId: id } }
       : noId("/bookings/bookings");
   }
 
   if (is("membership")) {
-    const id = readId(meta, ["membership_id", ...GENERIC_ID_KEYS]);
+    const id = pick(["membership_id", ...GENERIC_ID_KEYS]);
     return id
       ? { pathname: "/memberships/memberships", params: { openId: id } }
       : noId("/memberships/memberships");
   }
 
   if (is("waiver")) {
-    const id = readId(meta, ["waiver_id", ...GENERIC_ID_KEYS]);
+    const id = pick(["waiver_id", ...GENERIC_ID_KEYS]);
     return id
       ? { pathname: "/waivers/waivers", params: { openId: id } }
       : noId("/waivers/waivers");
   }
 
   if (is("customer") || is("contact")) {
-    const id = readId(meta, ["customer_id", "contact_id", ...GENERIC_ID_KEYS]);
+    const id = pick(["customer_id", "contact_id", ...GENERIC_ID_KEYS]);
     return id
       ? { pathname: "/customers/customers", params: { openId: id } }
       : noId("/customers/customers");
@@ -110,9 +152,12 @@ export function resolveNotificationRoute(
     return { pathname: "/events/events" };
   }
 
-  // Payment has no dedicated detail screen today; open the Payments module.
+  // Payment opens the specific transaction's detail sheet on the Payments module.
   if (is("payment")) {
-    return { pathname: "/payments/payments" };
+    const id = pick(["payment_id", "transaction_id", ...GENERIC_ID_KEYS]);
+    return id
+      ? { pathname: "/payments/payments", params: { openId: id } }
+      : noId("/payments/payments");
   }
 
   if (is("staff") || is("activity")) {

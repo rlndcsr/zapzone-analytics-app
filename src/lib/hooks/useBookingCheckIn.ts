@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert } from "react-native";
 
 import { ApiError } from "../../lib/api";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -6,9 +7,16 @@ import {
   checkInBooking,
   fetchBookingByReference,
   fetchBookingDetail,
+  recordBookingPayment,
   scanBookingFromDetail,
+  type BookingDetail,
   type ScanBooking,
 } from "../../services/bookingsService";
+import {
+  checkInWaiver as checkInWaiverApi,
+  fetchEntityWaivers,
+  type EntityWaivers,
+} from "../../services/waiversService";
 import { parseBookingQr } from "../checkin/parseTicketQr";
 // Reuse the phase/tone vocabulary from the attraction scanner so both flows
 // speak the same language (no runtime coupling — types only).
@@ -79,10 +87,25 @@ function gateStatus(
 export type UseBookingCheckIn = {
   phase: CheckInPhase;
   review: ScanBooking | null;
+  /** Full booking detail for the verify surface (null if the detail fetch failed). */
+  reviewDetail: BookingDetail | null;
+  /** Waivers connected to the booking under review (null while loading / on failure). */
+  waivers: EntityWaivers | null;
   result: BookingCheckInResult | null;
   busy: boolean;
+  /** True while an Add Payment request is in flight. */
+  paying: boolean;
+  /** Id of the waiver whose check-in is in flight (null when idle). */
+  checkingWaiverId: number | null;
   handleScan: (decoded: string) => void;
+  /** Approve → check the customer in (same as confirm). */
   confirm: () => void;
+  /** Record an in-store payment against the reviewed booking; returns success. */
+  addPayment: (amount: number) => Promise<boolean>;
+  /** Mark a connected waiver's participant as checked in, then refresh. */
+  checkInWaiver: (waiverId: number) => Promise<void>;
+  /** Deny → decline check-in and return to the scanner. */
+  deny: () => void;
   cancelReview: () => void;
   reset: () => void;
 };
@@ -95,8 +118,12 @@ export type UseBookingCheckIn = {
 export function useBookingCheckIn(): UseBookingCheckIn {
   const [phase, setPhase] = useState<CheckInPhase>("scanning");
   const [review, setReview] = useState<ScanBooking | null>(null);
+  const [reviewDetail, setReviewDetail] = useState<BookingDetail | null>(null);
+  const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
   const [result, setResult] = useState<BookingCheckInResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [checkingWaiverId, setCheckingWaiverId] = useState<number | null>(null);
 
   const processingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -113,6 +140,8 @@ export function useBookingCheckIn(): UseBookingCheckIn {
   const finishWithResult = useCallback((next: BookingCheckInResult) => {
     if (!mountedRef.current) return;
     setReview(null);
+    setReviewDetail(null);
+    setWaivers(null);
     setResult(next);
     setPhase("result");
   }, []);
@@ -207,9 +236,35 @@ export function useBookingCheckIn(): UseBookingCheckIn {
           return;
         }
 
-        // Eligible → hand off to the confirm surface.
-        setReview(booking);
+        // Eligible → load the full detail + connected waivers for the verify
+        // surface (both best-effort), then hand off to the review screen.
         setResult(null);
+
+        let detail: BookingDetail | null = null;
+        try {
+          detail = await fetchBookingDetail(token, booking.id, signal);
+        } catch (err) {
+          if (signal.aborted) return;
+          detail = null; // fall back to the summary-only review
+        }
+
+        let entityWaivers: EntityWaivers | null = null;
+        try {
+          entityWaivers = await fetchEntityWaivers(
+            token,
+            "booking",
+            booking.id,
+            signal,
+          );
+        } catch (err) {
+          if (signal.aborted) return;
+          entityWaivers = null;
+        }
+
+        if (!mountedRef.current) return;
+        setReviewDetail(detail);
+        setWaivers(entityWaivers);
+        setReview(booking);
         setPhase("review");
       } finally {
         processingRef.current = false;
@@ -259,25 +314,121 @@ export function useBookingCheckIn(): UseBookingCheckIn {
     }
   }, [review, busy, finishWithResult]);
 
-  const cancelReview = useCallback(() => {
+  // Record an in-store payment against the reviewed booking, then refresh the
+  // detail so the new Amount Paid / Payment Status show immediately.
+  const addPayment = useCallback(
+    async (amount: number): Promise<boolean> => {
+      if (!reviewDetail || paying) return false;
+      if (!(amount > 0)) {
+        Alert.alert("Invalid amount", "Enter a payment amount greater than 0.");
+        return false;
+      }
+
+      setPaying(true);
+      try {
+        const token = getToken();
+        if (!token) {
+          Alert.alert("Session expired", "Please sign in again to add a payment.");
+          return false;
+        }
+
+        await recordBookingPayment(token, {
+          bookingId: reviewDetail.id,
+          amount,
+          locationId: reviewDetail.locationId,
+          customerId: reviewDetail.customerId,
+        });
+
+        // Reflect the new balance from the server.
+        const detail = await fetchBookingDetail(token, reviewDetail.id);
+        if (mountedRef.current) {
+          setReviewDetail(detail);
+          setReview((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  amountPaid: detail.amountPaid,
+                  paymentStatus: detail.paymentStatus,
+                }
+              : prev,
+          );
+        }
+        return true;
+      } catch (err) {
+        const apiErr = err instanceof ApiError ? err : null;
+        Alert.alert(
+          "Payment failed",
+          apiErr?.message ??
+            "Unable to record the payment. Check your connection and try again.",
+        );
+        return false;
+      } finally {
+        if (mountedRef.current) setPaying(false);
+      }
+    },
+    [reviewDetail, paying],
+  );
+
+  // Check a connected waiver's participant in, then refresh the waivers list so
+  // the "Checked In" badge updates.
+  const checkInWaiver = useCallback(
+    async (waiverId: number) => {
+      if (!reviewDetail || checkingWaiverId != null) return;
+      setCheckingWaiverId(waiverId);
+      try {
+        const token = getToken();
+        if (!token) {
+          Alert.alert("Session expired", "Please sign in again.");
+          return;
+        }
+        await checkInWaiverApi(token, waiverId);
+        const refreshed = await fetchEntityWaivers(
+          token,
+          "booking",
+          reviewDetail.id,
+        );
+        if (mountedRef.current) setWaivers(refreshed);
+      } catch (err) {
+        const apiErr = err instanceof ApiError ? err : null;
+        Alert.alert(
+          "Check-in failed",
+          apiErr?.message ??
+            "Unable to check in this waiver. Check your connection and try again.",
+        );
+      } finally {
+        if (mountedRef.current) setCheckingWaiverId(null);
+      }
+    },
+    [reviewDetail, checkingWaiverId],
+  );
+
+  const clearReview = useCallback(() => {
     setReview(null);
+    setReviewDetail(null);
+    setWaivers(null);
     setResult(null);
     setPhase("scanning");
   }, []);
 
-  const reset = useCallback(() => {
-    setReview(null);
-    setResult(null);
-    setPhase("scanning");
-  }, []);
+  // Deny → decline the check-in and return to the scanner.
+  const deny = useCallback(() => clearReview(), [clearReview]);
+  const cancelReview = useCallback(() => clearReview(), [clearReview]);
+  const reset = useCallback(() => clearReview(), [clearReview]);
 
   return {
     phase,
     review,
+    reviewDetail,
+    waivers,
     result,
     busy,
+    paying,
+    checkingWaiverId,
     handleScan,
     confirm,
+    addPayment,
+    checkInWaiver,
+    deny,
     cancelReview,
     reset,
   };

@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/api";
+import { apiRequest, webUrl } from "../lib/api";
 
 /*
  * Waivers API client — mirrors the web admin's `src/services/waiverService.ts`
@@ -840,6 +840,11 @@ export type ConnectedWaiver = {
   selectedDate: string | null;
   submittedAt: string | null;
   minors: string[];
+  /** Whether the participant has been checked in (distinct from waiver signed). */
+  checkedIn: boolean;
+  checkedInAt: string | null;
+  /** Public completion link if the API provides one; otherwise built client-side. */
+  kioskUrl: string | null;
 };
 
 /** Connected-waiver summary + list for one entity. */
@@ -856,7 +861,38 @@ type RawConnectedWaiver = {
   selected_date?: string | null;
   submitted_at?: string | null;
   minors?: string[] | null;
+  checked_in?: boolean | number | null;
+  checked_in_at?: string | null;
+  kiosk_url?: string | null;
+  link?: string | null;
+  url?: string | null;
 };
+
+/**
+ * Public kiosk URL where a customer completes the waiver for a booking. The web
+ * WaiverConnectionPanel's "Kiosk" / "Copy link" open this page; the mobile app
+ * has no window.origin, so it builds the same path on the web frontend host
+ * (EXPO_PUBLIC_WEB_URL). NOTE: adjust this path if your kiosk route differs.
+ */
+export function buildWaiverKioskUrl(
+  entityType: WaiverEntityType,
+  entityId: number,
+): string {
+  return webUrl(`/waiver/kiosk/${entityType}/${entityId}`);
+}
+
+/**
+ * POST /api/waivers/{id}/check-in — mark a connected waiver's participant as
+ * checked in. NOTE: route is a best-guess mirror of the web action; adjust if
+ * your backend uses a different path.
+ */
+export async function checkInWaiver(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/waivers/${id}/check-in`, {
+    method: "POST",
+    token,
+    body: {},
+  });
+}
 
 /**
  * GET /api/waivers/for?type=&id= — waivers connected to an entity (the same
@@ -886,6 +922,9 @@ export async function fetchEntityWaivers(
     selectedDate: w.selected_date ?? null,
     submittedAt: w.submitted_at ?? null,
     minors: w.minors ?? [],
+    checkedIn: w.checked_in === true || w.checked_in === 1 || !!w.checked_in_at,
+    checkedInAt: w.checked_in_at ?? null,
+    kioskUrl: w.kiosk_url?.trim() || w.link?.trim() || w.url?.trim() || null,
   }));
   const s = res?.data?.summary ?? {};
   return {

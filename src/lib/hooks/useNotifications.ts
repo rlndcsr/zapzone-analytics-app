@@ -1,7 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
-import { fetchNotifications, markAllNotificationsAsRead, clearAllNotifications, markNotificationAsRead, AppNotification, NotificationFilterType } from '../../services/notificationService';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { fetchNotifications, markAllNotificationsAsRead, clearAllNotifications, markNotificationAsRead, deleteNotification as deleteNotificationApi, AppNotification, NotificationFilterType } from '../../services/notificationService';
 import { getToken, getCurrentUser } from '../session';
 import { Alert } from 'react-native';
+
+// How long the "Undo" window stays open before the delete is committed to the API.
+const UNDO_TIMEOUT_MS = 5000;
+
+type PendingDelete = { notification: AppNotification; index: number };
 
 export function useNotifications(initialFilter: NotificationFilterType = 'all') {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -13,6 +18,11 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [actionLoading, setActionLoading] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Holds the "commit this delete to the server" callback for the item currently
+  // in its undo window, so a second delete (or unmount) can flush it early.
+  const commitDeleteRef = useRef<(() => void) | null>(null);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -115,12 +125,88 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
     }
   };
 
-  return { 
-    notifications, 
+  // Restores a snapshotted notification back into the list at its original slot.
+  const restoreNotification = useCallback(({ notification, index }: PendingDelete) => {
+    setNotifications((prev) => {
+      const next = [...prev];
+      next.splice(Math.min(index, next.length), 0, notification);
+      return next;
+    });
+    setTotalCount((c) => c + 1);
+  }, []);
+
+  // Optimistically removes a notification and opens an undo window. The delete is
+  // only sent to the API once the window elapses (or another delete flushes it).
+  const deleteNotification = useCallback((id: number) => {
+    const token = getToken();
+    if (!token) return;
+
+    // A delete is already waiting to be undone — commit it now before starting a new one.
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+      commitDeleteRef.current?.();
+    }
+
+    let snapshot: PendingDelete | null = null;
+    setNotifications((prev) => {
+      const index = prev.findIndex((n) => n.id === id);
+      if (index === -1) return prev;
+      snapshot = { notification: prev[index], index };
+      return prev.filter((n) => n.id !== id);
+    });
+    if (!snapshot) return;
+
+    setTotalCount((c) => Math.max(0, c - 1));
+    setPendingDelete(snapshot);
+
+    const captured = snapshot;
+    const commit = async () => {
+      undoTimerRef.current = null;
+      commitDeleteRef.current = null;
+      setPendingDelete((p) => (p === captured ? null : p));
+      try {
+        await deleteNotificationApi(token, id);
+      } catch (err) {
+        restoreNotification(captured);
+        Alert.alert('Error', 'Failed to delete notification');
+      }
+    };
+
+    commitDeleteRef.current = commit;
+    undoTimerRef.current = setTimeout(commit, UNDO_TIMEOUT_MS);
+  }, [restoreNotification]);
+
+  // Cancels the pending delete and puts the notification back where it was.
+  const undoDelete = useCallback(() => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    commitDeleteRef.current = null;
+    setPendingDelete((p) => {
+      if (p) restoreNotification(p);
+      return null;
+    });
+  }, [restoreNotification]);
+
+  // On unmount, flush any pending delete so it isn't silently dropped.
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) {
+        clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = null;
+        commitDeleteRef.current?.();
+      }
+    };
+  }, []);
+
+  return {
+    notifications,
     totalCount,
-    lastPage, 
-    loading, 
-    error, 
+    lastPage,
+    loading,
+    error,
     filter,
     page,
     perPage,
@@ -131,6 +217,9 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
     markAllAsRead,
     markAsRead,
     clearAll,
+    deleteNotification,
+    undoDelete,
+    pendingDelete,
     actionLoading
   };
 }
