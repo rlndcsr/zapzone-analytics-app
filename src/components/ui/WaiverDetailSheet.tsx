@@ -16,6 +16,7 @@ import {
   SOURCE_LABELS,
   type WaiverDetail,
 } from "../../services/waiversService";
+import { apiUrl } from "../../lib/api";
 import { getToken } from "../../lib/session";
 import { BottomSheet } from "./BottomSheet";
 import { StatusBadge } from "./StatusBadge";
@@ -108,70 +109,6 @@ const Ack = ({
   </View>
 );
 
-/** Build a printable HTML document from the waiver detail. */
-function buildWaiverHtml(d: WaiverDetail): string {
-  const esc = (s: string | null | undefined) =>
-    String(s ?? "—").replace(/[&<>]/g, (c) =>
-      c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;",
-    );
-  const linked = d.bookingReference
-    ? `Booking ${d.bookingReference}`
-    : d.eventName
-      ? `Event · ${d.eventName}`
-      : d.attractionPurchaseId
-        ? `Attraction purchase #${d.attractionPurchaseId}`
-        : "—";
-  const minors = d.minors
-    .map(
-      (m) =>
-        `<li>${esc(`${m.firstName} ${m.lastName}`.trim())} — ${esc(
-          formatDate(m.dateOfBirth),
-        )}${m.relationship ? ` · ${esc(m.relationship)}` : ""}</li>`,
-    )
-    .join("");
-  return `<!doctype html><html><head><meta charset="utf-8"/>
-  <style>
-    body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#111;padding:28px;font-size:13px;line-height:1.5}
-    h1{font-size:20px;margin:0 0 2px}
-    .sub{color:#6b7280;margin-bottom:16px}
-    h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;border-bottom:1px solid #eee;padding-bottom:6px;margin:20px 0 10px}
-    .grid{display:flex;flex-wrap:wrap}
-    .cell{width:50%;margin-bottom:10px}
-    .lbl{font-size:10px;text-transform:uppercase;color:#9ca3af;letter-spacing:.05em}
-    .val{font-size:13px}
-    .body{white-space:pre-wrap;border:1px solid #eee;border-radius:8px;padding:12px;color:#374151;font-size:12px}
-    ul{margin:0;padding-left:18px}
-    .sig{margin-top:8px;font-weight:bold}
-  </style></head><body>
-  <h1>${esc(d.adultName)} — ${esc(d.status)}</h1>
-  <div class="sub">${esc(d.templateTitle)} · Waiver #${d.id}</div>
-  <h2>Participant / Guardian</h2>
-  <div class="grid">
-    <div class="cell"><div class="lbl">Full Name</div><div class="val">${esc(d.adultName)}</div></div>
-    <div class="cell"><div class="lbl">Date of Birth</div><div class="val">${esc(formatDate(d.adultDob))}</div></div>
-    <div class="cell"><div class="lbl">Email</div><div class="val">${esc(d.adultEmail)}</div></div>
-    <div class="cell"><div class="lbl">Phone</div><div class="val">${esc(d.adultPhone)}</div></div>
-  </div>
-  <h2>Visit Details</h2>
-  <div class="grid">
-    <div class="cell"><div class="lbl">Location</div><div class="val">${esc(d.locationName)}</div></div>
-    <div class="cell"><div class="lbl">Visit Date</div><div class="val">${esc(formatDate(d.selectedDate))}</div></div>
-    <div class="cell"><div class="lbl">Linked To</div><div class="val">${esc(linked)}</div></div>
-    <div class="cell"><div class="lbl">Source</div><div class="val">${esc(SOURCE_LABELS[d.source] ?? d.source)}</div></div>
-    <div class="cell"><div class="lbl">Submitted</div><div class="val">${esc(formatDateTime(d.submittedAt))}</div></div>
-  </div>
-  ${d.minors.length ? `<h2>Minor Participants (${d.minors.length})</h2><ul>${minors}</ul>` : ""}
-  ${d.renderedBody ? `<h2>Waiver Agreement</h2><div class="body">${esc(d.renderedBody)}</div>` : ""}
-  <h2>Acknowledgment &amp; Signature</h2>
-  <div>Agreement accepted: <b>${d.agreementAccepted ? "Yes" : "No"}</b></div>
-  <div>Electronic consent: <b>${d.electronicConsentAccepted ? "Yes" : "No"}</b></div>
-  <div>Photo / video release: <b>${d.photoVideoConsent == null ? "—" : d.photoVideoConsent ? "Agreed" : "Declined"}</b></div>
-  <div>Marketing consent: <b>${esc(marketingLabel(d.marketingConsentStatus))}</b></div>
-  <div class="sig">Signed electronically by ${esc(d.typedLegalName ?? d.adultName)}</div>
-  <div class="sub">${esc(formatDateTime(d.submittedAt))}</div>
-  </body></html>`;
-}
-
 type Props = {
   waiverId: number | null;
   visible: boolean;
@@ -183,8 +120,10 @@ type Props = {
 
 /**
  * View one waiver record (GET /waivers/{id}) — participant, visit, minors,
- * consents, the legal body, and the electronic signature — with a Print action
- * (native print dialog via expo-print). Admins can soft-delete with a reason.
+ * consents, the legal body, and the electronic signature. Print downloads the
+ * exact server-generated PDF the web admin prints (GET /waivers/{id}/print) and
+ * opens the native print dialog on it, so mobile keeps no separate template.
+ * Admins can soft-delete with a reason.
  */
 export function WaiverDetailSheet({
   waiverId,
@@ -258,10 +197,35 @@ export function WaiverDetailSheet({
 
   const runPrint = async () => {
     if (!detail) return;
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not authenticated");
+      return;
+    }
     setPrinting(true);
     try {
+      const FileSystem = await import("expo-file-system/legacy");
       const Print = await import("expo-print");
-      await Print.printAsync({ html: buildWaiverHtml(detail) });
+      // Fetch the exact PDF the web admin prints — the backend renders the full
+      // waiver document (Dompdf) at GET /api/waivers/{id}/print. We download it
+      // with the Sanctum bearer token, then open the native print dialog on the
+      // PDF itself rather than rendering our own (previously shortened) layout.
+      const dest = `${FileSystem.cacheDirectory}waiver-${detail.id}.pdf`;
+      const { uri, status } = await FileSystem.downloadAsync(
+        apiUrl(`/api/waivers/${detail.id}/print`),
+        dest,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (status !== 200) {
+        Alert.alert(
+          "Print unavailable",
+          status === 403
+            ? "You don't have permission to print this waiver."
+            : `Could not generate the waiver PDF (error ${status}).`,
+        );
+        return;
+      }
+      await Print.printAsync({ uri });
     } catch (e) {
       Alert.alert(
         "Print failed",
@@ -306,6 +270,22 @@ export function WaiverDetailSheet({
                 {detail.adultName}
               </Text>
               <StatusBadge status={detail.status} />
+              {/* Check-in badge — mirrors the web admin: driven purely by the
+                  truthiness of checked_in_at (no separate boolean field). */}
+              {detail.checkedInAt ? (
+                <View className="flex-row items-center gap-1 px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30">
+                  <Feather name="user-check" size={11} color="#047857" />
+                  <Text className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                    Checked In
+                  </Text>
+                </View>
+              ) : (
+                <View className="px-2 py-1 rounded-full bg-gray-100 dark:bg-neutral-800">
+                  <Text className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                    Not Checked In
+                  </Text>
+                </View>
+              )}
             </View>
             <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-1">
               {detail.templateTitle ?? "Waiver"} · Waiver #{detail.id}

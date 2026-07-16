@@ -84,6 +84,12 @@ export type Waiver = {
   eventId: number | null;
   eventName: string | null;
   attractionPurchaseId: number | null;
+  /**
+   * Participant check-in timestamp (nullable ISO string). Mirrors the web
+   * admin's `Waiver.checked_in_at`; its truthiness drives the "Checked In" vs
+   * "Not Checked In" badge (the web never uses a separate boolean).
+   */
+  checkedInAt: string | null;
 };
 
 /** Full waiver detail (GET /waivers/{id}) backing the detail sheet. */
@@ -187,6 +193,7 @@ type RawWaiver = {
   marketing_consent_status?: MarketingConsentStatus;
   source?: WaiverSource;
   submitted_at?: string | null;
+  checked_in_at?: string | null;
   template?: { id?: number; title?: string } | null;
   location?: { id?: number; name?: string } | null;
   minors?: RawMinor[] | null;
@@ -318,6 +325,7 @@ function mapWaiver(raw: RawWaiver): Waiver {
     eventId: raw.event?.id ?? null,
     eventName: raw.event?.name ?? null,
     attractionPurchaseId: raw.attraction_purchase?.id ?? null,
+    checkedInAt: raw.checked_in_at ?? null,
   };
 }
 
