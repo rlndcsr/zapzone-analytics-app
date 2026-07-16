@@ -245,6 +245,9 @@ export type MetricCardKey = keyof typeof METRIC_CARDS;
 /** Everything the screen needs to know to render one role's dashboard. */
 export type DashboardConfig = {
   role: string;
+  /** Home-screen header subtitle — role-scoped so wording matches the user's
+   *  actual reach (multi-location vs a single assigned location). */
+  subtitle: string;
   cards: MetricCardKey[];
   showLocationSelector: boolean;
   showBreakdowns: boolean;
@@ -259,6 +262,7 @@ export type DashboardConfig = {
 export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
   company_admin: {
     role: "company_admin",
+    subtitle: "Multi-location booking overview and management",
     cards: [
       "packages",
       "participants",
@@ -278,6 +282,7 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
   },
   location_manager: {
     role: "location_manager",
+    subtitle: "Location booking overview and management",
     cards: [
       "packages",
       "newBookings",
@@ -295,6 +300,7 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
   },
   attendant: {
     role: "attendant",
+    subtitle: "Location booking overview and daily operations",
     cards: [
       "packages",
       "newBookings",

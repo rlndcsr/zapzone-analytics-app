@@ -620,7 +620,7 @@ const Home = () => {
               Dashboard
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-              Multi-location booking overview and management
+              {dashboardConfig.subtitle}
             </Text>
           </View>
 

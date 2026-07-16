@@ -76,7 +76,7 @@ export function DashboardHeader({
               Hello, {roleLabel}
             </Text>
             <Text className="text-xs text-gray-400 dark:text-gray-500">
-              Welcome back
+              Here's what's happening today
             </Text>
           </View>
         </View>
