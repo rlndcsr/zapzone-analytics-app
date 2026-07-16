@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,96 +15,45 @@ import {
   deletePackage,
   duplicatePackage,
   fetchPackageDetail,
-  updatePackage,
   type PackageDetail,
   type PackageRow,
-  type UpdatePackageInput,
 } from "../../services/packagesService";
 import { BottomSheet } from "./BottomSheet";
-import {
-  SelectField,
-  TextField,
-  ToggleRow,
-  type SelectOption,
-} from "./FormControls";
+import { SelectField } from "./FormControls";
 import { StatusBadge } from "./StatusBadge";
 
 const PRIMARY = "#0644C7";
 
-type Mode = "menu" | "view" | "edit" | "duplicate";
+type Mode = "view" | "duplicate";
 export type LocationOption = { id: number; name: string };
-
-const DURATION_UNITS: SelectOption[] = [
-  { label: "Hours", value: "hours" },
-  { label: "Minutes", value: "minutes" },
-  { label: "Hours and minutes", value: "hours and minutes" },
-];
 
 const money = (n: number | null): string =>
   n == null ? "—" : `$${n.toFixed(2)}`;
 
-const parseNum = (s: string): number | null => {
-  const t = s.trim();
-  if (!t) return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
+// Availability time formatting — mirrors the web admin's utils/timeFormat.ts so
+// the details view reads identically ("16:30:00" → "4:30 PM").
+const convertTo12Hour = (time24: string | null): string => {
+  if (!time24) return "";
+  const [hourStr, minuteStr] = time24.substring(0, 5).split(":");
+  let hour = parseInt(hourStr, 10);
+  if (Number.isNaN(hour)) return time24;
+  const minute = minuteStr || "00";
+  const period = hour >= 12 ? "PM" : "AM";
+  if (hour === 0) hour = 12;
+  else if (hour > 12) hour = hour - 12;
+  return `${hour}:${minute} ${period}`;
 };
 
-const parseIntOrNull = (s: string): number | null => {
-  const t = s.trim();
-  if (!t) return null;
-  const n = parseInt(t, 10);
-  return Number.isFinite(n) ? n : null;
+/** "4:30 PM - 9:00 PM" (mirrors the web admin's formatTimeRange). */
+const formatTimeRange = (
+  start: string | null,
+  end: string | null,
+): string => {
+  if (!start || !end) return "";
+  return `${convertTo12Hour(start)} - ${convertTo12Hour(end)}`;
 };
 
 /* --- Local presentational helpers (per-module convention) ----------------- */
-
-const ActionRow = ({
-  icon,
-  label,
-  hint,
-  danger = false,
-  busy = false,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  label: string;
-  hint?: string;
-  danger?: boolean;
-  busy?: boolean;
-  onPress: () => void;
-}) => {
-  const color = danger ? "#dc2626" : "#374151";
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={busy}
-      style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
-      className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
-    >
-      <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
-        {busy ? (
-          <ActivityIndicator size="small" color={color} />
-        ) : (
-          <Feather name={icon} size={18} color={color} />
-        )}
-      </View>
-      <View className="flex-1">
-        <Text
-          className="text-base font-medium text-gray-800 dark:text-gray-100"
-          style={danger ? { color } : undefined}
-        >
-          {label}
-        </Text>
-        {!!hint && (
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-            {hint}
-          </Text>
-        )}
-      </View>
-    </Pressable>
-  );
-};
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-5 mb-2">
@@ -148,11 +98,12 @@ type Props = {
 };
 
 /**
- * Per-package actions hub — the mobile equivalent of the web admin's row buttons
- * (View / Edit / Duplicate / Delete). Everything lives in ONE BottomSheet that
- * swaps between menu / view / edit / duplicate content, so two native Modals are
- * never stacked (which crashes Android's new architecture). Reuses the same
- * endpoints as the web: GET/PUT/POST/DELETE /api/packages/{id}.
+ * Per-package detail sheet — opens straight into the package details (View) with
+ * footer actions. Edit opens the full-screen Edit Package screen (web parity);
+ * Duplicate/Delete run inline. One BottomSheet swaps between view / duplicate
+ * content, so two native Modals are never stacked (which crashes Android's new
+ * architecture). Reuses the same endpoints as the web: GET/POST/DELETE
+ * /api/packages/{id} (edit uses PUT from the dedicated screen).
  */
 export function PackageActionsSheet({
   visible,
@@ -162,47 +113,16 @@ export function PackageActionsSheet({
   onClose,
   onChanged,
 }: Props) {
-  const [mode, setMode] = useState<Mode>("menu");
+  const [mode, setMode] = useState<Mode>("view");
   const [detail, setDetail] = useState<PackageDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Edit form fields (core scalars only; relations/schedules/image are read-only).
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("");
-  const [price, setPrice] = useState("");
-  const [pricePerAdditional, setPricePerAdditional] = useState("");
-  const [minParticipants, setMinParticipants] = useState("");
-  const [maxParticipants, setMaxParticipants] = useState("");
-  const [duration, setDuration] = useState("");
-  const [durationUnit, setDurationUnit] = useState("hours");
-  const [bookingWindowDays, setBookingWindowDays] = useState("");
-  const [minNotice, setMinNotice] = useState("");
-  const [partialPct, setPartialPct] = useState("");
-  const [partialFixed, setPartialFixed] = useState("");
-  const [customerNotes, setCustomerNotes] = useState("");
-  const [displayOrder, setDisplayOrder] = useState("");
-  const [hasGoh, setHasGoh] = useState(false);
-  const [isActive, setIsActive] = useState(true);
-
   // Duplicate destination location.
   const [dupLocationId, setDupLocationId] = useState<number | null>(null);
 
   const reqRef = useRef(0);
-  const seededRef = useRef<number | null>(null);
-
-  // Reset to the menu whenever the sheet (re)opens for a package.
-  useEffect(() => {
-    if (visible) {
-      setMode("menu");
-      setDetail(null);
-      setError(null);
-      setBusy(false);
-      seededRef.current = null;
-    }
-  }, [visible]);
 
   const loadDetail = useCallback(async (id: number) => {
     const token = getToken();
@@ -227,56 +147,19 @@ export function PackageActionsSheet({
     }
   }, []);
 
-  const ensureDetail = useCallback(
-    (id: number) => {
-      if (!detail || detail.id !== id) loadDetail(id);
-    },
-    [detail, loadDetail],
-  );
-
-  const seedForm = useCallback((d: PackageDetail) => {
-    setName(d.name);
-    setDescription(d.description);
-    setCategory(d.category);
-    setPrice(String(d.price));
-    setPricePerAdditional(
-      d.pricePerAdditional != null ? String(d.pricePerAdditional) : "",
-    );
-    setMinParticipants(
-      d.minParticipants != null ? String(d.minParticipants) : "",
-    );
-    setMaxParticipants(
-      d.maxParticipants != null ? String(d.maxParticipants) : "",
-    );
-    setDuration(d.duration != null ? String(d.duration) : "");
-    setDurationUnit(d.durationUnit || "hours");
-    setBookingWindowDays(
-      d.bookingWindowDays != null ? String(d.bookingWindowDays) : "",
-    );
-    setMinNotice(
-      d.minBookingNoticeHours != null ? String(d.minBookingNoticeHours) : "",
-    );
-    setPartialPct(
-      d.partialPaymentPercentage != null
-        ? String(d.partialPaymentPercentage)
-        : "",
-    );
-    setPartialFixed(
-      d.partialPaymentFixed != null ? String(d.partialPaymentFixed) : "",
-    );
-    setCustomerNotes(d.customerNotes);
-    setDisplayOrder(String(d.displayOrder));
-    setHasGoh(d.hasGuestOfHonor);
-    setIsActive(d.isActive);
-  }, []);
-
-  // Seed the edit form once the detail for this package has loaded.
+  // Open straight into the details view and load the selected package's detail
+  // immediately. Keyed on the package id so switching packages reloads, but a
+  // same-package list refetch (onChanged) doesn't.
+  const pkgId = pkg?.id;
   useEffect(() => {
-    if (mode === "edit" && detail && seededRef.current !== detail.id) {
-      seedForm(detail);
-      seededRef.current = detail.id;
+    if (visible && pkgId != null) {
+      setMode("view");
+      setDetail(null);
+      setError(null);
+      setBusy(false);
+      loadDetail(pkgId);
     }
-  }, [mode, detail, seedForm]);
+  }, [visible, pkgId, loadDetail]);
 
   if (!pkg) {
     return (
@@ -288,24 +171,16 @@ export function PackageActionsSheet({
     );
   }
 
-  const title =
-    mode === "view"
-      ? "Package details"
-      : mode === "edit"
-        ? "Edit package"
-        : mode === "duplicate"
-          ? "Duplicate package"
-          : "Package actions";
+  const title = mode === "view" ? "Package details" : "Duplicate package";
 
   /* --- Actions ------------------------------------------------------------ */
 
-  const goView = () => {
-    setMode("view");
-    ensureDetail(pkg.id);
-  };
+  // Edit is a full-screen experience (all sections, like the web admin). Close
+  // the sheet and navigate; the list refetches on focus via the stale flag the
+  // edit screen sets on save.
   const goEdit = () => {
-    setMode("edit");
-    ensureDetail(pkg.id);
+    onClose();
+    router.push(`/packages/edit-packages?id=${pkg.id}`);
   };
   const goDuplicate = () => {
     setDupLocationId(pkg.locationId ?? null);
@@ -346,80 +221,6 @@ export function PackageActionsSheet({
     );
   };
 
-  const handleSave = async () => {
-    // Validation mirrors the web EditPackage form.
-    if (!name.trim()) return Alert.alert("Missing name", "Package name is required.");
-    if (!category.trim())
-      return Alert.alert("Missing category", "Please enter a category.");
-    const priceNum = parseNum(price);
-    if (priceNum == null || priceNum < 0)
-      return Alert.alert("Invalid price", "Please enter a valid price.");
-    const minP = parseIntOrNull(minParticipants);
-    if (minParticipants.trim() && (minP == null || minP < 1))
-      return Alert.alert("Invalid participants", "Min participants must be at least 1.");
-    const maxP = parseIntOrNull(maxParticipants);
-    if (maxParticipants.trim() && (maxP == null || maxP < 1))
-      return Alert.alert("Invalid participants", "Max participants must be at least 1.");
-    const ppa = parseNum(pricePerAdditional);
-    if (pricePerAdditional.trim() && (ppa == null || ppa < 0))
-      return Alert.alert(
-        "Invalid price",
-        "Price per additional participant must be 0 or more.",
-      );
-    const dur = parseNum(duration);
-    if (
-      durationUnit !== "hours and minutes" &&
-      duration.trim() &&
-      (dur == null || dur < 1)
-    )
-      return Alert.alert("Invalid duration", "Please enter a valid duration.");
-    const pct = parseIntOrNull(partialPct);
-    if (partialPct.trim() && (pct == null || pct < 0 || pct > 100))
-      return Alert.alert(
-        "Invalid deposit",
-        "Partial payment percentage must be between 0 and 100.",
-      );
-
-    const token = getToken();
-    if (!token) return Alert.alert("Not signed in", "Please sign in again.");
-
-    const input: UpdatePackageInput = {
-      name: name.trim(),
-      description: description.trim(),
-      category: category.trim(),
-      price: priceNum,
-      pricePerAdditional: ppa,
-      minParticipants: minP,
-      maxParticipants: maxP,
-      duration: dur,
-      durationUnit,
-      bookingWindowDays: parseIntOrNull(bookingWindowDays),
-      minBookingNoticeHours: parseIntOrNull(minNotice),
-      hasGuestOfHonor: hasGoh,
-      partialPaymentPercentage: pct,
-      partialPaymentFixed: parseNum(partialFixed),
-      customerNotes: customerNotes.trim(),
-      displayOrder: parseIntOrNull(displayOrder),
-      isActive,
-    };
-
-    setBusy(true);
-    try {
-      await updatePackage(token, pkg.id, input);
-      onChanged();
-      seededRef.current = null;
-      await loadDetail(pkg.id);
-      setMode("view");
-    } catch (err) {
-      Alert.alert(
-        "Update failed",
-        err instanceof Error ? err.message : "Could not update package.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleDuplicate = async () => {
     const token = getToken();
     if (!token) return Alert.alert("Not signed in", "Please sign in again.");
@@ -443,39 +244,6 @@ export function PackageActionsSheet({
 
   return (
     <BottomSheet visible={visible} onClose={onClose} title={title}>
-      {mode === "menu" && (
-        <View className="px-4 pb-6">
-          <View className="px-4 pb-2">
-            <Text
-              className="text-base font-bold text-gray-900 dark:text-white"
-              numberOfLines={1}
-            >
-              {pkg.name}
-            </Text>
-            {!!pkg.locationName && (
-              <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                {pkg.locationName}
-              </Text>
-            )}
-          </View>
-          <ActionRow icon="eye" label="View details" onPress={goView} />
-          <ActionRow icon="edit-2" label="Edit package" onPress={goEdit} />
-          <ActionRow
-            icon="copy"
-            label="Duplicate"
-            hint="Creates an inactive copy"
-            onPress={goDuplicate}
-          />
-          <ActionRow
-            icon="trash-2"
-            label="Delete"
-            danger
-            busy={busy}
-            onPress={confirmDelete}
-          />
-        </View>
-      )}
-
       {mode === "view" && (
         <ScrollView
           className="px-5"
@@ -496,7 +264,16 @@ export function PackageActionsSheet({
           )}
           {!loading && !error && detail && (
             <>
-              <View className="flex-row items-center gap-2 mt-2">
+              {/* Title header — package name as the primary heading with the
+                  category beneath it, mirroring the web admin's PackageDetails. */}
+              <Text className="text-xl font-bold text-gray-900 dark:text-white mt-2">
+                {detail.name}
+              </Text>
+              <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {detail.category || "No category"}
+              </Text>
+
+              <View className="flex-row items-center gap-2 mt-3">
                 <StatusBadge status={detail.isActive ? "active" : "inactive"} />
                 {!!detail.packageType && (
                   <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
@@ -659,10 +436,10 @@ export function PackageActionsSheet({
                         </Text>
                         <Text className="text-xs text-gray-500 dark:text-gray-400">
                           {s.timeSlotStart && s.timeSlotEnd
-                            ? `${s.timeSlotStart}–${s.timeSlotEnd}`
+                            ? formatTimeRange(s.timeSlotStart, s.timeSlotEnd)
                             : ""}
                           {s.timeSlotInterval
-                            ? ` · ${s.timeSlotInterval}m`
+                            ? ` (${s.timeSlotInterval} min intervals)`
                             : ""}
                         </Text>
                       </View>
@@ -715,195 +492,6 @@ export function PackageActionsSheet({
         </ScrollView>
       )}
 
-      {mode === "edit" && (
-        <ScrollView
-          className="px-5"
-          contentContainerStyle={{ paddingBottom: 28 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {loading && !detail ? (
-            <View className="py-10 items-center">
-              <ActivityIndicator color={PRIMARY} />
-            </View>
-          ) : (
-            <View className="gap-4 pt-2">
-              <TextField
-                label="Name"
-                required
-                value={name}
-                onChangeText={setName}
-                placeholder="Package name"
-              />
-              <TextField
-                label="Description"
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Description"
-                multiline
-              />
-              <TextField
-                label="Category"
-                required
-                value={category}
-                onChangeText={setCategory}
-                placeholder="e.g. Birthday"
-              />
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Price"
-                    required
-                    value={price}
-                    onChangeText={setPrice}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Per additional"
-                    value={pricePerAdditional}
-                    onChangeText={setPricePerAdditional}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                  />
-                </View>
-              </View>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Min participants"
-                    value={minParticipants}
-                    onChangeText={setMinParticipants}
-                    keyboardType="number-pad"
-                    placeholder="1"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Max participants"
-                    value={maxParticipants}
-                    onChangeText={setMaxParticipants}
-                    keyboardType="number-pad"
-                    placeholder="—"
-                  />
-                </View>
-              </View>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Duration"
-                    value={duration}
-                    onChangeText={setDuration}
-                    keyboardType="decimal-pad"
-                    placeholder="0"
-                  />
-                </View>
-                <View className="flex-1">
-                  <SelectField
-                    label="Unit"
-                    value={durationUnit}
-                    options={DURATION_UNITS}
-                    onSelect={(v) => setDurationUnit(String(v))}
-                  />
-                </View>
-              </View>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Booking window (days)"
-                    value={bookingWindowDays}
-                    onChangeText={setBookingWindowDays}
-                    keyboardType="number-pad"
-                    placeholder="—"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Min. notice (hours)"
-                    value={minNotice}
-                    onChangeText={setMinNotice}
-                    keyboardType="number-pad"
-                    placeholder="—"
-                  />
-                </View>
-              </View>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Deposit %"
-                    value={partialPct}
-                    onChangeText={setPartialPct}
-                    keyboardType="number-pad"
-                    placeholder="0"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Deposit (fixed)"
-                    value={partialFixed}
-                    onChangeText={setPartialFixed}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                  />
-                </View>
-              </View>
-              <TextField
-                label="Display order"
-                value={displayOrder}
-                onChangeText={setDisplayOrder}
-                keyboardType="number-pad"
-                placeholder="0"
-              />
-              <TextField
-                label="Customer notes"
-                value={customerNotes}
-                onChangeText={setCustomerNotes}
-                placeholder="Notes shown to customers"
-                multiline
-              />
-              <ToggleRow
-                label="Has guest of honor"
-                value={hasGoh}
-                onValueChange={setHasGoh}
-              />
-              <ToggleRow label="Active" value={isActive} onValueChange={setIsActive} />
-
-              <Text className="text-xs text-gray-400 dark:text-gray-500">
-                Attractions, add-ons, spaces, schedules and images are managed on
-                the web admin.
-              </Text>
-
-              <View className="flex-row gap-3 mt-2">
-                <Pressable
-                  onPress={() => setMode(detail ? "view" : "menu")}
-                  disabled={busy}
-                  className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
-                >
-                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                    Cancel
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleSave}
-                  disabled={busy}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7]"
-                >
-                  {busy ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text className="text-sm font-semibold text-white">
-                      Save changes
-                    </Text>
-                  )}
-                </Pressable>
-              </View>
-            </View>
-          )}
-        </ScrollView>
-      )}
-
       {mode === "duplicate" && (
         <View className="px-5 pb-8 pt-2">
           <Text className="text-sm text-gray-500 dark:text-gray-400">
@@ -942,7 +530,7 @@ export function PackageActionsSheet({
 
           <View className="flex-row gap-3 mt-6">
             <Pressable
-              onPress={() => setMode("menu")}
+              onPress={() => setMode("view")}
               disabled={busy}
               className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
             >

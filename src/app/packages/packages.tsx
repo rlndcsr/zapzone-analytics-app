@@ -565,10 +565,13 @@ const Packages = () => {
                 const isActive = pkg.status === "active";
                 const dateLabel = formatDate(pkg.createdAt);
                 return (
-                  <View
+                  <Pressable
                     key={pkg.id}
-                    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
+                    onPress={() => setActionsPkg(pkg)}
+                    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-90"
                     style={CARD_SHADOW}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View details for ${pkg.name}`}
                   >
                     {/* Top row */}
                     <View className="flex-row items-start justify-between">
@@ -702,7 +705,7 @@ const Packages = () => {
                         </View>
                       )}
                     </View>
-                  </View>
+                  </Pressable>
                 );
               })}
               <Pagination

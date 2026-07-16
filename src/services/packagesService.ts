@@ -320,12 +320,16 @@ export async function fetchPackageDetail(
   };
 }
 
-/** Core scalar fields the mobile Edit form can change (relations/schedules/image
- *  editing is deferred — those need the heavy option-list endpoints). */
+/** All fields the mobile Edit screen can change — full parity with the web
+ *  admin's Edit Package PUT payload (scalars + relations + features + media).
+ *  Availability schedules are saved separately via
+ *  {@link savePackageAvailabilitySchedules}, exactly as the web does. */
 export type UpdatePackageInput = {
   name: string;
   description: string;
   category: string;
+  packageType: string;
+  features: string[];
   price: number;
   pricePerAdditional: number | null;
   minParticipants: number | null;
@@ -338,13 +342,25 @@ export type UpdatePackageInput = {
   partialPaymentPercentage: number | null;
   partialPaymentFixed: number | null;
   customerNotes: string;
+  invitationDownloadLink: string;
+  /** Base64 data URL of a newly picked invitation file; null keeps the current. */
+  invitationFile: string | null;
   displayOrder: number | null;
   isActive: boolean;
+  /** Base64 data URL of a newly picked image; null keeps the current image. */
+  image: string | null;
+  attractionIds: number[];
+  addonIds: number[];
+  /** Add-on NAMES in display order (the key the backend expects). */
+  addOnsOrder: string[];
+  roomIds: number[];
+  promoIds: number[];
+  giftCardIds: number[];
 };
 
-/** PUT /api/packages/{id} — update the editable scalar fields. The backend
- *  validates each with `sometimes`, and relations/schedules are left untouched
- *  when their keys are omitted, so sending only these is safe. */
+/** PUT /api/packages/{id} — update every editable field (mirrors the web admin's
+ *  Edit Package save). `image`/`invitation_file` are only sent when a new one was
+ *  picked, so we never resend the existing base64 payload. */
 export async function updatePackage(
   token: string,
   id: number,
@@ -354,6 +370,8 @@ export async function updatePackage(
     name: input.name,
     description: input.description,
     category: input.category,
+    package_type: input.packageType || "regular",
+    features: input.features,
     price: input.price,
     price_per_additional: input.pricePerAdditional,
     min_participants: input.minParticipants,
@@ -366,9 +384,20 @@ export async function updatePackage(
     partial_payment_percentage: input.partialPaymentPercentage,
     partial_payment_fixed: input.partialPaymentFixed,
     customer_notes: input.customerNotes || null,
+    invitation_download_link: input.invitationDownloadLink || null,
     display_order: input.displayOrder,
     is_active: input.isActive,
+    attraction_ids: input.attractionIds,
+    addon_ids: input.addonIds,
+    add_ons_order: input.addOnsOrder,
+    room_ids: input.roomIds,
+    promo_ids: input.promoIds,
+    gift_card_ids: input.giftCardIds,
   };
+  // Only send media when a new one was chosen (base64 data URL), matching the
+  // web admin — omitting the key leaves the existing image/file untouched.
+  if (input.image) body.image = input.image;
+  if (input.invitationFile) body.invitation_file = input.invitationFile;
   await apiRequest(`/api/packages/${id}`, { method: "PUT", token, body });
 }
 
