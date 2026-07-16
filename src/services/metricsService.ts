@@ -1,5 +1,8 @@
 import { apiRequest } from "../lib/api";
 
+// The dashboard metrics endpoint is the heaviest call in the app (full aggregation across bookings/purchases/events)
+const METRICS_TIMEOUT_MS = 30000;
+
 /** Timeframe enum the backend expects (exact strings — do not abbreviate). */
 export type TimeframeType =
   | "today"
@@ -159,7 +162,7 @@ export async function fetchDashboardMetrics({
 
   return apiRequest<DashboardData>(
     `/api/metrics/dashboard/${userId}?${params.toString()}`,
-    { token },
+    { token, timeoutMs: METRICS_TIMEOUT_MS },
   );
 }
 
@@ -193,6 +196,6 @@ export async function fetchAttendantMetrics({
 
   return apiRequest<DashboardData>(
     `/api/metrics/attendant?${params.toString()}`,
-    { token },
+    { token, timeoutMs: METRICS_TIMEOUT_MS },
   );
 }

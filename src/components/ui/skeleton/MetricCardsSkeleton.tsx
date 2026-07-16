@@ -68,15 +68,18 @@ function MetricCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
 
 export function MetricCardsSkeleton({
   count = DEFAULT_CARD_COUNT,
+  columns = 2,
 }: {
   count?: number;
+  /** Cards per row — mirrors the dashboard's grid/list toggle (2 = grid, 1 = list). */
+  columns?: 1 | 2;
 } = {}) {
   const pulse = usePulse();
 
   return (
     <View className="flex-row flex-wrap -mx-1.5">
       {Array.from({ length: count }).map((_, index) => (
-        <View key={index} className="w-1/2">
+        <View key={index} className={columns === 2 ? "w-1/2" : "w-full"}>
           <MetricCardSkeleton pulse={pulse} />
         </View>
       ))}

@@ -70,17 +70,31 @@ export class ApiError extends Error {
   }
 }
 
+/** Default request timeout — fail fast instead of hanging indefinitely. */
+export const DEFAULT_TIMEOUT_MS = 15000;
+
 type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
   /** Bearer token for protected endpoints. */
   token?: string;
+  /**
+   * Per-request timeout in ms. Defaults to {@link DEFAULT_TIMEOUT_MS} (15s);
+   * raise it only for known-heavy endpoints (e.g. the dashboard metrics call).
+   */
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(
   path: string,
-  { method = "GET", body, signal, token }: RequestOptions = {},
+  {
+    method = "GET",
+    body,
+    signal,
+    token,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+  }: RequestOptions = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -90,9 +104,9 @@ export async function apiRequest<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  // Fail fast after 15s instead of hanging indefinitely.
+  // Fail fast after `timeoutMs` instead of hanging indefinitely.
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 15000);
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
   const onCallerAbort = () => timeoutController.abort();
   signal?.addEventListener("abort", onCallerAbort);
 
