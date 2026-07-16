@@ -505,6 +505,18 @@ const Packages = () => {
             Showing {filtered.length} packages
           </Text>
 
+          {/* Top pagination (below the count) — same state as the bottom pager */}
+          <View className="mt-3">
+            <Pagination
+              compact
+              page={page}
+              perPage={perPage}
+              total={filtered.length}
+              onPageChange={setPage}
+              onPerPageChange={setPerPage}
+            />
+          </View>
+
           {/* Select all */}
           <Pressable
             onPress={toggleSelectAll}

@@ -1493,20 +1493,35 @@ const ManageAttendants = () => {
             <Feather name="chevron-down" size={14} color="#9CA3AF" />
           </Pressable>
 
-          {/* List header */}
+          {/* List header + top pagination (below the title, same state as bottom) */}
           {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4 mt-1">
-              <Text
-                numberOfLines={1}
-                className="shrink text-lg font-bold text-gray-900 dark:text-white"
-              >
-                Attendants
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  {total}
+            <View className="mb-4 mt-1">
+              <View className="flex-row items-center gap-2">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                >
+                  Attendants
                 </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {total}
+                  </Text>
+                </View>
               </View>
+              {paged.length > 0 && (
+                <View className="mt-3">
+                  <Pagination
+                    compact
+                    page={page}
+                    perPage={perPage}
+                    total={total}
+                    options={PER_PAGE_OPTIONS}
+                    onPageChange={setPage}
+                    onPerPageChange={setPerPage}
+                  />
+                </View>
+              )}
             </View>
           )}
 

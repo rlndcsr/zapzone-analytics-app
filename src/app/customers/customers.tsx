@@ -550,6 +550,20 @@ const Customers = () => {
             </Text>
           )}
 
+          {/* Top pagination (below the count) — same state as the bottom pager */}
+          {!showInitialLoader && !showError && (
+            <View className="mt-3">
+              <Pagination
+                compact
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
+            </View>
+          )}
+
           {showInitialLoader && <AnalyticsSkeleton tiles={0} panels={4} />}
 
           {showError && (

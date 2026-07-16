@@ -416,6 +416,19 @@ const Payments = () => {
                 })}
               </View>
 
+              {/* Top pagination (above the list) — same state as the bottom pager */}
+              <Pagination
+                compact
+                page={currentPage}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={(pp) => {
+                  setPerPage(pp);
+                  setPage(1);
+                }}
+              />
+
               {/* List */}
               {visible.map((p) => (
                 <Pressable

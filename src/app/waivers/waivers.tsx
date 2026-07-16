@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { PaginationControls } from "../../components/ui/PaginationControls";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { WaiverDetailSheet } from "../../components/ui/WaiverDetailSheet";
 import {
@@ -827,20 +828,35 @@ const Waivers = () => {
             )}
           </View>
 
-          {/* List header */}
+          {/* List header + top pagination (below the title, same state as bottom) */}
           {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4">
-              <Text
-                numberOfLines={1}
-                className="shrink text-lg font-bold text-gray-900 dark:text-white"
-              >
-                Waivers
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  {total}
+            <View className="mb-4">
+              <View className="flex-row items-center gap-2">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                >
+                  Waivers
                 </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {total}
+                  </Text>
+                </View>
               </View>
+              {displayed.length > 0 && (
+                <View className="mt-3">
+                  <PaginationControls
+                    compact
+                    page={page}
+                    lastPage={lastPage}
+                    perPage={perPage}
+                    perPageOptions={PER_PAGE_OPTIONS}
+                    onPageChange={setPage}
+                    onPerPageChange={setPerPage}
+                  />
+                </View>
+              )}
             </View>
           )}
 
@@ -872,88 +888,15 @@ const Waivers = () => {
                   />
                 ))}
 
-                {/* Pagination (server-side) */}
-                <View className="mt-1 mb-4">
-                  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800">
-                    <View className="flex-row items-center justify-between mb-4">
-                      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                        Items per page
-                      </Text>
-                      <View className="flex-row gap-1.5">
-                        {PER_PAGE_OPTIONS.map((option) => {
-                          const isActive = perPage === option;
-                          return (
-                            <Pressable
-                              key={option}
-                              onPress={() => setPerPage(option)}
-                              className={`px-3 py-1.5 rounded-lg border ${
-                                isActive
-                                  ? "bg-[#0644C7] border-[#0644C7]"
-                                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                              }`}
-                            >
-                              <Text
-                                className={`text-xs font-medium ${
-                                  isActive
-                                    ? "text-white"
-                                    : "text-gray-600 dark:text-gray-300"
-                                }`}
-                              >
-                                {option}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
-
-                    <View className="flex-row items-center justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
-                      <Pressable
-                        onPress={() => setPage(page - 1)}
-                        disabled={page === 1}
-                        className={`px-4 py-2 rounded-lg border ${
-                          page === 1
-                            ? "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 opacity-50"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                        }`}
-                      >
-                        <Text
-                          className={`text-sm font-medium ${
-                            page === 1
-                              ? "text-gray-400 dark:text-gray-500"
-                              : "text-gray-700 dark:text-gray-200"
-                          }`}
-                        >
-                          Previous
-                        </Text>
-                      </Pressable>
-
-                      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        Page {page} of {lastPage}
-                      </Text>
-
-                      <Pressable
-                        onPress={() => setPage(page + 1)}
-                        disabled={page >= lastPage}
-                        className={`px-4 py-2 rounded-lg border ${
-                          page >= lastPage
-                            ? "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 opacity-50"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                        }`}
-                      >
-                        <Text
-                          className={`text-sm font-medium ${
-                            page >= lastPage
-                              ? "text-gray-400 dark:text-gray-500"
-                              : "text-gray-700 dark:text-gray-200"
-                          }`}
-                        >
-                          Next
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
+                {/* Pagination (bottom, server-side) — same state as the top */}
+                <PaginationControls
+                  page={page}
+                  lastPage={lastPage}
+                  perPage={perPage}
+                  perPageOptions={PER_PAGE_OPTIONS}
+                  onPageChange={setPage}
+                  onPerPageChange={setPerPage}
+                />
               </>
             )
           )}
