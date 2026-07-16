@@ -1,10 +1,6 @@
+import { useRootNavigationState, useRouter, useSegments } from "expo-router";
 import { useEffect } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import {
-  useRootNavigationState,
-  useRouter,
-  useSegments,
-} from "expo-router";
 
 import {
   expireSession,
@@ -13,23 +9,8 @@ import {
   useAuthStatus,
 } from "../lib/session";
 
-// How often to slide the inactivity window forward while the app is actively
-// foregrounded. Must be well under SESSION_TTL_MS so an in-use session never
-// lapses; the exact cadence only affects how promptly we persist the new expiry.
-const ACTIVITY_HEARTBEAT_MS = 5 * 60 * 1000;
+const EXPIRY_CHECK_INTERVAL_MS = 60 * 1000;
 
-/**
- * Centralized authentication guard. Mounted once in the root layout so it runs
- * across every route. Responsibilities:
- *  - Redirect to Login (`/`) whenever the user is unauthenticated on a protected
- *    route (covers launch, deep links, expiry, and 401-triggered logout). Also
- *    makes Android back self-correcting — returning to a protected route while
- *    signed out re-triggers the redirect.
- *  - Enforce the 1-hour client session expiry via a timer, even if the app stays
- *    open, and re-validate on foreground/resume.
- *
- * Renders nothing.
- */
 export function AuthGuard() {
   const authed = useAuthStatus();
   const segments = useSegments();
@@ -48,35 +29,41 @@ export function AuthGuard() {
     }
   }, [authed, segments, navState?.key, router]);
 
-  // Sliding inactivity timeout. While the app is actively foregrounded we keep
-  // extending the session (on resume + on a heartbeat) so a session in active
-  // use never drops. When the app is backgrounded or closed the window stops
-  // advancing, so returning to the foreground — or reopening the app — after the
-  // inactivity period logs the user out. Nothing runs while signed out.
+  const routeKey = (segments as string[]).join("/");
+  useEffect(() => {
+    if (!authed) return;
+    void touchSession();
+  }, [authed, routeKey]);
+
+  // Inactivity enforcement. Returning to the foreground is activity: extend the
+  // window if it's still open, log out if it lapsed while we were away. A
+  // check-only interval (which never extends) makes an idle *foregrounded* app
+  // expire at the deadline too. Nothing runs while signed out.
   useEffect(() => {
     if (!authed) return;
 
-    const bump = () => {
+    // Foreground return / entering the authed state (login, launch) is activity.
+    const onForeground = () => {
       if (isSessionExpired()) expireSession();
       else void touchSession();
     };
 
-    // Extend right away: the app is foregrounded and in use.
-    bump();
+    onForeground();
 
     const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
-      if (state === "active") bump();
+      if (state === "active") onForeground();
     });
-    // Heartbeat keeps the window sliding during long, uninterrupted use (no
-    // foreground transition to trigger it). Gated to the foreground so a
-    // backgrounded app never extends its own session.
-    const heartbeat = setInterval(() => {
-      if (AppState.currentState === "active") bump();
-    }, ACTIVITY_HEARTBEAT_MS);
+    // Sweep the clock while foregrounded so an untouched session still lapses on
+    // time. Check-only: it logs out when expired but never slides the window.
+    const expiryCheck = setInterval(() => {
+      if (AppState.currentState === "active" && isSessionExpired()) {
+        expireSession();
+      }
+    }, EXPIRY_CHECK_INTERVAL_MS);
 
     return () => {
       sub.remove();
-      clearInterval(heartbeat);
+      clearInterval(expiryCheck);
     };
   }, [authed]);
 

@@ -1,4 +1,4 @@
-import { handleUnauthorized } from "./session";
+import { handleUnauthorized, touchSession } from "./session";
 
 const API_BASE_URL = (() => {
   const url = process.env.EXPO_PUBLIC_API_URL;
@@ -16,10 +16,6 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
-// Public web (Zappoint) origin where customers open purchase pages. The web app
-// uses `window.location.origin`; the mobile app has no equivalent, so it reads
-// the frontend host from EXPO_PUBLIC_WEB_URL. Falls back to the API origin when
-// unset — links stay structurally correct but point at the wrong host until the
 // var is configured.
 const WEB_BASE_URL = (
   process.env.EXPO_PUBLIC_WEB_URL?.trim() || API_BASE_URL
@@ -30,23 +26,12 @@ export function webUrl(path: string): string {
   return `${WEB_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-/**
- * Resolve a stored image reference to something `<Image>` can load. Passes
- * through absolute URLs and base64 data URIs; prefixes the API host for
- * server-relative paths and the storage disk for bare filenames/paths.
- */
-export function mediaUrl(
-  path: string | null | undefined,
-): string | null {
+export function mediaUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   const p = String(path).trim();
   if (!p) return null;
-  // Already usable: absolute URL or data URI.
   if (/^(https?:|data:)/i.test(p)) return p;
-  // Server-relative path.
   if (p.startsWith("/")) return `${API_BASE_URL}${p}`;
-  // Raw base64 image data stored without the data-URI prefix (long token, no
-  // path separators) — wrap it so <Image> can decode it.
   if (p.length > 200 && !p.includes("/") && !p.includes(" ")) {
     return `data:image/jpeg;base64,${p}`;
   }
@@ -54,10 +39,8 @@ export function mediaUrl(
   return `${API_BASE_URL}/storage/${p.replace(/^storage\//, "")}`;
 }
 
-/** Field-keyed validation messages as returned by the Laravel backend. */
 export type FieldErrors = Record<string, string[]>;
 
-/** Error thrown for any non-2xx response or network failure. */
 export class ApiError extends Error {
   readonly status: number;
   readonly fieldErrors?: FieldErrors;
@@ -143,6 +126,9 @@ export async function apiRequest<T>(
         : "Something went wrong. Please try again.";
     throw new ApiError(message, response.status, data?.errors);
   }
+
+  // Successful requests extend the session (except before login).
+  void touchSession();
 
   return data as T;
 }

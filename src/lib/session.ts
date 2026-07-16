@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from "react";
 import * as SecureStore from "expo-secure-store";
+import { useSyncExternalStore } from "react";
 
 import type { AuthUser } from "../services/auth";
 import { resetActiveLocation } from "./location/activeLocationStore";
@@ -8,39 +8,34 @@ const TOKEN_KEY = "zapzone_auth_token";
 const USER_KEY = "zapzone_auth_user";
 const EXPIRY_KEY = "zapzone_auth_expires_at";
 
-/**
- * Client-side inactivity timeout: the session stays alive as long as the app is
- * used within any 1-hour window. Activity (app foreground / heartbeat) slides
- * the expiry forward via `touchSession`; leaving the app backgrounded or closed
- * past this window logs the user out on their next return.
- */
+// Extends the session after user activity. Logs out after 1 hour of inactivity
 export const SESSION_TTL_MS = 60 * 60 * 1000;
+
+// Limits how often the updated session expiry is saved to storage
+const EXPIRY_PERSIST_THROTTLE_MS = 60 * 1000;
 
 let authToken: string | null = null;
 let authUser: AuthUser | null = null;
 let expiresAt: number | null = null;
+let lastExpiryPersistAt = 0;
 
 // Why the last session ended, so the Login screen can show a subtle notice for
 // an expired/invalidated session but stay silent on an intentional sign-out.
 type SessionEndReason = "expired" | "unauthorized" | null;
 let endReason: SessionEndReason = null;
 
-// Reactive layer (mirrors location/activeLocationStore.ts) so a global guard can
-// re-render/redirect the moment auth state changes — the plain getters below are
-// not reactive on their own.
+// Makes auth changes update the app immediately
 const listeners = new Set<() => void>();
 function notify(): void {
   listeners.forEach((l) => l());
 }
 
-/**
- * Persist + cache the session after a successful login. Opens the inactivity
- * window (extended thereafter by `touchSession` while the app is in use).
- */
+// Saves the session after login and starts the inactivity timer
 export async function setSession(token: string, user: AuthUser): Promise<void> {
+  const now = Date.now();
   authToken = token;
   authUser = user;
-  expiresAt = Date.now() + SESSION_TTL_MS;
+  expiresAt = now + SESSION_TTL_MS;
   endReason = null;
   try {
     await Promise.all([
@@ -48,17 +43,16 @@ export async function setSession(token: string, user: AuthUser): Promise<void> {
       SecureStore.setItemAsync(USER_KEY, JSON.stringify(user)),
       SecureStore.setItemAsync(EXPIRY_KEY, String(expiresAt)),
     ]);
+    // Record the persist so the first post-login `touchSession` doesn't rewrite
+    // the expiry inside the throttle window.
+    lastExpiryPersistAt = now;
   } catch {
     // Secure storage unavailable — session remains in memory for this run only.
   }
   notify();
 }
 
-/**
- * Rehydrate the in-memory session from secure storage. Call once on launch.
- * Returns true when a stored, still-valid session was restored; a missing or
- * expired session is cleared and returns false.
- */
+// Restores the saved session if it's still valid
 export async function restoreSession(): Promise<boolean> {
   try {
     const [token, userJson, expiryRaw] = await Promise.all([
@@ -82,8 +76,7 @@ export async function restoreSession(): Promise<boolean> {
       return true;
     }
 
-    // A stored-but-past-TTL session should surface the "expired" notice on
-    // Login; a simply-absent session (never signed in) should not.
+    // Show "Session expired" only if an old session has expired.
     const hadExpiredSession =
       !!token &&
       !!userJson &&
@@ -112,15 +105,17 @@ export function getSessionExpiresAt(): number | null {
   return expiresAt;
 }
 
-/**
- * Slide the inactivity window forward on user activity — a no-op when signed
- * out. Does NOT notify subscribers (auth state is unchanged), so extending the
- * session on a heartbeat never triggers re-renders. Persists the new expiry so
- * it survives an app restart within the window.
- */
+/** Slide the inactivity window forward on activity (no-op when signed out; never
+ *  notifies, so no re-render). Won't revive a lapsed session; persistence throttled. */
 export async function touchSession(): Promise<void> {
   if (authToken == null) return;
-  expiresAt = Date.now() + SESSION_TTL_MS;
+  // Once the window has elapsed, activity must not extend it — logout wins.
+  if (isSessionExpired()) return;
+  const now = Date.now();
+  expiresAt = now + SESSION_TTL_MS;
+  // Throttle persistence: skip the SecureStore write if we persisted recently.
+  if (now - lastExpiryPersistAt < EXPIRY_PERSIST_THROTTLE_MS) return;
+  lastExpiryPersistAt = now;
   try {
     await SecureStore.setItemAsync(EXPIRY_KEY, String(expiresAt));
   } catch {
@@ -142,6 +137,7 @@ export async function clearSession(): Promise<void> {
   authToken = null;
   authUser = null;
   expiresAt = null;
+  lastExpiryPersistAt = 0;
   // Drop the active workspace location so it can't leak into the next account.
   resetActiveLocation();
   try {
@@ -168,10 +164,7 @@ export function handleUnauthorized(): void {
   void clearSession();
 }
 
-/**
- * Returns true once if the session ended because it expired or was rejected
- * (not an intentional sign-out), then clears the flag. Drives the Login notice.
- */
+// Returns true if the session expired, then clears the flag
 export function consumeSessionExpiredNotice(): boolean {
   const notice = endReason === "expired" || endReason === "unauthorized";
   endReason = null;
@@ -185,8 +178,7 @@ function subscribeAuth(cb: () => void): () => void {
   };
 }
 
-// Snapshot identity flips whenever the session changes (login/logout/expiry), so
-// useSyncExternalStore re-runs subscribers. Token value is a fine snapshot.
+// Triggers updates on login, logout, or session expiry.
 function getAuthSnapshot(): string | null {
   return authToken;
 }
