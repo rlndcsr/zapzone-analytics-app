@@ -1,8 +1,8 @@
 import { router } from "expo-router";
+import { Bell, Settings } from "lucide-react-native";
 import { useColorScheme } from "nativewind";
 import { type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
-import { Bell, Settings } from "lucide-react-native";
 
 import { getCurrentUser } from "../../lib/session";
 
@@ -44,10 +44,8 @@ export function DashboardHeader({
 
   const user = getCurrentUser();
   const roleLabel = user?.role
-    ? ROLE_LABELS[user.role] ??
-      user.role
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, (c) => c.toUpperCase())
+    ? (ROLE_LABELS[user.role] ??
+      user.role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()))
     : "there";
   const initials =
     `${user?.first_name?.[0] ?? ""}${user?.last_name?.[0] ?? ""}`

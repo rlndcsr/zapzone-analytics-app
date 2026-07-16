@@ -25,7 +25,13 @@ import {
   Zap,
 } from "lucide-react-native";
 import { useColorScheme } from "nativewind";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   Dimensions,
@@ -52,8 +58,11 @@ import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
-import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import {
+  FilterPill,
+  PillDivider,
+  PillSegment,
+} from "../../components/ui/FilterPill";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
@@ -613,14 +622,6 @@ const Home = () => {
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
               Multi-location booking overview and management
             </Text>
-
-          
-            {/* Global workspace location selector (company-admin only; renders
-                null otherwise). Scopes every location-aware module. */}
-            <View className="mt-10">
-              <Text className="text-sm text-gray-500 mb-2">Note: Location will affect all screens module.</Text>
-              <LocationWorkspaceSelector />
-            </View>
           </View>
 
           {/* Filters Row — segmented pill + card-layout toggle */}
@@ -633,6 +634,7 @@ const Home = () => {
                   onPress={() => setShowDateDropdown(true)}
                   renderIcon={(c) => <Calendar size={15} color={c} />}
                 />
+                <PillDivider />
                 <PillSegment
                   label="Cards"
                   active={showCardsMenu}

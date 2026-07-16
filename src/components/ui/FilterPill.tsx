@@ -28,6 +28,12 @@ export function FilterPill({ children }: { children: ReactNode }) {
   );
 }
 
+/** Thin vertical divider placed between {@link PillSegment}s inside a
+ *  {@link FilterPill}; inset slightly so it reads as a separator, not a border. */
+export function PillDivider() {
+  return <View className="w-px self-stretch my-1 bg-gray-200 dark:bg-neutral-700" />;
+}
+
 /**
  * One equal-width segment inside a {@link FilterPill}. Renders blue (active) or
  * transparent (default); `renderIcon` receives the resolved icon color so it
