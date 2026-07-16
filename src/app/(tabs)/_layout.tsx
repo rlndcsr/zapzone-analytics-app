@@ -21,10 +21,6 @@ import {
   FabRect,
   MorphingFabMenu,
 } from "../../components/navigation/MorphingFabMenu";
-import {
-  forDirectionalSlide,
-  TAB_TRANSITION_SPEC,
-} from "../../components/navigation/tabTransition";
 import { getRoleTabs } from "../../lib/navigation/navConfig";
 import { getCurrentUser } from "../../lib/session";
 
@@ -88,17 +84,10 @@ const FloatingTabBar = ({
   const [fabRect, setFabRect] = useState<FabRect | null>(null);
   const fabRef = useRef<View>(null);
 
-  // Cache the FAB's window box as it lays out so opening can be synchronous.
-  // measureInWindow is an async native round-trip; doing it on tap delays the
-  // sheet by a frame or two, which reads as lag. The floating tab bar never
-  // moves, so a layout-time measure stays accurate for the tap path.
   const measureFab = () => {
     fabRef.current?.measureInWindow((x, y, width, height) => {
       if (width <= 0 || height <= 0) return;
-      // Only commit when the box actually moved. onLayout can fire on every
-      // commit; storing a fresh object each time would re-render → re-measure →
-      // re-render, which on the New Architecture can spiral into "Maximum update
-      // depth exceeded". Bailing on an unchanged rect breaks that cycle.
+
       setFabRect((prev) =>
         prev &&
         prev.x === x &&
@@ -291,14 +280,7 @@ const TabLayout = () => {
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={{
-        headerShown: false,
-        // Premium, direction-aware slide between bottom-tab screens. Providing a
-        // transitionSpec (with no `animation` preset) enables the custom scene
-        // interpolator; both run on the native driver for 60fps transitions.
-        transitionSpec: TAB_TRANSITION_SPEC,
-        sceneStyleInterpolator: forDirectionalSlide,
-      }}
+      screenOptions={{ headerShown: false }}
     >
       <Tabs.Screen
         name="home"
