@@ -8,10 +8,15 @@ import {
 
 import {
   expireSession,
-  getSessionExpiresAt,
   isSessionExpired,
+  touchSession,
   useAuthStatus,
 } from "../lib/session";
+
+// How often to slide the inactivity window forward while the app is actively
+// foregrounded. Must be well under SESSION_TTL_MS so an in-use session never
+// lapses; the exact cadence only affects how promptly we persist the new expiry.
+const ACTIVITY_HEARTBEAT_MS = 5 * 60 * 1000;
 
 /**
  * Centralized authentication guard. Mounted once in the root layout so it runs
@@ -30,7 +35,6 @@ export function AuthGuard() {
   const segments = useSegments();
   const router = useRouter();
   const navState = useRootNavigationState();
-  const expiry = getSessionExpiresAt();
 
   // Redirect unauthenticated users off protected routes. Public routes are the
   // Login screen (`/`, empty segments) and the splash screen.
@@ -44,26 +48,37 @@ export function AuthGuard() {
     }
   }, [authed, segments, navState?.key, router]);
 
-  // 1-hour expiry timer — fires while the app is open so the user isn't left on
-  // a stale screen. Re-armed whenever a new session sets a new expiry.
+  // Sliding inactivity timeout. While the app is actively foregrounded we keep
+  // extending the session (on resume + on a heartbeat) so a session in active
+  // use never drops. When the app is backgrounded or closed the window stops
+  // advancing, so returning to the foreground — or reopening the app — after the
+  // inactivity period logs the user out. Nothing runs while signed out.
   useEffect(() => {
-    if (!authed || expiry == null) return;
-    const ms = Math.max(0, expiry - Date.now());
-    const timer = setTimeout(() => expireSession(), ms);
-    return () => clearTimeout(timer);
-  }, [authed, expiry]);
+    if (!authed) return;
 
-  // Re-validate on resume: timers can be throttled/paused while backgrounded, so
-  // an app returning to the foreground past its expiry must clear immediately.
-  useEffect(() => {
-    const onChange = (state: AppStateStatus) => {
-      if (state === "active" && isSessionExpired()) {
-        expireSession();
-      }
+    const bump = () => {
+      if (isSessionExpired()) expireSession();
+      else void touchSession();
     };
-    const sub = AppState.addEventListener("change", onChange);
-    return () => sub.remove();
-  }, []);
+
+    // Extend right away: the app is foregrounded and in use.
+    bump();
+
+    const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
+      if (state === "active") bump();
+    });
+    // Heartbeat keeps the window sliding during long, uninterrupted use (no
+    // foreground transition to trigger it). Gated to the foreground so a
+    // backgrounded app never extends its own session.
+    const heartbeat = setInterval(() => {
+      if (AppState.currentState === "active") bump();
+    }, ACTIVITY_HEARTBEAT_MS);
+
+    return () => {
+      sub.remove();
+      clearInterval(heartbeat);
+    };
+  }, [authed]);
 
   return null;
 }

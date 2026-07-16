@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
 import {
@@ -176,6 +177,19 @@ const Templates = () => {
   );
 
   const { templates, loading, error, refetch } = useWaiverTemplates(filters);
+
+  // Client-side pagination over the loaded templates list.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const paged = useMemo(
+    () => templates.slice((page - 1) * perPage, page * perPage),
+    [templates, page, perPage],
+  );
+
+  // Reset to the first page whenever the result set changes / filters move.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter, showDeleted, perPage]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -392,22 +406,32 @@ const Templates = () => {
               </Text>
             </View>
           ) : (
-            !error &&
-            templates.map((t) => (
-              <TemplateCard
-                key={t.id}
-                template={t}
-                deleted={showDeleted}
-                onPress={() =>
-                  showDeleted
-                    ? setActionsTemplate(t)
-                    : canManage
-                      ? router.push(`/waivers/create-template?id=${t.id}` as never)
-                      : setActionsTemplate(t)
-                }
-                onMore={() => setActionsTemplate(t)}
-              />
-            ))
+            !error && (
+              <View>
+                {paged.map((t) => (
+                  <TemplateCard
+                    key={t.id}
+                    template={t}
+                    deleted={showDeleted}
+                    onPress={() =>
+                      showDeleted
+                        ? setActionsTemplate(t)
+                        : canManage
+                          ? router.push(`/waivers/create-template?id=${t.id}` as never)
+                          : setActionsTemplate(t)
+                    }
+                    onMore={() => setActionsTemplate(t)}
+                  />
+                ))}
+                <Pagination
+                  page={page}
+                  perPage={perPage}
+                  total={templates.length}
+                  onPageChange={setPage}
+                  onPerPageChange={setPerPage}
+                />
+              </View>
+            )
           )}
         </View>
       </ScrollView>

@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type ComponentProps,
@@ -24,6 +25,7 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { Pagination } from "../../components/ui/Pagination";
 import { consumePackagesStale, usePackages } from "../../lib/hooks/usePackages";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -41,7 +43,6 @@ const CARD_SHADOW = {
 } as const;
 
 const PRIMARY = "#0644C7";
-const DEFAULT_VISIBLE = 5;
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
@@ -102,10 +103,13 @@ const Packages = () => {
   const [category, setCategory] = useState("All Categories");
   const [sortKey, setSortKey] = useState<SortKey>("Name");
   const [sortAsc, setSortAsc] = useState(true);
-  const [showAll, setShowAll] = useState(false);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Client-side pagination over the filtered list.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
 
   const [showSortSheet, setShowSortSheet] = useState(false);
 
@@ -186,7 +190,16 @@ const Packages = () => {
     return result;
   }, [packages, search, category, activeLocation, sortKey, sortAsc]);
 
-  const visible = showAll ? filtered : filtered.slice(0, DEFAULT_VISIBLE);
+  const paged = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage],
+  );
+
+  // Reset to the first page whenever the result set changes size / filters move.
+  useEffect(() => {
+    setPage(1);
+  }, [search, category, activeLocation, sortKey, sortAsc, perPage]);
+
   const allSelected =
     filtered.length > 0 && filtered.every((p) => selected[p.id]);
 
@@ -489,7 +502,7 @@ const Packages = () => {
 
           {/* Count */}
           <Text className="text-sm text-gray-500 dark:text-gray-400 mt-4">
-            Showing {visible.length} of {filtered.length} packages
+            Showing {filtered.length} packages
           </Text>
 
           {/* Select all */}
@@ -535,7 +548,7 @@ const Packages = () => {
           {/* Cards */}
           {!showInitialLoader && !showError && (
             <View className="mt-4 gap-4">
-              {visible.map((pkg) => {
+              {paged.map((pkg) => {
                 const isSelected = !!selected[pkg.id];
                 const isActive = pkg.status === "active";
                 const dateLabel = formatDate(pkg.createdAt);
@@ -680,6 +693,13 @@ const Packages = () => {
                   </View>
                 );
               })}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
             </View>
           )}
 
@@ -695,22 +715,6 @@ const Packages = () => {
             </View>
           )}
 
-          {/* See all / Show less */}
-          {filtered.length > DEFAULT_VISIBLE && (
-            <Pressable
-              onPress={() => setShowAll((v) => !v)}
-              className="flex-row items-center justify-center gap-2 mt-5 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-            >
-              <Text className="text-sm font-semibold text-[#0644C7]">
-                {showAll ? "Show less" : `See all ${filtered.length} cards`}
-              </Text>
-              <Feather
-                name={showAll ? "chevron-up" : "chevron-down"}
-                size={16}
-                color={PRIMARY}
-              />
-            </Pressable>
-          )}
         </View>
       </ScrollView>
 

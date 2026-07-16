@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { getToken } from "../../lib/session";
 import {
@@ -226,6 +227,19 @@ const EmailTemplates = () => {
     });
   }, [templates, search, statusFilter, categoryFilter]);
 
+  // Client-side pagination over the filtered list.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const paged = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage],
+  );
+
+  // Reset to the first page whenever the result set changes size / filters move.
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, categoryFilter, perPage]);
+
   const filtersActive = statusFilter !== "all" || categoryFilter !== "all";
 
   return (
@@ -422,7 +436,7 @@ const EmailTemplates = () => {
           )}
 
           {/* List */}
-          {filtered.map((t) => {
+          {paged.map((t) => {
             const pill = STATUS_PILL[t.status] ?? STATUS_PILL.draft;
             return (
               <View
@@ -473,6 +487,14 @@ const EmailTemplates = () => {
               </View>
             );
           })}
+
+          <Pagination
+            page={page}
+            perPage={perPage}
+            total={filtered.length}
+            onPageChange={setPage}
+            onPerPageChange={setPerPage}
+          />
 
           {!loading && !error && filtered.length === 0 && (
             <View className="items-center py-10">

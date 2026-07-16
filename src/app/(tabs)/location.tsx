@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   RefreshControl,
@@ -9,6 +9,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
+import { Pagination } from "../../components/ui/Pagination";
 import {
   OverviewCardsSkeleton,
   TopCardsSkeleton,
@@ -57,9 +58,6 @@ const formatMoney = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
-
-// How many overview cards to show before "Show All".
-const OVERVIEW_PREVIEW = 4;
 
 const UtilizationBar = ({ value }: { value: number }) => {
   // Ensure value is between 0 and 100
@@ -256,7 +254,6 @@ const Location = () => {
   const activeLocation = useActiveLocation();
   const selectedLocation = activeLocation.id;
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
-  const [showAll, setShowAll] = useState(false);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -323,9 +320,18 @@ const Location = () => {
     [filteredLocations],
   );
 
-  const overviewLocations = showAll
-    ? filteredLocations
-    : filteredLocations.slice(0, OVERVIEW_PREVIEW);
+  // Client-side pagination over the filtered list.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const paged = useMemo(
+    () => filteredLocations.slice((page - 1) * perPage, page * perPage),
+    [filteredLocations, page, perPage],
+  );
+
+  // Reset to the first page whenever the result set changes / filters move.
+  useEffect(() => {
+    setPage(1);
+  }, [selectedLocation, perPage]);
 
   const selectedLocationLabel =
     selectedLocation === "all"
@@ -489,23 +495,16 @@ const Location = () => {
                 <OverviewCardsSkeleton />
               ) : (
                 <>
-                  {overviewLocations.map((loc) => (
+                  {paged.map((loc) => (
                     <OverviewCard key={loc.id} location={loc} />
                   ))}
-
-                  {/* Show All / Show Less toggle */}
-                  {filteredLocations.length > OVERVIEW_PREVIEW && (
-                    <Pressable
-                      onPress={() => setShowAll((prev) => !prev)}
-                      className="self-center bg-white dark:bg-neutral-900 px-6 py-3 rounded-xl border border-gray-200 dark:border-neutral-800 mt-2 shadow-sm"
-                    >
-                      <Text className="text-sm font-semibold text-[#0644C7]">
-                        {showAll
-                          ? "Show Less"
-                          : `Show All (${filteredLocations.length})`}
-                      </Text>
-                    </Pressable>
-                  )}
+                  <Pagination
+                    page={page}
+                    perPage={perPage}
+                    total={filteredLocations.length}
+                    onPageChange={setPage}
+                    onPerPageChange={setPerPage}
+                  />
                 </>
               )}
             </>

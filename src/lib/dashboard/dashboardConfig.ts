@@ -26,6 +26,12 @@ export type MetricCardDef = {
   icon: string;
   color: string;
   gradient: [string, string];
+  /**
+   * Plain-language explanation of what this metric counts, shown when the user
+   * taps the card's info icon. Written to match how the backend
+   * (MetricsController) actually computes the value.
+   */
+  info: string;
 };
 
 // Subtitle metric-part builders — reproduce the web's strings (timeframe
@@ -82,8 +88,8 @@ const ticketSalesPart: SubtitleFn = (m) => {
 export const METRIC_CARDS = {
   packages: {
     key: "packages",
-    label: "Packages",
-    title: "Total Bookings",
+    label: "Packages Brakedown",
+    title: "Packages",
     valueField: "totalBookings",
     format: "number",
     breakdownKey: "packageBreakdown",
@@ -91,11 +97,12 @@ export const METRIC_CARDS = {
     icon: "party.png",
     color: "#5B7EFF",
     gradient: ["#5B7EFF", "#7B9CFF"],
+    info: "Package bookings placed in the selected period (counted by the date the booking was made, not the party date). Cancelled bookings are excluded. \"Confirmed\" counts bookings that were confirmed, including those already checked in or completed.",
   },
   participants: {
     key: "participants",
     label: "Participants",
-    title: "Party Participants",
+    title: "Participants",
     valueField: "totalParticipants",
     format: "number",
     breakdownKey: "participantBreakdown",
@@ -103,6 +110,7 @@ export const METRIC_CARDS = {
     icon: "group.png",
     color: "#A78BFA",
     gradient: ["#A78BFA", "#C4B5FD"],
+    info: "Total participant headcount across all non-cancelled package bookings placed in the period. Attraction and event tickets are not included here.",
   },
   attractions: {
     key: "attractions",
@@ -115,6 +123,7 @@ export const METRIC_CARDS = {
     icon: "ticket.png",
     color: "#10B981",
     gradient: ["#10B981", "#34D399"],
+    info: "Attraction ticket purchases placed in the selected period, counted by purchase date. The breakdown shows ticket quantities grouped by attraction category.",
   },
   events: {
     key: "events",
@@ -127,6 +136,7 @@ export const METRIC_CARDS = {
     icon: "shopping-cart.png",
     color: "#EC4899",
     gradient: ["#EC4899", "#F472B6"],
+    info: "Event ticket purchases placed in the selected period, counted by purchase date. Cancelled and refunded purchases are excluded from ticket and revenue totals. The breakdown shows ticket quantities grouped by event.",
   },
   memberships: {
     key: "memberships",
@@ -139,6 +149,7 @@ export const METRIC_CARDS = {
     icon: "membership.png",
     color: "#F59E0B",
     gradient: ["#F59E0B", "#FBBF24"],
+    info: "New memberships created during the selected period, counted by sign-up date. The breakdown groups them by membership plan.",
   },
   customers: {
     key: "customers",
@@ -151,6 +162,7 @@ export const METRIC_CARDS = {
     icon: "add-user.png",
     color: "#EF4444",
     gradient: ["#EF4444", "#F87171"],
+    info: "Unique customers with at least one booking, attraction purchase, or event purchase in the selected period. \"New\" are customers whose account was first created within the period; the rest are counted as returning.",
   },
   confirmed: {
     key: "confirmed",
@@ -163,6 +175,7 @@ export const METRIC_CARDS = {
     icon: "checked.png",
     color: "#14B8A6",
     gradient: ["#14B8A6", "#2DD4BF"],
+    info: "Package bookings marked \"confirmed\" in the selected period (includes those later checked in or completed). The breakdown compares confirmed packages with event and attraction purchases for the same period.",
   },
   revenue: {
     key: "revenue",
@@ -174,6 +187,7 @@ export const METRIC_CARDS = {
     icon: "box.png",
     color: "#059669",
     gradient: ["#059669", "#34D399"],
+    info: "Combined revenue for the selected period: package booking payments plus attraction and event ticket sales. Cancelled bookings and cancelled or refunded purchases are excluded.",
   },
 
   newBookings: {
@@ -186,6 +200,7 @@ export const METRIC_CARDS = {
     icon: "calendar.png",
     color: "#5B7EFF",
     gradient: ["#5B7EFF", "#7B9CFF"],
+    info: "Package bookings created during the selected period, counted by the date the booking was made (not the party date).",
   },
   pending: {
     key: "pending",
@@ -197,6 +212,7 @@ export const METRIC_CARDS = {
     icon: "info.png",
     color: "#F59E0B",
     gradient: ["#F59E0B", "#FBBF24"],
+    info: "Package bookings awaiting confirmation (status \"pending\") in the selected period.",
   },
   avgBooking: {
     key: "avgBooking",
@@ -208,6 +224,7 @@ export const METRIC_CARDS = {
     icon: "shopping-cart.png",
     color: "#A78BFA",
     gradient: ["#A78BFA", "#C4B5FD"],
+    info: "Average revenue per package booking in the selected period — total non-cancelled booking payments divided by the number of bookings.",
   },
   ticketSales: {
     key: "ticketSales",
@@ -219,6 +236,7 @@ export const METRIC_CARDS = {
     icon: "ticket.png",
     color: "#10B981",
     gradient: ["#10B981", "#34D399"],
+    info: "Attraction ticket purchases in the selected period, counted by purchase date. Revenue shown is from completed attraction purchases.",
   },
 } satisfies Record<string, MetricCardDef>;
 

@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { Pagination } from "../../components/ui/Pagination";
 import {
   CheckboxRow,
   FieldLabel,
@@ -184,6 +185,19 @@ const MembershipPlans = () => {
   );
   const [benefitsPlan, setBenefitsPlan] = useState<MembershipPlanRow | null>(null);
 
+  // Client-side pagination over the plans list.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const paged = useMemo(
+    () => plans.slice((page - 1) * perPage, page * perPage),
+    [plans, page, perPage],
+  );
+
+  // Reset to the first page whenever the page size changes.
+  useEffect(() => {
+    setPage(1);
+  }, [perPage]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -320,7 +334,7 @@ const MembershipPlans = () => {
           {/* Plan cards */}
           {!showInitialLoader && !showError && (
             <View className="gap-4">
-              {plans.map((plan) => (
+              {paged.map((plan) => (
                 <View
                   key={plan.id}
                   className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
@@ -422,6 +436,13 @@ const MembershipPlans = () => {
                   </View>
                 </View>
               ))}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={plans.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
             </View>
           )}
 

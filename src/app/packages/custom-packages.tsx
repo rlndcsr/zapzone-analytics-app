@@ -1,9 +1,11 @@
 import { View, Text, Pressable, ScrollView, TextInput } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { Pagination } from "../../components/ui/Pagination";
 
 const CARD_SHADOW = {
   shadowColor: "#000",
@@ -35,6 +37,21 @@ const CustomPackages = () => {
     price: 200.0,
     capacity: 20,
   };
+
+  const customPackages = [customPackage];
+
+  // Client-side pagination over the custom package list.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const paged = useMemo(
+    () => customPackages.slice((page - 1) * perPage, page * perPage),
+    [customPackages, page, perPage],
+  );
+
+  // Reset to the first page whenever the page size changes.
+  useEffect(() => {
+    setPage(1);
+  }, [perPage]);
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -129,71 +146,80 @@ const CustomPackages = () => {
             </View>
           </View>
 
-          {/* Custom Package Card */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 border border-gray-100 dark:border-neutral-800"
-            style={CARD_SHADOW}
-          >
-            {/* Title */}
-            <Text className="text-lg font-bold text-gray-900 dark:text-white mb-3">
-              {customPackage.name}
-            </Text>
-
-            {/* Location */}
-            <View className="flex-row items-center gap-1.5 mb-1.5">
-              <Feather name="map-pin" size={14} color="#9CA3AF" />
-              <Text className="text-sm text-gray-500 dark:text-gray-400">
-                {customPackage.location}
+          {/* Custom Package Cards */}
+          {paged.map((pkg) => (
+            <View
+              key={pkg.id}
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-5 border border-gray-100 dark:border-neutral-800 mb-4"
+              style={CARD_SHADOW}
+            >
+              {/* Title */}
+              <Text className="text-lg font-bold text-gray-900 dark:text-white mb-3">
+                {pkg.name}
               </Text>
-            </View>
 
-            {/* Date */}
-            <View className="flex-row items-center gap-1.5 mb-3">
-              <Feather name="calendar" size={14} color="#9CA3AF" />
-              <Text className="text-sm text-gray-500 dark:text-gray-400">
-                {customPackage.date}
-              </Text>
-            </View>
-
-            {/* Description */}
-            <Text className="text-sm text-gray-700 dark:text-gray-200 mb-4 leading-5">
-              {customPackage.description}
-            </Text>
-
-            {/* Tags */}
-            <View className="flex-row flex-wrap gap-2 mb-4">
-              {customPackage.tags.map((tag) => (
-                <View
-                  key={tag}
-                  className="bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-md border border-blue-100 dark:border-blue-800"
-                >
-                  <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                    {tag}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Price and Capacity */}
-            <View className="flex-row items-center justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
-              <Text className="text-2xl font-bold text-gray-900 dark:text-white">
-                ${customPackage.price.toFixed(2)}
-              </Text>
-              <View className="flex-row items-center gap-1.5">
-                <Feather name="users" size={16} color="#9CA3AF" />
-                <Text className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                  {customPackage.capacity}
+              {/* Location */}
+              <View className="flex-row items-center gap-1.5 mb-1.5">
+                <Feather name="map-pin" size={14} color="#9CA3AF" />
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
+                  {pkg.location}
                 </Text>
               </View>
+
+              {/* Date */}
+              <View className="flex-row items-center gap-1.5 mb-3">
+                <Feather name="calendar" size={14} color="#9CA3AF" />
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
+                  {pkg.date}
+                </Text>
+              </View>
+
+              {/* Description */}
+              <Text className="text-sm text-gray-700 dark:text-gray-200 mb-4 leading-5">
+                {pkg.description}
+              </Text>
+
+              {/* Tags */}
+              <View className="flex-row flex-wrap gap-2 mb-4">
+                {pkg.tags.map((tag) => (
+                  <View
+                    key={tag}
+                    className="bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-md border border-blue-100 dark:border-blue-800"
+                  >
+                    <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+                      {tag}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Price and Capacity */}
+              <View className="flex-row items-center justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-2xl font-bold text-gray-900 dark:text-white">
+                  ${pkg.price.toFixed(2)}
+                </Text>
+                <View className="flex-row items-center gap-1.5">
+                  <Feather name="users" size={16} color="#9CA3AF" />
+                  <Text className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                    {pkg.capacity}
+                  </Text>
+                </View>
+              </View>
             </View>
-          </View>
+          ))}
 
           {/* Bottom Count */}
-          <Text className="text-sm text-gray-500 dark:text-gray-400 mt-5">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mt-5 mb-3">
             Showing 1 of 1 custom package
           </Text>
 
-          
+          <Pagination
+            page={page}
+            perPage={perPage}
+            total={customPackages.length}
+            onPageChange={setPage}
+            onPerPageChange={setPerPage}
+          />
         </View>
       </ScrollView>
     </View>

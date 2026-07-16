@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { Pagination } from "../../components/ui/Pagination";
 import { SelectField } from "../../components/ui/FormControls";
 import { MembershipsListSkeleton } from "../../components/ui/skeleton/MembershipsSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -233,6 +234,19 @@ const Memberships = () => {
     });
   }, [memberships, search, statusFilter]);
 
+  // Client-side pagination over the filtered list.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const paged = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage],
+  );
+
+  // Reset to the first page whenever the search / filters move.
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, perPage]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -414,7 +428,7 @@ const Memberships = () => {
           {/* Member rows */}
           {!showInitialLoader && !showError && (
             <View className="mt-3 gap-3">
-              {filtered.map((m) => {
+              {paged.map((m) => {
                 const meta = STATUS_META[m.status];
                 return (
                   <Pressable
@@ -478,6 +492,13 @@ const Memberships = () => {
                   </Pressable>
                 );
               })}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
             </View>
           )}
 

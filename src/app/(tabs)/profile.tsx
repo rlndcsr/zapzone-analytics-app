@@ -1,7 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -12,7 +11,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import { ProfileSkeleton } from "../../components/ui/skeleton/ProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { getCurrentUser } from "../../lib/session";
@@ -57,25 +55,66 @@ const InfoRow = ({
 };
 
 const SectionCard = ({
-  icon,
   title,
   children,
 }: {
-  icon: keyof typeof Feather.glyphMap;
   title: string;
   children: React.ReactNode;
 }) => (
-  <View className="mt-4 rounded-2xl bg-white dark:bg-neutral-900 p-5 shadow-sm border border-gray-100 dark:border-neutral-800">
-    <View className="flex-row items-center gap-2 mb-3">
-      <View className="w-8 h-8 rounded-xl items-center justify-center bg-[#0644C7]/10">
-        <Feather name={icon} size={16} color="#0644C7" />
-      </View>
-      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-        {title}
-      </Text>
-    </View>
+  <View className="mt-4 rounded-3xl bg-white dark:bg-neutral-900 p-5 border border-gray-100 dark:border-neutral-800">
+    <Text className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+      {title}
+    </Text>
     {children}
   </View>
+);
+
+/** Tappable list row with a circular icon badge and a chevron. */
+const MenuRow = ({
+  icon,
+  label,
+  onPress,
+  danger,
+  loading,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+  loading?: boolean;
+}) => (
+  <Pressable
+    onPress={onPress}
+    disabled={loading}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className="flex-row items-center py-3.5 active:opacity-70"
+  >
+    <View
+      className={`h-11 w-11 items-center justify-center rounded-full ${
+        danger
+          ? "bg-red-50 dark:bg-red-900/20"
+          : "bg-gray-100 dark:bg-neutral-800"
+      }`}
+    >
+      {loading ? (
+        <ActivityIndicator
+          size="small"
+          color={danger ? "#EF4444" : "#111827"}
+        />
+      ) : (
+        <Feather name={icon} size={18} color={danger ? "#EF4444" : "#111827"} />
+      )}
+    </View>
+    <Text
+      className={`ml-4 flex-1 text-[15px] font-medium ${
+        danger ? "text-red-500" : "text-gray-900 dark:text-white"
+      }`}
+    >
+      {label}
+    </Text>
+    <Feather name="chevron-right" size={20} color="#9CA3AF" />
+  </Pressable>
 );
 
 const composeAddress = (company: CompanyDetails) =>
@@ -92,8 +131,6 @@ const composeAddress = (company: CompanyDetails) =>
 const Profile = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#eb4a4a";
   const { user, stats, loading, error, refresh } = useProfile();
   const [loggingOut, setLoggingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -119,7 +156,6 @@ const Profile = () => {
   const session = getCurrentUser();
   const displayName = user?.name ?? session?.name ?? "Guest";
   const displayEmail = user?.email ?? session?.email ?? null;
-  const role = user?.role ?? session?.role;
   const company = user?.company ?? null;
 
   const handleLogout = async () => {
@@ -134,31 +170,6 @@ const Profile = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header — shared DashboardHeader (same as Home), with Logout only */}
-      <DashboardHeader
-        rightSlot={
-          <Pressable
-            onPress={handleLogout}
-            disabled={loggingOut}
-            className="px-3 py-2 border-red-200 dark:border-red-200 border rounded-full bg-red-100 dark:bg-neutral-800 items-center justify-center flex-row active:opacity-80"
-            accessibilityRole="button"
-            accessibilityLabel="Logout"
-          >
-            {loggingOut ? (
-              <ActivityIndicator color={headerIcon} size="small" />
-            ) : (
-              <>
-                <Feather name="log-out" size={16} color={headerIcon} />
-                <Text className="text-xs font-medium text-red-500 dark:text-white">
-                  {" "}
-                  Logout
-                </Text>
-              </>
-            )}
-          </Pressable>
-        }
-      />
-
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
@@ -176,57 +187,64 @@ const Profile = () => {
           />
         }
       >
-        <View className="px-5 pt-0">
-          {/* Profile Header Card */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-6 mt-6 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800 items-center">
-            <View className="w-20 h-20 rounded-full bg-[#0644C7]/10 items-center justify-center">
+        {/* Cream hero — title + edit link, then centered avatar / name / email */}
+        <View
+          className="bg-[#0644C7]/5 dark:bg-neutral-900 rounded-b-[32px] px-6 pb-9"
+          style={{ paddingTop: insets.top + 10 }}
+        >
+         
+
+          <View className="items-center mt-6">
+            <View className="h-28 w-28 rounded-full bg-white dark:bg-neutral-800 items-center justify-center overflow-hidden border border-black/5 dark:border-white/10">
               <Image
                 source={require("../../../assets/zapzone-assests/zapzone.png")}
-                style={{ width: 50, height: 50 }}
+                style={{ width: 68, height: 68 }}
                 contentFit="contain"
               />
             </View>
-
-            <Text className="mt-3 text-xl font-bold text-gray-900 dark:text-white">
+            <Text className="mt-4 text-[22px] font-bold text-gray-900 dark:text-white">
               {displayName}
             </Text>
-            <Text className="mt-1 text-sm text-[#0644C7] dark:text-blue-400 font-medium">
-              {formatRole(role)}
-            </Text>
             {displayEmail ? (
-              <Text className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+              <Text className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {displayEmail}
               </Text>
             ) : null}
+          </View>
+        </View>
 
-            {/* Quick Actions */}
-            <View className="flex-row gap-3 mt-4 w-full">
-              <Pressable
-                onPress={() => router.push("/profile/edit-profile")}
-                className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7]/10 py-2.5 active:opacity-80"
-              >
-                <Feather name="edit-2" size={16} color="#0644C7" />
-                <Text className="text-xs font-medium text-[#0644C7]">
-                  Edit Profile
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push("/settings/settings")}
-                className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-gray-100 dark:bg-neutral-800 py-2.5 active:opacity-80"
-              >
-                <Feather name="settings" size={16} color="#6B7280" />
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                  Settings
-                </Text>
-              </Pressable>
-            </View>
+        <View className="px-5">
+          {/* Account — menu-style list of actions */}
+          <View className="mt-5 rounded-3xl bg-white dark:bg-neutral-900 px-5 py-2 border border-gray-100 dark:border-neutral-800">
+            <Text className="text-lg font-bold text-gray-900 dark:text-white mt-3 mb-1">
+              Account
+            </Text>
+            <MenuRow
+              icon="edit-2"
+              label="Edit Profile"
+              onPress={() => router.push("/profile/edit-profile")}
+            />
+            <View className="h-px bg-gray-100 dark:bg-neutral-800/60 ml-14" />
+            <MenuRow
+              icon="settings"
+              label="Settings"
+              onPress={() => router.push("/settings/settings")}
+            />
+            <View className="h-px bg-gray-100 dark:bg-neutral-800/60 ml-14" />
+            <MenuRow
+              icon="log-out"
+              label="Logout"
+              onPress={handleLogout}
+              loading={loggingOut}
+              danger
+            />
           </View>
 
           {/* Loading / error states for the fetched data */}
           {loading && !refreshing && <ProfileSkeleton />}
 
           {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
+            <View className="mt-4 bg-red-50 border border-red-100 rounded-3xl p-5">
               <Text className="text-red-600 font-semibold">
                 Something went wrong
               </Text>
@@ -237,7 +255,7 @@ const Profile = () => {
           {(!loading || refreshing) && user && (
             <>
               {/* Personal Information */}
-              <SectionCard icon="user" title="Personal Information">
+              <SectionCard title="Personal Information">
                 <InfoRow label="First Name" value={user.first_name} />
                 <InfoRow label="Last Name" value={user.last_name} />
                 <InfoRow label="Email Address" value={user.email} />
@@ -250,7 +268,7 @@ const Profile = () => {
 
               {/* Company Details */}
               {company && (
-                <SectionCard icon="briefcase" title="Company Details">
+                <SectionCard title="Company Details">
                   <InfoRow label="Company Name" value={company.company_name} />
                   <InfoRow label="Company Email" value={company.email} />
                   <InfoRow label="Company Phone" value={company.phone} />
@@ -263,7 +281,7 @@ const Profile = () => {
 
               {/* Business Overview */}
               {stats && (
-                <SectionCard icon="bar-chart-2" title="Business Overview">
+                <SectionCard title="Business Overview">
                   <Text className="text-xs text-gray-400 dark:text-gray-500 mb-3">
                     Automatically calculated from your companys locations and
                     employees.

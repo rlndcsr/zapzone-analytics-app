@@ -8,7 +8,12 @@ const TOKEN_KEY = "zapzone_auth_token";
 const USER_KEY = "zapzone_auth_user";
 const EXPIRY_KEY = "zapzone_auth_expires_at";
 
-/** Client-side session lifetime: 1 hour from a successful login. */
+/**
+ * Client-side inactivity timeout: the session stays alive as long as the app is
+ * used within any 1-hour window. Activity (app foreground / heartbeat) slides
+ * the expiry forward via `touchSession`; leaving the app backgrounded or closed
+ * past this window logs the user out on their next return.
+ */
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 let authToken: string | null = null;
@@ -28,7 +33,10 @@ function notify(): void {
   listeners.forEach((l) => l());
 }
 
-/** Persist + cache the session after a successful login. Starts the 1h timer. */
+/**
+ * Persist + cache the session after a successful login. Opens the inactivity
+ * window (extended thereafter by `touchSession` while the app is in use).
+ */
 export async function setSession(token: string, user: AuthUser): Promise<void> {
   authToken = token;
   authUser = user;
@@ -102,6 +110,22 @@ export function getCurrentUser(): AuthUser | null {
 /** Epoch-ms the current session expires at (null when signed out). */
 export function getSessionExpiresAt(): number | null {
   return expiresAt;
+}
+
+/**
+ * Slide the inactivity window forward on user activity — a no-op when signed
+ * out. Does NOT notify subscribers (auth state is unchanged), so extending the
+ * session on a heartbeat never triggers re-renders. Persists the new expiry so
+ * it survives an app restart within the window.
+ */
+export async function touchSession(): Promise<void> {
+  if (authToken == null) return;
+  expiresAt = Date.now() + SESSION_TTL_MS;
+  try {
+    await SecureStore.setItemAsync(EXPIRY_KEY, String(expiresAt));
+  } catch {
+    // Secure storage unavailable — the in-memory extension still applies.
+  }
 }
 
 /** True once the 1h window has elapsed while a token is still cached. */

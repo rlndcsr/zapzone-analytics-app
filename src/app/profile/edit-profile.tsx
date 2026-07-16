@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
@@ -24,21 +25,10 @@ import {
   type UserProfilePayload,
 } from "../../services/profileService";
 
-const SectionHeader = ({
-  icon,
-  title,
-}: {
-  icon: keyof typeof Feather.glyphMap;
-  title: string;
-}) => (
-  <View className="flex-row items-center gap-2 mb-3 mt-2">
-    <View className="h-8 w-8 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/40">
-      <Feather name={icon} size={16} color="#0644C7" />
-    </View>
-    <Text className="text-base font-bold text-gray-900 dark:text-white">
-      {title}
-    </Text>
-  </View>
+const SectionHeader = ({ title }: { title: string }) => (
+  <Text className="text-lg font-bold text-gray-900 dark:text-white mb-3 mt-1">
+    {title}
+  </Text>
 );
 
 const EditProfile = () => {
@@ -46,7 +36,7 @@ const EditProfile = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const { user, stats, loading, refresh } = useProfile();
+  const { user, loading, refresh } = useProfile();
   const [saving, setSaving] = useState(false);
 
   // Personal information form state.
@@ -153,22 +143,42 @@ const EditProfile = () => {
 
   const hasCompany = !!(user?.company_id ?? user?.company);
 
+  const displayName =
+    `${firstName} ${lastName}`.trim() || user?.name || "Your profile";
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
+      {/* Cream hero — back + serif title, then centered avatar / name */}
       <View
-        className="bg-white dark:bg-neutral-900 px-5 pb-4 flex-row items-center gap-3 border-b border-gray-100 dark:border-neutral-800"
-        style={{ paddingTop: insets.top + 12 }}
+        className="bg-[#0644C7]/5 dark:bg-neutral-900 rounded-b-[32px] px-5 pb-8"
+        style={{ paddingTop: insets.top + 10 }}
       >
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          className="h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-neutral-800 active:opacity-80"
-        >
-          <Feather name="chevron-left" size={22} color={headerIcon} />
-        </Pressable>
-        <Text className="text-xl font-bold text-gray-900 dark:text-white">Edit Profile</Text>
+        <View className="flex-row items-center gap-3">
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            className="h-9 w-9 items-center justify-center rounded-full bg-black/5 dark:bg-neutral-800 active:opacity-80"
+          >
+            <Feather name="chevron-left" size={22} color={headerIcon} />
+          </Pressable>
+          <Text className="text-[26px] font-bold text-gray-900 dark:text-white">
+            Edit Profile
+          </Text>
+        </View>
+
+        <View className="items-center mt-5">
+          <View className="h-24 w-24 rounded-full bg-white dark:bg-neutral-800 items-center justify-center overflow-hidden border border-black/5 dark:border-white/10">
+            <Image
+              source={require("../../../assets/zapzone-assests/zapzone.png")}
+              style={{ width: 58, height: 58 }}
+              contentFit="contain"
+            />
+          </View>
+          <Text className="mt-3 text-lg font-semibold text-gray-900 dark:text-white">
+            {displayName}
+          </Text>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -188,8 +198,8 @@ const EditProfile = () => {
           ) : (
             <>
               {/* Personal Information */}
-              <View className="rounded-2xl bg-white dark:bg-neutral-900 p-4">
-                <SectionHeader icon="user" title="Personal Information" />
+              <View className="rounded-3xl bg-white dark:bg-neutral-900 p-5 border border-gray-100 dark:border-neutral-800">
+                <SectionHeader title="Personal Information" />
                 <InputField
                   label="First Name"
                   value={firstName}
@@ -247,8 +257,8 @@ const EditProfile = () => {
 
               {/* Company Details */}
               {hasCompany && (
-                <View className="mt-4 rounded-2xl bg-white dark:bg-neutral-900 p-4">
-                  <SectionHeader icon="briefcase" title="Company Details" />
+                <View className="mt-4 rounded-3xl bg-white dark:bg-neutral-900 p-5 border border-gray-100 dark:border-neutral-800">
+                  <SectionHeader title="Company Details" />
                   <InputField
                     label="Company Name"
                     value={companyName}
@@ -336,34 +346,6 @@ const EditProfile = () => {
                 </View>
               )}
 
-              {/* Business Metrics (read-only, auto-calculated) */}
-              {stats && (
-                <View className="mt-4 rounded-2xl bg-white dark:bg-neutral-900 p-4">
-                  <SectionHeader icon="bar-chart-2" title="Business Metrics" />
-                  <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                    Automatically calculated from your company’s locations and
-                    employees.
-                  </Text>
-                  <View className="flex-row gap-3">
-                    <View className="flex-1 items-center rounded-2xl bg-blue-50 dark:bg-blue-900/30 py-5">
-                      <Text className="text-3xl font-bold text-[#0644C7] dark:text-blue-300">
-                        {stats.total_locations}
-                      </Text>
-                      <Text className="mt-1 text-xs text-gray-600 dark:text-gray-300">
-                        Total Locations
-                      </Text>
-                    </View>
-                    <View className="flex-1 items-center rounded-2xl bg-blue-50 dark:bg-blue-900/30 py-5">
-                      <Text className="text-3xl font-bold text-[#0644C7] dark:text-blue-300">
-                        {stats.total_users}
-                      </Text>
-                      <Text className="mt-1 text-xs text-gray-600 dark:text-gray-300">
-                        Total Employees
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              )}
 
               <PrimaryButton
                 label="Save Changes"

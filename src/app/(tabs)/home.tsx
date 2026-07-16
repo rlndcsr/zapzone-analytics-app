@@ -192,6 +192,7 @@ const MetricCard = ({
   subtitleFn,
   timeframeLabel,
   onPress,
+  onInfo,
   layoutKey,
   index,
 }: {
@@ -201,6 +202,7 @@ const MetricCard = ({
   subtitleFn?: (metrics: DashboardData["metrics"]) => string;
   timeframeLabel: string;
   onPress: (key: string) => void;
+  onInfo: (key: string) => void;
   layoutKey: number;
   index: number;
 }) => {
@@ -228,10 +230,19 @@ const MetricCard = ({
       }}
     >
       <View className="flex-row items-start justify-between mb-4">
-        <View className="flex-1 mr-2">
+        <View className="flex-row items-center gap-1.5 flex-1 mr-2">
           <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
             {metric.title}
           </Text>
+          <Pressable
+            onPress={() => onInfo(metric.key)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={`About ${metric.title}`}
+            className="active:opacity-60"
+          >
+            <Info size={14} color="#9CA3AF" />
+          </Pressable>
         </View>
         <MetricIconBadge metric={metric} layoutKey={layoutKey} index={index} />
       </View>
@@ -418,6 +429,8 @@ const Home = () => {
   }, []);
 
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  // Which card's info popup is open (metric key), or null when closed.
+  const [infoMetric, setInfoMetric] = useState<string | null>(null);
   const {
     timeframe: dateFilter,
     dateFrom: customStartDate,
@@ -687,6 +700,7 @@ const Home = () => {
                     subtitleFn={getCardSubtitleFn(dashboardConfig, metric)}
                     timeframeLabel={timeframeLabel}
                     onPress={openModal}
+                    onInfo={setInfoMetric}
                     layoutKey={gridColumns}
                     index={index}
                   />
@@ -944,6 +958,33 @@ const Home = () => {
             </Text>
           </Pressable>
         </ScrollView>
+      </BottomSheet>
+
+      {/* Metric info — what this card counts (tap the ⓘ on a card) */}
+      <BottomSheet
+        visible={infoMetric !== null}
+        onClose={() => setInfoMetric(null)}
+        title={
+          infoMetric
+            ? METRIC_CARDS[infoMetric as keyof typeof METRIC_CARDS]?.title
+            : "About this metric"
+        }
+      >
+        <View className="px-5 pb-8">
+          <View className="flex-row items-center gap-2 mb-3">
+            <View className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/20 items-center justify-center">
+              <Info size={18} color="#0644C7" />
+            </View>
+            <Text className="text-base font-bold text-gray-900 dark:text-white">
+              How this is calculated
+            </Text>
+          </View>
+          <Text className="text-sm leading-6 text-gray-600 dark:text-gray-300">
+            {infoMetric
+              ? METRIC_CARDS[infoMetric as keyof typeof METRIC_CARDS]?.info
+              : ""}
+          </Text>
+        </View>
       </BottomSheet>
     </View>
   );

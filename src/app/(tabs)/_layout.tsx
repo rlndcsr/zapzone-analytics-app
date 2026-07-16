@@ -94,9 +94,20 @@ const FloatingTabBar = ({
   // moves, so a layout-time measure stays accurate for the tap path.
   const measureFab = () => {
     fabRef.current?.measureInWindow((x, y, width, height) => {
-      if (width > 0 && height > 0) {
-        setFabRect({ x, y, width, height });
-      }
+      if (width <= 0 || height <= 0) return;
+      // Only commit when the box actually moved. onLayout can fire on every
+      // commit; storing a fresh object each time would re-render → re-measure →
+      // re-render, which on the New Architecture can spiral into "Maximum update
+      // depth exceeded". Bailing on an unchanged rect breaks that cycle.
+      setFabRect((prev) =>
+        prev &&
+        prev.x === x &&
+        prev.y === y &&
+        prev.width === width &&
+        prev.height === height
+          ? prev
+          : { x, y, width, height },
+      );
     });
   };
 
