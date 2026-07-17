@@ -860,6 +860,27 @@ function durationToMinutes(
   return unit === "hours" ? duration * 60 : duration;
 }
 
+/** Map a raw schedule/list booking to the ScheduleBooking shape. */
+function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
+  return {
+    id: raw.id,
+    roomId: raw.room_id ?? null,
+    referenceNumber: raw.reference_number ?? null,
+    status: raw.status ?? "pending",
+    time: toTime(raw.booking_time),
+    durationMinutes: durationToMinutes(
+      Number(raw.duration ?? 0),
+      raw.duration_unit,
+    ),
+    participants: Number(raw.participants ?? 0),
+    totalAmount: Number(raw.total_amount ?? 0),
+    amountPaid: Number(raw.amount_paid ?? 0),
+    paymentStatus: raw.payment_status ?? "pending",
+    packageName: raw.package?.name?.trim() || "Booking",
+    customerName: customerName(raw.customer, raw.guest_name),
+  };
+}
+
 /**
  * GET /api/bookings?booking_date=YYYY-MM-DD — the single day's bookings for the
  * Space Schedule (same request the web makes: `getBookings({ booking_date,
@@ -893,28 +914,35 @@ export async function fetchDaySchedule({
       };
     }>(`/api/bookings?${params.toString()}`, { token, signal });
     for (const raw of res?.data?.bookings ?? []) {
-      out.push({
-        id: raw.id,
-        roomId: raw.room_id ?? null,
-        referenceNumber: raw.reference_number ?? null,
-        status: raw.status ?? "pending",
-        time: toTime(raw.booking_time),
-        durationMinutes: durationToMinutes(
-          Number(raw.duration ?? 0),
-          raw.duration_unit,
-        ),
-        participants: Number(raw.participants ?? 0),
-        totalAmount: Number(raw.total_amount ?? 0),
-        amountPaid: Number(raw.amount_paid ?? 0),
-        paymentStatus: raw.payment_status ?? "pending",
-        packageName: raw.package?.name?.trim() || "Booking",
-        customerName: customerName(raw.customer, raw.guest_name),
-      });
+      out.push(mapScheduleBooking(raw));
     }
     lastPage = res?.data?.pagination?.last_page ?? page;
     page++;
   } while (page <= lastPage && page <= SYNC_MAX_PAGES);
   return out;
+}
+
+/**
+ * GET /api/bookings/location-date?location_id=&date= — bookings at a location on
+ * a date, matching the web admin's `getBookingsByLocationAndDate` (used by
+ * EditBooking to show "Existing bookings at this location"). Reuses the same
+ * dedicated Laravel endpoint the web uses, location-scoped server-side.
+ */
+export async function fetchBookingsByLocationAndDate(
+  token: string,
+  locationId: number,
+  date: string,
+  signal?: AbortSignal,
+): Promise<ScheduleBooking[]> {
+  const params = new URLSearchParams({
+    location_id: String(locationId),
+    date,
+  });
+  const res = await apiRequest<{ data?: RawScheduleBooking[] }>(
+    `/api/bookings/location-date?${params.toString()}`,
+    { token, signal },
+  );
+  return (Array.isArray(res?.data) ? res.data : []).map(mapScheduleBooking);
 }
 
 /**
@@ -1056,9 +1084,10 @@ export type BookingUpdateInput = {
 };
 
 /**
- * PATCH /api/bookings/{id} — full booking update from the Edit form.
- * NOTE: route/field names mirror the web edit form as a best guess; adjust the
- * body keys here if your backend expects different names.
+ * PUT /api/bookings/{id} — full booking update from the Edit form. Method and
+ * body keys mirror the web admin exactly (bookingService.updateBooking /
+ * EditBooking.tsx): PUT, `guest_name`, `notes` (customer notes), and
+ * `send_notification` for the update-notification toggle.
  */
 export async function updateBooking(
   token: string,
@@ -1069,10 +1098,7 @@ export async function updateBooking(
   if (input.locationId != null) body.location_id = input.locationId;
   if (input.packageId != null) body.package_id = input.packageId;
   if (input.roomId != null) body.room_id = input.roomId;
-  if (input.customerName != null) {
-    body.customer_name = input.customerName;
-    body.guest_name = input.customerName;
-  }
+  if (input.customerName != null) body.guest_name = input.customerName;
   if (input.customerEmail != null) body.guest_email = input.customerEmail;
   if (input.customerPhone != null) body.guest_phone = input.customerPhone;
   if (input.date != null) body.booking_date = input.date;
@@ -1085,13 +1111,12 @@ export async function updateBooking(
     body.guest_of_honor_age = input.guestOfHonorAge;
   if (input.guestOfHonorGender !== undefined)
     body.guest_of_honor_gender = input.guestOfHonorGender;
-  if (input.customerNotes !== undefined)
-    body.customer_notes = input.customerNotes;
+  if (input.customerNotes !== undefined) body.notes = input.customerNotes;
   if (input.internalNotes !== undefined)
     body.internal_notes = input.internalNotes;
-  if (input.sendEmail != null) body.send_email = input.sendEmail;
+  if (input.sendEmail != null) body.send_notification = input.sendEmail;
 
-  await apiRequest(`/api/bookings/${id}`, { method: "PATCH", token, body });
+  await apiRequest(`/api/bookings/${id}`, { method: "PUT", token, body });
 }
 
 // ---------------------------------------------------------------------------

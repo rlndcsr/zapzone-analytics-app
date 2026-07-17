@@ -26,11 +26,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
-import { getCurrentUser, getToken } from "../../lib/session";
+import { getToken } from "../../lib/session";
 import {
   fetchAvailableTimeSlots,
   fetchBookingDetail,
-  fetchDaySchedule,
+  fetchBookingsByLocationAndDate,
   fetchPackageAvailabilitySchedules,
   fetchPackages,
   fetchRooms,
@@ -190,7 +190,6 @@ const SelectField = ({
  *  screen's Edit button. */
 const EditBookingScreen = () => {
   const insets = useSafeAreaInsets();
-  const user = getCurrentUser();
   const params = useLocalSearchParams<{ id?: string }>();
   const bookingId = Number(params.id);
 
@@ -348,9 +347,10 @@ const EditBookingScreen = () => {
     };
   }, [date, packageId]);
 
-  // Existing bookings for the chosen date (web admin shows this for awareness).
+  // Existing bookings at this location on the chosen date — reuses the web
+  // admin's dedicated /bookings/location-date endpoint (location-scoped).
   useEffect(() => {
-    if (!date) {
+    if (!date || locationId == null) {
       setExisting([]);
       setLoadingExisting(false);
       return;
@@ -359,14 +359,14 @@ const EditBookingScreen = () => {
     if (!token) return;
     let alive = true;
     setLoadingExisting(true);
-    fetchDaySchedule({ token, date, userId: user?.id })
+    fetchBookingsByLocationAndDate(token, locationId, date)
       .then((b) => alive && setExisting(b))
       .catch(() => alive && setExisting([]))
       .finally(() => alive && setLoadingExisting(false));
     return () => {
       alive = false;
     };
-  }, [date, user?.id]);
+  }, [date, locationId]);
 
   const packageOptions: Option[] = useMemo(() => {
     const opts = packages.map((p) => ({
@@ -582,8 +582,8 @@ const EditBookingScreen = () => {
                   <>
                     <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
                       {existing.length === 0
-                        ? `No other bookings on ${longDate(date)}`
-                        : `Existing bookings on ${longDate(date)}`}
+                        ? `No other bookings at this location on ${longDate(date)}`
+                        : `Existing bookings at this location on ${longDate(date)}`}
                     </Text>
                     {existing.slice(0, 5).map((b) => (
                       <View
