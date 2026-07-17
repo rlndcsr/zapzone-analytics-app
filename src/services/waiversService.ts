@@ -801,6 +801,119 @@ export async function resendGroupInvite(
   });
 }
 
+/* -------------------------------------------------------------- Reports -- */
+
+/** The MVP report kinds the backend dispatches (mirrors the web `REPORT_TYPES`). */
+export type WaiverReportType =
+  | "completed-by-date"
+  | "missing"
+  | "bulk-completion"
+  | "by-event"
+  | "by-template"
+  | "by-source"
+  | "marketing-consent"
+  | "deleted";
+
+/** Which report types accept a start/end date filter (others ignore it). */
+export const DATED_REPORT_TYPES: readonly WaiverReportType[] = [
+  "completed-by-date",
+  "missing",
+  "by-event",
+  "by-template",
+  "by-source",
+  "marketing-consent",
+];
+
+/**
+ * Report payloads are shape-per-type (an array of rows, an object with an
+ * `items` array + count, or a flat count map for marketing-consent). The screen
+ * narrows on `type`; the service passes the `data` node through untouched so it
+ * always matches the web admin's `/waivers/reports/{type}` contract.
+ */
+export async function fetchWaiverReport(
+  token: string,
+  type: WaiverReportType,
+  range: { startDate?: string; endDate?: string } = {},
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const params = new URLSearchParams();
+  if (range.startDate && range.endDate) {
+    params.append("start_date", range.startDate);
+    params.append("end_date", range.endDate);
+  }
+  const qs = params.toString();
+  const res = await apiRequest<{ success: boolean; type: string; data: unknown }>(
+    `/api/waivers/reports/${type}${qs ? `?${qs}` : ""}`,
+    { token, signal },
+  );
+  return res?.data ?? null;
+}
+
+/* --------------------------------------------------------- Deletion Log -- */
+
+/** One row of the waiver deletion audit trail (GET /api/waivers/deletion-log). */
+export type WaiverDeletionLogEntry = {
+  id: number;
+  waiverId: number;
+  reason: string | null;
+  deletedBy: string | null;
+  deletedAt: string | null;
+  guestName: string | null;
+  selectedDate: string | null;
+  status: string | null;
+};
+
+type RawDeletionLog = {
+  id: number;
+  waiver_id?: number;
+  reason?: string | null;
+  created_at?: string | null;
+  deleter?: { first_name?: string | null; last_name?: string | null } | null;
+  snapshot?: {
+    adult_name?: string | null;
+    selected_date?: string | null;
+    status?: string | null;
+  } | null;
+};
+
+type DeletionLogResponse = {
+  success: boolean;
+  data: { logs: RawDeletionLog[]; pagination: Pagination };
+};
+
+function mapDeletionLog(raw: RawDeletionLog): WaiverDeletionLogEntry {
+  const deleter = fullName(raw.deleter?.first_name, raw.deleter?.last_name);
+  return {
+    id: raw.id,
+    waiverId: num(raw.waiver_id, 0),
+    reason: raw.reason?.trim() || null,
+    deletedBy: deleter === "—" ? null : deleter,
+    deletedAt: raw.created_at ?? null,
+    guestName: raw.snapshot?.adult_name?.trim() || null,
+    selectedDate: raw.snapshot?.selected_date ?? null,
+    status: raw.snapshot?.status ?? null,
+  };
+}
+
+/**
+ * GET /api/waivers/deletion-log — audit trail of deleted waivers, newest first.
+ * Admin-only (or a manager when `manager_can_view_deletion_log`); a 403 surfaces
+ * as an ApiError the caller can show as a permission message. Fetches a large
+ * page so the shared client-side `Pagination` can slice it (per the app pattern).
+ */
+export async function fetchDeletionLog(
+  token: string,
+  perPage = 200,
+  signal?: AbortSignal,
+): Promise<WaiverDeletionLogEntry[]> {
+  const params = new URLSearchParams({ per_page: String(perPage) });
+  const res = await apiRequest<DeletionLogResponse>(
+    `/api/waivers/deletion-log?${params.toString()}`,
+    { token, signal },
+  );
+  return (res?.data?.logs ?? []).map(mapDeletionLog);
+}
+
 /* ------------------------------------------------------------- Settings -- */
 
 /** GET /api/waiver-settings — company permission flags + UI hints. */

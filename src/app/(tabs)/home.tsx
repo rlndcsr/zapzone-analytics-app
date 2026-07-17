@@ -63,6 +63,7 @@ import {
   PillDivider,
   PillSegment,
 } from "../../components/ui/FilterPill";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
@@ -201,6 +202,7 @@ const MetricCard = ({
   subtitleFn,
   timeframeLabel,
   onPress,
+  onInfo,
   layoutKey,
   index,
 }: {
@@ -210,6 +212,7 @@ const MetricCard = ({
   subtitleFn?: (metrics: DashboardData["metrics"]) => string;
   timeframeLabel: string;
   onPress: (key: string) => void;
+  onInfo: (key: string) => void;
   layoutKey: number;
   index: number;
 }) => {
@@ -237,9 +240,19 @@ const MetricCard = ({
       }}
     >
       <View className="flex-row items-start justify-between mb-4">
-        <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex-1 mr-2">
-          {metric.title}
-        </Text>
+        <View className="flex-row items-center gap-1.5 flex-1 mr-2">
+          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200 shrink">
+            {metric.title}
+          </Text>
+          <Pressable
+            onPress={() => onInfo(metric.key)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={`About ${metric.title}`}
+          >
+            <Info size={14} color="#9CA3AF" strokeWidth={2} />
+          </Pressable>
+        </View>
         <MetricIconBadge metric={metric} layoutKey={layoutKey} index={index} />
       </View>
 
@@ -425,6 +438,8 @@ const Home = () => {
   }, []);
 
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  // Metric whose info sheet is open (tapping a card's ⓘ icon).
+  const [infoMetric, setInfoMetric] = useState<string | null>(null);
   const {
     timeframe: dateFilter,
     dateFrom: customStartDate,
@@ -624,6 +639,12 @@ const Home = () => {
             </Text>
           </View>
 
+          {/* Global active-location workspace selector (company-admin only;
+              renders nothing for managers/attendants). Sits above the filters. */}
+          <View className="mb-3">
+            <LocationWorkspaceSelector />
+          </View>
+
           {/* Filters Row — segmented pill + card-layout toggle */}
           <View className="flex-row items-start gap-2">
             <View className="flex-1">
@@ -692,6 +713,7 @@ const Home = () => {
                     subtitleFn={getCardSubtitleFn(dashboardConfig, metric)}
                     timeframeLabel={timeframeLabel}
                     onPress={openModal}
+                    onInfo={setInfoMetric}
                     layoutKey={gridColumns}
                     index={index}
                   />
@@ -846,6 +868,26 @@ const Home = () => {
           </Animated.View>
         </View>
       </Modal>
+
+      {/* Metric info sheet — opened by a card's ⓘ icon. */}
+      <BottomSheet
+        visible={infoMetric !== null}
+        onClose={() => setInfoMetric(null)}
+        title={
+          infoMetric
+            ? (METRIC_CARDS[infoMetric as keyof typeof METRIC_CARDS]?.title ??
+              "About this metric")
+            : "About this metric"
+        }
+      >
+        <View className="px-5 pb-8">
+          <Text className="text-sm leading-6 text-gray-600 dark:text-gray-300">
+            {infoMetric
+              ? METRIC_CARDS[infoMetric as keyof typeof METRIC_CARDS]?.info
+              : ""}
+          </Text>
+        </View>
+      </BottomSheet>
 
       {/* Timeframe Picker */}
       <BottomSheet

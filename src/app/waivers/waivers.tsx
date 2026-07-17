@@ -85,7 +85,7 @@ const NAV_ITEMS: {
     label: "Groups Invite",
     desc: "Invite groups to your space",
     icon: "users",
-    route: "/waivers/groups",
+    route: "/waivers/group-invites",
   },
   {
     label: "Reports",

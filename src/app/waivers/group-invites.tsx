@@ -246,8 +246,18 @@ const GroupInvites = () => {
             </Text>
           </View>
 
+          <Pressable
+            onPress={() => router.push("/waivers/create-group-invite")}
+            className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              New Invite
+            </Text>
+          </Pressable>
+
           {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5">
+          <View className="mt-5 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5">
             <Feather name="search" size={16} color="#9CA3AF" />
             <TextInput
               value={search}
@@ -265,7 +275,9 @@ const GroupInvites = () => {
 
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -352,27 +364,7 @@ const GroupInvites = () => {
         </View>
       </BottomSheet>
 
-      {/* FAB — New Group Invite */}
-      {canManage && (
-        <Pressable
-          onPress={() => router.push("/waivers/create-group-invite" as never)}
-          accessibilityRole="button"
-          accessibilityLabel="Create group invite"
-          style={{
-            position: "absolute",
-            right: 20,
-            bottom: insets.bottom + 20,
-            shadowColor: PRIMARY,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.4,
-            shadowRadius: 12,
-            elevation: 8,
-          }}
-          className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-        >
-          <Feather name="plus" size={26} color="#FFFFFF" />
-        </Pressable>
-      )}
+      
     </View>
   );
 };
