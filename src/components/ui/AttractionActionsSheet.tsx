@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -11,49 +12,31 @@ import {
   View,
 } from "react-native";
 
-import { webUrl } from "../../lib/api";
+import { mediaUrl, webUrl } from "../../lib/api";
 import { getToken } from "../../lib/session";
 import { buildLocationSlug, createSlugWithId } from "../../lib/slug";
+import { formatTimeRange } from "../../lib/time";
 import {
   deleteAttraction,
   duplicateAttraction,
   fetchAttractionDetail,
-  updateAttraction,
   type AttractionDetail,
   type AttractionRow,
-  type UpdateAttractionInput,
 } from "../../services/attractionsService";
 import { BottomSheet } from "./BottomSheet";
-import {
-  SelectField,
-  TextField,
-  ToggleRow,
-  type SelectOption,
-} from "./FormControls";
 import { StatusBadge } from "./StatusBadge";
 
 const PRIMARY = "#0644C7";
 
-type Mode = "menu" | "view" | "edit";
+type Mode = "menu" | "view";
 
-const PRICING_TYPES: SelectOption[] = [
+const PRICING_TYPES = [
   { label: "Per Person", value: "per_person" },
   { label: "Per Group", value: "per_group" },
   { label: "Per Hour", value: "per_hour" },
   { label: "Per Game", value: "per_game" },
   { label: "Fixed Price", value: "fixed" },
 ];
-
-const DURATION_UNITS: SelectOption[] = [
-  { label: "Minutes", value: "minutes" },
-  { label: "Hours", value: "hours" },
-];
-
-const PRICING_SUFFIX: Record<string, string> = {
-  per_person: "/person",
-  per_group: "/group",
-  per_hour: "/hour",
-};
 
 const pricingLabel = (value: string): string =>
   PRICING_TYPES.find((p) => p.value === value)?.label ?? value;
@@ -63,13 +46,6 @@ const money = (n: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
-
-const parseNum = (s: string): number | null => {
-  const t = s.trim();
-  if (!t) return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-};
 
 /** Public purchase URL — same shape the web ManageAttractions "Copy Link" builds. */
 const buildPurchaseLink = (a: AttractionRow): string =>
@@ -146,6 +122,13 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 type Props = {
   visible: boolean;
   attraction: AttractionRow | null;
+  /**
+   * Which content the sheet opens on. "menu" (default) shows the action hub —
+   * used by the three-dot overflow. "view" opens straight into the details, so a
+   * card tap lands on the details without the extra menu step (mirrors
+   * PackageActionsSheet, which always opens in its view mode).
+   */
+  initialMode?: Mode;
   onClose: () => void;
   /** Refetch the list after any mutation so cards reflect the new state. */
   onChanged: () => void;
@@ -153,15 +136,17 @@ type Props = {
 
 /**
  * Per-attraction actions hub — the mobile equivalent of the web admin's row
- * buttons (Copy Link / Open Link / View / Edit / Duplicate / Delete). Everything
- * lives in ONE BottomSheet that swaps between menu / view / edit content, so two
- * native Modals are never stacked. Reuses the same endpoints as the web:
- * GET/PUT/DELETE /api/attractions/{id} and POST /api/attractions (duplicate).
- * Mirrors the sibling PackageActionsSheet.
+ * buttons (Copy Link / View purchase / View / Edit / Duplicate / Delete). The
+ * menu and details views live in ONE BottomSheet that swaps content, so two
+ * native Modals are never stacked. Editing opens the dedicated
+ * /attractions/edit-attraction screen (mirrors PackageActionsSheet, whose Edit
+ * routes to the full-screen edit page). Reuses the same endpoints as the web:
+ * GET/DELETE /api/attractions/{id} and POST /api/attractions (duplicate).
  */
 export function AttractionActionsSheet({
   visible,
   attraction,
+  initialMode = "menu",
   onClose,
   onChanged,
 }: Props) {
@@ -173,36 +158,8 @@ export function AttractionActionsSheet({
   const [copied, setCopied] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
 
-  // Edit form fields (core scalars; availability/images/add-ons are preserved
-  // from the loaded detail and managed on the web admin).
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("");
-  const [price, setPrice] = useState("");
-  const [pricingType, setPricingType] = useState("per_person");
-  const [maxCapacity, setMaxCapacity] = useState("");
-  const [displayCapacity, setDisplayCapacity] = useState(true);
-  const [duration, setDuration] = useState("");
-  const [durationUnit, setDurationUnit] = useState("minutes");
-  const [displayOrder, setDisplayOrder] = useState("0");
-  const [isActive, setIsActive] = useState(true);
-
   const reqRef = useRef(0);
-  const seededRef = useRef<number | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Reset to the menu whenever the sheet (re)opens for an attraction.
-  useEffect(() => {
-    if (visible) {
-      setMode("menu");
-      setDetail(null);
-      setError(null);
-      setBusy(false);
-      setCopied(false);
-      setDuplicating(false);
-      seededRef.current = null;
-    }
-  }, [visible]);
 
   useEffect(
     () => () => {
@@ -234,34 +191,27 @@ export function AttractionActionsSheet({
     }
   }, []);
 
+  // Reset to the requested entry mode whenever the sheet (re)opens for an
+  // attraction. When opening straight into the details (initialMode "view"), the
+  // detail is loaded here since there's no menu tap to trigger it.
+  useEffect(() => {
+    if (visible) {
+      setMode(initialMode);
+      setDetail(null);
+      setError(null);
+      setBusy(false);
+      setCopied(false);
+      setDuplicating(false);
+      if (initialMode !== "menu" && attraction) loadDetail(attraction.id);
+    }
+  }, [visible, initialMode, attraction, loadDetail]);
+
   const ensureDetail = useCallback(
     (id: number) => {
       if (!detail || detail.id !== id) loadDetail(id);
     },
     [detail, loadDetail],
   );
-
-  const seedForm = useCallback((d: AttractionDetail) => {
-    setName(d.name);
-    setDescription(d.description);
-    setCategory(d.category);
-    setPrice(String(d.price));
-    setPricingType(d.pricingType || "per_person");
-    setMaxCapacity(String(d.maxCapacity));
-    setDisplayCapacity(d.displayCapacityToCustomers);
-    setDuration(d.duration != null ? String(d.duration) : "");
-    setDurationUnit(d.durationUnit === "hours" ? "hours" : "minutes");
-    setDisplayOrder(String(d.displayOrder));
-    setIsActive(d.status === "active");
-  }, []);
-
-  // Seed the edit form once the detail for this attraction has loaded.
-  useEffect(() => {
-    if (mode === "edit" && detail && seededRef.current !== detail.id) {
-      seedForm(detail);
-      seededRef.current = detail.id;
-    }
-  }, [mode, detail, seedForm]);
 
   if (!attraction) {
     return (
@@ -273,12 +223,11 @@ export function AttractionActionsSheet({
     );
   }
 
+  // In the details view the attraction name IS the header title, so it shares
+  // the sheet's top row with the close button (web admin parity). Falls back to
+  // the row name until the full detail loads.
   const title =
-    mode === "view"
-      ? "Attraction details"
-      : mode === "edit"
-        ? "Edit attraction"
-        : "Attraction actions";
+    mode === "view" ? (detail?.name ?? attraction.name) : "Attraction actions";
 
   const purchaseLink = buildPurchaseLink(attraction);
 
@@ -288,9 +237,12 @@ export function AttractionActionsSheet({
     setMode("view");
     ensureDetail(attraction.id);
   };
+  // Editing is a dedicated full-screen experience (all sections, web parity),
+  // matching PackageActionsSheet. Close the sheet and navigate; the list
+  // refetches on focus via the stale flag the edit screen sets on save.
   const goEdit = () => {
-    setMode("edit");
-    ensureDetail(attraction.id);
+    onClose();
+    router.push(`/attractions/edit-attraction?id=${attraction.id}`);
   };
 
   const handleCopyLink = async () => {
@@ -371,69 +323,31 @@ export function AttractionActionsSheet({
     );
   };
 
-  const handleSave = async () => {
-    // Validation mirrors the web EditAttraction form.
-    if (!name.trim())
-      return Alert.alert("Missing name", "Attraction name is required.");
-    if (!category.trim())
-      return Alert.alert("Missing category", "Please enter a category.");
-    const priceNum = parseNum(price);
-    if (priceNum == null || priceNum < 0)
-      return Alert.alert("Invalid price", "Please enter a valid price.");
-    const capNum = parseNum(maxCapacity);
-    if (capNum == null || capNum < 1)
-      return Alert.alert(
-        "Invalid capacity",
-        "Capacity must be at least 1.",
-      );
-
-    const token = getToken();
-    if (!token) return Alert.alert("Not signed in", "Please sign in again.");
-    if (!detail) return;
-
-    const durationNum = parseNum(duration) ?? 0;
-
-    // Full payload like the web: send edited scalars, preserve availability /
-    // images / add-ons from the loaded detail so nothing is wiped.
-    const input: UpdateAttractionInput = {
-      location_id: detail.locationId ?? undefined,
-      name: name.trim(),
-      description: description.trim(),
-      category: category.trim(),
-      price: priceNum,
-      pricing_type: pricingType,
-      max_capacity: Math.round(capNum),
-      duration: durationNum,
-      duration_unit: durationUnit === "hours" ? "hours" : "minutes",
-      availability: detail.availability,
-      image: detail.images.length > 0 ? detail.images : undefined,
-      is_active: isActive,
-      addon_ids: detail.addOns.map((a) => a.id),
-      add_ons_order: detail.addOnsOrder,
-      display_capacity_to_customers: displayCapacity,
-      display_order: parseNum(displayOrder) ?? 0,
-    };
-
-    setBusy(true);
-    try {
-      await updateAttraction(token, attraction.id, input);
-      onChanged();
-      seededRef.current = null;
-      await loadDetail(attraction.id);
-      setMode("view");
-    } catch (err) {
-      Alert.alert(
-        "Update failed",
-        err instanceof Error ? err.message : "Could not update attraction.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   /* --- Render -------------------------------------------------------------- */
 
-  const suffix = PRICING_SUFFIX[detail?.pricingType ?? attraction.pricingType] ?? "";
+  // Primary image (first image, like the web admin), resolved to an absolute
+  // URL via the shared media resolver. Null when the attraction has no image.
+  const primaryImage =
+    detail && detail.images.length > 0 ? mediaUrl(detail.images[0]) : null;
+
+  // Price with its pricing type in words, e.g. "$31.99 (per person)" — matching
+  // the web admin. Flat "fixed" pricing carries no per-unit qualifier.
+  const priceValue = detail
+    ? `${money(detail.price)}${
+        detail.pricingType && detail.pricingType !== "fixed"
+          ? ` (${pricingLabel(detail.pricingType).toLowerCase()})`
+          : ""
+      }`
+    : "";
+
+  // Created date in the web admin's numeric locale form, e.g. "2/22/2026".
+  const createdValue = (() => {
+    if (!detail?.createdAt) return "—";
+    const d = new Date(detail.createdAt);
+    return Number.isNaN(d.getTime())
+      ? "—"
+      : d.toLocaleDateString("en-US");
+  })();
 
   return (
     <BottomSheet visible={visible} onClose={onClose} title={title}>
@@ -503,7 +417,15 @@ export function AttractionActionsSheet({
           )}
           {!loading && !error && detail && (
             <>
-              <View className="flex-row items-center gap-2 mt-2">
+              {/* The attraction name lives in the sheet header (beside the close
+                  button); the category + status badges sit directly beneath it,
+                  then the image. */}
+              <View className="flex-row items-center gap-2 mt-1">
+                <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
+                  <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+                    {detail.category}
+                  </Text>
+                </View>
                 <StatusBadge status={detail.status} />
                 {detail.name.includes("(Copy)") && (
                   <View className="flex-row items-center gap-1 px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40">
@@ -512,6 +434,24 @@ export function AttractionActionsSheet({
                       Copy
                     </Text>
                   </View>
+                )}
+              </View>
+
+              {/* Primary image (web admin parity) — first image if present, else
+                  the shared placeholder. Fixed aspect ratio keeps it undistorted
+                  with the app's standard rounded-corner card style. */}
+              <View
+                className="w-full rounded-2xl overflow-hidden bg-gray-100 dark:bg-neutral-800 mt-4 items-center justify-center"
+                style={{ aspectRatio: 16 / 9 }}
+              >
+                {primaryImage ? (
+                  <Image
+                    source={{ uri: primaryImage }}
+                    style={{ width: "100%", height: "100%" }}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <Feather name="image" size={36} color="#9CA3AF" />
                 )}
               </View>
 
@@ -524,18 +464,12 @@ export function AttractionActionsSheet({
                 </>
               )}
 
-              <SectionTitle>Details</SectionTitle>
+              <SectionTitle>Attraction Details</SectionTitle>
               <Row label="Category" value={detail.category} />
+              <Row label="Price" value={priceValue} />
               <Row
-                label="Price"
-                value={`${money(detail.price)}${suffix ? ` ${suffix}` : ""}`}
-              />
-              <Row label="Pricing type" value={pricingLabel(detail.pricingType)} />
-              <Row
-                label="Capacity"
-                value={`${detail.maxCapacity} people${
-                  detail.displayCapacityToCustomers ? "" : " (hidden)"
-                }`}
+                label="Max Capacity"
+                value={`${detail.maxCapacity} people`}
               />
               <Row
                 label="Duration"
@@ -545,10 +479,8 @@ export function AttractionActionsSheet({
                     : "Unlimited"
                 }
               />
-              {!!detail.locationName && (
-                <Row label="Location" value={detail.locationName} />
-              )}
-              <Row label="Display order" value={String(detail.displayOrder)} />
+              <Row label="Location" value={detail.locationName || "—"} />
+              <Row label="Created" value={createdValue} />
 
               {detail.addOns.length > 0 && (
                 <>
@@ -571,7 +503,7 @@ export function AttractionActionsSheet({
 
               {detail.availability.length > 0 && (
                 <>
-                  <SectionTitle>Availability</SectionTitle>
+                  <SectionTitle>Availability Schedule</SectionTitle>
                   {detail.availability.map((s, i) => (
                     <View
                       key={i}
@@ -579,7 +511,8 @@ export function AttractionActionsSheet({
                     >
                       <View className="flex-row items-center justify-between">
                         <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                          {s.start_time}–{s.end_time}
+                          {formatTimeRange(s.start_time, s.end_time) ||
+                            `${s.start_time}–${s.end_time}`}
                         </Text>
                       </View>
                       {s.days.length > 0 && (
@@ -625,144 +558,6 @@ export function AttractionActionsSheet({
                 </Pressable>
               </View>
             </>
-          )}
-        </ScrollView>
-      )}
-
-      {mode === "edit" && (
-        <ScrollView
-          className="px-5"
-          contentContainerStyle={{ paddingBottom: 28 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {loading && !detail ? (
-            <View className="py-10 items-center">
-              <ActivityIndicator color={PRIMARY} />
-            </View>
-          ) : (
-            <View className="gap-4 pt-2">
-              <TextField
-                label="Name"
-                required
-                value={name}
-                onChangeText={setName}
-                placeholder="Attraction name"
-              />
-              <TextField
-                label="Description"
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Description"
-                multiline
-              />
-              <TextField
-                label="Category"
-                required
-                value={category}
-                onChangeText={setCategory}
-                placeholder="e.g. Arcade"
-              />
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Price"
-                    required
-                    value={price}
-                    onChangeText={setPrice}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                  />
-                </View>
-                <View className="flex-1">
-                  <SelectField
-                    label="Pricing type"
-                    value={pricingType}
-                    options={PRICING_TYPES}
-                    onSelect={(v) => setPricingType(String(v))}
-                  />
-                </View>
-              </View>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Max capacity"
-                    required
-                    value={maxCapacity}
-                    onChangeText={setMaxCapacity}
-                    keyboardType="number-pad"
-                    placeholder="10"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Display order"
-                    value={displayOrder}
-                    onChangeText={setDisplayOrder}
-                    keyboardType="number-pad"
-                    placeholder="0"
-                  />
-                </View>
-              </View>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Duration (0 = unlimited)"
-                    value={duration}
-                    onChangeText={setDuration}
-                    keyboardType="decimal-pad"
-                    placeholder="0"
-                  />
-                </View>
-                <View className="flex-1">
-                  <SelectField
-                    label="Unit"
-                    value={durationUnit}
-                    options={DURATION_UNITS}
-                    onSelect={(v) => setDurationUnit(String(v))}
-                  />
-                </View>
-              </View>
-              <ToggleRow
-                label="Display capacity to customers"
-                value={displayCapacity}
-                onValueChange={setDisplayCapacity}
-              />
-              <ToggleRow
-                label="Active"
-                value={isActive}
-                onValueChange={setIsActive}
-              />
-
-              <Text className="text-xs text-gray-400 dark:text-gray-500">
-                Availability, images and add-ons are managed on the web admin.
-              </Text>
-
-              <View className="flex-row gap-3 mt-2">
-                <Pressable
-                  onPress={() => setMode(detail ? "view" : "menu")}
-                  disabled={busy}
-                  className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
-                >
-                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                    Cancel
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleSave}
-                  disabled={busy}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7]"
-                >
-                  {busy ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text className="text-sm font-semibold text-white">
-                      Save changes
-                    </Text>
-                  )}
-                </Pressable>
-              </View>
-            </View>
           )}
         </ScrollView>
       )}

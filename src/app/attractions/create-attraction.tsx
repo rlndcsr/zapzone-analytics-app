@@ -1,14 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +18,24 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import {
+  ALL_DAY_KEYS,
+  CARD_SHADOW,
+  DAYS,
+  ErrorText,
+  FieldLabel,
+  formatTime,
+  type IconName,
+  MAX_IMAGES,
+  money,
+  newSchedule,
+  PRICING_TYPES,
+  PRIMARY,
+  scheduleDaysLabel,
+  Section,
+  SelectRow,
+  TIME_OPTIONS,
+} from "../../components/ui/attractionFormKit";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { InputField } from "../../components/ui/InputField";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -44,102 +55,6 @@ import {
   fetchCategories,
   type Category,
 } from "../../services/categoriesService";
-
-const PRIMARY = "#0644C7";
-
-type IconName = ComponentProps<typeof Feather>["name"];
-
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
-const PRICING_TYPES = [
-  { value: "per_person", label: "Per Person" },
-  { value: "per_group", label: "Per Group" },
-  { value: "per_hour", label: "Per Hour" },
-  { value: "per_game", label: "Per Game" },
-  { value: "fixed", label: "Fixed Price" },
-] as const;
-
-const DAYS = [
-  { key: "monday", label: "Mon" },
-  { key: "tuesday", label: "Tue" },
-  { key: "wednesday", label: "Wed" },
-  { key: "thursday", label: "Thu" },
-  { key: "friday", label: "Fri" },
-  { key: "saturday", label: "Sat" },
-  { key: "sunday", label: "Sun" },
-] as const;
-
-const ALL_DAY_KEYS = DAYS.map((d) => d.key);
-
-const MAX_IMAGES = 5;
-
-// 30-minute increments, the native stand-in for the web's <input type="time">.
-const TIME_OPTIONS: string[] = (() => {
-  const out: string[] = [];
-  for (let h = 0; h < 24; h++) {
-    for (const m of [0, 30]) {
-      out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    }
-  }
-  return out;
-})();
-
-function formatTime(value: string): string {
-  const [hStr, mStr] = value.split(":");
-  let hour = Number(hStr);
-  const meridian = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  return `${hour}:${mStr} ${meridian}`;
-}
-
-const newSchedule = (): AvailabilitySchedule => ({
-  days: [...ALL_DAY_KEYS],
-  start_time: "09:00",
-  end_time: "17:00",
-});
-
-/** Section wrapper card matching the app's card design. */
-const Section = ({
-  icon,
-  title,
-  children,
-  onLayout,
-}: {
-  icon: IconName;
-  title: string;
-  children: React.ReactNode;
-  onLayout?: (e: LayoutChangeEvent) => void;
-}) => (
-  <View
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm"
-    style={CARD_SHADOW}
-    onLayout={onLayout}
-  >
-    <View className="flex-row items-center gap-2 mb-4">
-      <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-        <Feather name={icon} size={16} color={PRIMARY} />
-      </View>
-      <Text className="text-base font-bold text-gray-900 dark:text-white">
-        {title}
-      </Text>
-    </View>
-    {children}
-  </View>
-);
-
-const money = (n: number) => `$${n.toFixed(2)}`;
-
-/** Human-readable day list for one availability schedule (in weekday order). */
-const scheduleDaysLabel = (days: string[]): string => {
-  const labels = DAYS.filter((d) => days.includes(d.key)).map((d) => d.label);
-  return labels.length ? labels.join(", ") : "No days";
-};
 
 /** Review card: a Section-styled card with a per-section "Edit" affordance. */
 const OverviewCard = ({
@@ -190,50 +105,6 @@ const OverviewRow = ({ label, value }: { label: string; value: string }) => (
     </Text>
   </View>
 );
-
-const FieldLabel = ({ children }: { children: React.ReactNode }) => (
-  <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-    {children}
-  </Text>
-);
-
-/** A pressable that opens a picker sheet, showing the current value. */
-const SelectRow = ({
-  icon,
-  value,
-  placeholder,
-  onPress,
-  error,
-}: {
-  icon: IconName;
-  value: string | null;
-  placeholder: string;
-  onPress: () => void;
-  error?: boolean;
-}) => (
-  <Pressable
-    onPress={onPress}
-    className={`h-14 flex-row items-center gap-3 rounded-full border bg-white dark:bg-neutral-900 px-5 ${
-      error ? "border-red-400" : "border-gray-200 dark:border-neutral-700"
-    }`}
-  >
-    <Feather name={icon} size={18} color="#9CA3AF" />
-    <Text
-      className={`flex-1 text-base ${
-        value ? "text-gray-900 dark:text-white" : "text-gray-400"
-      }`}
-      numberOfLines={1}
-    >
-      {value ?? placeholder}
-    </Text>
-    <Feather name="chevron-down" size={18} color="#9CA3AF" />
-  </Pressable>
-);
-
-const ErrorText = ({ error }: { error?: string }) =>
-  error ? (
-    <Text className="ml-4 mt-1.5 text-xs text-red-500">{error}</Text>
-  ) : null;
 
 type FormErrors = Partial<
   Record<"name" | "description" | "category" | "price" | "maxCapacity" | "location", string>

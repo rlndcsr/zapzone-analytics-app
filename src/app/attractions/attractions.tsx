@@ -119,9 +119,13 @@ type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
 const AttractionCard = ({
   attraction,
+  onOpenDetails,
   onActions,
 }: {
   attraction: AttractionRow;
+  /** Tapping the card body opens the details directly (mirrors Packages). */
+  onOpenDetails: () => void;
+  /** The three-dot overflow opens the full action menu. */
   onActions: () => void;
 }) => {
   const isCopy = attraction.name.includes("(Copy)");
@@ -130,11 +134,11 @@ const AttractionCard = ({
 
   return (
     <Pressable
-      onPress={onActions}
+      onPress={onOpenDetails}
       className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
       style={CARD_SHADOW}
       accessibilityRole="button"
-      accessibilityLabel={`Actions for ${attraction.name}`}
+      accessibilityLabel={`View details for ${attraction.name}`}
     >
       {/* Header: name + location (left), status + actions (right) */}
       <View className="flex-row items-start justify-between mb-2">
@@ -278,6 +282,9 @@ const Attractions = () => {
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
     useState<AttractionRow | null>(null);
+  // Which content the actions sheet opens on: a card-body tap goes straight to
+  // "view" (details); the three-dot overflow opens the "menu".
+  const [actionsMode, setActionsMode] = useState<"menu" | "view">("view");
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -694,7 +701,14 @@ const Attractions = () => {
                   <AttractionCard
                     key={attraction.id}
                     attraction={attraction}
-                    onActions={() => setActionsAttraction(attraction)}
+                    onOpenDetails={() => {
+                      setActionsMode("view");
+                      setActionsAttraction(attraction);
+                    }}
+                    onActions={() => {
+                      setActionsMode("menu");
+                      setActionsAttraction(attraction);
+                    }}
                   />
                 ))}
 
@@ -765,10 +779,13 @@ const Attractions = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Per-card actions: Copy Link / Open Link / View / Edit / Duplicate / Delete */}
+      {/* Per-card sheet — a card tap opens the details directly (initialMode
+          "view"); the three-dot opens the menu (Copy Link / View purchase /
+          View / Edit / Duplicate / Delete). */}
       <AttractionActionsSheet
         visible={actionsAttraction !== null}
         attraction={actionsAttraction}
+        initialMode={actionsMode}
         onClose={() => setActionsAttraction(null)}
         onChanged={refetch}
       />

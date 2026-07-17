@@ -114,10 +114,13 @@ export function BottomSheet({
               <View className="pb-1">
                 <View className="w-10 h-1 rounded-full bg-gray-300 self-center mt-3" />
                 <View className="flex-row items-center justify-between px-6 pt-4 pb-3">
-                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                  {/* flex-1 lets long titles wrap instead of pushing the close
+                      button off-screen; pr-4 keeps a gap. Short titles are
+                      unaffected (still left-aligned with the button at right). */}
+                  <Text className="text-lg font-bold text-gray-900 dark:text-white flex-1 pr-4">
                     {title}
                   </Text>
-                  <Pressable onPress={onClose} className="p-1">
+                  <Pressable onPress={onClose} className="p-1 shrink-0">
                     <Text className="text-xl text-gray-500 dark:text-gray-400">✕</Text>
                   </Pressable>
                 </View>

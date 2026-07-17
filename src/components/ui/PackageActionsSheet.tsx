@@ -11,6 +11,7 @@ import {
 } from "react-native";
 
 import { getToken } from "../../lib/session";
+import { formatTimeRange } from "../../lib/time";
 import {
   deletePackage,
   duplicatePackage,
@@ -29,29 +30,6 @@ export type LocationOption = { id: number; name: string };
 
 const money = (n: number | null): string =>
   n == null ? "—" : `$${n.toFixed(2)}`;
-
-// Availability time formatting — mirrors the web admin's utils/timeFormat.ts so
-// the details view reads identically ("16:30:00" → "4:30 PM").
-const convertTo12Hour = (time24: string | null): string => {
-  if (!time24) return "";
-  const [hourStr, minuteStr] = time24.substring(0, 5).split(":");
-  let hour = parseInt(hourStr, 10);
-  if (Number.isNaN(hour)) return time24;
-  const minute = minuteStr || "00";
-  const period = hour >= 12 ? "PM" : "AM";
-  if (hour === 0) hour = 12;
-  else if (hour > 12) hour = hour - 12;
-  return `${hour}:${minute} ${period}`;
-};
-
-/** "4:30 PM - 9:00 PM" (mirrors the web admin's formatTimeRange). */
-const formatTimeRange = (
-  start: string | null,
-  end: string | null,
-): string => {
-  if (!start || !end) return "";
-  return `${convertTo12Hour(start)} - ${convertTo12Hour(end)}`;
-};
 
 /* --- Local presentational helpers (per-module convention) ----------------- */
 
