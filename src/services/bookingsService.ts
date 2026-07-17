@@ -1037,6 +1037,7 @@ export async function fetchAvailableTimeSlots(
 }
 
 export type BookingUpdateInput = {
+  locationId?: number | null;
   packageId?: number | null;
   roomId?: number | null;
   customerName?: string;
@@ -1065,6 +1066,7 @@ export async function updateBooking(
   input: BookingUpdateInput,
 ): Promise<void> {
   const body: Record<string, unknown> = {};
+  if (input.locationId != null) body.location_id = input.locationId;
   if (input.packageId != null) body.package_id = input.packageId;
   if (input.roomId != null) body.room_id = input.roomId;
   if (input.customerName != null) {

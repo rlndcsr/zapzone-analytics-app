@@ -9,6 +9,7 @@ import {
   DoorOpen,
   MapPin,
   Package,
+  Pencil,
   QrCode,
   StickyNote,
   Tag,
@@ -150,6 +151,8 @@ type Props = {
   visible: boolean;
   detail: BookingDetail | null;
   onClose: () => void;
+  /** Opens the dedicated Edit Booking screen (provided by the host sheet). */
+  onEdit?: () => void;
   /** Called after a successful delete so the caller can refresh + dismiss. */
   onDeleted?: () => void;
 };
@@ -159,7 +162,7 @@ type Props = {
  * View button. Presents the booking as icon-tile sections and offers a
  * scannable/downloadable QR code. Editing lives in the Booking Details sheet.
  */
-export function BookingFullView({ visible, detail, onClose, onDeleted }: Props) {
+export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }: Props) {
   const [showQR, setShowQR] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -223,11 +226,11 @@ export function BookingFullView({ visible, detail, onClose, onDeleted }: Props) 
               Reference: {detail.referenceNumber}
             </Text>
           )}
-          <View className="mt-3">
+          <View className="mt-3 flex-row gap-3">
             <Pressable
               onPress={() => detail.referenceNumber && setShowQR(true)}
               disabled={!detail.referenceNumber}
-              className={`py-3 rounded-xl bg-[#0644C7] items-center flex-row justify-center gap-2 active:opacity-80 ${
+              className={`flex-1 py-3 rounded-xl bg-[#0644C7] items-center flex-row justify-center gap-2 active:opacity-80 ${
                 detail.referenceNumber ? "" : "opacity-40"
               }`}
             >
@@ -236,6 +239,17 @@ export function BookingFullView({ visible, detail, onClose, onDeleted }: Props) 
                 View QR Code
               </Text>
             </Pressable>
+            {!!onEdit && (
+              <Pressable
+                onPress={onEdit}
+                className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center flex-row justify-center gap-2 active:opacity-80"
+              >
+                <Pencil size={16} color="#0644C7" />
+                <Text className="text-sm font-semibold text-[#0644C7]">
+                  Edit Booking
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Booking Information */}
@@ -296,9 +310,14 @@ export function BookingFullView({ visible, detail, onClose, onDeleted }: Props) 
               label="Location"
               value={detail.locationName || "—"}
             />
-            {!!detail.roomName && (
-              <InfoTile icon={DoorOpen} label="Space" value={detail.roomName} />
-            )}
+            {/* Assigned table/space — always shown (web parity); the room can be
+                named e.g. "Table 1". Falls back to the same dash the Location
+                tile uses when nothing is assigned. */}
+            <InfoTile
+              icon={DoorOpen}
+              label="Assigned Table / Space"
+              value={detail.roomName || "—"}
+            />
 
             <InfoTile icon={CheckCircle} label="Booking Status">
               <View className="flex-row">

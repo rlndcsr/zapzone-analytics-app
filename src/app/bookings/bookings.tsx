@@ -415,6 +415,10 @@ const Bookings = () => {
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
     null,
   );
+  // Which content the detail sheet opens on: a card tap goes straight to the
+  // full "details"; the three-dot's "View Details" opens the "hub" (summary +
+  // Edit / Payment). Mirrors the Packages / Attractions card-tap pattern.
+  const [detailMode, setDetailMode] = useState<"hub" | "details">("details");
 
   // Auto-open a booking's detail sheet when navigated here from a
   // notification (e.g. /bookings/bookings?openId=123).
@@ -422,7 +426,10 @@ const Bookings = () => {
   useEffect(() => {
     if (!openId) return;
     const id = Number(openId);
-    if (!Number.isNaN(id)) setSelectedBookingId(id);
+    if (!Number.isNaN(id)) {
+      setDetailMode("details");
+      setSelectedBookingId(id);
+    }
     router.setParams({ openId: undefined });
   }, [openId]);
   // The booking whose "More" actions sheet is open (null = closed).
@@ -526,36 +533,20 @@ const Bookings = () => {
     }, [refetch]),
   );
 
-  // The global workspace location already scopes the fetch server-side, so the
-  // loaded list is the location-scoped set that drives the KPIs and the list.
   const locationScoped = bookings;
 
-  // KPI values, computed client-side over the location-scoped set — mirroring
-  // the web's `metrics` array exactly (Bookings.tsx:409-445). The web has no
-  // stats endpoint; it derives all five cards from the loaded bookings array
-  // (which is location-scoped when a location is selected). We do the same off
-  // the same `/api/bookings` list feed, so there are no extra requests.
   const kpis = useMemo(() => {
     const active = locationScoped.filter((b) => b.status !== "cancelled");
     return {
-      // Total Bookings — bookings.length
       total: locationScoped.length,
-      // Package Bookings — same count as total (all bookings are packages);
-      // the subtitle surfaces the confirmed count.
       confirmed: locationScoped.filter((b) => b.status === "confirmed").length,
       cancelled: locationScoped.length - active.length,
-      // Participants — sum of participants
       participants: locationScoped.reduce((s, b) => s + b.participants, 0),
-      // Revenue — sum of amountPaid, excluding cancelled
       revenue: active.reduce((s, b) => s + b.amountPaid, 0),
-      // Possible Revenue — sum of totalAmount, excluding cancelled
       possibleRevenue: active.reduce((s, b) => s + b.totalAmount, 0),
     };
   }, [locationScoped]);
 
-  // Deleted bookings, scoped to the active workspace location the same way
-  // active ones are. The list uses this when "View Deleted" is on; KPIs always
-  // use active. Trashed items aren't server-scoped, so filter by name here.
   const deletedScoped = useMemo(
     () =>
       activeLocation.id === "all"
@@ -582,8 +573,6 @@ const Bookings = () => {
       }
       return true;
     });
-    // Default ordering identical to the web (applyDefaultSort). The deleted list
-    // keeps its deleted_at-desc fetch order, matching the web's trashed view.
     return showDeleted ? result : result.sort(compareBookingsDefault);
   }, [listBase, search, statusFilter, dateFilter, showDeleted]);
 
@@ -595,7 +584,14 @@ const Bookings = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, dateFilter, activeLocationId, perPage, showDeleted]);
+  }, [
+    search,
+    statusFilter,
+    dateFilter,
+    activeLocationId,
+    perPage,
+    showDeleted,
+  ]);
 
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ??
@@ -913,7 +909,10 @@ const Bookings = () => {
                     key={booking.id}
                     booking={booking}
                     showLocation={isCompanyAdmin}
-                    onPress={() => setSelectedBookingId(booking.id)}
+                    onPress={() => {
+                      setDetailMode("details");
+                      setSelectedBookingId(booking.id);
+                    }}
                     onMore={() => setActionsBooking(booking)}
                   />
                 ))}
@@ -1017,6 +1016,7 @@ const Bookings = () => {
       <BookingDetailSheet
         bookingId={selectedBookingId}
         visible={selectedBookingId !== null}
+        initialMode={detailMode}
         onClose={() => setSelectedBookingId(null)}
         onChanged={refetch}
       />
@@ -1028,7 +1028,12 @@ const Bookings = () => {
         deleted={showDeleted}
         onClose={() => setActionsBooking(null)}
         onViewDetails={() => {
-          if (actionsBooking) setSelectedBookingId(actionsBooking.id);
+          if (actionsBooking) {
+            // The three-dot's View Details opens the hub (summary + Edit /
+            // Payment), unlike a card tap which jumps to the full details.
+            setDetailMode("hub");
+            setSelectedBookingId(actionsBooking.id);
+          }
         }}
         onChanged={showDeleted ? loadDeleted : refetch}
       />

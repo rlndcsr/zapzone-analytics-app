@@ -8,6 +8,7 @@ import {
   Package,
   Pencil,
 } from "lucide-react-native";
+import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,7 +24,6 @@ import {
   recordBookingPayment,
   type BookingDetail,
 } from "../../services/bookingsService";
-import { BookingEditSheet } from "./BookingEditSheet";
 import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
 
@@ -132,6 +132,14 @@ const Badge = ({ text, className }: { text: string; className: string }) => {
 type Props = {
   bookingId: number | null;
   visible: boolean;
+  /**
+   * Which content the sheet opens on. "hub" (default) shows the summary +
+   * action buttons — used by the three-dot's "View Details". "details" opens
+   * straight into the full web-parity Booking Details (BookingFullView), so a
+   * card tap lands on the details without the extra tap (mirrors the Packages /
+   * Attractions sheets' initialMode).
+   */
+  initialMode?: "hub" | "details";
   onClose: () => void;
   /** Notifies the parent that this booking changed, so it can refetch its list. */
   onChanged?: () => void;
@@ -145,6 +153,7 @@ type Props = {
 export function BookingDetailSheet({
   bookingId,
   visible,
+  initialMode = "hub",
   onClose,
   onChanged,
 }: Props) {
@@ -155,7 +164,16 @@ export function BookingDetailSheet({
 
   const [processing, setProcessing] = useState(false);
   const [showFull, setShowFull] = useState(false);
-  const [showEdit, setShowEdit] = useState(false);
+
+  // Editing is a dedicated full-screen route (matches Packages / Attractions).
+  // Dismiss both the full view and the sheet before navigating so nothing
+  // lingers over the edit screen.
+  const goEdit = () => {
+    if (bookingId == null) return;
+    setShowFull(false);
+    onClose();
+    router.push(`/bookings/edit-booking?id=${bookingId}`);
+  };
 
   const load = useCallback(async () => {
     if (bookingId == null) return;
@@ -183,17 +201,18 @@ export function BookingDetailSheet({
     }
   }, [bookingId]);
 
-  // Fetch whenever a new booking is opened; reset transient UI state.
+  // Fetch whenever a new booking is opened; reset transient UI state. A card tap
+  // (initialMode "details") lands straight on the full Booking Details view;
+  // the three-dot's "View Details" opens the hub (initialMode "hub").
   useEffect(() => {
     if (bookingId == null) return;
     setDetail(null);
-    setShowFull(false);
-    setShowEdit(false);
+    setShowFull(initialMode === "details");
     load();
     return () => {
       requestIdRef.current++;
     };
-  }, [bookingId, load]);
+  }, [bookingId, initialMode, load]);
 
   const processPayment = () => {
     if (!detail) return;
@@ -251,23 +270,6 @@ export function BookingDetailSheet({
   const remaining = detail
     ? Math.max(0, detail.totalAmount - detail.amountPaid)
     : 0;
-
-  // Editing swaps the whole surface for the Edit modal. Rendering only one
-  // native Modal at a time avoids the Android crash from stacking full-screen
-  // Modals on top of one another.
-  if (showEdit) {
-    return (
-      <BookingEditSheet
-        visible
-        detail={detail}
-        onClose={() => setShowEdit(false)}
-        onSaved={() => {
-          load();
-          onChanged?.();
-        }}
-      />
-    );
-  }
 
   return (
     <>
@@ -520,7 +522,7 @@ export function BookingDetailSheet({
                     </Text>
                   </Pressable>
                   <Pressable
-                    onPress={() => setShowEdit(true)}
+                    onPress={goEdit}
                     style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
                     className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center flex-row justify-center gap-2"
                   >
@@ -577,11 +579,18 @@ export function BookingDetailSheet({
         </ScrollView>
       </BottomSheet>
 
-      {/* Second screen: full icon-tile view + QR, opened from the View button */}
+      {/* Full icon-tile view + QR. Reached from the hub's View button, or opened
+          directly on a card tap (initialMode "details"). When it's the entry
+          point, closing dismisses the whole sheet back to the list; when reached
+          from the hub, closing returns to the hub. */}
       <BookingFullView
         visible={showFull}
         detail={detail}
-        onClose={() => setShowFull(false)}
+        onEdit={goEdit}
+        onClose={() => {
+          setShowFull(false);
+          if (initialMode === "details") onClose();
+        }}
         onDeleted={() => {
           // Dismiss both surfaces and refresh the list after a delete.
           setShowFull(false);
