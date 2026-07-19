@@ -19,6 +19,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { AttractionActionsSheet } from "../../components/ui/AttractionActionsSheet";
+import { AttractionsExportSheet } from "../../components/ui/AttractionsExportSheet";
+import { AttractionsImportSheet } from "../../components/ui/AttractionsImportSheet";
 import {
   AttractionFiltersSheet,
   EMPTY_ATTRACTION_FILTERS,
@@ -36,6 +38,7 @@ import {
 } from "../../components/ui/skeleton/AttractionsSkeleton";
 import {
   consumeAttractionsStale,
+  markAttractionsStale,
   useAttractions,
 } from "../../lib/hooks/useAttractions";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
@@ -280,6 +283,8 @@ const Attractions = () => {
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showCreatedDateSheet, setShowCreatedDateSheet] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
+  const [showImportSheet, setShowImportSheet] = useState(false);
+  const [showExportSheet, setShowExportSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
     useState<AttractionRow | null>(null);
   // Which content the actions sheet opens on: a card-body tap goes straight to
@@ -421,13 +426,50 @@ const Attractions = () => {
 
   const hasResults = filtered.length > 0;
 
-  // Mirrors the web "More" action menu; these management actions arrive in a
-  // future release, so they're shown but not yet actionable.
-  const moreActions: { label: string; icon: ComponentIconName }[] = [
-    { label: "Fee Supports", icon: "dollar-sign" },
-    { label: "Special Pricing", icon: "percent" },
-    { label: "Import Attractions", icon: "upload" },
-    { label: "Export Attractions", icon: "download" },
+  // Mirrors the web "More" action menu. Fee Supports / Special Pricing link to
+  // their management screens; Import / Export open their dedicated sheets.
+  const moreActions: {
+    label: string;
+    icon: ComponentIconName;
+    hint: string;
+    onPress: () => void;
+  }[] = [
+    {
+      label: "Fee Supports",
+      icon: "dollar-sign",
+      hint: "Manage additional fees",
+      onPress: () => {
+        setShowMoreSheet(false);
+        router.push("/pricing/fee-support");
+      },
+    },
+    {
+      label: "Special Pricing",
+      icon: "percent",
+      hint: "Manage automatic discounts",
+      onPress: () => {
+        setShowMoreSheet(false);
+        router.push("/pricing/pricing");
+      },
+    },
+    {
+      label: "Import Attractions",
+      icon: "upload",
+      hint: "Bulk-create from a JSON file",
+      onPress: () => {
+        setShowMoreSheet(false);
+        setShowImportSheet(true);
+      },
+    },
+    {
+      label: "Export Attractions",
+      icon: "download",
+      hint: `Select from ${filtered.length} to export as JSON`,
+      onPress: () => {
+        setShowMoreSheet(false);
+        setShowExportSheet(true);
+      },
+    },
   ];
 
   return (
@@ -663,17 +705,6 @@ const Attractions = () => {
                   {filtered.length}
                 </Text>
               </View>
-              {hasResults && (
-                <PaginationControls
-                  compact
-                  page={page}
-                  lastPage={lastPage}
-                  perPage={perPage}
-                  perPageOptions={PER_PAGE_OPTIONS}
-                  onPageChange={setPage}
-                  onPerPageChange={setPerPage}
-                />
-              )}
             </View>
           )}
 
@@ -748,7 +779,8 @@ const Attractions = () => {
         onApply={applyCreatedDate}
       />
 
-      {/* More actions (matches the web action menu; wired in a future release) */}
+      {/* More actions — mirrors the web action menu (Fee Supports / Special
+          Pricing links + Import / Export). */}
       <BottomSheet
         visible={showMoreSheet}
         onClose={() => setShowMoreSheet(false)}
@@ -756,28 +788,46 @@ const Attractions = () => {
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {moreActions.map((action) => (
-            <View
+            <Pressable
               key={action.label}
-              className="flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 opacity-60"
+              onPress={action.onPress}
+              style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
+              className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
             >
-              <View className="flex-row items-center gap-3 flex-1 mr-2">
-                <Feather name={action.icon} size={18} color="#6B7280" />
-                <Text className="text-base font-medium text-gray-700 dark:text-gray-200">
+              <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
+                <Feather name={action.icon} size={18} color="#374151" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
                   {action.label}
                 </Text>
-              </View>
-              <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-                  Soon
+                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  {action.hint}
                 </Text>
               </View>
-            </View>
+              <Feather name="chevron-right" size={18} color="#9CA3AF" />
+            </Pressable>
           ))}
-          <Text className="text-xs text-gray-400 dark:text-gray-500 px-4 mt-2">
-            Management actions arrive in a future update.
-          </Text>
         </ScrollView>
       </BottomSheet>
+
+      {/* Bulk import (JSON) — same endpoint as the web ManageAttractions import. */}
+      <AttractionsImportSheet
+        visible={showImportSheet}
+        onClose={() => setShowImportSheet(false)}
+        locationId={activeLocationId ?? null}
+        onImported={() => {
+          markAttractionsStale();
+          refetch();
+        }}
+      />
+
+      {/* Export — select from the filtered list, share as JSON. */}
+      <AttractionsExportSheet
+        visible={showExportSheet}
+        onClose={() => setShowExportSheet(false)}
+        attractions={filtered}
+      />
 
       {/* Per-card sheet — a card tap opens the details directly (initialMode
           "view"); the three-dot opens the menu (Copy Link / View purchase /

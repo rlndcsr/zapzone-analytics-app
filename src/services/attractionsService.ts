@@ -268,6 +268,59 @@ export async function duplicateAttraction(
   return createAttraction(token, input);
 }
 
+/** One attraction record accepted by POST /api/attractions/bulk-import. The
+ *  backend accepts either camelCase or snake_case keys; we send the same
+ *  camelCase shape the Export produces so a file exported here re-imports
+ *  cleanly. `location_id` is injected at import time from the chosen location. */
+export type AttractionImportInput = {
+  location_id: number;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  pricingType?: string;
+  maxCapacity?: number;
+  duration?: number | null;
+  durationUnit?: string;
+  availability?: AvailabilitySchedule[];
+  images?: string[];
+  status?: string;
+};
+
+/** Flattened result of a bulk import (mirrors the web `bulkImport` response). */
+export type AttractionImportResult = {
+  imported: number;
+  failed: number;
+  errors: { index: number; name: string; error: string }[];
+};
+
+type BulkImportResponse = {
+  success: boolean;
+  message?: string;
+  data?: { imported_count?: number; failed_count?: number };
+  errors?: { index: number; name: string; error: string }[];
+};
+
+/**
+ * POST /api/attractions/bulk-import — bulk-create attractions, the same endpoint
+ * the web ManageAttractions "Import" modal uses. The backend imports each item
+ * independently and reports per-row failures, so a partial success is normal.
+ */
+export async function bulkImportAttractions(
+  token: string,
+  attractions: AttractionImportInput[],
+): Promise<AttractionImportResult> {
+  const res = await apiRequest<BulkImportResponse>(
+    "/api/attractions/bulk-import",
+    { method: "POST", token, body: { attractions } },
+  );
+  return {
+    imported: res.data?.imported_count ?? 0,
+    failed: res.data?.failed_count ?? 0,
+    errors: res.errors ?? [],
+  };
+}
+
 type FetchParams = {
   token: string;
   userId: number;
