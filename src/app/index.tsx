@@ -2,13 +2,7 @@ import { Image } from "expo-image";
 import { Redirect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { ScrollView, Text, useWindowDimensions, View } from "react-native";
 import Animated, {
   useAnimatedKeyboard,
   useAnimatedStyle,
@@ -16,6 +10,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoginForm } from "../components/auth/LoginForm";
+import { useTransientAlert } from "../lib/hooks/useTransientAlert";
 import { consumeSessionExpiredNotice, isAuthenticated } from "../lib/session";
 import { hasPlayedSplash } from "../lib/splashState";
 
@@ -39,11 +34,11 @@ export default function HomeScreen() {
   }));
 
   // Notice shown only when we landed here from an expired/401 session (silent
-  // for a normal sign-in or intentional sign-out).
-  const [sessionEnded, setSessionEnded] = useState(false);
+  // for a normal sign-in or intentional sign-out). Auto-dismisses after 3s.
+  const [sessionEnded, showSessionEnded] = useTransientAlert<boolean>();
   useEffect(() => {
-    if (consumeSessionExpiredNotice()) setSessionEnded(true);
-  }, []);
+    if (consumeSessionExpiredNotice()) showSessionEnded(true);
+  }, [showSessionEnded]);
 
   // Snapshot auth ONCE at mount (not live): this redirects an already-authed
   // cold start / deep link straight to /home, without re-rendering into a
@@ -120,16 +115,3 @@ export default function HomeScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  circle: {
-    position: "absolute",
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.10)",
-  },
-  circleFaint: {
-    position: "absolute",
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-});

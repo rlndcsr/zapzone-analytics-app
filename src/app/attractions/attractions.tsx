@@ -123,13 +123,10 @@ type ComponentIconName = ComponentProps<typeof Feather>["name"];
 const AttractionCard = ({
   attraction,
   onOpenDetails,
-  onActions,
 }: {
   attraction: AttractionRow;
-  /** Tapping the card body opens the details directly (mirrors Packages). */
+  /** Tapping anywhere on the card opens the Attraction Details (mirrors Packages). */
   onOpenDetails: () => void;
-  /** The three-dot overflow opens the full action menu. */
-  onActions: () => void;
 }) => {
   const isCopy = attraction.name.includes("(Copy)");
   const suffix = PRICING_SUFFIX[attraction.pricingType] ?? "";
@@ -143,7 +140,7 @@ const AttractionCard = ({
       accessibilityRole="button"
       accessibilityLabel={`View details for ${attraction.name}`}
     >
-      {/* Header: name + location (left), status + actions (right) */}
+      {/* Header: name + location (left), status (right) */}
       <View className="flex-row items-start justify-between mb-2">
         <View className="flex-1 mr-3">
           <View className="flex-row items-center gap-2 flex-wrap">
@@ -171,18 +168,7 @@ const AttractionCard = ({
             </View>
           )}
         </View>
-        <View className="flex-row items-center gap-2">
-          <StatusBadge status={attraction.status} />
-          <Pressable
-            onPress={onActions}
-            hitSlop={6}
-            className="w-8 h-8 rounded-lg items-center justify-center bg-gray-100 dark:bg-neutral-800"
-            accessibilityRole="button"
-            accessibilityLabel={`Actions for ${attraction.name}`}
-          >
-            <Feather name="more-vertical" size={16} color="#6B7280" />
-          </Pressable>
-        </View>
+        <StatusBadge status={attraction.status} />
       </View>
 
       {/* Description */}
@@ -287,9 +273,6 @@ const Attractions = () => {
   const [showExportSheet, setShowExportSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
     useState<AttractionRow | null>(null);
-  // Which content the actions sheet opens on: a card-body tap goes straight to
-  // "view" (details); the three-dot overflow opens the "menu".
-  const [actionsMode, setActionsMode] = useState<"menu" | "view">("view");
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -341,8 +324,10 @@ const Attractions = () => {
   // inclusive YYYY-MM-DD created-date range). All client-side, like the web.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const priceMin = filters.priceMin === "" ? null : parseFloat(filters.priceMin);
-    const priceMax = filters.priceMax === "" ? null : parseFloat(filters.priceMax);
+    const priceMin =
+      filters.priceMin === "" ? null : parseFloat(filters.priceMin);
+    const priceMax =
+      filters.priceMax === "" ? null : parseFloat(filters.priceMax);
     const capMin =
       filters.capacityMin === "" ? null : parseFloat(filters.capacityMin);
     const capMax =
@@ -351,10 +336,14 @@ const Attractions = () => {
 
     return locationScoped
       .filter((a) => {
-        if (filters.status !== "all" && a.status !== filters.status) return false;
+        if (filters.status !== "all" && a.status !== filters.status)
+          return false;
         if (filters.category !== "all" && a.category !== filters.category)
           return false;
-        if (filters.pricingType !== "all" && a.pricingType !== filters.pricingType)
+        if (
+          filters.pricingType !== "all" &&
+          a.pricingType !== filters.pricingType
+        )
           return false;
         if (filters.durationType !== "all") {
           // 0/null duration = "Unlimited" (matches web isUnlimitedDuration).
@@ -605,7 +594,6 @@ const Attractions = () => {
             </Pressable>
           </View>
 
-
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
@@ -732,14 +720,7 @@ const Attractions = () => {
                   <AttractionCard
                     key={attraction.id}
                     attraction={attraction}
-                    onOpenDetails={() => {
-                      setActionsMode("view");
-                      setActionsAttraction(attraction);
-                    }}
-                    onActions={() => {
-                      setActionsMode("menu");
-                      setActionsAttraction(attraction);
-                    }}
+                    onOpenDetails={() => setActionsAttraction(attraction)}
                   />
                 ))}
 
@@ -829,13 +810,11 @@ const Attractions = () => {
         attractions={filtered}
       />
 
-      {/* Per-card sheet — a card tap opens the details directly (initialMode
-          "view"); the three-dot opens the menu (Copy Link / View purchase /
-          View / Edit / Duplicate / Delete). */}
+      {/* Tapping a card opens the Attraction Details, which now hosts every
+          action (Copy Link / View purchase / Edit / Duplicate / Delete). */}
       <AttractionActionsSheet
         visible={actionsAttraction !== null}
         attraction={actionsAttraction}
-        initialMode={actionsMode}
         onClose={() => setActionsAttraction(null)}
         onChanged={refetch}
       />

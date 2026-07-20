@@ -1,4 +1,3 @@
-import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { useRef, useState } from "react";
@@ -11,6 +10,7 @@ import {
 } from "react-native";
 
 import { ApiError } from "../../lib/api";
+import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { setSession } from "../../lib/session";
 import { login } from "../../services/auth";
 import { InputField } from "../ui/InputField";
@@ -35,7 +35,10 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [formError, setFormError] = useState<string | null>(null);
+  // Transient login banner (incorrect password / invalid credentials / auth
+  // errors) — auto-dismisses after 3s. Field-tied validation (`errors`) is not
+  // auto-dismissed; it clears as the user edits the field.
+  const [formError, setFormError] = useTransientAlert<string>();
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = email.trim().length > 0 && password.length > 0;

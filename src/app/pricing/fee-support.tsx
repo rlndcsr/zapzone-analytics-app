@@ -286,9 +286,8 @@ const FeeSupportCard = ({
       <View className="flex-row flex-wrap -mx-1 mb-1">
         {cols.amount && (
           <Field
-            label="Amount"
+            label={isPercent ? "Amount %" : "Amount $"}
             value={row.amountLabel}
-            icon={isPercent ? "percent" : "dollar-sign"}
             valueClassName="text-[#0644C7] dark:text-blue-300 font-bold"
           />
         )}
