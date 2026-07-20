@@ -216,7 +216,13 @@ const MetricCard = ({
   layoutKey: number;
   index: number;
 }) => {
-  const raw = data ? data.metrics[metric.valueField] : undefined;
+  const primary = data ? data.metrics[metric.valueField] : undefined;
+  // Fall back to a secondary field when the primary is absent/NaN (mirrors the
+  // web's `metrics.a ?? metrics.b`, e.g. attraction tickets → orders count).
+  const raw =
+    (primary == null || Number.isNaN(primary)) && data && metric.fallbackField
+      ? data.metrics[metric.fallbackField]
+      : primary;
   const hasValue = raw != null && !Number.isNaN(raw);
   const value = hasValue ? formatMetricValue(raw, metric.format) : "—";
   const subtitle = hasValue

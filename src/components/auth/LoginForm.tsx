@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +17,7 @@ import { InputField } from "../ui/InputField";
 import { PasswordInput } from "../ui/PasswordInput";
 
 const LOGIN_BLUE = "#2563EB";
+const TERMS_URL = "https://zap-zone.com/terms-conditions/";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -66,6 +68,9 @@ export function LoginForm() {
     setSubmitting(true);
     try {
       const result = await login({ email: email.trim(), password });
+      // Establish the session, then navigate imperatively. `setSession` awaits
+      // its storage writes and notifies before this runs, so the replace happens
+      // after the auth state has settled — not during a render.
       await setSession(result.token, result.user);
       router.replace("/home");
     } catch (error) {
@@ -99,6 +104,12 @@ export function LoginForm() {
     if (errors.password)
       setErrors((prev) => ({ ...prev, password: undefined }));
     if (formError) setFormError(null);
+  };
+
+  // Open the Terms & Conditions in an in-app browser (same pattern as the rest
+  // of the app), so the user never leaves ZapZone to read them.
+  const openTerms = () => {
+    void WebBrowser.openBrowserAsync(TERMS_URL);
   };
 
   return (
@@ -153,20 +164,8 @@ export function LoginForm() {
           accessibilityState={{ checked: rememberMe }}
           className="flex-row items-center"
         >
-          <View
-            className="h-5 w-5 items-center justify-center rounded border"
-            style={{
-              borderColor: rememberMe ? LOGIN_BLUE : "#D1D5DB",
-              backgroundColor: rememberMe ? LOGIN_BLUE : "transparent",
-            }}
-          >
-            {rememberMe ? (
-              <Feather name="check" size={13} color="#FFFFFF" />
-            ) : null}
-          </View>
-          <Text className="ml-2 text-sm text-gray-600 dark:text-gray-300">
-            Remember me
-          </Text>
+          
+  
         </Pressable>
 
         <Pressable
@@ -174,12 +173,7 @@ export function LoginForm() {
           hitSlop={8}
           accessibilityRole="button"
         >
-          <Text
-            className="text-sm font-medium"
-            style={{ color: LOGIN_BLUE }}
-          >
-            Forgot your Password?
-          </Text>
+
         </Pressable>
       </View>
 
@@ -200,6 +194,18 @@ export function LoginForm() {
           <Text className="text-base font-semibold text-white">Login</Text>
         )}
       </Pressable>
+
+      <Text className="mt-6 text-center text-xs leading-5 text-gray-400 dark:text-gray-500">
+        By continuing, you agree to our{" "}
+        <Text
+          className="font-semibold"
+          style={{ color: LOGIN_BLUE }}
+          onPress={openTerms}
+          accessibilityRole="link"
+        >
+          Terms &amp; Conditions
+        </Text>
+      </Text>
     </View>
   );
 }

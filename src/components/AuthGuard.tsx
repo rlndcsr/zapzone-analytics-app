@@ -1,10 +1,11 @@
-import { useRootNavigationState, useRouter, useSegments } from "expo-router";
-import { useEffect } from "react";
+import { usePathname, useRootNavigationState, useRouter } from "expo-router";
+import { useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
 import {
   expireSession,
   isSessionExpired,
+  registerAppResume,
   touchSession,
   useAuthStatus,
 } from "../lib/session";
@@ -13,45 +14,52 @@ const EXPIRY_CHECK_INTERVAL_MS = 60 * 1000;
 
 export function AuthGuard() {
   const authed = useAuthStatus();
-  const segments = useSegments();
+  const pathname = usePathname();
   const router = useRouter();
   const navState = useRootNavigationState();
 
-  // Redirect unauthenticated users off protected routes. Public routes are the
-  // Login screen (`/`, empty segments) and the splash screen.
+  // Kick unauthenticated users off protected routes — and ONLY that direction.
+  //
+  // Loop-safety is the whole point of how this is written:
+  //  • It depends on `pathname` (a stable string) instead of `useSegments()` (a
+  //    fresh array every render), so the effect runs only when auth or the route
+  //    actually changes — not on every commit / animation frame during a
+  //    transition. Re-running every commit while dispatching `router.replace`
+  //    is exactly what produced the "Maximum update depth exceeded" crash.
+  //  • A ref makes the redirect fire at most once per episode; it re-arms only
+  //    once we're somewhere legitimate (authed, or on a public route).
+  const redirectedRef = useRef(false);
   useEffect(() => {
     if (!navState?.key) return; // wait until the navigator is mounted
-    const seg = segments as string[];
-    // Public routes: the Login screen (`/`, no segments) and the splash screen.
-    const isPublic = seg.length === 0 || seg[0] === "splash";
-    if (!authed && !isPublic) {
+    const isPublic = pathname === "/" || pathname.startsWith("/splash");
+    if (authed || isPublic) {
+      redirectedRef.current = false;
+      return;
+    }
+    if (!redirectedRef.current) {
+      redirectedRef.current = true;
       router.replace("/");
     }
-  }, [authed, segments, navState?.key, router]);
+  }, [authed, pathname, navState?.key, router]);
 
-  const routeKey = (segments as string[]).join("/");
   useEffect(() => {
     if (!authed) return;
     void touchSession();
-  }, [authed, routeKey]);
+  }, [authed, pathname]);
 
-  // Inactivity enforcement. Returning to the foreground is activity: extend the
-  // window if it's still open, log out if it lapsed while we were away. A
-  // check-only interval (which never extends) makes an idle *foregrounded* app
-  // expire at the deadline too. Nothing runs while signed out.
+  // Inactivity enforcement — counting only time the app is OPEN. Entering the
+  // authed state and every foreground return is activity, so it slides the
+  // window forward (reviving one that lapsed while backgrounded/closed). Only a
+  // session left idle *while foregrounded* past the deadline is logged out, by
+  // the check-only interval below. Nothing runs while signed out.
   useEffect(() => {
     if (!authed) return;
 
-    // Foreground return / entering the authed state (login, launch) is activity.
-    const onForeground = () => {
-      if (isSessionExpired()) expireSession();
-      else void touchSession();
-    };
-
-    onForeground();
+    // Entering the authed state (login, launch) is activity.
+    void registerAppResume();
 
     const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
-      if (state === "active") onForeground();
+      if (state === "active") void registerAppResume();
     });
     // Sweep the clock while foregrounded so an untouched session still lapses on
     // time. Check-only: it logs out when expired but never slides the window.

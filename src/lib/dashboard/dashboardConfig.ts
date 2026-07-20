@@ -20,6 +20,9 @@ export type MetricCardDef = {
   label: string;
   title: string;
   valueField: keyof DashboardTotals;
+  /** Field used when `valueField` is absent/NaN in the response (mirrors the
+   *  web's `metrics.a ?? metrics.b`, e.g. attraction tickets → orders). */
+  fallbackField?: keyof DashboardTotals;
   format: MetricFormat;
   breakdownKey?: BreakdownKey;
   subtitle?: SubtitleFn;
@@ -44,10 +47,11 @@ const participantsPart: SubtitleFn = (m) =>
 const confirmedCountPart: SubtitleFn = (m) =>
   `${m.confirmedBookings} confirmed`;
 const completedPart: SubtitleFn = (m) => `Completed: ${m.completedBookings}`;
-const confirmedCompositionPart: SubtitleFn = () =>
-  "Packages + events + attractions";
 const newCustomersPart: SubtitleFn = (m) => `${m.newCustomers ?? 0} new`;
 const eventTicketsPart: SubtitleFn = (m) => `${m.totalEventTickets} tickets`;
+// Attractions "Sold" counts tickets; the sub-line shows how many orders they
+// came from (matches the web's `${totalPurchases} orders`).
+const attractionOrdersPart: SubtitleFn = (m) => `${m.totalPurchases} orders`;
 
 // Manager Total Revenue: "Bkgs: $X • Tix: $Y[ • Events: $Z]" (rounded).
 const managerRevenuePart: SubtitleFn = (m) => {
@@ -102,7 +106,7 @@ export const METRIC_CARDS = {
   participants: {
     key: "participants",
     label: "Participants",
-    title: "Participants",
+    title: "Party Participants",
     valueField: "totalParticipants",
     format: "number",
     breakdownKey: "participantBreakdown",
@@ -115,15 +119,16 @@ export const METRIC_CARDS = {
   attractions: {
     key: "attractions",
     label: "Attractions",
-    title: "Tickets Sold",
-    valueField: "totalPurchases",
+    title: "Attractions Sold",
+    valueField: "totalAttractionTickets",
+    fallbackField: "totalPurchases",
     format: "number",
     breakdownKey: "attractionBreakdown",
-    subtitle: () => "Tickets sold",
+    subtitle: attractionOrdersPart,
     icon: "ticket.png",
     color: "#10B981",
     gradient: ["#10B981", "#34D399"],
-    info: "Attraction ticket purchases placed in the selected period, counted by purchase date. The breakdown shows ticket quantities grouped by attraction category.",
+    info: "Attraction tickets sold in the period (sum of ticket quantities across orders, counted by purchase date). Cancelled and refunded orders are excluded. The subtitle shows how many orders those tickets came from.",
   },
   events: {
     key: "events",
@@ -141,7 +146,7 @@ export const METRIC_CARDS = {
   memberships: {
     key: "memberships",
     label: "Memberships",
-    title: "New Members",
+    title: "Memberships",
     valueField: "newMemberships",
     format: "number",
     breakdownKey: "membershipBreakdown",
@@ -149,7 +154,7 @@ export const METRIC_CARDS = {
     icon: "membership.png",
     color: "#F59E0B",
     gradient: ["#F59E0B", "#FBBF24"],
-    info: "New memberships created during the selected period, counted by sign-up date. The breakdown groups them by membership plan.",
+    info: "New memberships created in the selected period. This is not the total number of active members — it counts sign-ups within the timeframe.",
   },
   customers: {
     key: "customers",
@@ -162,7 +167,7 @@ export const METRIC_CARDS = {
     icon: "add-user.png",
     color: "#EF4444",
     gradient: ["#EF4444", "#F87171"],
-    info: "Unique customers with at least one booking, attraction purchase, or event purchase in the selected period. \"New\" are customers whose account was first created within the period; the rest are counted as returning.",
+    info: "Customers with at least one package booking, attraction order, or event order in the period. Each customer is counted once. 'New' counts those whose customer account was also created in the period; guests who booked without an account are not included.",
   },
   confirmed: {
     key: "confirmed",
@@ -176,6 +181,23 @@ export const METRIC_CARDS = {
     color: "#14B8A6",
     gradient: ["#14B8A6", "#2DD4BF"],
     info: "Package bookings marked \"confirmed\" in the selected period (includes those later checked in or completed). The breakdown compares confirmed packages with event and attraction purchases for the same period.",
+  },
+  // Company-admin variant of `confirmed`: counts ALL confirmed sales combined
+  // (bookings + event tickets + attraction tickets), matching the web's
+  // "Confirmed Sales" card. Managers/attendants keep the `confirmed` card above.
+  confirmedSales: {
+    key: "confirmedSales",
+    label: "Confirmed",
+    title: "Confirmed Sales",
+    valueField: "confirmedTotal",
+    fallbackField: "confirmedBookings",
+    format: "number",
+    breakdownKey: "confirmedBreakdown",
+    subtitle: () => "Bookings + tickets confirmed",
+    icon: "checked.png",
+    color: "#14B8A6",
+    gradient: ["#14B8A6", "#2DD4BF"],
+    info: "All confirmed sales in the period combined by quantity: package bookings + event tickets + attraction tickets, matching the counts on the sold cards. Sales that progressed to checked-in or completed still count as confirmed. Open the card for the split by type.",
   },
   revenue: {
     key: "revenue",
@@ -270,14 +292,13 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
       "events",
       "memberships",
       "customers",
-      "confirmed",
+      "confirmedSales",
     ],
     showLocationSelector: true,
     showBreakdowns: true,
     metricsSource: "dashboard",
     subtitleOverrides: {
       packages: confirmedCountPart,
-      confirmed: confirmedCompositionPart,
     },
   },
   location_manager: {

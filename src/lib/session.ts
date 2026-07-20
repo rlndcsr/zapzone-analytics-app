@@ -52,39 +52,29 @@ export async function setSession(token: string, user: AuthUser): Promise<void> {
   notify();
 }
 
-// Restores the saved session if it's still valid
+// Restores the saved session on launch. The inactivity window counts only time
+// the app is actually open, so a session that "lapsed" purely because the app
+// was closed is NOT treated as expired — reopening the app is itself activity.
 export async function restoreSession(): Promise<boolean> {
   try {
-    const [token, userJson, expiryRaw] = await Promise.all([
+    const [token, userJson] = await Promise.all([
       SecureStore.getItemAsync(TOKEN_KEY),
       SecureStore.getItemAsync(USER_KEY),
-      SecureStore.getItemAsync(EXPIRY_KEY),
     ]);
 
-    const storedExpiry = expiryRaw ? Number(expiryRaw) : null;
-    const valid =
-      !!token &&
-      !!userJson &&
-      storedExpiry != null &&
-      !Number.isNaN(storedExpiry) &&
-      Date.now() < storedExpiry;
-
-    if (valid) {
+    if (token && userJson) {
       authUser = JSON.parse(userJson) as AuthUser;
       authToken = token;
-      expiresAt = storedExpiry;
+      // Start a fresh inactivity window from now instead of honoring a deadline
+      // that elapsed while the app was closed. Reset the persist throttle so the
+      // next activity writes this refreshed deadline through to storage.
+      expiresAt = Date.now() + SESSION_TTL_MS;
+      lastExpiryPersistAt = 0;
       return true;
     }
 
-    // Show "Session expired" only if an old session has expired.
-    const hadExpiredSession =
-      !!token &&
-      !!userJson &&
-      storedExpiry != null &&
-      !Number.isNaN(storedExpiry);
-    if (hadExpiredSession) {
-      endReason = "expired";
-    }
+    // No stored credentials — clear any partial remnants. (No "expired" notice:
+    // there was no in-app session that timed out, so the login screen stays quiet.)
     await clearSession();
   } catch {
     await clearSession();
@@ -115,6 +105,23 @@ export async function touchSession(): Promise<void> {
   expiresAt = now + SESSION_TTL_MS;
   // Throttle persistence: skip the SecureStore write if we persisted recently.
   if (now - lastExpiryPersistAt < EXPIRY_PERSIST_THROTTLE_MS) return;
+  lastExpiryPersistAt = now;
+  try {
+    await SecureStore.setItemAsync(EXPIRY_KEY, String(expiresAt));
+  } catch {
+    // Secure storage unavailable — the in-memory extension still applies.
+  }
+}
+
+/** Reopening / returning the app to the foreground counts as activity: start a
+ *  fresh inactivity window even if the previous one lapsed while the app was
+ *  backgrounded or closed. Unlike {@link touchSession}, this revives a lapsed
+ *  window on purpose — only idle time with the app OPEN should ever log you out.
+ *  No-op when signed out. */
+export async function registerAppResume(): Promise<void> {
+  if (authToken == null) return;
+  const now = Date.now();
+  expiresAt = now + SESSION_TTL_MS;
   lastExpiryPersistAt = now;
   try {
     await SecureStore.setItemAsync(EXPIRY_KEY, String(expiresAt));

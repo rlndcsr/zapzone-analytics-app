@@ -45,9 +45,10 @@ export default function HomeScreen() {
     if (consumeSessionExpiredNotice()) setSessionEnded(true);
   }, []);
 
-  // Snapshot auth ONCE at mount (not live): redirects an already-authenticated
-  // cold-start/deep-link to /home, while never re-rendering into <Redirect> after
-  // an in-app login — that would race LoginForm's own replace into a nav loop.
+  // Snapshot auth ONCE at mount (not live): this redirects an already-authed
+  // cold start / deep link straight to /home, without re-rendering into a
+  // redirect after an in-app login — that path is navigated imperatively by
+  // LoginForm, so the two never compete.
   const [authedAtMount] = useState(() => isAuthenticated());
 
   if (!hasPlayedSplash()) {
@@ -81,29 +82,6 @@ export default function HomeScreen() {
             headerAnimatedStyle,
           ]}
         >
-          {/* Soft translucent circles */}
-          <View
-            pointerEvents="none"
-            style={[
-              styles.circle,
-              { width: 350, height: 350, top: -70, right: 80 },
-            ]}
-          />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.circle,
-              { width: 250, height: 250, bottom: 170, left: -10 },
-            ]}
-          />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.circleFaint,
-              { width: 150, height: 150, top: -30, left: 0 },
-            ]}
-          />
-
           <Image
             source={logo}
             style={{ width: 104, height: 80 }}
@@ -115,7 +93,7 @@ export default function HomeScreen() {
         <View
           className="grow bg-white dark:bg-neutral-900 px-6 pt-9"
           style={{
-            marginTop: -28,
+            marginTop: -20,
             borderTopLeftRadius: 36,
             borderTopRightRadius: 36,
             paddingBottom: insets.bottom + 32,
