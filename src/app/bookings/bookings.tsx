@@ -21,20 +21,28 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingActionsSheet } from "../../components/ui/BookingActionsSheet";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
+import {
+  BookingsBulkBar,
+  type BookingBulkAction,
+} from "../../components/ui/BookingsBulkBar";
 import { BookingsImportSheet } from "../../components/ui/BookingsImportSheet";
 import { BookingsMoreSheet } from "../../components/ui/BookingsMoreSheet";
 import { BookingsReportSheet } from "../../components/ui/BookingsReportSheet";
+import { BookingsTable } from "../../components/ui/BookingsTable";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkeleton";
 import { consumeBookingsStale, useBookings } from "../../lib/hooks/useBookings";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  bulkDeleteBookings,
+  bulkSetBookingStatus,
   exportBookings,
   fetchTrashedBookings,
   type BookingStatus,
@@ -412,6 +420,13 @@ const Bookings = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
+  // Presentation layout for the active list — table by default (card view via
+  // toggle). Both render the same `paged` slice, so switching never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  // Bulk-selection (active list, table view). Single source of truth for which
+  // rows are selected; `bulkBusy` marks the in-flight bulk action.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<BookingBulkAction | null>(null);
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
     null,
   );
@@ -592,6 +607,119 @@ const Bookings = () => {
     perPage,
     showDeleted,
   ]);
+
+  // Keep the current page valid after the list shrinks (e.g. a bulk delete).
+  useEffect(() => {
+    if (page > lastPage) setPage(lastPage);
+  }, [page, lastPage]);
+
+  // Selection is scoped to the visible active-list page: clear it whenever the
+  // visible set changes or we leave the table, so a bulk action never touches
+  // off-screen (or deleted) rows.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [
+    search,
+    statusFilter,
+    dateFilter,
+    activeLocationId,
+    perPage,
+    page,
+    viewMode,
+    showDeleted,
+  ]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Header checkbox — select / deselect every booking on the current page.
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const all = paged.length > 0 && paged.every((b) => prev.has(b.id));
+      return all ? new Set() : new Set(paged.map((b) => b.id));
+    });
+  }, [paged]);
+
+  // Bulk status change — mirrors the web bulk bar (per-id; a "checked-in"
+  // change routes through the check-in endpoint). Refetches + clears selection;
+  // filters, search and the current page are preserved.
+  const runBulkStatus = useCallback(
+    async (status: Exclude<BookingBulkAction, "delete">) => {
+      const token = getToken();
+      if (!token || selectedIds.size === 0) return;
+      const chosen = paged.filter((b) => selectedIds.has(b.id));
+      setBulkBusy(status);
+      try {
+        await bulkSetBookingStatus(
+          token,
+          chosen.map((b) => ({
+            id: b.id,
+            referenceNumber: b.referenceNumber,
+          })),
+          status,
+          currentUser?.id,
+        );
+        setSelectedIds(new Set());
+        await refetch();
+      } catch (e) {
+        Alert.alert(
+          "Update failed",
+          e instanceof Error
+            ? e.message
+            : "Could not update the selected bookings.",
+        );
+      } finally {
+        setBulkBusy(null);
+      }
+    },
+    [selectedIds, paged, currentUser?.id, refetch],
+  );
+
+  // Bulk delete — same confirmation as the web, then the dedicated bulk-delete
+  // endpoint (one round-trip). Soft-deletes to trash, like the row action.
+  const confirmBulkDelete = useCallback(() => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    Alert.alert(
+      "Delete bookings",
+      `Are you sure you want to delete ${count} booking(s)?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) return;
+            const ids = [...selectedIds];
+            setBulkBusy("delete");
+            try {
+              await bulkDeleteBookings(token, ids);
+              setSelectedIds(new Set());
+              await refetch();
+            } catch (e) {
+              Alert.alert(
+                "Delete failed",
+                e instanceof Error
+                  ? e.message
+                  : "Could not delete the selected bookings.",
+              );
+            } finally {
+              setBulkBusy(null);
+            }
+          },
+        },
+      ],
+    );
+  }, [selectedIds, refetch]);
 
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ??
@@ -865,7 +993,25 @@ const Bookings = () => {
                   onPerPageChange={setPerPage}
                 />
               )}
+              {/* Layout toggle (Table default / Cards) — active list only. */}
+              {!showDeleted && (
+                <View className="ml-auto">
+                  <ViewToggle mode={viewMode} onChange={setViewMode} />
+                </View>
+              )}
             </View>
+          )}
+
+          {/* Bulk-action toolbar — table view of the active list, shown while a
+              selection exists; disappears when selection is cleared. */}
+          {!showDeleted && viewMode === "table" && selectedIds.size > 0 && (
+            <BookingsBulkBar
+              count={selectedIds.size}
+              busy={bulkBusy}
+              onStatus={runBulkStatus}
+              onDelete={confirmBulkDelete}
+              onClear={clearSelection}
+            />
           )}
 
           {/* Deleted-list error (active-list error is shown above the KPIs) */}
@@ -904,18 +1050,35 @@ const Bookings = () => {
           ) : (
             !listError && (
               <>
-                {paged.map((booking) => (
-                  <BookingCard
-                    key={booking.id}
-                    booking={booking}
+                {/* Table (default) and card layouts render from the same
+                    `paged` slice — switching is instant and never refetches.
+                    The deleted list keeps cards (its own restore actions). */}
+                {!showDeleted && viewMode === "table" ? (
+                  <BookingsTable
+                    bookings={paged}
                     showLocation={isCompanyAdmin}
-                    onPress={() => {
+                    selectedIds={selectedIds}
+                    onToggleRow={toggleRow}
+                    onToggleAll={toggleAllVisible}
+                    onRowPress={(booking) => {
                       setDetailMode("details");
                       setSelectedBookingId(booking.id);
                     }}
-                    onMore={() => setActionsBooking(booking)}
                   />
-                ))}
+                ) : (
+                  paged.map((booking) => (
+                    <BookingCard
+                      key={booking.id}
+                      booking={booking}
+                      showLocation={isCompanyAdmin}
+                      onPress={() => {
+                        setDetailMode("details");
+                        setSelectedBookingId(booking.id);
+                      }}
+                      onMore={() => setActionsBooking(booking)}
+                    />
+                  ))
+                )}
 
                 {/* Pagination (bottom) — same state as the top control */}
                 <PaginationControls

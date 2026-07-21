@@ -24,6 +24,12 @@ export type CalendarBooking = {
   amountPaid: number;
   packageName: string;
   customerName: string;
+  customerEmail: string | null;
+  customerPhone: string | null;
+  roomName: string;
+  duration: number | null;
+  durationUnit: string;
+  paymentMethod: string | null;
   locationName: string;
   createdAt: string | null;
 };
@@ -89,10 +95,21 @@ type RawBooking = {
   participants?: number | string | null;
   total_amount?: number | string | null;
   amount_paid?: number | string | null;
+  duration?: number | string | null;
+  duration_unit?: string | null;
+  payment_method?: string | null;
   guest_name?: string | null;
+  guest_email?: string | null;
+  guest_phone?: string | null;
   package?: { name?: string | null } | null;
+  room?: { name?: string | null } | null;
   location?: { name?: string | null } | null;
-  customer?: { first_name?: string | null; last_name?: string | null } | null;
+  customer?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
 };
 
 /** Raw shape of the full booking model returned by GET /api/bookings/{id}. */
@@ -195,6 +212,7 @@ function customerName(
 }
 
 function mapBooking(raw: RawBooking, date: string): CalendarBooking {
+  const durationRaw = raw.duration == null ? null : Number(raw.duration);
   return {
     id: raw.id,
     referenceNumber: raw.reference_number ?? null,
@@ -206,6 +224,13 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     amountPaid: Number(raw.amount_paid ?? 0),
     packageName: raw.package?.name?.trim() || "Booking",
     customerName: customerName(raw.customer, raw.guest_name),
+    customerEmail: raw.customer?.email?.trim() || raw.guest_email?.trim() || null,
+    customerPhone: raw.customer?.phone?.trim() || raw.guest_phone?.trim() || null,
+    roomName: raw.room?.name?.trim() || "",
+    duration:
+      durationRaw != null && !Number.isNaN(durationRaw) ? durationRaw : null,
+    durationUnit: raw.duration_unit ?? "minutes",
+    paymentMethod: raw.payment_method ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
   };
@@ -395,6 +420,44 @@ export async function checkInBooking(
       reference_number: referenceNumber,
       ...(userId != null ? { user_id: userId } : {}),
     },
+  });
+}
+
+/**
+ * Bulk status change for the selected bookings. There is no bulk-status endpoint,
+ * so — exactly like the web admin's bulk bar — this fans out per-id requests:
+ * a "checked-in" change routes through the dedicated check-in endpoint (records
+ * checked_in_at/by, confirmed-only), every other status uses the generic status
+ * PATCH. Rejects if any single update fails.
+ */
+export async function bulkSetBookingStatus(
+  token: string,
+  bookings: { id: number; referenceNumber: string | null }[],
+  status: string,
+  userId?: number,
+): Promise<void> {
+  await Promise.all(
+    bookings.map((b) =>
+      status === "checked-in" && b.referenceNumber
+        ? checkInBooking(token, b.referenceNumber, userId)
+        : updateBookingStatus(token, b.id, status),
+    ),
+  );
+}
+
+/**
+ * POST /api/bookings/bulk-delete — the backend's dedicated bulk soft-delete
+ * endpoint (one round-trip), the same route the web BookingService exposes as
+ * `bulkDelete({ ids })`.
+ */
+export async function bulkDeleteBookings(
+  token: string,
+  ids: number[],
+): Promise<void> {
+  await apiRequest("/api/bookings/bulk-delete", {
+    method: "POST",
+    token,
+    body: { ids },
   });
 }
 

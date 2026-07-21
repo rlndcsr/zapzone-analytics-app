@@ -33,6 +33,7 @@ import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
   AttractionsKpiSkeleton,
   AttractionsListSkeleton,
@@ -58,52 +59,6 @@ import {
 const PRIMARY = "#0644C7";
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
-
-/** Subtle lift for the active segment of the layout toggle. */
-const TOGGLE_ACTIVE_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 1 },
-  shadowOpacity: 0.08,
-  shadowRadius: 2,
-  elevation: 1,
-} as const;
-
-/** Presentation layout for the attractions list. Table is the default. */
-type ViewMode = "table" | "cards";
-
-/** Compact segmented Table / Cards switch shown on the list header row. */
-const ViewToggle = ({
-  mode,
-  onChange,
-}: {
-  mode: ViewMode;
-  onChange: (mode: ViewMode) => void;
-}) => (
-  <View className="flex-row items-center bg-gray-100 dark:bg-neutral-800 rounded-xl p-1">
-    {(["table", "cards"] as const).map((m) => {
-      const active = mode === m;
-      return (
-        <Pressable
-          key={m}
-          onPress={() => onChange(m)}
-          accessibilityRole="button"
-          accessibilityState={{ selected: active }}
-          accessibilityLabel={m === "table" ? "Table view" : "Card view"}
-          className={`px-3 py-1.5 rounded-lg ${
-            active ? "bg-white dark:bg-neutral-700" : ""
-          }`}
-          style={active ? TOGGLE_ACTIVE_SHADOW : undefined}
-        >
-          <Feather
-            name={m === "table" ? "list" : "grid"}
-            size={16}
-            color={active ? PRIMARY : "#9CA3AF"}
-          />
-        </Pressable>
-      );
-    })}
-  </View>
-);
 
 type KpiTone = { bg: string; tint: string };
 
