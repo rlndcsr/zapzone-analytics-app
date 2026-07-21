@@ -1,13 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
-  useEffect,
-  useMemo,
-  useState,
-  useCallback,
-  type ComponentProps,
-} from "react";
-import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -19,8 +14,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { AttractionActionsSheet } from "../../components/ui/AttractionActionsSheet";
+import { AttractionCard } from "../../components/ui/AttractionCard";
+import {
+  AttractionsBulkBar,
+  type BulkAction,
+} from "../../components/ui/AttractionsBulkBar";
 import { AttractionsExportSheet } from "../../components/ui/AttractionsExportSheet";
 import { AttractionsImportSheet } from "../../components/ui/AttractionsImportSheet";
+import { AttractionsTable } from "../../components/ui/AttractionsTable";
 import {
   AttractionFiltersSheet,
   EMPTY_ATTRACTION_FILTERS,
@@ -41,175 +42,68 @@ import {
   markAttractionsStale,
   useAttractions,
 } from "../../lib/hooks/useAttractions";
+import {
+  CARD_SHADOW,
+  formatMoney,
+  type FeatherIconName,
+} from "../../lib/attractions/attractionDisplay";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
-import type {
-  AttractionRow,
-  AttractionStatus,
+import { getToken } from "../../lib/session";
+import {
+  bulkDeleteAttractions,
+  bulkSetAttractionsActive,
+  type AttractionRow,
 } from "../../services/attractionsService";
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PER_PAGE_OPTIONS = [5, 10, 15];
 
-// Only these pricing types carry a unit suffix on the web page.
-const PRICING_SUFFIX: Record<string, string> = {
-  per_person: "/person",
-  per_group: "/group",
-  per_hour: "/hour",
-};
+/** Subtle lift for the active segment of the layout toggle. */
+const TOGGLE_ACTIVE_SHADOW = {
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.08,
+  shadowRadius: 2,
+  elevation: 1,
+} as const;
 
-const formatMoney = (value: number) =>
-  `$${value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+/** Presentation layout for the attractions list. Table is the default. */
+type ViewMode = "table" | "cards";
 
-function formatCreatedAt(dateStr: string | null): string {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function durationLabel(row: AttractionRow): string {
-  if (!row.duration) return "Unlimited";
-  return `${row.duration} ${row.durationUnit}`;
-}
-
-const StatusBadge = ({ status }: { status: AttractionStatus }) => {
-  const active = status === "active";
-  return (
-    <View
-      className={`px-2.5 py-1 rounded-full ${
-        active
-          ? "bg-green-50 dark:bg-green-900/30"
-          : "bg-gray-100 dark:bg-neutral-800"
-      }`}
-    >
-      <Text
-        className={`text-xs font-semibold capitalize ${
-          active
-            ? "text-green-600 dark:text-green-400"
-            : "text-gray-500 dark:text-gray-400"
-        }`}
-      >
-        {status}
-      </Text>
-    </View>
-  );
-};
-
-const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
-  <View className="flex-row items-center gap-1.5">
-    <Feather name={icon} size={12} color="#9CA3AF" />
-    <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
+/** Compact segmented Table / Cards switch shown on the list header row. */
+const ViewToggle = ({
+  mode,
+  onChange,
+}: {
+  mode: ViewMode;
+  onChange: (mode: ViewMode) => void;
+}) => (
+  <View className="flex-row items-center bg-gray-100 dark:bg-neutral-800 rounded-xl p-1">
+    {(["table", "cards"] as const).map((m) => {
+      const active = mode === m;
+      return (
+        <Pressable
+          key={m}
+          onPress={() => onChange(m)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: active }}
+          accessibilityLabel={m === "table" ? "Table view" : "Card view"}
+          className={`px-3 py-1.5 rounded-lg ${
+            active ? "bg-white dark:bg-neutral-700" : ""
+          }`}
+          style={active ? TOGGLE_ACTIVE_SHADOW : undefined}
+        >
+          <Feather
+            name={m === "table" ? "list" : "grid"}
+            size={16}
+            color={active ? PRIMARY : "#9CA3AF"}
+          />
+        </Pressable>
+      );
+    })}
   </View>
 );
-
-type ComponentIconName = ComponentProps<typeof Feather>["name"];
-
-const AttractionCard = ({
-  attraction,
-  onOpenDetails,
-}: {
-  attraction: AttractionRow;
-  /** Tapping anywhere on the card opens the Attraction Details (mirrors Packages). */
-  onOpenDetails: () => void;
-}) => {
-  const isCopy = attraction.name.includes("(Copy)");
-  const suffix = PRICING_SUFFIX[attraction.pricingType] ?? "";
-  const created = formatCreatedAt(attraction.createdAt);
-
-  return (
-    <Pressable
-      onPress={onOpenDetails}
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
-      style={CARD_SHADOW}
-      accessibilityRole="button"
-      accessibilityLabel={`View details for ${attraction.name}`}
-    >
-      {/* Header: name + location (left), status (right) */}
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <View className="flex-row items-center gap-2 flex-wrap">
-            <Text
-              className="text-base font-bold text-gray-900 dark:text-white"
-              numberOfLines={1}
-            >
-              {attraction.name}
-            </Text>
-            {isCopy && (
-              <View className="flex-row items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40">
-                <Feather name="copy" size={9} color="#B45309" />
-                <Text className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                  Copy
-                </Text>
-              </View>
-            )}
-          </View>
-          {!!attraction.locationName && (
-            <View className="flex-row items-center gap-1 mt-0.5">
-              <Feather name="map-pin" size={11} color="#9CA3AF" />
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
-                {attraction.locationName}
-              </Text>
-            </View>
-          )}
-        </View>
-        <StatusBadge status={attraction.status} />
-      </View>
-
-      {/* Description */}
-      {!!attraction.description && (
-        <Text
-          className="text-xs text-gray-500 dark:text-gray-400 leading-5"
-          numberOfLines={2}
-        >
-          {attraction.description}
-        </Text>
-      )}
-
-      {/* Category + price */}
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
-          <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-            {attraction.category}
-          </Text>
-        </View>
-        <Text className="text-sm font-bold text-gray-900 dark:text-white">
-          {formatMoney(attraction.price)}
-          {!!suffix && (
-            <Text className="text-xs font-normal text-gray-400"> {suffix}</Text>
-          )}
-        </Text>
-      </View>
-
-      {/* Capacity / duration / created */}
-      <View className="flex-row items-center flex-wrap gap-x-4 gap-y-1 mt-2">
-        <Stat
-          icon="users"
-          label={`${attraction.maxCapacity} people${
-            attraction.displayCapacityToCustomers ? "" : " (hidden)"
-          }`}
-        />
-        <Stat icon="clock" label={durationLabel(attraction)} />
-        {!!created && <Stat icon="calendar" label={created} />}
-      </View>
-    </Pressable>
-  );
-};
 
 type KpiTone = { bg: string; tint: string };
 
@@ -220,7 +114,7 @@ const KpiCard = ({
   value,
   change,
 }: {
-  icon: ComponentIconName;
+  icon: FeatherIconName;
   tone: KpiTone;
   title: string;
   value: string;
@@ -276,6 +170,14 @@ const Attractions = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
+  // Presentation layout only — table by default, card view on toggle. Kept in
+  // component state so it survives filter/search/page changes while mounted and
+  // never triggers a refetch (both layouts read the same `paged` collection).
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  // Bulk-selection (table view only). Single source of truth for which rows are
+  // selected; `bulkBusy` marks the in-flight bulk action so the toolbar locks.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<BulkAction | null>(null);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -394,6 +296,105 @@ const Attractions = () => {
     setPage(1);
   }, [search, filters, activeLocationId, perPage]);
 
+  // Keep the current page valid after the list shrinks (e.g. a bulk delete):
+  // clamp down so the user stays on the nearest still-populated page.
+  useEffect(() => {
+    if (page > lastPage) setPage(lastPage);
+  }, [page, lastPage]);
+
+  // Selection is scoped to what's visible: clear it whenever the visible set
+  // changes (search / filters / location / page size / page) or the layout
+  // toggles away, so a bulk action never touches off-screen rows.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [search, filters, activeLocationId, perPage, page, viewMode]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Header checkbox — select / deselect every row on the current page.
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const allSelected =
+        paged.length > 0 && paged.every((a) => prev.has(a.id));
+      return allSelected ? new Set() : new Set(paged.map((a) => a.id));
+    });
+  }, [paged]);
+
+  // Bulk activate / deactivate — fans out per-id PATCH calls (no bulk status
+  // endpoint exists), then refetches and clears the selection. Filters, search
+  // and the current page are all preserved.
+  const runBulkStatus = useCallback(
+    async (isActive: boolean) => {
+      const token = getToken();
+      if (!token || selectedIds.size === 0) return;
+      const ids = [...selectedIds];
+      setBulkBusy(isActive ? "activate" : "deactivate");
+      try {
+        await bulkSetAttractionsActive(token, ids, isActive);
+        setSelectedIds(new Set());
+        await refetch();
+      } catch (err) {
+        Alert.alert(
+          isActive ? "Activate failed" : "Deactivate failed",
+          err instanceof Error
+            ? err.message
+            : "Could not update the selected attractions.",
+        );
+      } finally {
+        setBulkBusy(null);
+      }
+    },
+    [selectedIds, refetch],
+  );
+
+  // Bulk delete — same confirmation copy as the web admin, then the dedicated
+  // bulk-delete endpoint (one round-trip). Refetches and clears selection; the
+  // page-clamp effect keeps the user on a valid page.
+  const confirmBulkDelete = useCallback(() => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    Alert.alert(
+      "Delete attractions",
+      `Are you sure you want to delete ${count} attraction(s)? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) return;
+            const ids = [...selectedIds];
+            setBulkBusy("delete");
+            try {
+              await bulkDeleteAttractions(token, ids);
+              setSelectedIds(new Set());
+              await refetch();
+            } catch (err) {
+              Alert.alert(
+                "Delete failed",
+                err instanceof Error
+                  ? err.message
+                  : "Could not delete the selected attractions.",
+              );
+            } finally {
+              setBulkBusy(null);
+            }
+          },
+        },
+      ],
+    );
+  }, [selectedIds, refetch]);
+
   const activeFilterCount = countActiveAttractionFilters(filters);
 
   // Created Date reuses the shared range calendar. The filter sheet is a native
@@ -419,7 +420,7 @@ const Attractions = () => {
   // their management screens; Import / Export open their dedicated sheets.
   const moreActions: {
     label: string;
-    icon: ComponentIconName;
+    icon: FeatherIconName;
     hint: string;
     onPress: () => void;
   }[] = [
@@ -679,21 +680,37 @@ const Attractions = () => {
             />
           </FilterPill>
 
-          {/* List header + top pagination (same state as the bottom control) */}
+          {/* List header + layout toggle (Table default / Cards) */}
           {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4 flex-wrap">
-              <Text
-                numberOfLines={1}
-                className="shrink text-lg font-bold text-gray-900 dark:text-white"
-              >
-                All Attractions
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  {filtered.length}
+            <View className="flex-row items-center justify-between gap-2 mb-4">
+              <View className="flex-row items-center gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                >
+                  All Attractions
                 </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {filtered.length}
+                  </Text>
+                </View>
               </View>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
             </View>
+          )}
+
+          {/* Bulk-action toolbar — table view only, shown while a selection
+              exists; unmounts (disappears) the moment selection is cleared. */}
+          {viewMode === "table" && selectedIds.size > 0 && (
+            <AttractionsBulkBar
+              count={selectedIds.size}
+              busy={bulkBusy}
+              onActivate={() => runBulkStatus(true)}
+              onDeactivate={() => runBulkStatus(false)}
+              onDelete={confirmBulkDelete}
+              onClear={clearSelection}
+            />
           )}
 
           {/* List / states */}
@@ -716,13 +733,27 @@ const Attractions = () => {
           ) : (
             !error && (
               <>
-                {paged.map((attraction) => (
-                  <AttractionCard
-                    key={attraction.id}
-                    attraction={attraction}
-                    onOpenDetails={() => setActionsAttraction(attraction)}
+                {/* Table (default) and card layouts render from the same
+                    `paged` slice — switching is instant and never refetches. */}
+                {viewMode === "table" ? (
+                  <AttractionsTable
+                    attractions={paged}
+                    onRowPress={(attraction) =>
+                      setActionsAttraction(attraction)
+                    }
+                    selectedIds={selectedIds}
+                    onToggleRow={toggleRow}
+                    onToggleAll={toggleAllVisible}
                   />
-                ))}
+                ) : (
+                  paged.map((attraction) => (
+                    <AttractionCard
+                      key={attraction.id}
+                      attraction={attraction}
+                      onOpenDetails={() => setActionsAttraction(attraction)}
+                    />
+                  ))
+                )}
 
                 {/* Pagination (bottom) — same state as the top control */}
                 <PaginationControls

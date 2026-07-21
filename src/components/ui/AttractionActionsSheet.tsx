@@ -12,9 +12,10 @@ import {
   View,
 } from "react-native";
 
-import { mediaUrl, webUrl } from "../../lib/api";
+import { buildPurchaseLink } from "../../lib/attractions/purchaseLink";
+import { mediaUrl } from "../../lib/api";
 import { getToken } from "../../lib/session";
-import { buildLocationSlug, createSlugWithId } from "../../lib/slug";
+import { createSlugWithId } from "../../lib/slug";
 import { formatTimeRange } from "../../lib/time";
 import {
   deleteAttraction,
@@ -44,12 +45,6 @@ const money = (n: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
-
-/** Public purchase URL — same shape the web ManageAttractions "Copy Link" builds. */
-const buildPurchaseLink = (a: AttractionRow): string =>
-  webUrl(
-    `/purchase/attraction/${buildLocationSlug(a.locationName, a.locationId)}/${createSlugWithId(a.name, a.id)}`,
-  );
 
 /* --- Local presentational helpers (matches PackageActionsSheet convention) -- */
 

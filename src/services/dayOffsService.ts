@@ -24,6 +24,8 @@ export type DayOff = {
   isRecurring: boolean;
   packageIds: number[];
   roomIds: number[];
+  attractionIds: number[];
+  eventIds: number[];
   /** No package/room scoping → the block covers the entire location. */
   isLocationWide: boolean;
   /** "Entire Location" | "N package(s)" | "N room(s)". */
@@ -42,6 +44,8 @@ type RawDayOff = {
   is_recurring?: boolean | null;
   package_ids?: number[] | null;
   room_ids?: number[] | null;
+  attraction_ids?: number[] | null;
+  event_ids?: number[] | null;
   location?: { id?: number; name?: string | null } | null;
 };
 
@@ -107,6 +111,8 @@ function mapDayOff(raw: RawDayOff): DayOff {
     isRecurring: !!raw.is_recurring,
     packageIds,
     roomIds,
+    attractionIds: raw.attraction_ids ?? [],
+    eventIds: raw.event_ids ?? [],
     isLocationWide,
     scopeLabel: scopeLabel(packageIds, roomIds),
     durationLabel: durationLabel(raw.time_start ?? null, raw.time_end ?? null),
@@ -176,6 +182,23 @@ export async function fetchDayOffs(
     currentPage: pg?.current_page ?? page,
     lastPage: pg?.last_page ?? page,
   };
+}
+
+/**
+ * GET /api/day-offs/location/{locationId} — every day-off for a location (not
+ * paginated). This is the exact endpoint the web admin's purchase calendar uses
+ * (`dayOffService.getDayOffsByLocation`) to decide which visit dates to block.
+ */
+export async function fetchDayOffsByLocation(
+  token: string,
+  locationId: number,
+  signal?: AbortSignal,
+): Promise<DayOff[]> {
+  const res = await apiRequest<{ success: boolean; data: RawDayOff[] }>(
+    `/api/day-offs/location/${locationId}`,
+    { token, signal },
+  );
+  return (res?.data ?? []).map(mapDayOff);
 }
 
 /* ---------------------------------------------------------------- writes -- */

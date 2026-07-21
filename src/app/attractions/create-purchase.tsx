@@ -23,7 +23,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { InputField } from "../../components/ui/InputField";
+import { formatShortDate, pad, toKey } from "../../lib/date/calendar";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -47,13 +49,6 @@ const CARD_SHADOW = {
   shadowRadius: 8,
   elevation: 2,
 } as const;
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
 
 // Hourly slots 08:00–21:00 — the mobile stand-in for the web's availability
 // time-slot generator (day-off / per-attraction windows are a later refinement).
@@ -336,24 +331,14 @@ const CreatePurchaseScreen = () => {
   const discountNum = Math.max(0, Number(discount) || 0);
   const total = Math.max(0, subtotal + addOnsTotal - discountNum);
 
-  const dateOptions = useMemo(() => {
-    const out: { value: string; label: string }[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (let i = 0; i < 60; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      out.push({
-        value: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-        label:
-          i === 0
-            ? "Today"
-            : `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`,
-      });
-    }
-    return out;
-  }, []);
-  const dateLabel = dateOptions.find((d) => d.value === scheduledDate)?.label ?? null;
+  // Today's key (YYYY-MM-DD) — the visit-date floor and the transaction's
+  // `purchase_date`. Computed once, timezone-safe.
+  const todayKey = useMemo(() => toKey(new Date()), []);
+  const dateLabel = !scheduledDate
+    ? null
+    : scheduledDate === todayKey
+      ? "Today"
+      : formatShortDate(scheduledDate);
 
   const locationName =
     selectedLocationId == null
@@ -420,7 +405,7 @@ const CreatePurchaseScreen = () => {
       payment_method: paymentMethod,
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
       location_id: effectiveLocationId,
-      purchase_date: dateOptions[0].value,
+      purchase_date: todayKey,
       scheduled_date: scheduledDate,
       scheduled_time: scheduledTime,
       notes:
@@ -891,41 +876,20 @@ const CreatePurchaseScreen = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Date picker */}
-      <BottomSheet
+      {/* Date picker — native calendar (browse months, tap a day). Past dates
+          are disabled; the selected date flows through the same `scheduledDate`
+          state as before. */}
+      <DatePickerSheet
         visible={sheet === "date"}
+        value={scheduledDate || null}
+        minDate={todayKey}
+        title="Select Visit Date"
         onClose={() => setSheet(null)}
-        title="Select Date"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {dateOptions.map((d) => {
-            const isSelected = scheduledDate === d.value;
-            return (
-              <Pressable
-                key={d.value}
-                onPress={() => {
-                  setScheduledDate(d.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {d.label}
-                </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+        onSelect={(date) => {
+          setScheduledDate(date);
+          setSheet(null);
+        }}
+      />
 
       {/* Time picker */}
       <BottomSheet

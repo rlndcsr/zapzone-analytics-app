@@ -26,8 +26,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { InputField } from "../../components/ui/InputField";
 import { mediaUrl } from "../../lib/api";
+import {
+  availableTimeSlotsForDate,
+  computeDayOffAvailability,
+} from "../../lib/attractions/dayOffAvailability";
+import { formatFullDate, toKey } from "../../lib/date/calendar";
+import {
+  fetchDayOffsByLocation,
+  type DayOff,
+} from "../../services/dayOffsService";
 import { getToken } from "../../lib/session";
 import {
   fetchAttractionDetail,
@@ -50,22 +60,6 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const WEEKDAY_KEYS = [
-  "sunday",
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-];
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
 const money = (n: number) => `$${n.toFixed(2)}`;
 
 const pricingSuffix = (t: string) =>
@@ -83,25 +77,6 @@ function formatTime(value: string): string {
   const meridian = hour >= 12 ? "PM" : "AM";
   hour = hour % 12 || 12;
   return `${hour}:${m} ${meridian}`;
-}
-
-// Mirrors the web PurchaseAttraction generateTimeSlots (hourly windows from the
-// attraction's availability), rather than a fixed slot list.
-function generateTimeSlots(
-  startTime: string,
-  endTime: string,
-  intervalMinutes = 60,
-): string[] {
-  const slots: string[] = [];
-  const [sh, sm] = startTime.split(":").map(Number);
-  const [eh, em] = endTime.split(":").map(Number);
-  let cur = sh * 60 + sm;
-  const end = eh * 60 + em;
-  while (cur < end) {
-    slots.push(`${pad(Math.floor(cur / 60))}:${pad(cur % 60)}`);
-    cur += intervalMinutes;
-  }
-  return slots;
 }
 
 const Section = ({
@@ -233,6 +208,9 @@ const PurchasePageScreen = () => {
   const [sheet, setSheet] = useState<null | "date" | "time">(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  // Location day-offs backing the calendar's blocked / limited dates (same
+  // data + endpoint the web purchase calendar uses).
+  const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
   const submitLockRef = useRef(false);
 
   // Load the attraction detail (same GET /api/attractions/{id} the web uses).
@@ -265,6 +243,25 @@ const PurchasePageScreen = () => {
     return () => controller.abort();
   }, [attractionId]);
 
+  // Fetch the attraction's location day-offs once the detail (and its location)
+  // is known. Errors are swallowed (calendar simply shows no blocks), matching
+  // the web behaviour.
+  useEffect(() => {
+    const token = getToken();
+    const locId = detail?.locationId;
+    if (!token || locId == null) {
+      setDayOffs([]);
+      return;
+    }
+    const controller = new AbortController();
+    fetchDayOffsByLocation(token, locId, controller.signal)
+      .then(setDayOffs)
+      .catch(() => {
+        if (!controller.signal.aborted) setDayOffs([]);
+      });
+    return () => controller.abort();
+  }, [detail?.locationId]);
+
   const images = useMemo(
     () =>
       (detail?.images ?? [])
@@ -286,39 +283,49 @@ const PurchasePageScreen = () => {
     });
   }, [detail]);
 
-  // Date options: next 60 days (day-off blocking is a web-only refinement, as in
-  // the on-site purchase screen).
-  const dateOptions = useMemo(() => {
-    const out: { value: string; label: string }[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (let i = 0; i < 60; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      out.push({
-        value: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-        label:
-          i === 0
-            ? "Today"
-            : `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`,
-      });
-    }
-    return out;
-  }, []);
-  const dateLabel = dateOptions.find((d) => d.value === scheduledDate)?.label ?? null;
+  // Today's key (YYYY-MM-DD) — the visit-date floor and the transaction's
+  // `purchase_date`. Computed once, timezone-safe.
+  const todayKey = useMemo(() => toKey(new Date()), []);
+  // Full, unabbreviated date ("Friday, July 24, 2026") — the Date field is now
+  // full width, so the selected day is always shown in full, never truncated.
+  const dateLabel = !scheduledDate
+    ? null
+    : scheduledDate === todayKey
+      ? `Today · ${formatFullDate(scheduledDate)}`
+      : formatFullDate(scheduledDate);
 
-  // Time slots derived from the attraction availability for the selected day —
-  // mirrors the web getAttractionAvailability + generateTimeSlots.
+  // Local midnight "now" for the day-off past-date checks.
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
+  // Calendar availability (full day-offs / limited-hours / open weekdays) —
+  // computed from the same Laravel day-off data + attraction availability the
+  // web uses. The calendar only renders these sets; the rules live in the
+  // shared helper.
+  const dayOffAvailability = useMemo(
+    () =>
+      computeDayOffAvailability({
+        dayOffs,
+        attractionId: detail?.id ?? -1,
+        availability: detail?.availability ?? [],
+        today,
+      }),
+    [dayOffs, detail?.id, detail?.availability, today],
+  );
+
+  // Time slots for the selected day: the weekday's availability window minus
+  // any partial-closure hours — mirrors the web time-slot recompute.
   const availableTimeSlots = useMemo(() => {
     if (!scheduledDate || !detail) return [];
-    const day = new Date(scheduledDate + "T00:00:00");
-    const dayKey = WEEKDAY_KEYS[day.getDay()];
-    const slot = detail.availability.find((s) =>
-      s.days.map((d) => d.toLowerCase()).includes(dayKey),
+    return availableTimeSlotsForDate(
+      scheduledDate,
+      detail.availability,
+      dayOffAvailability.partialClosuresByDate,
     );
-    if (!slot) return [];
-    return generateTimeSlots(slot.start_time, slot.end_time, 60);
-  }, [scheduledDate, detail]);
+  }, [scheduledDate, detail, dayOffAvailability]);
 
   // Clear a chosen time if it's no longer valid for the newly picked date.
   useEffect(() => {
@@ -399,7 +406,7 @@ const PurchasePageScreen = () => {
       payment_method: paymentMethod,
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
       location_id: locationId,
-      purchase_date: dateOptions[0].value,
+      purchase_date: todayKey,
       scheduled_date: scheduledDate,
       scheduled_time: scheduledTime,
       notes: `Attraction Purchase: ${detail.name} (${quantity} ticket${quantity > 1 ? "s" : ""})`,
@@ -675,31 +682,31 @@ const PurchasePageScreen = () => {
               <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-3">
                 Select your preferred visit date and time.
               </Text>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <FieldLabel>Date</FieldLabel>
-                  <SelectRow
-                    icon="calendar"
-                    value={dateLabel}
-                    placeholder="Select date"
-                    onPress={() => setSheet("date")}
-                  />
-                </View>
-                <View className="flex-1">
-                  <FieldLabel>Time</FieldLabel>
-                  <SelectRow
-                    icon="clock"
-                    value={scheduledTime ? formatTime(scheduledTime) : null}
-                    placeholder="Select time"
-                    onPress={() => {
-                      if (!scheduledDate) {
-                        Alert.alert("Pick a date first", "Choose a visit date, then a time.");
-                        return;
-                      }
-                      setSheet("time");
-                    }}
-                  />
-                </View>
+              {/* Stacked full-width fields so the selected date + time are
+                  always shown in full (side-by-side truncated the date). */}
+              <View className="mb-4">
+                <FieldLabel>Date</FieldLabel>
+                <SelectRow
+                  icon="calendar"
+                  value={dateLabel}
+                  placeholder="Select date"
+                  onPress={() => setSheet("date")}
+                />
+              </View>
+              <View>
+                <FieldLabel>Time</FieldLabel>
+                <SelectRow
+                  icon="clock"
+                  value={scheduledTime ? formatTime(scheduledTime) : null}
+                  placeholder="Select time"
+                  onPress={() => {
+                    if (!scheduledDate) {
+                      Alert.alert("Pick a date first", "Choose a visit date, then a time.");
+                      return;
+                    }
+                    setSheet("time");
+                  }}
+                />
               </View>
               {!!scheduledDate && availableTimeSlots.length === 0 && (
                 <Text className="text-xs text-amber-600 dark:text-amber-400 mt-2">
@@ -898,41 +905,23 @@ const PurchasePageScreen = () => {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Date picker */}
-      <BottomSheet
+      {/* Date picker — native calendar (browse months, tap a day). Past dates
+          are disabled; the selected date flows through the same `scheduledDate`
+          state, which drives the availability-based time slots as before. */}
+      <DatePickerSheet
         visible={sheet === "date"}
+        value={scheduledDate || null}
+        minDate={todayKey}
+        dayOffDates={dayOffAvailability.fullDayOffDates}
+        limitedDates={dayOffAvailability.partialDates}
+        availableWeekdays={dayOffAvailability.availableWeekdays}
+        title="Select Visit Date"
         onClose={() => setSheet(null)}
-        title="Select Date"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {dateOptions.map((d) => {
-            const isSelected = scheduledDate === d.value;
-            return (
-              <Pressable
-                key={d.value}
-                onPress={() => {
-                  setScheduledDate(d.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {d.label}
-                </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+        onSelect={(date) => {
+          setScheduledDate(date);
+          setSheet(null);
+        }}
+      />
 
       {/* Time picker */}
       <BottomSheet

@@ -1,32 +1,19 @@
 import { Feather } from "@expo/vector-icons";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+
+import {
+  MONTHS,
+  WEEKDAYS_MIN as WEEKDAYS,
+  buildMonthCells,
+  formatShortDate,
+  parseKey,
+} from "../../lib/date/calendar";
 import { BottomSheet } from "./BottomSheet";
 import { PrimaryButton } from "./PrimaryButton";
 
-const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** Local calendar date -> "YYYY-MM-DD" (the format the backend + web expect). */
-const toKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-/** "YYYY-MM-DD" -> local Date (midnight), or null when unparseable. */
-const parseKey = (s?: string | null): Date | null => {
-  if (!s) return null;
-  const d = new Date(`${s.substring(0, 10)}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
-
-/** "2026-01-05" -> "Jan 5, 2026" for compact display. */
-export const formatShortDate = (s?: string | null): string => {
-  const d = parseKey(s);
-  return d ? `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}, ${d.getFullYear()}` : "";
-};
+// Re-exported for the many screens that import it from here.
+export { formatShortDate } from "../../lib/date/calendar";
 
 type DateRangeSheetProps = {
   visible: boolean;
@@ -65,15 +52,10 @@ export function DateRangeSheet({
     setViewMonth(new Date(base.getFullYear(), base.getMonth(), 1));
   }, [visible, initialStart, initialEnd]);
 
-  const cells = useMemo<(string | null)[]>(() => {
-    const year = viewMonth.getFullYear();
-    const month = viewMonth.getMonth();
-    const leading = new Date(year, month, 1).getDay(); // 0 = Sunday
-    const days = new Date(year, month + 1, 0).getDate();
-    const out: (string | null)[] = Array.from({ length: leading }, () => null);
-    for (let day = 1; day <= days; day++) out.push(toKey(new Date(year, month, day)));
-    return out;
-  }, [viewMonth]);
+  const cells = useMemo<(string | null)[]>(
+    () => buildMonthCells(viewMonth),
+    [viewMonth],
+  );
 
   const onTapDay = (key: string) => {
     // No start yet, or a complete range exists → begin a fresh range.

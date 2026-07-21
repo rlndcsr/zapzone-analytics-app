@@ -233,6 +233,52 @@ export async function deleteAttraction(
 }
 
 /**
+ * PATCH /api/attractions/{id}/activate | /deactivate — the same per-id status
+ * endpoints the web bulk bar calls. The path carries the intent, so the body is
+ * empty (the web sends no `is_active` payload here either).
+ */
+export async function setAttractionActive(
+  token: string,
+  id: number,
+  isActive: boolean,
+): Promise<void> {
+  const action = isActive ? "activate" : "deactivate";
+  await apiRequest(`/api/attractions/${id}/${action}`, {
+    method: "PATCH",
+    token,
+  });
+}
+
+/**
+ * Bulk activate / deactivate. There is no bulk status endpoint on the backend,
+ * so — exactly like the web ManageAttractions bulk bar — this fans out one
+ * PATCH per id in parallel. Rejects if any single update fails.
+ */
+export async function bulkSetAttractionsActive(
+  token: string,
+  ids: number[],
+  isActive: boolean,
+): Promise<void> {
+  await Promise.all(ids.map((id) => setAttractionActive(token, id, isActive)));
+}
+
+/**
+ * POST /api/attractions/bulk-delete — the backend's dedicated bulk-delete
+ * endpoint (one round-trip for the whole selection), the same route the web
+ * AttractionService exposes as `bulkDelete({ ids })`.
+ */
+export async function bulkDeleteAttractions(
+  token: string,
+  ids: number[],
+): Promise<void> {
+  await apiRequest("/api/attractions/bulk-delete", {
+    method: "POST",
+    token,
+    body: { ids },
+  });
+}
+
+/**
  * Duplicate an attraction. Mirrors the web ManageAttractions flow exactly: fetch
  * the full record, then POST a copy named "<name> (Copy)" that starts inactive.
  * There is no dedicated duplicate endpoint on either platform — this reuses
