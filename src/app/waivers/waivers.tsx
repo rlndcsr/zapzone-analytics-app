@@ -24,6 +24,8 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import { WaiversTable } from "../../components/ui/WaiversTable";
 import { WaiverDetailSheet } from "../../components/ui/WaiverDetailSheet";
 import {
   WaiversKpiSkeleton,
@@ -36,8 +38,11 @@ import {
 } from "../../lib/hooks/useWaivers";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
-import { getCurrentUser } from "../../lib/session";
+import { apiUrl } from "../../lib/api";
+import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  checkInWaiver,
+  deleteWaiver,
   SOURCE_LABELS,
   type MarketingConsentStatus,
   type Waiver,
@@ -184,6 +189,7 @@ type WColKey =
   | "source"
   | "date"
   | "submitted"
+  | "checkin"
   | "status"
   | "marketing";
 type WCols = Record<WColKey, boolean>;
@@ -195,6 +201,7 @@ const DEFAULT_WCOLS: WCols = {
   source: true,
   date: true,
   submitted: true,
+  checkin: true,
   status: true,
   marketing: true,
 };
@@ -206,6 +213,7 @@ const WCOLUMN_META: { key: WColKey; label: string }[] = [
   { key: "source", label: "Source" },
   { key: "date", label: "Date" },
   { key: "submitted", label: "Submitted" },
+  { key: "checkin", label: "Check-in" },
   { key: "status", label: "Status" },
   { key: "marketing", label: "Marketing" },
 ];
@@ -467,6 +475,12 @@ const Waivers = () => {
   const { settings } = useWaiverSettings();
   // Admin-only delete, honoring the company's admin_delete_enabled UI hint.
   const canDelete = isCompanyAdmin && (settings?.adminDeleteEnabled ?? true);
+  // Inline table actions mirror the web Records row: check-in follows the same
+  // admin/manager rule as assign; print/export honors the company setting.
+  const canCheckIn = canAssign;
+  const canPrint =
+    isCompanyAdmin ||
+    (role === "location_manager" && (settings?.managerPrintExportEnabled ?? false));
 
   const [statusFilter, setStatusFilter] = useState<WaiverStatus>("completed");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
@@ -478,6 +492,11 @@ const Waivers = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [statsNonce, setStatsNonce] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Presentation layout only — table by default, card view on toggle. Both
+  // layouts read the same `displayed` list, so switching never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  // Which row has an inline table action (check-in / print / delete) in flight.
+  const [busyRowId, setBusyRowId] = useState<number | null>(null);
 
   // Global workspace location (company_admin). Waivers has no backend location
   // field, so — as before — location is applied client-side over the current
@@ -657,6 +676,109 @@ const Waivers = () => {
     }
   }, [displayed]);
 
+  // Inline table row actions — mirror the web Records "Actions" cell.
+  const handleCheckIn = useCallback(
+    async (w: Waiver) => {
+      const token = getToken();
+      if (!token) {
+        Alert.alert("Not signed in", "Please sign in again to check in.");
+        return;
+      }
+      setBusyRowId(w.id);
+      try {
+        await checkInWaiver(token, w.id);
+        await refetch();
+        setStatsNonce((n) => n + 1);
+      } catch (err) {
+        Alert.alert(
+          "Check-in failed",
+          err instanceof Error ? err.message : "Could not check in this waiver.",
+        );
+      } finally {
+        setBusyRowId(null);
+      }
+    },
+    [refetch],
+  );
+
+  // Downloads the exact server-generated PDF (GET /waivers/{id}/print) with the
+  // bearer token, then opens the native print dialog — same flow as the detail
+  // sheet's Print button.
+  const handlePrint = useCallback(async (w: Waiver) => {
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not signed in", "Please sign in again to print.");
+      return;
+    }
+    setBusyRowId(w.id);
+    try {
+      const FileSystem = await import("expo-file-system/legacy");
+      const Print = await import("expo-print");
+      const dest = `${FileSystem.cacheDirectory}waiver-${w.id}.pdf`;
+      const { uri, status } = await FileSystem.downloadAsync(
+        apiUrl(`/api/waivers/${w.id}/print`),
+        dest,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (status !== 200) {
+        Alert.alert(
+          "Print unavailable",
+          status === 403
+            ? "You don't have permission to print this waiver."
+            : `Could not generate the waiver PDF (error ${status}).`,
+        );
+        return;
+      }
+      await Print.printAsync({ uri });
+    } catch (err) {
+      Alert.alert(
+        "Print failed",
+        err instanceof Error ? err.message : "Could not open the print dialog.",
+      );
+    } finally {
+      setBusyRowId(null);
+    }
+  }, []);
+
+  const handleDelete = useCallback(
+    (w: Waiver) => {
+      Alert.alert(
+        "Delete waiver",
+        `Delete the waiver for ${w.adultName}? This is recorded in the deletion log and can't be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) {
+                Alert.alert("Not signed in", "Please sign in again to delete.");
+                return;
+              }
+              setBusyRowId(w.id);
+              try {
+                await deleteWaiver(token, w.id);
+                await refetch();
+                setStatsNonce((n) => n + 1);
+              } catch (err) {
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error
+                    ? err.message
+                    : "Could not delete this waiver.",
+                );
+              } finally {
+                setBusyRowId(null);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [refetch],
+  );
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
@@ -831,32 +953,22 @@ const Waivers = () => {
           {/* List header + top pagination (below the title, same state as bottom) */}
           {!loading && !error && (
             <View className="mb-4">
-              <View className="flex-row items-center gap-2">
-                <Text
-                  numberOfLines={1}
-                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
-                >
-                  Waivers
-                </Text>
-                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {total}
+              <View className="flex-row items-center justify-between gap-2">
+                <View className="flex-row items-center gap-2 shrink">
+                  <Text
+                    numberOfLines={1}
+                    className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                  >
+                    Waivers
                   </Text>
+                  <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                    <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {total}
+                    </Text>
+                  </View>
                 </View>
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
               </View>
-              {displayed.length > 0 && (
-                <View className="mt-3">
-                  <PaginationControls
-                    compact
-                    page={page}
-                    lastPage={lastPage}
-                    perPage={perPage}
-                    perPageOptions={PER_PAGE_OPTIONS}
-                    onPageChange={setPage}
-                    onPerPageChange={setPerPage}
-                  />
-                </View>
-              )}
             </View>
           )}
 
@@ -878,15 +990,33 @@ const Waivers = () => {
           ) : (
             !error && (
               <>
-                {displayed.map((w) => (
-                  <WaiverCard
-                    key={w.id}
-                    waiver={w}
-                    showLocation={isCompanyAdmin}
+                {/* Table (default) and card layouts render from the same
+                    `displayed` list — switching is instant and never refetches. */}
+                {viewMode === "table" ? (
+                  <WaiversTable
+                    waivers={displayed}
                     cols={cols}
-                    onPress={() => setSelectedId(w.id)}
+                    showLocation={isCompanyAdmin}
+                    canCheckIn={canCheckIn}
+                    canPrint={canPrint}
+                    canDelete={canDelete}
+                    busyId={busyRowId}
+                    onRowPress={(w) => setSelectedId(w.id)}
+                    onCheckIn={handleCheckIn}
+                    onPrint={handlePrint}
+                    onDelete={handleDelete}
                   />
-                ))}
+                ) : (
+                  displayed.map((w) => (
+                    <WaiverCard
+                      key={w.id}
+                      waiver={w}
+                      showLocation={isCompanyAdmin}
+                      cols={cols}
+                      onPress={() => setSelectedId(w.id)}
+                    />
+                  ))
+                )}
 
                 {/* Pagination (bottom, server-side) — same state as the top */}
                 <PaginationControls

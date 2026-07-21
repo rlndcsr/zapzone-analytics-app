@@ -17,7 +17,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { SelectField } from "../../components/ui/FormControls";
 import { Pagination } from "../../components/ui/Pagination";
+import { PaymentsTable } from "../../components/ui/PaymentsTable";
 import { StatTile } from "../../components/ui/StatTile";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { PaymentsListSkeleton } from "../../components/ui/skeleton/PaymentsSkeleton";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
@@ -175,6 +177,9 @@ const Payments = () => {
   const [statusFilter, setStatusFilter] = useState("All");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
+  // Presentation layout only — table by default, card view on toggle. Both read
+  // the same `visible` slice, so switching never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   const [showInvoices, setShowInvoices] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
@@ -416,6 +421,24 @@ const Payments = () => {
                 })}
               </View>
 
+              {/* List header + layout toggle (Table default / Cards) */}
+              <View className="flex-row items-center justify-between gap-2">
+                <View className="flex-row items-center gap-2 shrink">
+                  <Text
+                    numberOfLines={1}
+                    className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                  >
+                    All Payments
+                  </Text>
+                  <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                    <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {filtered.length}
+                    </Text>
+                  </View>
+                </View>
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </View>
+
               {/* Top pagination (above the list) — same state as the bottom pager */}
               <Pagination
                 compact
@@ -429,17 +452,26 @@ const Payments = () => {
                 }}
               />
 
-              {/* List */}
-              {visible.map((p) => (
-                <Pressable
-                  key={p.id}
-                  onPress={() => setSelectedPaymentId(p.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`View payment ${p.reference}`}
-                >
-                  <PaymentCard p={p} />
-                </Pressable>
-              ))}
+              {/* List — table (default) and card layouts render from the same
+                  `visible` slice, so switching is instant and never refetches. */}
+              {visible.length > 0 &&
+                (viewMode === "table" ? (
+                  <PaymentsTable
+                    payments={visible}
+                    onRowPress={(p) => setSelectedPaymentId(p.id)}
+                  />
+                ) : (
+                  visible.map((p) => (
+                    <Pressable
+                      key={p.id}
+                      onPress={() => setSelectedPaymentId(p.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View payment ${p.reference}`}
+                    >
+                      <PaymentCard p={p} />
+                    </Pressable>
+                  ))
+                ))}
 
               {filtered.length === 0 && (
                 <View className="items-center py-10">

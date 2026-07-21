@@ -22,6 +22,8 @@ import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { SpecialPricingTable } from "../../components/ui/SpecialPricingTable";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
   SpecialPricingKpiSkeleton,
   SpecialPricingListSkeleton,
@@ -385,6 +387,9 @@ const Pricing = () => {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
+  // Presentation layout only — table by default, card view on toggle. Both
+  // layouts read the same `paged` slice, so switching never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   // Filters / columns
   const [showFilters, setShowFilters] = useState(false);
@@ -941,20 +946,23 @@ const Pricing = () => {
             </View>
           )}
 
-          {/* List header */}
+          {/* List header + layout toggle (Table default / Cards) */}
           {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4 mt-2">
-              <Text
-                numberOfLines={1}
-                className="shrink text-lg font-bold text-gray-900 dark:text-white"
-              >
-                All Special Pricings
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  {filtered.length}
+            <View className="flex-row items-center justify-between gap-2 mb-4 mt-2">
+              <View className="flex-row items-center gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                >
+                  All Special Pricings
                 </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {filtered.length}
+                  </Text>
+                </View>
               </View>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
             </View>
           )}
 
@@ -978,17 +986,30 @@ const Pricing = () => {
           ) : (
             !error && (
               <>
-                {paged.map((row) => (
-                  <SpecialPricingCard
-                    key={row.id}
-                    row={row}
-                    busy={busyId === row.id}
+                {/* Table (default) and card layouts render from the same
+                    `paged` slice — switching is instant and never refetches. */}
+                {viewMode === "table" ? (
+                  <SpecialPricingTable
+                    rows={paged}
                     cols={cols}
-                    onToggle={() => handleToggle(row)}
-                    onEdit={() => handleEdit(row)}
-                    onDelete={() => handleDelete(row)}
+                    busyId={busyId}
+                    onToggle={handleToggle}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
                   />
-                ))}
+                ) : (
+                  paged.map((row) => (
+                    <SpecialPricingCard
+                      key={row.id}
+                      row={row}
+                      busy={busyId === row.id}
+                      cols={cols}
+                      onToggle={() => handleToggle(row)}
+                      onEdit={() => handleEdit(row)}
+                      onDelete={() => handleDelete(row)}
+                    />
+                  ))
+                )}
 
                 {/* Pagination */}
                 <View className="mt-1 mb-4">

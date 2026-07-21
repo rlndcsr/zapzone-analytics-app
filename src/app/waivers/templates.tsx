@@ -17,6 +17,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { TemplatesTable } from "../../components/ui/TemplatesTable";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
 import {
   consumeTemplatesStale,
@@ -161,6 +163,9 @@ const Templates = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [actionsTemplate, setActionsTemplate] = useState<WaiverTemplate | null>(null);
   const [busy, setBusy] = useState(false);
+  // Presentation layout only — table by default, card view on toggle. Both
+  // layouts read the same `paged` slice, so switching never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
@@ -271,6 +276,17 @@ const Templates = () => {
     );
   };
 
+  // Tapping a template opens the editor when the user can manage it; otherwise
+  // (or in the deleted/trash view) it opens the actions sheet. Shared by both
+  // the card and the table row so tap behaviour stays identical.
+  const openTemplate = (t: WaiverTemplate) => {
+    if (!showDeleted && canManage) {
+      router.push(`/waivers/create-template?id=${t.id}` as never);
+    } else {
+      setActionsTemplate(t);
+    }
+  };
+
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Statuses";
 
@@ -375,15 +391,18 @@ const Templates = () => {
           )}
 
           {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4">
-              <Text className="shrink text-lg font-bold text-gray-900 dark:text-white">
-                {showDeleted ? "Trash" : "All Templates"}
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  {templates.length}
+            <View className="flex-row items-center justify-between gap-2 mb-4">
+              <View className="flex-row items-center gap-2 shrink">
+                <Text className="shrink text-lg font-bold text-gray-900 dark:text-white">
+                  {showDeleted ? "Trash" : "All Templates"}
                 </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {templates.length}
+                  </Text>
+                </View>
               </View>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
             </View>
           )}
 
@@ -408,21 +427,35 @@ const Templates = () => {
           ) : (
             !error && (
               <View>
-                {paged.map((t) => (
-                  <TemplateCard
-                    key={t.id}
-                    template={t}
+                {/* Table (default) and card layouts render from the same
+                    `paged` slice — switching is instant and never refetches. */}
+                {viewMode === "table" ? (
+                  <TemplatesTable
+                    templates={paged}
                     deleted={showDeleted}
-                    onPress={() =>
-                      showDeleted
-                        ? setActionsTemplate(t)
-                        : canManage
-                          ? router.push(`/waivers/create-template?id=${t.id}` as never)
-                          : setActionsTemplate(t)
+                    canManage={canManage}
+                    isCompanyAdmin={isCompanyAdmin}
+                    busy={busy}
+                    onRowPress={openTemplate}
+                    onEdit={(t) =>
+                      router.push(`/waivers/create-template?id=${t.id}` as never)
                     }
-                    onMore={() => setActionsTemplate(t)}
+                    onToggleStatus={onToggleStatus}
+                    onDelete={onDelete}
+                    onRestore={onRestore}
+                    onForceDelete={onForceDelete}
                   />
-                ))}
+                ) : (
+                  paged.map((t) => (
+                    <TemplateCard
+                      key={t.id}
+                      template={t}
+                      deleted={showDeleted}
+                      onPress={() => openTemplate(t)}
+                      onMore={() => setActionsTemplate(t)}
+                    />
+                  ))
+                )}
                 <Pagination
                   page={page}
                   perPage={perPage}

@@ -11,7 +11,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DeletionLogTable } from "../../components/ui/DeletionLogTable";
 import { Pagination } from "../../components/ui/Pagination";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
 import { getToken } from "../../lib/session";
 import {
@@ -119,6 +121,9 @@ const WaiverDeletionLogScreen = () => {
 
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
+  // Presentation layout only — table by default, card view on toggle. Both
+  // layouts read the same `paged` slice, so switching never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   const requestIdRef = useRef(0);
 
@@ -232,15 +237,20 @@ const WaiverDeletionLogScreen = () => {
           )}
 
           {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4">
-              <Text className="shrink text-lg font-bold text-gray-900 dark:text-white">
-                Deletions
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  {logs.length}
+            <View className="flex-row items-center justify-between gap-2 mb-4">
+              <View className="flex-row items-center gap-2 shrink">
+                <Text className="shrink text-lg font-bold text-gray-900 dark:text-white">
+                  Deletions
                 </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {logs.length}
+                  </Text>
+                </View>
               </View>
+              {logs.length > 0 && (
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              )}
             </View>
           )}
 
@@ -261,9 +271,13 @@ const WaiverDeletionLogScreen = () => {
           ) : (
             !error && (
               <>
-                {paged.map((entry) => (
-                  <LogCard key={entry.id} entry={entry} />
-                ))}
+                {/* Table (default) and card layouts render from the same
+                    `paged` slice — switching is instant and never refetches. */}
+                {viewMode === "table" ? (
+                  <DeletionLogTable entries={paged} />
+                ) : (
+                  paged.map((entry) => <LogCard key={entry.id} entry={entry} />)
+                )}
                 <Pagination
                   page={page}
                   perPage={perPage}

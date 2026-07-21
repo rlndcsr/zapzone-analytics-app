@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   RefreshControl,
@@ -13,8 +14,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AddTagSheet } from "../../components/ui/AddTagSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { ContactActionsSheet } from "../../components/ui/ContactActionsSheet";
+import { CustomersTable } from "../../components/ui/CustomersTable";
 import {
   DateRangeSheet,
   formatShortDate,
@@ -24,9 +27,11 @@ import { Pagination } from "../../components/ui/Pagination";
 import { type SheetSelectOption } from "../../components/ui/SheetSelect";
 import { StatTile } from "../../components/ui/StatTile";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  deleteContact,
   fetchAllContacts,
   fetchContactStats,
   fetchContactTags,
@@ -161,6 +166,16 @@ const Customers = () => {
 
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(PAGE_SIZE);
+  // Presentation layout only — table by default, card view on toggle. Both read
+  // the same `visible` slice, so switching never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  // Which row has an inline table delete in flight.
+  const [busyRowId, setBusyRowId] = useState<number | null>(null);
+  // Bulk selection (table view only) + the in-flight bulk delete flag.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // The contact whose Add Tag sheet is open (null = closed).
+  const [addTagContact, setAddTagContact] = useState<ContactRow | null>(null);
 
   // undefined = sheet closed; null = create; row = actions for that contact.
   const [sheetContact, setSheetContact] = useState<ContactRow | null | undefined>(
@@ -303,6 +318,33 @@ const Customers = () => {
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page, perPage],
   );
+
+  // Selection is scoped to what's visible: clear it whenever the visible set
+  // changes (filters / page / page-size) or the layout toggles away, so a bulk
+  // action never touches off-screen rows.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [search, status, tag, source, company, sms, dateStart, dateEnd, sort, page, perPage, viewMode]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Header checkbox — select / deselect every row on the current page.
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const allSelected =
+        visible.length > 0 && visible.every((c) => prev.has(c.id));
+      return allSelected ? new Set() : new Set(visible.map((c) => c.id));
+    });
+  }, [visible]);
   const activeFilterCount =
     (status !== "all" ? 1 : 0) +
     (tag !== "all" ? 1 : 0) +
@@ -322,6 +364,86 @@ const Customers = () => {
   };
 
   const afterMutation = () => load();
+
+  // Inline table delete — confirm, then DELETE and reload (mirrors the web
+  // contacts row trash button). The actions sheet remains the richer path.
+  const handleDelete = useCallback(
+    (c: ContactRow) => {
+      Alert.alert(
+        "Delete customer",
+        `Delete ${c.name}? This can't be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) {
+                Alert.alert("Not signed in", "Please sign in again to delete.");
+                return;
+              }
+              setBusyRowId(c.id);
+              try {
+                await deleteContact(token, c.id);
+                await load();
+              } catch (err) {
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error
+                    ? err.message
+                    : "Could not delete this customer.",
+                );
+              } finally {
+                setBusyRowId(null);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [load],
+  );
+
+  // Bulk delete — confirm, then fan out per-id DELETE calls (no bulk endpoint),
+  // reload and clear the selection. Mirrors the web bulk delete.
+  const confirmBulkDelete = useCallback(() => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    Alert.alert(
+      "Delete customers",
+      `Delete ${ids.length} customer(s)? This can't be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) {
+              Alert.alert("Not signed in", "Please sign in again to delete.");
+              return;
+            }
+            setBulkBusy(true);
+            try {
+              await Promise.all(ids.map((id) => deleteContact(token, id)));
+              setSelectedIds(new Set());
+              await load();
+            } catch (err) {
+              Alert.alert(
+                "Delete failed",
+                err instanceof Error
+                  ? err.message
+                  : "Could not delete the selected customers.",
+              );
+            } finally {
+              setBulkBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [selectedIds, load]);
 
   const showInitialLoader = loading && allRows.length === 0 && !error;
   const showError = !loading && !!error && allRows.length === 0;
@@ -543,26 +665,16 @@ const Customers = () => {
             )}
           </View>
 
-          {/* Count */}
+          {/* Count + layout toggle (Table default / Cards) */}
           {!showInitialLoader && !showError && (
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              Showing {visible.length} of {filtered.length} customers
-            </Text>
-          )}
-
-          {/* Top pagination (below the count) — same state as the bottom pager */}
-          {!showInitialLoader && !showError && (
-            <View className="mt-3">
-              <Pagination
-                compact
-                page={page}
-                perPage={perPage}
-                total={filtered.length}
-                onPageChange={setPage}
-                onPerPageChange={setPerPage}
-              />
+            <View className="flex-row items-center justify-between gap-2">
+              <Text className="shrink text-sm text-gray-500 dark:text-gray-400">
+                Showing {visible.length} of {filtered.length} customers
+              </Text>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
             </View>
           )}
+
 
           {showInitialLoader && <AnalyticsSkeleton tiles={0} panels={4} />}
 
@@ -581,8 +693,91 @@ const Customers = () => {
             </View>
           )}
 
+          {/* List — table (default) and card layouts render from the same
+              `visible` slice, so switching is instant and never refetches. */}
+          {!showInitialLoader && !showError && viewMode === "table" && (
+            <View className="gap-3">
+              {/* Bulk-action bar — shown while a selection exists. */}
+              {selectedIds.size > 0 && (
+                <View className="rounded-2xl border border-[#0644C7]/30 bg-blue-50 dark:bg-blue-900/20 p-3 flex-row items-center justify-between">
+                  <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                    {selectedIds.size} selected
+                  </Text>
+                  <View className="flex-row items-center gap-2">
+                    <Pressable
+                      onPress={confirmBulkDelete}
+                      disabled={bulkBusy}
+                      className={`flex-row items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 bg-white dark:bg-neutral-900 active:opacity-70 ${
+                        bulkBusy ? "opacity-50" : ""
+                      }`}
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete selected customers"
+                    >
+                      {bulkBusy ? (
+                        <ActivityIndicator size="small" color="#DC2626" />
+                      ) : (
+                        <Feather name="trash-2" size={15} color="#DC2626" />
+                      )}
+                      <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
+                        Delete
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={clearSelection}
+                      disabled={bulkBusy}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear selection"
+                      className="flex-row items-center gap-1 active:opacity-70"
+                    >
+                      <Feather name="x" size={14} color="#6B7280" />
+                      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        Clear
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {visible.length > 0 && (
+                <CustomersTable
+                  contacts={visible}
+                  busyId={busyRowId}
+                  selectedIds={selectedIds}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAllVisible}
+                  onRowPress={(c) => setSheetContact(c)}
+                  onView={(c) => setSheetContact(c)}
+                  onDelete={handleDelete}
+                  onAddTag={(c) => setAddTagContact(c)}
+                />
+              )}
+
+              {/* Empty */}
+              {filtered.length === 0 && (
+                <View className="items-center py-12">
+                  <Feather name="users" size={40} color="#D1D5DB" />
+                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
+                    {search || activeFilterCount > 0
+                      ? "No customers match your filters"
+                      : "No customers yet"}
+                  </Text>
+                </View>
+              )}
+
+              {/* Pagination */}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
+            </View>
+          )}
+
           {/* Cards */}
-          {!showInitialLoader && !showError && (
+          {!showInitialLoader && !showError && viewMode === "cards" && (
             <View className="gap-3">
               {visible.map((c) => (
                 <Pressable
@@ -692,6 +887,14 @@ const Customers = () => {
         locationId={user?.location_id ?? null}
         onClose={() => setSheetContact(undefined)}
         onChanged={afterMutation}
+      />
+
+      {/* Add Tag — opened from the Tags cell's square "+" button. */}
+      <AddTagSheet
+        contact={addTagContact}
+        allTags={tagChoices}
+        onClose={() => setAddTagContact(null)}
+        onAdded={load}
       />
 
       <DateRangeSheet
