@@ -356,6 +356,23 @@ export async function deleteAttractionPurchase(
   });
 }
 
+/**
+ * PUT /api/attraction-purchases/{id} — update a purchase's status. Mirrors the
+ * web `updatePurchase(id, { status })` the Manage Purchases bulk bar loops over
+ * (there is no bulk-status endpoint; the caller fans out per id, like the web).
+ */
+export async function updateAttractionPurchaseStatus(
+  token: string,
+  id: number,
+  status: PurchaseStatus,
+): Promise<void> {
+  await apiRequest(`/api/attraction-purchases/${id}`, {
+    method: "PUT",
+    token,
+    body: { status },
+  });
+}
+
 /** Envelope for a single-purchase response (verify / check-in). */
 type SinglePurchaseResponse = {
   success: boolean;
