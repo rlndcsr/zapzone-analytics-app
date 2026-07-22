@@ -887,8 +887,9 @@ const ManagePurchases = () => {
             </Pressable>
           </View>
 
-          {/* List header + layout toggle (Table default / Cards) */}
-          {!listLoading && !listError && (
+          {/* List header + layout toggle — stays visible during loading; only
+              the records below skeletonize. */}
+          {!listError && (
             <View className="flex-row items-center gap-2 mb-4 flex-wrap pt-4">
               <Text
                 className="shrink text-lg font-bold text-gray-900 dark:text-white"
@@ -925,7 +926,7 @@ const ManagePurchases = () => {
 
           {/* List / states */}
           {listLoading ? (
-            <PurchasesListSkeleton />
+            <PurchasesListSkeleton view={showDeleted ? "cards" : viewMode} />
           ) : !listError && !hasResults ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">

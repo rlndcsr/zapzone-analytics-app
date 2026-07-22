@@ -370,6 +370,22 @@ export async function fetchEventPurchaseDetail(
 }
 
 /**
+ * PATCH /api/event-purchases/{id}/status — update a purchase's status. Mirrors
+ * the web `updateStatus` the bulk bar loops over (no bulk-status endpoint).
+ */
+export async function updateEventPurchaseStatus(
+  token: string,
+  id: number,
+  status: EventPurchaseStatus,
+): Promise<void> {
+  await apiRequest(`/api/event-purchases/${id}/status`, {
+    method: "PATCH",
+    token,
+    body: { status },
+  });
+}
+
+/**
  * DELETE /api/event-purchases/{id} — soft-delete a purchase. Same endpoint the
  * web Event Purchases uses (`deletePurchase`); no dedicated mobile route.
  */

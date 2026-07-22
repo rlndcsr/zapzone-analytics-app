@@ -152,6 +152,7 @@ type Props = {
   /** Event names for the Event dropdown (derived from loaded data). */
   events: string[];
   onChange: (next: EventPurchaseFilterValues) => void;
+  onApply: () => void;
   onClear: () => void;
   onClose: () => void;
   onOpenDateRange: (target: EventPurchaseDateTarget) => void;
@@ -162,6 +163,7 @@ export function EventPurchaseFiltersSheet({
   values,
   events,
   onChange,
+  onApply,
   onClear,
   onClose,
   onOpenDateRange,
@@ -278,21 +280,37 @@ export function EventPurchaseFiltersSheet({
             )}
           </View>
 
-          {/* Footer: Clear Filters (secondary) + Done (primary) */}
-          <View className="flex-row gap-3 mt-2">
+          {/* Footer: Clear All + Cancel (secondary), Apply (primary) */}
+          <View className="gap-3 mt-2">
+            <View className="flex-row gap-3">
+              <Pressable
+                onPress={onClear}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
+                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              >
+                <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
+                  Clear All
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              >
+                <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
+                  Cancel
+                </Text>
+              </Pressable>
+            </View>
             <Pressable
-              onPress={onClear}
-              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              onPress={onApply}
+              accessibilityRole="button"
+              accessibilityLabel="Apply filters"
+              className="h-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
             >
-              <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
-                Clear Filters
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={onClose}
-              className="flex-1 h-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-            >
-              <Text className="text-base font-semibold text-white">Done</Text>
+              <Text className="text-base font-semibold text-white">Apply</Text>
             </Pressable>
           </View>
         </View>
