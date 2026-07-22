@@ -1400,6 +1400,7 @@ export type BookablePackage = {
 type RawPackage = {
   id: number;
   name?: string | null;
+  description?: string | null;
   category?: string | null;
   is_active?: boolean | number | null;
   price?: number | string | null;
@@ -1479,6 +1480,7 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
 export type PackageListItem = {
   id: number;
   name: string;
+  description: string;
   category: string;
   price: number;
   duration: number;
@@ -1493,6 +1495,7 @@ function mapPackageListItem(raw: RawPackage): PackageListItem {
   return {
     id: raw.id,
     name: raw.name?.trim() || `Package #${raw.id}`,
+    description: raw.description?.trim() || "",
     category: raw.category?.trim() || "",
     price: Number(raw.price ?? 0),
     duration: Number(raw.duration ?? 0),
@@ -1591,8 +1594,13 @@ export type CreateBookingInput = {
   total_amount: number;
   amount_paid: number;
   payment_method: "in-store" | "paylater";
-  status?: "confirmed";
+  status?: BookingStatus;
   payment_status?: "paid" | "partial" | "pending";
+  /** Manual-booking flags (mirrors the web ManualBooking payload). The backend
+   *  ignores unknown keys, but sending them keeps the mobile request identical
+   *  to the web admin's and forward-compatible if the API starts honoring them. */
+  is_manual_entry?: boolean;
+  skip_date_validation?: boolean;
   notes?: string;
   internal_notes?: string;
   additional_attractions?: BookingAttractionInput[];

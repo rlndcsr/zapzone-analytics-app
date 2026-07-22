@@ -26,10 +26,16 @@ import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
-import { consumePackagesStale, usePackages } from "../../lib/hooks/usePackages";
+import {
+  consumePackagesStale,
+  markPackagesStale,
+  usePackages,
+} from "../../lib/hooks/usePackages";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  bulkImportPackages,
+  deletePackage,
   togglePackageStatus,
   type PackageRow,
 } from "../../services/packagesService";
@@ -116,16 +122,10 @@ const Packages = () => {
   // Package whose per-card actions sheet (View / Edit / Duplicate / Delete) is open.
   const [actionsPkg, setActionsPkg] = useState<PackageRow | null>(null);
 
-  // Mirrors the web "More" action menu; these management actions arrive in a
-  // future release, so they're shown but not yet actionable.
-  const moreActions: { label: string; icon: ComponentIconName }[] = [
-    { label: "Fee Supports", icon: "dollar-sign" },
-    { label: "Special Pricing", icon: "percent" },
-    { label: "Global Notes", icon: "file-text" },
-    { label: "Import Packages", icon: "upload" },
-    { label: "Export Packages", icon: "download" },
-    { label: "Delete Packages", icon: "trash-2" },
-  ];
+  // In-flight "More" management action (spinner + lock in the sheet).
+  const [busyAction, setBusyAction] = useState<
+    null | "import" | "export" | "delete"
+  >(null);
 
   // Filter options derived from the fetched data.
   const categoryOptions = useMemo(
@@ -244,6 +244,222 @@ const Packages = () => {
     await refetch();
     setRefreshing(false);
   };
+
+  // Ids of the currently checked cards (for bulk delete).
+  const selectedIds = useMemo(
+    () => Object.keys(selected).filter((k) => selected[Number(k)]).map(Number),
+    [selected],
+  );
+
+  // The location new/imported packages belong to — the active workspace
+  // location, else the manager's own location.
+  const importLocationId =
+    typeof activeLocation.id === "number"
+      ? activeLocation.id
+      : (getCurrentUser()?.location_id ?? null);
+
+  // ---- Import Packages (JSON, mirrors the web bulk-import) ----------------
+  const runImport = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not authenticated", "Please sign in again.");
+      return;
+    }
+    try {
+      const DocumentPicker = await import("expo-document-picker");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["application/json", "text/plain"],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset) return;
+      const text = await (await fetch(asset.uri)).text();
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        Alert.alert("Invalid JSON", "The selected file isn't valid JSON.");
+        return;
+      }
+      const arr = Array.isArray(parsed)
+        ? parsed
+        : parsed &&
+            typeof parsed === "object" &&
+            Array.isArray((parsed as { packages?: unknown }).packages)
+          ? (parsed as { packages: unknown[] }).packages
+          : null;
+      if (!arr || arr.length === 0) {
+        Alert.alert("Nothing to import", "Expected a JSON array of packages.");
+        return;
+      }
+      if (importLocationId == null) {
+        Alert.alert(
+          "Select a location",
+          "Switch the workspace to a specific location before importing.",
+        );
+        return;
+      }
+
+      setBusyAction("import");
+      const res = await bulkImportPackages(
+        token,
+        arr as Record<string, unknown>[],
+        importLocationId,
+      );
+      markPackagesStale();
+      await refetch();
+      setShowMoreSheet(false);
+      Alert.alert(
+        "Import complete",
+        `Imported ${res.imported} package(s)${
+          res.failed ? `, ${res.failed} failed` : ""
+        }.`,
+      );
+    } catch (err) {
+      Alert.alert(
+        "Import failed",
+        err instanceof Error ? err.message : "Could not import packages.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }, [importLocationId, refetch]);
+
+  // ---- Export Packages (client-side JSON, mirrors the web) ----------------
+  const runExport = useCallback(async () => {
+    if (filtered.length === 0) {
+      Alert.alert("Nothing to export", "There are no packages to export.");
+      return;
+    }
+    setBusyAction("export");
+    try {
+      const rows = filtered.map((p) => ({
+        name: p.name,
+        description: p.description,
+        category: p.category,
+        price: p.price,
+        max_participants: p.capacity,
+        min_booking_notice_hours: p.bufferHours,
+        is_active: p.status === "active",
+        display_order: p.displayOrder,
+      }));
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const stamp = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}zapzone-packages-${stamp}.json`;
+      await FileSystem.writeAsStringAsync(uri, JSON.stringify(rows, null, 2));
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "application/json",
+          dialogTitle: "Export Packages",
+          UTI: "public.json",
+        });
+      } else {
+        Alert.alert("Export ready", `Saved to ${uri}`);
+      }
+      setShowMoreSheet(false);
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export packages.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }, [filtered]);
+
+  // ---- Delete selected packages (no bulk endpoint → per-id soft delete) ---
+  const runDeleteSelected = useCallback(() => {
+    if (selectedIds.length === 0) {
+      Alert.alert(
+        "No packages selected",
+        "Select one or more packages first, then choose Delete Packages.",
+      );
+      return;
+    }
+    Alert.alert(
+      "Delete packages",
+      `Delete ${selectedIds.length} selected package(s)? They can be restored from the web trash.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) return;
+            setBusyAction("delete");
+            try {
+              for (const id of selectedIds) await deletePackage(token, id);
+              setSelected({});
+              markPackagesStale();
+              await refetch();
+              setShowMoreSheet(false);
+              Alert.alert("Deleted", `${selectedIds.length} package(s) deleted.`);
+            } catch (err) {
+              Alert.alert(
+                "Delete failed",
+                err instanceof Error
+                  ? err.message
+                  : "Could not delete the selected packages.",
+              );
+            } finally {
+              setBusyAction(null);
+            }
+          },
+        },
+      ],
+    );
+  }, [selectedIds, refetch]);
+
+  // "More" management actions (mirrors the web action menu). Fee Supports /
+  // Special Pricing / Global Notes navigate to their screens; the rest run
+  // inline.
+  const moreActions: {
+    label: string;
+    icon: ComponentIconName;
+    onPress: () => void;
+    busyKey?: "import" | "export" | "delete";
+    danger?: boolean;
+    badge?: string;
+  }[] = [
+    {
+      label: "Fee Supports",
+      icon: "dollar-sign",
+      onPress: () => {
+        setShowMoreSheet(false);
+        router.push("/pricing/fee-support");
+      },
+    },
+    {
+      label: "Special Pricing",
+      icon: "percent",
+      onPress: () => {
+        setShowMoreSheet(false);
+        router.push("/pricing/pricing");
+      },
+    },
+    {
+      label: "Global Notes",
+      icon: "file-text",
+      onPress: () => {
+        setShowMoreSheet(false);
+        router.push("/packages/global-notes");
+      },
+    },
+    { label: "Import Packages", icon: "upload", onPress: runImport, busyKey: "import" },
+    { label: "Export Packages", icon: "download", onPress: runExport, busyKey: "export" },
+    {
+      label: "Delete Packages",
+      icon: "trash-2",
+      onPress: runDeleteSelected,
+      busyKey: "delete",
+      danger: true,
+      badge: selectedIds.length > 0 ? String(selectedIds.length) : undefined,
+    },
+  ];
 
   const showInitialLoader = loading && packages.length === 0;
   const showError = !loading && !!error && packages.length === 0;
@@ -505,17 +721,7 @@ const Packages = () => {
             Showing {filtered.length} packages
           </Text>
 
-          {/* Top pagination (below the count) — same state as the bottom pager */}
-          <View className="mt-3">
-            <Pagination
-              compact
-              page={page}
-              perPage={perPage}
-              total={filtered.length}
-              onPageChange={setPage}
-              onPerPageChange={setPerPage}
-            />
-          </View>
+          
 
           {/* Select all */}
           <Pressable
@@ -740,26 +946,57 @@ const Packages = () => {
         title="More"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {moreActions.map((action) => (
-            <View
-              key={action.label}
-              className="flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 opacity-60"
-            >
-              <View className="flex-row items-center gap-3 flex-1 mr-2">
-                <Feather name={action.icon} size={18} color="#6B7280" />
-                <Text className="text-base font-medium text-gray-700 dark:text-gray-200">
-                  {action.label}
-                </Text>
-              </View>
-              <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-                  Soon
-                </Text>
-              </View>
-            </View>
-          ))}
+          {moreActions.map((action) => {
+            const busy = action.busyKey != null && busyAction === action.busyKey;
+            const locked = busyAction !== null;
+            return (
+              <Pressable
+                key={action.label}
+                onPress={action.onPress}
+                disabled={locked}
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  action.danger
+                    ? "active:bg-red-50 dark:active:bg-red-900/20"
+                    : "active:bg-gray-50 dark:active:bg-neutral-800"
+                } ${locked && !busy ? "opacity-40" : ""}`}
+              >
+                <View className="flex-row items-center gap-3 flex-1 mr-2">
+                  {busy ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={action.danger ? "#EF4444" : PRIMARY}
+                    />
+                  ) : (
+                    <Feather
+                      name={action.icon}
+                      size={18}
+                      color={action.danger ? "#EF4444" : "#6B7280"}
+                    />
+                  )}
+                  <Text
+                    className={`text-base font-medium ${
+                      action.danger
+                        ? "text-red-600"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {action.label}
+                  </Text>
+                </View>
+                {action.badge ? (
+                  <View className="bg-[#0644C7] rounded-full min-w-5 h-5 px-1.5 items-center justify-center">
+                    <Text className="text-[11px] font-bold text-white">
+                      {action.badge}
+                    </Text>
+                  </View>
+                ) : (
+                  <Feather name="chevron-right" size={16} color="#9CA3AF" />
+                )}
+              </Pressable>
+            );
+          })}
           <Text className="text-xs text-gray-400 dark:text-gray-500 px-4 mt-2">
-            Management actions arrive in a future update.
+            Delete Packages removes the packages you&apos;ve selected on the list.
           </Text>
         </ScrollView>
       </BottomSheet>

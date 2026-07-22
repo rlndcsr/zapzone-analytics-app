@@ -844,9 +844,22 @@ const Bookings = () => {
             </Pressable>
           </View>
 
-          {/* Secondary "More" + primary "Create New Booking" on one row, equal
-              width. "More" stays outlined/secondary; "Create New Booking" is
-              the primary filled CTA. */}
+          {/* Manual Booking — a single-page manual entry flow (mirrors the web
+              admin's Manual Booking) with Standard (availability-validated) and
+              Flexible (past dates allowed) modes. */}
+          <Pressable
+            onPress={() => router.push("/bookings/manual-booking")}
+            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-3"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Manual Booking
+            </Text>
+          </Pressable>
+
+          {/* Secondary "More" + "New Booking" (the step-by-step wizard) on one
+              row, equal width. "More" stays outlined/secondary; "New Booking"
+              is an outlined-primary CTA so the filled Manual Booking above leads. */}
           <View className="flex-row items-center gap-3 mb-5">
             <Pressable
               onPress={() => setMoreOpen(true)}
@@ -859,10 +872,10 @@ const Bookings = () => {
             </Pressable>
             <Pressable
               onPress={() => router.push("/bookings/create-booking")}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-[#0644C7] bg-white dark:bg-neutral-900 active:opacity-70"
             >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text className="text-sm font-semibold text-white">
+              <Feather name="plus" size={16} color={PRIMARY} />
+              <Text className="text-sm font-semibold text-[#0644C7]">
                 New Booking
               </Text>
             </Pressable>
@@ -982,17 +995,7 @@ const Bookings = () => {
                   {filtered.length}
                 </Text>
               </View>
-              {hasResults && (
-                <PaginationControls
-                  compact
-                  page={page}
-                  lastPage={lastPage}
-                  perPage={perPage}
-                  perPageOptions={PER_PAGE_OPTIONS}
-                  onPageChange={setPage}
-                  onPerPageChange={setPerPage}
-                />
-              )}
+              
               {/* Layout toggle (Table default / Cards) — active list only. */}
               {!showDeleted && (
                 <View className="ml-auto">

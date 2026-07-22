@@ -445,6 +445,75 @@ export async function deletePackage(token: string, id: number): Promise<void> {
   await apiRequest(`/api/packages/${id}`, { method: "DELETE", token });
 }
 
+/**
+ * POST /api/packages/reorder — persist a new display order in one bulk request,
+ * mirroring the web admin's drag-and-drop reorder (`reorderPackages`). Each item
+ * carries its 0-based `display_order`.
+ */
+export async function reorderPackages(
+  token: string,
+  items: { id: number; display_order: number }[],
+): Promise<void> {
+  await apiRequest("/api/packages/reorder", {
+    method: "POST",
+    token,
+    body: { items },
+  });
+}
+
+/** Result of a bulk import (mirrors the web `bulkImport` response). */
+export type BulkImportResult = {
+  imported: number;
+  failed: number;
+  errors: string[];
+};
+
+/**
+ * POST /api/packages/bulk-import — import packages from a parsed JSON array
+ * (matches the web admin's Import Packages; the backend expects JSON, not CSV).
+ * Each entry is forced to `locationId` when provided (the backend also pins
+ * non-admins to their own location). `id`/timestamps/location fields from an
+ * exported file are stripped so the payload is a clean create set.
+ */
+export async function bulkImportPackages(
+  token: string,
+  rawPackages: Record<string, unknown>[],
+  locationId?: number | null,
+): Promise<BulkImportResult> {
+  const packages = rawPackages.map((p) => {
+    const {
+      id: _id,
+      created_at: _c,
+      updated_at: _u,
+      location: _loc,
+      location_id: _lid,
+      ...rest
+    } = p as Record<string, unknown>;
+    return locationId != null ? { ...rest, location_id: locationId } : rest;
+  });
+
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: { imported_count?: number; failed_count?: number };
+    errors?: unknown[];
+    message?: string;
+  }>("/api/packages/bulk-import", {
+    method: "POST",
+    token,
+    body: { packages },
+  });
+
+  return {
+    imported: Number(res?.data?.imported_count ?? 0),
+    failed: Number(res?.data?.failed_count ?? 0),
+    errors: Array.isArray(res?.errors)
+      ? res.errors.map((e) =>
+          typeof e === "string" ? e : JSON.stringify(e),
+        )
+      : [],
+  };
+}
+
 /** Fields the mobile Create form supplies. `locationId` is required by the store
  *  endpoint (the backend forces it to the user's own location for non-admins).
  *  Relations are id arrays; `addOnsOrder` is add-on NAMES in display order (the

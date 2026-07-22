@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AccountsTable } from "../../components/ui/AccountsTable";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import {
   DateRangeSheet,
@@ -30,6 +31,7 @@ import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
   consumeStaffStale,
   markStaffStale,
@@ -441,6 +443,53 @@ const FilterChip = ({
   </Pressable>
 );
 
+/** A single chip in the table's bulk-action toolbar (Activate / Deactivate /
+ *  Delete). Mirrors the bookings bulk bar's chip look. */
+const BulkChip = ({
+  label,
+  icon,
+  tint,
+  loading,
+  disabled,
+  danger = false,
+  onPress,
+}: {
+  label: string;
+  icon: React.ComponentProps<typeof Feather>["name"];
+  tint: string;
+  loading: boolean;
+  disabled: boolean;
+  danger?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    disabled={disabled}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className={`flex-row items-center gap-1.5 px-3 py-2 rounded-xl border bg-white dark:bg-neutral-900 active:opacity-70 ${
+      danger
+        ? "border-red-200 dark:border-red-900/50"
+        : "border-gray-200 dark:border-neutral-700"
+    } ${disabled ? "opacity-50" : ""}`}
+  >
+    {loading ? (
+      <ActivityIndicator size="small" color={tint} />
+    ) : (
+      <Feather name={icon} size={14} color={tint} />
+    )}
+    <Text
+      className={`text-xs font-semibold ${
+        danger
+          ? "text-red-600 dark:text-red-400"
+          : "text-gray-700 dark:text-gray-200"
+      }`}
+    >
+      {label}
+    </Text>
+  </Pressable>
+);
+
 /* ------------------------------------------------------------------ screen -- */
 
 type FormState = {
@@ -512,6 +561,15 @@ const ManageAccounts = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
 
+  // Presentation layout for the accounts list — table by default (grid/card view
+  // via the toggle), mirroring the web admin's Manage Accounts table.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  // Bulk-selection (table view). The parent owns the selected id set.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<"active" | "inactive" | "delete" | null>(
+    null,
+  );
+
   const [sheet, setSheet] = useState<
     | null
     | "status"
@@ -526,6 +584,7 @@ const ManageAccounts = () => {
     | "view"
     | "form"
     | "invite"
+    | "statusPicker"
   >(null);
   const [selected, setSelected] = useState<StaffUser | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
@@ -908,12 +967,36 @@ const ManageAccounts = () => {
     }
   }, [selected, afterMutation]);
 
-  const runResend = useCallback(async () => {
-    if (!selected) return;
+  // Set a specific account to a target status (used by the table's inline
+  // Status dropdown). toggleStaffStatus flips, so only call it when different.
+  const setStatusFor = useCallback(
+    async (user: StaffUser, target: StaffStatus) => {
+      if (user.status === target) {
+        setSheet(null);
+        return;
+      }
+      setActionBusy(true);
+      try {
+        await toggleStaffStatus(getToken() ?? "", user.id);
+        setSheet(null);
+        afterMutation();
+      } catch (err) {
+        Alert.alert(
+          "Update failed",
+          err instanceof Error ? err.message : "Could not update this account.",
+        );
+      } finally {
+        setActionBusy(false);
+      }
+    },
+    [afterMutation],
+  );
+
+  const runResendFor = useCallback(async (user: StaffUser) => {
     setActionBusy(true);
     try {
-      await resendStaffCredentials(getToken() ?? "", selected.id);
-      Alert.alert("Credentials sent", `A new password was emailed to ${selected.email}.`);
+      await resendStaffCredentials(getToken() ?? "", user.id);
+      Alert.alert("Credentials sent", `A new password was emailed to ${user.email}.`);
       setSheet(null);
       setSelected(null);
     } catch (err) {
@@ -924,38 +1007,134 @@ const ManageAccounts = () => {
     } finally {
       setActionBusy(false);
     }
-  }, [selected]);
+  }, []);
 
-  const confirmDelete = useCallback(() => {
-    if (!selected) return;
-    const target = selected;
+  const confirmDeleteFor = useCallback(
+    (user: StaffUser) => {
+      Alert.alert(
+        "Delete account",
+        `Permanently delete ${user.name}'s account? This cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              setActionBusy(true);
+              try {
+                await deleteStaffUser(getToken() ?? "", user.id);
+                setSheet(null);
+                afterMutation();
+              } catch (err) {
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error ? err.message : "Could not delete this account.",
+                );
+              } finally {
+                setActionBusy(false);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [afterMutation],
+  );
+
+  /* ---- selection + bulk actions (table view) ---- */
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Header checkbox — select / deselect every account on the current page.
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const all = paged.length > 0 && paged.every((u) => prev.has(u.id));
+      return all ? new Set() : new Set(paged.map((u) => u.id));
+    });
+  }, [paged]);
+
+  // Selection is scoped to the visible page: clear it whenever the visible set
+  // changes or we leave the table, so a bulk action never touches off-screen rows.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [
+    debouncedSearch,
+    statusFilter,
+    userTypeFilter,
+    departmentFilter,
+    locationFilter,
+    lastLoginFilter,
+    createdFrom,
+    createdTo,
+    hireFrom,
+    hireTo,
+    page,
+    perPage,
+    viewMode,
+  ]);
+
+  // Bulk-set status / delete for the selected accounts. There's no bulk users
+  // endpoint, so — like the bookings bulk bar — this fans out per-id requests,
+  // skipping the current user and (for a status change) rows already in the
+  // target state.
+  const runBulk = useCallback(
+    async (target: "active" | "inactive" | "delete") => {
+      const token = getToken();
+      if (!token || selectedIds.size === 0) return;
+      const chosen = accounts.filter(
+        (a) => selectedIds.has(a.id) && a.id !== currentUser?.id,
+      );
+      if (chosen.length === 0) {
+        clearSelection();
+        return;
+      }
+      setBulkBusy(target);
+      try {
+        if (target === "delete") {
+          for (const u of chosen) await deleteStaffUser(token, u.id);
+        } else {
+          for (const u of chosen)
+            if (u.status !== target) await toggleStaffStatus(token, u.id);
+        }
+        clearSelection();
+        afterMutation();
+      } catch (err) {
+        Alert.alert(
+          "Bulk action failed",
+          err instanceof Error ? err.message : "Could not update the selection.",
+        );
+      } finally {
+        setBulkBusy(null);
+      }
+    },
+    [selectedIds, accounts, currentUser?.id, clearSelection, afterMutation],
+  );
+
+  const confirmBulkDelete = useCallback(() => {
+    const count = selectedIds.size;
+    if (count === 0) return;
     Alert.alert(
-      "Delete account",
-      `Permanently delete ${target.name}'s account? This cannot be undone.`,
+      "Delete accounts",
+      `Permanently delete ${count} account(s)? This cannot be undone.`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
-          onPress: async () => {
-            setActionBusy(true);
-            try {
-              await deleteStaffUser(getToken() ?? "", target.id);
-              setSheet(null);
-              afterMutation();
-            } catch (err) {
-              Alert.alert(
-                "Delete failed",
-                err instanceof Error ? err.message : "Could not delete this account.",
-              );
-            } finally {
-              setActionBusy(false);
-            }
-          },
+          onPress: () => runBulk("delete"),
         },
       ],
     );
-  }, [selected, afterMutation]);
+  }, [selectedIds, runBulk]);
 
   /* ---- invite ---- */
 
@@ -1322,20 +1501,67 @@ const ManageAccounts = () => {
                     {total}
                   </Text>
                 </View>
-              </View>
-              {paged.length > 0 && (
-                <View className="mt-3">
-                  <Pagination
-                    compact
-                    page={page}
-                    perPage={perPage}
-                    total={total}
-                    options={PER_PAGE_OPTIONS}
-                    onPageChange={setPage}
-                    onPerPageChange={setPerPage}
-                  />
+                {/* Layout toggle (Table default / Cards grid). */}
+                <View className="ml-auto">
+                  <ViewToggle mode={viewMode} onChange={setViewMode} />
                 </View>
-              )}
+              </View>
+              
+            </View>
+          )}
+
+          {/* Bulk-action toolbar — table view, shown while a selection exists. */}
+          {viewMode === "table" && selectedIds.size > 0 && (
+            <View className="rounded-2xl border border-[#0644C7]/30 bg-blue-50 dark:bg-blue-900/20 p-3 mb-4">
+              <View className="flex-row items-center justify-between mb-3">
+                <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                  {selectedIds.size} selected
+                </Text>
+                <Pressable
+                  onPress={clearSelection}
+                  disabled={bulkBusy !== null}
+                  hitSlop={8}
+                  className="flex-row items-center gap-1 active:opacity-70"
+                >
+                  <Feather name="x" size={14} color="#6B7280" />
+                  <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Clear
+                  </Text>
+                </Pressable>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8 }}
+              >
+                <BulkChip
+                  label="Activate"
+                  icon="user-check"
+                  tint="#16A34A"
+                  loading={bulkBusy === "active"}
+                  disabled={bulkBusy !== null}
+                  onPress={() => runBulk("active")}
+                />
+                <BulkChip
+                  label="Deactivate"
+                  icon="user-x"
+                  tint="#B45309"
+                  loading={bulkBusy === "inactive"}
+                  disabled={bulkBusy !== null}
+                  onPress={() => runBulk("inactive")}
+                />
+                {isCompanyAdmin && (
+                  <BulkChip
+                    label="Delete"
+                    icon="trash-2"
+                    tint="#DC2626"
+                    danger
+                    loading={bulkBusy === "delete"}
+                    disabled={bulkBusy !== null}
+                    onPress={confirmBulkDelete}
+                  />
+                )}
+              </ScrollView>
             </View>
           )}
 
@@ -1361,16 +1587,43 @@ const ManageAccounts = () => {
           ) : (
             !error && (
               <>
-                {paged.map((u) => (
-                  <AccountCard
-                    key={u.id}
-                    user={u}
-                    onPress={() => {
+                {viewMode === "table" ? (
+                  <AccountsTable
+                    accounts={paged}
+                    selectedIds={selectedIds}
+                    onToggleRow={toggleRow}
+                    onToggleAll={toggleAllVisible}
+                    onRowPress={(u) => {
                       setSelected(u);
                       setSheet("actions");
                     }}
+                    currentUserId={currentUser?.id}
+                    canManage={canManage}
+                    isCompanyAdmin={isCompanyAdmin}
+                    onView={(u) => {
+                      setSelected(u);
+                      setSheet("view");
+                    }}
+                    onEdit={openEdit}
+                    onStatusPress={(u) => {
+                      setSelected(u);
+                      setSheet("statusPicker");
+                    }}
+                    onResend={runResendFor}
+                    onDelete={confirmDeleteFor}
                   />
-                ))}
+                ) : (
+                  paged.map((u) => (
+                    <AccountCard
+                      key={u.id}
+                      user={u}
+                      onPress={() => {
+                        setSelected(u);
+                        setSheet("actions");
+                      }}
+                    />
+                  ))
+                )}
 
                 <Pagination
                   page={page}
@@ -1597,7 +1850,7 @@ const ManageAccounts = () => {
 
                   {isCompanyAdmin && (
                     <Pressable
-                      onPress={runResend}
+                      onPress={() => selected && runResendFor(selected)}
                       className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
                     >
                       <Feather name="key" size={18} color={PRIMARY} />
@@ -1609,7 +1862,7 @@ const ManageAccounts = () => {
 
                   {isCompanyAdmin && (
                     <Pressable
-                      onPress={confirmDelete}
+                      onPress={() => selected && confirmDeleteFor(selected)}
                       className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-red-50 dark:active:bg-red-900/20"
                     >
                       <Feather name="trash-2" size={18} color="#EF4444" />
@@ -1625,6 +1878,49 @@ const ManageAccounts = () => {
                 </Text>
               ) : null}
             </>
+          )}
+        </View>
+      </BottomSheet>
+
+      {/* Status picker (table inline dropdown) */}
+      <BottomSheet
+        visible={sheet === "statusPicker"}
+        onClose={() => (actionBusy ? undefined : setSheet(null))}
+        title="Set Status"
+      >
+        <View className="px-4 pb-8">
+          {actionBusy ? (
+            <View className="py-6 items-center">
+              <ActivityIndicator color={PRIMARY} />
+            </View>
+          ) : (
+            (["active", "inactive"] as StaffStatus[]).map((option) => {
+              const isSelected = selected?.status === option;
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() => selected && setStatusFor(selected, option)}
+                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  }`}
+                >
+                  <Text
+                    className={`text-base font-medium capitalize ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {option}
+                  </Text>
+                  {isSelected && (
+                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                      <Feather name="check" size={14} color="#FFFFFF" />
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })
           )}
         </View>
       </BottomSheet>
