@@ -1,4 +1,8 @@
-import { handleUnauthorized, touchSession } from "./session";
+import {
+  handleUnauthorized,
+  isSessionInvalidated,
+  touchSession,
+} from "./session";
 
 const API_BASE_URL = (() => {
   const url = process.env.EXPO_PUBLIC_API_URL;
@@ -56,6 +60,12 @@ export class ApiError extends Error {
 /** Default request timeout — fail fast instead of hanging indefinitely. */
 export const DEFAULT_TIMEOUT_MS = 15000;
 
+/** A promise that never settles: a 401'd request resolves to this so no caller's
+ *  `catch` runs (no error banner/toast) — the AuthGuard handles the redirect. */
+function neverSettles<T>(): Promise<T> {
+  return new Promise<T>(() => {});
+}
+
 type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
@@ -79,6 +89,12 @@ export async function apiRequest<T>(
     timeoutMs = DEFAULT_TIMEOUT_MS,
   }: RequestOptions = {},
 ): Promise<T> {
+  // After a 401 teardown, silently drop pending/new authenticated requests.
+  // Login (no token) is never blocked, so re-authentication still works.
+  if (token && isSessionInvalidated()) {
+    return neverSettles<T>();
+  }
+
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -115,10 +131,11 @@ export async function apiRequest<T>(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    // A 401 means the session is no longer valid — clear it globally so the
-    // auth guard redirects to Login (401 only; 403 is a role-permission denial).
+    // 401 → tear down once (idempotent) and swallow silently, so parallel 401s
+    // cause no banners and one logout. 403 (role denial) still surfaces below.
     if (response.status === 401) {
       handleUnauthorized();
+      return neverSettles<T>();
     }
     const message =
       typeof data?.message === "string"

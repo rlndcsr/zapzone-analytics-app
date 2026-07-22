@@ -24,6 +24,10 @@ let lastExpiryPersistAt = 0;
 type SessionEndReason = "expired" | "unauthorized" | null;
 let endReason: SessionEndReason = null;
 
+// Single-logout latch: the first involuntary failure (401/timeout) flips it so
+// one teardown runs for many parallel failures. Reset only on a fresh session.
+let sessionInvalidated = false;
+
 // Makes auth changes update the app immediately
 const listeners = new Set<() => void>();
 function notify(): void {
@@ -37,6 +41,9 @@ export async function setSession(token: string, user: AuthUser): Promise<void> {
   authUser = user;
   expiresAt = now + SESSION_TTL_MS;
   endReason = null;
+  // A brand-new session clears the involuntary-logout latch so authenticated
+  // requests are allowed again (the previous 401, if any, is fully behind us).
+  sessionInvalidated = false;
   try {
     await Promise.all([
       SecureStore.setItemAsync(TOKEN_KEY, token),
@@ -52,9 +59,8 @@ export async function setSession(token: string, user: AuthUser): Promise<void> {
   notify();
 }
 
-// Restores the saved session on launch. The inactivity window counts only time
-// the app is actually open, so a session that "lapsed" purely because the app
-// was closed is NOT treated as expired — reopening the app is itself activity.
+// Restores the saved session on launch. A window that "lapsed" only because the
+// app was closed is NOT expired — reopening the app counts as activity.
 export async function restoreSession(): Promise<boolean> {
   try {
     const [token, userJson] = await Promise.all([
@@ -65,11 +71,12 @@ export async function restoreSession(): Promise<boolean> {
     if (token && userJson) {
       authUser = JSON.parse(userJson) as AuthUser;
       authToken = token;
-      // Start a fresh inactivity window from now instead of honoring a deadline
-      // that elapsed while the app was closed. Reset the persist throttle so the
-      // next activity writes this refreshed deadline through to storage.
+      // Fresh window from now (ignore the closed-app deadline); reset the
+      // persist throttle so the next activity writes it through.
       expiresAt = Date.now() + SESSION_TTL_MS;
       lastExpiryPersistAt = 0;
+      // Start clean so an earlier latch (dev fast refresh) can't block requests.
+      sessionInvalidated = false;
       return true;
     }
 
@@ -113,11 +120,8 @@ export async function touchSession(): Promise<void> {
   }
 }
 
-/** Reopening / returning the app to the foreground counts as activity: start a
- *  fresh inactivity window even if the previous one lapsed while the app was
- *  backgrounded or closed. Unlike {@link touchSession}, this revives a lapsed
- *  window on purpose — only idle time with the app OPEN should ever log you out.
- *  No-op when signed out. */
+/** Foregrounding is activity: start a fresh window, reviving a lapsed one on
+ *  purpose (only idle time while OPEN logs you out). No-op when signed out. */
 export async function registerAppResume(): Promise<void> {
   if (authToken == null) return;
   const now = Date.now();
@@ -159,16 +163,29 @@ export async function clearSession(): Promise<void> {
   notify();
 }
 
+/** The one teardown path for an INVOLUNTARY logout (401 or inactivity), latched
+ *  so it runs exactly once even if many requests fail at the same instant. */
+function invalidateSession(reason: Exclude<SessionEndReason, null>): void {
+  if (sessionInvalidated) return; // one logout flow, regardless of the count
+  sessionInvalidated = true;
+  endReason = reason;
+  void clearSession();
+}
+
 /** End the session because the 1h window elapsed (timer / resume check). */
 export function expireSession(): void {
-  endReason = "expired";
-  void clearSession();
+  invalidateSession("expired");
 }
 
 /** End the session because the backend returned 401 (called from the API layer). */
 export function handleUnauthorized(): void {
-  endReason = "unauthorized";
-  void clearSession();
+  invalidateSession("unauthorized");
+}
+
+/** True once an involuntary logout has begun. The API layer reads this to drop
+ *  any still-pending authenticated request silently instead of failing loudly. */
+export function isSessionInvalidated(): boolean {
+  return sessionInvalidated;
 }
 
 // Returns true if the session expired, then clears the flag

@@ -1,5 +1,5 @@
-import { apiRequest } from "../lib/api";
-import { clearSession, getToken } from "../lib/session";
+import { apiRequest, apiUrl } from "../lib/api";
+import { clearSession, getToken, handleUnauthorized } from "../lib/session";
 
 /** Staff roles returned by the backend (kept open-ended for forward-compat). */
 export type UserRole =
@@ -48,6 +48,35 @@ export function login(credentials: LoginCredentials): Promise<LoginResponse> {
     method: "POST",
     body: credentials,
   });
+}
+
+// Startup must never hang on a slow network; a timeout means "offline, assume valid".
+const VALIDATE_TIMEOUT_MS = 8000;
+
+/** Launch token check (GET /api/user): 401 → tear down (route to Login, no flash),
+ *  network error → keep session. Raw fetch: apiRequest's never-settle would hang. */
+export async function validateStoredSession(): Promise<void> {
+  const token = getToken();
+  if (!token) return;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), VALIDATE_TIMEOUT_MS);
+  try {
+    const res = await fetch(apiUrl("/api/user"), {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    });
+    if (res.status === 401) {
+      handleUnauthorized();
+    }
+  } catch {
+    // Offline / timeout — keep the session; it re-validates on the next request.
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function signOut(): Promise<void> {

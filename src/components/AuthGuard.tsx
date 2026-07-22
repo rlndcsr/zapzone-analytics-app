@@ -18,16 +18,9 @@ export function AuthGuard() {
   const router = useRouter();
   const navState = useRootNavigationState();
 
-  // Kick unauthenticated users off protected routes — and ONLY that direction.
-  //
-  // Loop-safety is the whole point of how this is written:
-  //  • It depends on `pathname` (a stable string) instead of `useSegments()` (a
-  //    fresh array every render), so the effect runs only when auth or the route
-  //    actually changes — not on every commit / animation frame during a
-  //    transition. Re-running every commit while dispatching `router.replace`
-  //    is exactly what produced the "Maximum update depth exceeded" crash.
-  //  • A ref makes the redirect fire at most once per episode; it re-arms only
-  //    once we're somewhere legitimate (authed, or on a public route).
+  // Redirect unauthed users off protected routes only. Depends on `pathname`
+  // (stable) not `useSegments()`, and a ref fires it once — both avoid the
+  // render-loop crash; the ref re-arms once authed or on a public route.
   const redirectedRef = useRef(false);
   useEffect(() => {
     if (!navState?.key) return; // wait until the navigator is mounted
@@ -38,6 +31,9 @@ export function AuthGuard() {
     }
     if (!redirectedRef.current) {
       redirectedRef.current = true;
+      // Reset the stack, not just navigate: dismissAll() pops pushed module
+      // screens so Back can't re-enter them, then replace() swaps in Login.
+      if (router.canDismiss()) router.dismissAll();
       router.replace("/");
     }
   }, [authed, pathname, navState?.key, router]);
@@ -47,11 +43,9 @@ export function AuthGuard() {
     void touchSession();
   }, [authed, pathname]);
 
-  // Inactivity enforcement — counting only time the app is OPEN. Entering the
-  // authed state and every foreground return is activity, so it slides the
-  // window forward (reviving one that lapsed while backgrounded/closed). Only a
-  // session left idle *while foregrounded* past the deadline is logged out, by
-  // the check-only interval below. Nothing runs while signed out.
+  // Inactivity enforcement, counting only time the app is OPEN: entering authed
+  // and each foreground return slide the window; the interval below logs out a
+  // session left idle-while-foregrounded past the deadline.
   useEffect(() => {
     if (!authed) return;
 
@@ -61,8 +55,7 @@ export function AuthGuard() {
     const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
       if (state === "active") void registerAppResume();
     });
-    // Sweep the clock while foregrounded so an untouched session still lapses on
-    // time. Check-only: it logs out when expired but never slides the window.
+    // Check-only sweep: logs out an expired foregrounded session, never extends.
     const expiryCheck = setInterval(() => {
       if (AppState.currentState === "active" && isSessionExpired()) {
         expireSession();
