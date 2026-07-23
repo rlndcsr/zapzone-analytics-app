@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -56,18 +57,48 @@ const ActionRow = ({
   </Pressable>
 );
 
+// Created/Last Updated → "7/23/2026, 10:50:44 AM" (web admin parity).
 const fmtDateTime = (iso: string | null): string => {
   if (!iso) return "—";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
 };
 
-const Row = ({ label, value }: { label: string; value: string }) => (
-  <View className="flex-row items-start justify-between py-1.5">
-    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">{label}</Text>
-    <Text className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-right">
-      {value}
+// Date of Birth → "M/D/YYYY" from the YYYY-MM-DD prefix (no timezone shift).
+const fmtDate = (iso: string | null): string => {
+  const m = iso?.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${Number(m[2])}/${Number(m[3])}/${m[1]}` : "—";
+};
+
+// Titled group rendered on a soft rounded card (matches BookingFullView).
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <>
+    <Text className="text-base font-bold text-gray-900 dark:text-white mt-6 mb-2">
+      {title}
     </Text>
+    <View className="bg-gray-50 dark:bg-neutral-800/40 rounded-2xl px-4 py-1.5">
+      {children}
+    </View>
+  </>
+);
+
+// Label above value; empty values fall back to an em dash.
+const Field = ({
+  label,
+  value,
+  children,
+}: {
+  label: string;
+  value?: string | null;
+  children?: React.ReactNode;
+}) => (
+  <View className="py-2">
+    <Text className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">{label}</Text>
+    {children ?? (
+      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+        {value?.trim() ? value : "—"}
+      </Text>
+    )}
   </View>
 );
 
@@ -94,7 +125,9 @@ export function ContactActionsSheet({
   onClose,
   onChanged,
 }: Props) {
-  const [mode, setMode] = useState<Mode>(contact ? "menu" : "create");
+  // Tap a record → open straight into details ("view"), matching the other
+  // modules; the "menu" hub still exists but is no longer the entry point.
+  const [mode, setMode] = useState<Mode>(contact ? "view" : "create");
   const [busy, setBusy] = useState(false);
 
   // Form fields (create + edit).
@@ -143,7 +176,7 @@ export function ContactActionsSheet({
 
   useEffect(() => {
     if (!visible) return;
-    setMode(contact ? "menu" : "create");
+    setMode(contact ? "view" : "create");
     setBusy(false);
     setNewTag("");
     setNewFormTag("");
@@ -152,7 +185,7 @@ export function ContactActionsSheet({
 
   const title =
     mode === "view"
-      ? "Contact details"
+      ? "Customer Details"
       : mode === "edit"
         ? "Edit contact"
         : mode === "create"
@@ -205,6 +238,14 @@ export function ContactActionsSheet({
     } finally {
       setBusy(false);
     }
+  };
+
+  // Edit opens the dedicated Edit Customer screen (mirrors Packages/Attractions):
+  // close the sheet first, then navigate with the contact id.
+  const goEdit = () => {
+    if (!contact) return;
+    onClose();
+    router.push(`/customers/edit-customer?id=${contact.id}`);
   };
 
   const toggleStatus = async () => {
@@ -444,7 +485,7 @@ export function ContactActionsSheet({
             )}
           </View>
           <ActionRow icon="eye" label="View details" onPress={() => setMode("view")} />
-          <ActionRow icon="edit-2" label="Edit" onPress={() => setMode("edit")} />
+          <ActionRow icon="edit-2" label="Edit" onPress={goEdit} />
           <ActionRow
             icon={contact.status === "active" ? "user-x" : "user-check"}
             label={contact.status === "active" ? "Set inactive" : "Set active"}
@@ -460,71 +501,96 @@ export function ContactActionsSheet({
           contentContainerStyle={{ paddingBottom: 28 }}
           showsVerticalScrollIndicator={false}
         >
-          <View className="flex-row items-center justify-between mt-2 mb-2">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>
+          {/* Header: customer name as the main title + status badge. */}
+          <View className="flex-row items-center justify-between mt-2 mb-1">
+            <Text className="text-xl font-bold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={2}>
               {contact.name}
             </Text>
             <StatusBadge status={contact.status} />
           </View>
 
-          {!!contact.email && <Row label="Email" value={contact.email} />}
-          {!!contact.phone && <Row label="Phone" value={contact.phone} />}
-          {!!contact.companyName && <Row label="Company" value={contact.companyName} />}
-          {!!contact.jobTitle && <Row label="Job title" value={contact.jobTitle} />}
-          {!!contact.locationName && <Row label="Location" value={contact.locationName} />}
-          {!!contact.source && <Row label="Source" value={contact.source} />}
-          <Row label="SMS consent" value={contact.smsConsent ? "Opted in" : "No"} />
-          {[contact.address, contact.city, contact.state, contact.zip, contact.country]
-            .filter(Boolean).length > 0 && (
-            <Row
-              label="Address"
-              value={[contact.address, contact.city, contact.state, contact.zip, contact.country]
-                .filter(Boolean)
-                .join(", ")}
-            />
-          )}
-          {!!contact.notes && <Row label="Notes" value={contact.notes} />}
-          <Row label="Created" value={fmtDateTime(contact.createdAt)} />
-          <Row label="Last updated" value={fmtDateTime(contact.updatedAt)} />
-
-          {/* Tags */}
-          <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-5 mb-2">
-            Tags
-          </Text>
-          <View className="flex-row flex-wrap">
-            {tags.map((t) => (
-              <Pressable
-                key={t}
-                onPress={() => removeTag(t)}
-                className="flex-row items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-full mr-2 mb-2"
+          <Section title="Personal Information">
+            <Field label="First Name" value={contact.firstName} />
+            <Field label="Last Name" value={contact.lastName} />
+            <Field label="Email" value={contact.email} />
+            <Field label="Phone" value={contact.phone} />
+            <Field label="Date of Birth" value={fmtDate(contact.dateOfBirth)} />
+            <Field label="SMS Consent">
+              <Text
+                className="text-sm font-semibold"
+                style={{ color: contact.smsConsent ? "#16a34a" : "#6b7280" }}
               >
-                <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                  {t}
-                </Text>
-                <Feather name="x" size={12} color={PRIMARY} />
-              </Pressable>
-            ))}
-          </View>
-          <View className="flex-row items-center gap-2 mt-1">
-            <View className="flex-1 rounded-xl px-3.5 py-2.5 border border-gray-200 dark:border-neutral-800">
-              <TextInput
-                value={newTag}
-                onChangeText={setNewTag}
-                placeholder="Add a tag"
-                placeholderTextColor="#9CA3AF"
-                onSubmitEditing={addTag}
-                className="text-sm text-gray-900 dark:text-white"
-                style={{ paddingVertical: 0 }}
-              />
-            </View>
-            <Pressable onPress={addTag} className="px-4 py-2.5 rounded-xl bg-[#0644C7]">
-              <Text className="text-sm font-semibold text-white">Add</Text>
-            </Pressable>
-          </View>
+                {contact.smsConsent ? "Opted In" : "Not Opted In"}
+              </Text>
+            </Field>
+          </Section>
+
+          <Section title="Work Information">
+            <Field label="Company" value={contact.companyName} />
+            <Field label="Job Title" value={contact.jobTitle} />
+            <Field label="Source" value={contact.source} />
+            <Field label="Status">
+              <View className="flex-row">
+                <StatusBadge status={contact.status} />
+              </View>
+            </Field>
+          </Section>
+
+          <Section title="Address">
+            <Field label="Street Address" value={contact.address} />
+            <Field label="City" value={contact.city} />
+            <Field label="State" value={contact.state} />
+            <Field label="ZIP" value={contact.zip} />
+            <Field label="Country" value={contact.country} />
+          </Section>
+
+          <Section title="Additional Information">
+            <Field label="Location" value={contact.locationName} />
+            <Field label="Created" value={fmtDateTime(contact.createdAt)} />
+            <Field label="Last Updated" value={fmtDateTime(contact.updatedAt)} />
+            {/* Tags render as chips; tap a chip to remove, add via the input. */}
+            <Field label="Tags">
+              {tags.length > 0 ? (
+                <View className="flex-row flex-wrap">
+                  {tags.map((t) => (
+                    <Pressable
+                      key={t}
+                      onPress={() => removeTag(t)}
+                      className="flex-row items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-full mr-2 mb-2"
+                    >
+                      <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+                        {t}
+                      </Text>
+                      <Feather name="x" size={12} color={PRIMARY} />
+                    </Pressable>
+                  ))}
+                </View>
+              ) : (
+                <Text className="text-sm font-semibold text-gray-900 dark:text-white">—</Text>
+              )}
+              <View className="flex-row items-center gap-2 mt-1">
+                <View className="flex-1 rounded-xl px-3.5 py-2.5 border border-gray-200 dark:border-neutral-800">
+                  <TextInput
+                    value={newTag}
+                    onChangeText={setNewTag}
+                    placeholder="Add a tag"
+                    placeholderTextColor="#9CA3AF"
+                    onSubmitEditing={addTag}
+                    className="text-sm text-gray-900 dark:text-white"
+                    style={{ paddingVertical: 0 }}
+                  />
+                </View>
+                <Pressable onPress={addTag} className="px-4 py-2.5 rounded-xl bg-[#0644C7]">
+                  <Text className="text-sm font-semibold text-white">Add</Text>
+                </Pressable>
+              </View>
+            </Field>
+            <Field label="Notes" value={contact.notes} />
+          </Section>
 
           <View className="flex-row gap-3 mt-6">
             <Pressable
-              onPress={() => setMode("edit")}
+              onPress={goEdit}
               className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7]"
             >
               <Feather name="edit-2" size={16} color="#fff" />

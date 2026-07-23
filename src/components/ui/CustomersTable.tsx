@@ -99,40 +99,17 @@ const COLUMNS: Column[] = [
   {
     key: "name",
     label: "Name",
-    width: 190,
-    render: (c) => {
-      const first = c.firstName?.trim();
-      const last = c.lastName?.trim();
-      // Two-line first / last like the web; fall back to the derived name.
-      if (first || last) {
-        return (
-          <View>
-            <Text
-              numberOfLines={1}
-              className="text-sm font-semibold text-gray-900 dark:text-white"
-            >
-              {first || "—"}
-            </Text>
-            {!!last && (
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-900 dark:text-white"
-              >
-                {last}
-              </Text>
-            )}
-          </View>
-        );
-      }
-      return (
-        <Text
-          numberOfLines={2}
-          className="text-sm font-semibold text-gray-900 dark:text-white"
-        >
-          {c.name}
-        </Text>
-      );
-    },
+    width: 210,
+    // Single line, truncated with an ellipsis, to keep rows short and readable.
+    render: (c) => (
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        className="text-sm font-semibold text-gray-900 dark:text-white"
+      >
+        {c.name}
+      </Text>
+    ),
   },
   {
     key: "email",

@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -29,6 +29,8 @@ import { StatTile } from "../../components/ui/StatTile";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
+import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
+import { consumeContactsStale } from "../../lib/contactsStale";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteContact,
@@ -235,6 +237,14 @@ const Customers = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // After editing on the dedicated screen, refetch on return so the list + KPIs
+  // reflect the saved changes (mirrors the other modules' stale-flag pattern).
+  useFocusEffect(
+    useCallback(() => {
+      if (consumeContactsStale()) load();
+    }, [load]),
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -445,7 +455,8 @@ const Customers = () => {
     );
   }, [selectedIds, load]);
 
-  const showInitialLoader = loading && allRows.length === 0 && !error;
+  // Show the page skeleton on initial load AND pull-to-refresh (not just when empty).
+  const showSkeleton = loading && !error;
   const showError = !loading && !!error && allRows.length === 0;
 
   return (
@@ -497,8 +508,10 @@ const Customers = () => {
             <Feather name="chevron-right" size={20} color="#9CA3AF" />
           </Pressable>
 
-          {/* KPI cards */}
-          {(stats || allRows.length > 0) && (
+          {/* KPI cards — skeleton while loading (tiles match StatTile exactly). */}
+          {showSkeleton ? (
+            <AnalyticsSkeleton tiles={4} panels={0} />
+          ) : (stats || allRows.length > 0) ? (
             <View className="flex-row flex-wrap gap-3">
               <StatTile
                 icon="users"
@@ -533,7 +546,7 @@ const Customers = () => {
                 hint="New customers"
               />
             </View>
-          )}
+          ) : null}
 
           {/* Add customer (above the filter pills) */}
           <Pressable
@@ -666,7 +679,7 @@ const Customers = () => {
           </View>
 
           {/* Count + layout toggle (Table default / Cards) */}
-          {!showInitialLoader && !showError && (
+          {!showSkeleton && !showError && (
             <View className="flex-row items-center justify-between gap-2">
               <Text className="shrink text-sm text-gray-500 dark:text-gray-400">
                 Showing {visible.length} of {filtered.length} customers
@@ -675,8 +688,10 @@ const Customers = () => {
             </View>
           )}
 
-
-          {showInitialLoader && <AnalyticsSkeleton tiles={0} panels={4} />}
+          {/* List skeleton — table/card aware, in the same spot as the real list. */}
+          {showSkeleton && !showError && (
+            <PurchasesListSkeleton view={viewMode} />
+          )}
 
           {showError && (
             <View className="items-center py-14">
@@ -695,7 +710,7 @@ const Customers = () => {
 
           {/* List — table (default) and card layouts render from the same
               `visible` slice, so switching is instant and never refetches. */}
-          {!showInitialLoader && !showError && viewMode === "table" && (
+          {!showSkeleton && !showError && viewMode === "table" && (
             <View className="gap-3">
               {/* Bulk-action bar — shown while a selection exists. */}
               {selectedIds.size > 0 && (
@@ -777,7 +792,7 @@ const Customers = () => {
           )}
 
           {/* Cards */}
-          {!showInitialLoader && !showError && viewMode === "cards" && (
+          {!showSkeleton && !showError && viewMode === "cards" && (
             <View className="gap-3">
               {visible.map((c) => (
                 <Pressable

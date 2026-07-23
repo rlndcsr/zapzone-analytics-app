@@ -19,6 +19,8 @@ export type ContactRow = {
   name: string;
   email: string;
   phone: string | null;
+  /** ISO date string (date_of_birth); null when unset. */
+  dateOfBirth: string | null;
   companyName: string | null;
   jobTitle: string | null;
   source: string | null;
@@ -43,6 +45,7 @@ type RawContact = {
   last_name?: string | null;
   email?: string | null;
   phone?: string | null;
+  date_of_birth?: string | null;
   company_name?: string | null;
   job_title?: string | null;
   source?: string | null;
@@ -76,6 +79,7 @@ function mapContact(raw: RawContact): ContactRow {
     name: fullName || email || "Unnamed contact",
     email,
     phone: strOrNull(raw.phone),
+    dateOfBirth: strOrNull(raw.date_of_birth),
     companyName: strOrNull(raw.company_name),
     jobTitle: strOrNull(raw.job_title),
     source: strOrNull(raw.source),
@@ -206,6 +210,19 @@ export async function fetchAllContacts({
   return out;
 }
 
+/** GET /api/contacts/{id} — one contact, mapped via the shared mapper (Edit screen). */
+export async function fetchContact(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<ContactRow> {
+  const res = await apiRequest<{ data?: RawContact }>(`/api/contacts/${id}`, {
+    token,
+    signal,
+  });
+  return mapContact(res.data ?? { id });
+}
+
 export type ContactStats = {
   total: number;
   active: number;
@@ -276,6 +293,8 @@ export type ContactInput = {
   firstName: string;
   lastName: string;
   phone: string;
+  /** YYYY-MM-DD; optional so the create form (which omits it) still type-checks. */
+  dateOfBirth?: string | null;
   companyName: string;
   jobTitle: string;
   address: string;
@@ -299,6 +318,7 @@ function inputToBody(input: Partial<ContactInput>): Record<string, unknown> {
   if (input.firstName != null) body.first_name = input.firstName || null;
   if (input.lastName != null) body.last_name = input.lastName || null;
   if (input.phone != null) body.phone = input.phone || null;
+  if (input.dateOfBirth !== undefined) body.date_of_birth = input.dateOfBirth || null;
   if (input.companyName != null) body.company_name = input.companyName || null;
   if (input.jobTitle != null) body.job_title = input.jobTitle || null;
   if (input.address != null) body.address = input.address || null;
