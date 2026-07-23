@@ -689,7 +689,10 @@ const ManualBookingScreen = () => {
             const active = bookingMode === m.v;
             return (
               <Pressable
-                key={m.v}
+                // Key by active so the segment remounts on toggle: css-interop
+                // then resolves the shadow/dark CSS variables on a fresh initial
+                // render instead of a crash-prone post-mount upgrade warning.
+                key={`${m.v}-${active}`}
                 onPress={() => {
                   setBookingMode(m.v);
                   resetSchedule();
