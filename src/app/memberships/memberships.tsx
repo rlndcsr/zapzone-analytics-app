@@ -1,5 +1,9 @@
 import { Feather } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import {
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
 import React, {
   useCallback,
   useEffect,
@@ -25,6 +29,13 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { SelectField } from "../../components/ui/FormControls";
 import { MembershipsListSkeleton } from "../../components/ui/skeleton/MembershipsSkeleton";
+import { MembershipsTable } from "../../components/ui/MembershipsTable";
+import {
+  MembershipsBulkBar,
+  type MembershipBulkAction,
+} from "../../components/ui/MembershipsBulkBar";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import { consumeMembershipsStale } from "../../lib/membershipsStale";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useMemberships } from "../../lib/hooks/useMemberships";
 import { useMembershipPlans } from "../../lib/hooks/useMembershipPlans";
@@ -36,7 +47,6 @@ import {
   deleteMembership,
   freezeMembership,
   unfreezeMembership,
-  type MembershipRow,
   type MembershipStatus,
   type PaymentType,
 } from "../../services/membershipsService";
@@ -189,28 +199,38 @@ const Memberships = () => {
 
   const [showFilters, setShowFilters] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<MembershipRow | null>(
-    null,
+
+  // Table is the default view; card view stays available via the toggle.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<MembershipBulkAction | null>(null);
+
+  // Open a membership's dedicated details screen (replaces the old action sheet).
+  const openDetails = useCallback(
+    (id: number) => {
+      router.push({
+        pathname: "/memberships/membership-details",
+        params: { id: String(id) },
+      });
+    },
+    [router],
   );
 
-  // Deep link: open a member's actions sheet directly when navigated here from
-  // a notification (e.g. /memberships/memberships?openId=123). Wait until the
-  // list has loaded before resolving so we don't clear the param prematurely;
-  // if the record no longer exists, show a friendly message and stay put.
+  // Deep link: open a member's details screen when navigated here from a
+  // notification (e.g. ?openId=123). Wait until the list has loaded to verify
+  // the record exists; otherwise show a friendly message.
   const { openId } = useLocalSearchParams<{ openId?: string }>();
   useEffect(() => {
     if (!openId || loading) return;
     const match = memberships.find((m) => String(m.id) === openId);
-    if (match) {
-      setSelectedMember(match);
-    } else {
+    if (match) openDetails(match.id);
+    else
       Alert.alert(
         "Membership unavailable",
         "This membership is no longer available.",
       );
-    }
     router.setParams({ openId: undefined });
-  }, [openId, loading, memberships, router]);
+  }, [openId, loading, memberships, router, openDetails]);
 
   // Locations for the filter + Add Member picker come from the dashboard
   // metrics rollup (the /api/locations endpoint is too heavy for mobile).
@@ -252,6 +272,98 @@ const Memberships = () => {
     await refetch();
     setRefreshing(false);
   }, [refetch]);
+
+  // Clear selection whenever the visible set changes or we leave the table.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [search, statusFilter, page, perPage, viewMode, activeLocationId]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const all = paged.length > 0 && paged.every((m) => prev.has(m.id));
+      return all ? new Set() : new Set(paged.map((m) => m.id));
+    });
+  }, [paged]);
+
+  // Bulk status change (freeze / unfreeze / cancel-at-term) over the selection.
+  const runBulkStatus = useCallback(
+    async (action: Exclude<MembershipBulkAction, "delete">) => {
+      const token = getToken();
+      if (!token || selectedIds.size === 0) return;
+      const ids = [...selectedIds];
+      setBulkBusy(action);
+      try {
+        await Promise.all(
+          ids.map((id) =>
+            action === "freeze"
+              ? freezeMembership(token, id)
+              : action === "unfreeze"
+                ? unfreezeMembership(token, id)
+                : cancelMembership(token, id, "end_of_term"),
+          ),
+        );
+        setSelectedIds(new Set());
+        await refetch();
+      } catch (err) {
+        Alert.alert(
+          "Action failed",
+          err instanceof Error ? err.message : "Please try again.",
+        );
+      } finally {
+        setBulkBusy(null);
+      }
+    },
+    [selectedIds, refetch],
+  );
+
+  const confirmBulkDelete = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    Alert.alert(
+      "Delete memberships",
+      "Only canceled memberships can be deleted. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) return;
+            const ids = [...selectedIds];
+            setBulkBusy("delete");
+            try {
+              await Promise.all(ids.map((id) => deleteMembership(token, id)));
+              setSelectedIds(new Set());
+              await refetch();
+            } catch (err) {
+              Alert.alert(
+                "Delete failed",
+                err instanceof Error ? err.message : "Please try again.",
+              );
+            } finally {
+              setBulkBusy(null);
+            }
+          },
+        },
+      ],
+    );
+  }, [selectedIds, refetch]);
+
+  // Refetch when returning from the details screen after a mutation.
+  useFocusEffect(
+    useCallback(() => {
+      if (consumeMembershipsStale()) refetch();
+    }, [refetch]),
+  );
 
   const filterActive = statusFilter !== "all";
   const showInitialLoader = loading && memberships.length === 0;
@@ -395,12 +507,31 @@ const Memberships = () => {
             />
           </FilterPill>
 
-          {/* Count */}
+          {/* Count + view toggle (Table default / Cards) */}
           {!showInitialLoader && !showError && (
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-4">
-              Showing {filtered.length} of {memberships.length} members
-            </Text>
+            <View className="flex-row items-center justify-between mt-4">
+              <Text className="shrink text-sm text-gray-500 dark:text-gray-400">
+                Showing {filtered.length} of {memberships.length} members
+              </Text>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+            </View>
           )}
+
+          {/* Bulk actions — table view only, while a selection exists. */}
+          {!showInitialLoader &&
+            !showError &&
+            viewMode === "table" &&
+            selectedIds.size > 0 && (
+              <View className="mt-3">
+                <MembershipsBulkBar
+                  count={selectedIds.size}
+                  busy={bulkBusy}
+                  onStatus={runBulkStatus}
+                  onDelete={confirmBulkDelete}
+                  onClear={clearSelection}
+                />
+              </View>
+            )}
 
           {/* Loading */}
           {showInitialLoader && (
@@ -425,18 +556,27 @@ const Memberships = () => {
             </View>
           )}
 
-          {/* Member rows */}
-          {!showInitialLoader && !showError && (
+          {/* List — table (default) or cards, both from the same `paged` slice */}
+          {!showInitialLoader && !showError && filtered.length > 0 && (
             <View className="mt-3 gap-3">
-              {paged.map((m) => {
-                const meta = STATUS_META[m.status];
-                return (
-                  <Pressable
-                    key={m.id}
-                    onPress={() => setSelectedMember(m)}
-                    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-90"
-                    style={CARD_SHADOW}
-                  >
+              {viewMode === "table" ? (
+                <MembershipsTable
+                  memberships={paged}
+                  selectedIds={selectedIds}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAllVisible}
+                  onRowPress={(m) => openDetails(m.id)}
+                />
+              ) : (
+                paged.map((m) => {
+                  const meta = STATUS_META[m.status];
+                  return (
+                    <Pressable
+                      key={m.id}
+                      onPress={() => openDetails(m.id)}
+                      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-90"
+                      style={CARD_SHADOW}
+                    >
                     <View className="flex-row items-center justify-between">
                       <View className="flex-1 mr-2">
                         <Text
@@ -489,9 +629,10 @@ const Memberships = () => {
                         </Text>
                       </View>
                     </View>
-                  </Pressable>
-                );
-              })}
+                    </Pressable>
+                  );
+                })
+              )}
               <Pagination
                 page={page}
                 perPage={perPage}
@@ -536,15 +677,6 @@ const Memberships = () => {
         }}
       />
 
-      {/* Member actions sheet */}
-      <MemberActionsSheet
-        member={selectedMember}
-        onClose={() => setSelectedMember(null)}
-        onChanged={() => {
-          setSelectedMember(null);
-          refetch();
-        }}
-      />
     </View>
   );
 };
@@ -923,208 +1055,6 @@ function AddMemberSheet({
         </View>
       </ScrollView>
     </BottomSheet>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Member actions sheet                                                */
-/* ------------------------------------------------------------------ */
-
-function MemberActionsSheet({
-  member,
-  onClose,
-  onChanged,
-}: {
-  member: MembershipRow | null;
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  const [busy, setBusy] = useState<string | null>(null);
-
-  // Keep the last member around while the sheet animates closed.
-  const [shown, setShown] = useState<MembershipRow | null>(member);
-  useEffect(() => {
-    if (member) setShown(member);
-  }, [member]);
-
-  const run = async (
-    key: string,
-    fn: (token: string, id: number) => Promise<void>,
-  ) => {
-    const token = getToken();
-    if (!token || !shown) return;
-    setBusy(key);
-    try {
-      await fn(token, shown.id);
-      onChanged();
-    } catch (err) {
-      Alert.alert(
-        "Action failed",
-        err instanceof Error ? err.message : "Please try again.",
-      );
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const confirmDelete = () => {
-    if (!shown) return;
-    Alert.alert(
-      "Delete membership?",
-      "This permanently removes the canceled membership. This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => run("delete", deleteMembership),
-        },
-      ],
-    );
-  };
-
-  const confirmCancel = (effective: "immediate" | "end_of_term") => {
-    if (!shown) return;
-    Alert.alert(
-      effective === "immediate" ? "Cancel now?" : "Cancel at end of term?",
-      effective === "immediate"
-        ? "The membership ends immediately."
-        : "The membership stays active until the current term ends.",
-      [
-        { text: "Back", style: "cancel" },
-        {
-          text: "Confirm",
-          style: "destructive",
-          onPress: () =>
-            run("cancel", (t, id) => cancelMembership(t, id, effective)),
-        },
-      ],
-    );
-  };
-
-  const s = shown?.status;
-  const canFreeze = s === "active" || s === "past_due";
-  const canUnfreeze = s === "frozen";
-  const canCancel = s !== "canceled" && s !== "expired";
-  const canDelete = s === "canceled";
-
-  return (
-    <BottomSheet
-      visible={!!member}
-      onClose={onClose}
-      title={shown?.memberName ?? "Member"}
-    >
-      <View className="px-6 pb-6">
-        {shown && (
-          <View className="flex-row items-center gap-2 mb-4">
-            <View
-              className={`px-3 py-1 rounded-full ${STATUS_META[shown.status].pill}`}
-            >
-              <Text
-                className={`text-xs font-semibold ${STATUS_META[shown.status].dot}`}
-              >
-                {STATUS_META[shown.status].label}
-              </Text>
-            </View>
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              Plan {shown.planLabel}
-            </Text>
-          </View>
-        )}
-
-        <ActionRow
-          icon="pause-circle"
-          label="Freeze membership"
-          disabled={!canFreeze || !!busy}
-          loading={busy === "freeze"}
-          onPress={() => run("freeze", (t, id) => freezeMembership(t, id))}
-        />
-        <ActionRow
-          icon="play-circle"
-          label="Unfreeze membership"
-          disabled={!canUnfreeze || !!busy}
-          loading={busy === "unfreeze"}
-          onPress={() => run("unfreeze", (t, id) => unfreezeMembership(t, id))}
-        />
-        <ActionRow
-          icon="clock"
-          label="Cancel at end of term"
-          disabled={!canCancel || !!busy}
-          loading={false}
-          onPress={() => confirmCancel("end_of_term")}
-        />
-        <ActionRow
-          icon="x-circle"
-          label="Cancel now"
-          disabled={!canCancel || !!busy}
-          loading={busy === "cancel"}
-          destructive
-          onPress={() => confirmCancel("immediate")}
-        />
-        <ActionRow
-          icon="trash-2"
-          label="Delete membership"
-          disabled={!canDelete || !!busy}
-          loading={busy === "delete"}
-          destructive
-          onPress={confirmDelete}
-        />
-        {!canDelete && (
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1 px-1">
-            A membership must be canceled before it can be deleted.
-          </Text>
-        )}
-      </View>
-    </BottomSheet>
-  );
-}
-
-function ActionRow({
-  icon,
-  label,
-  onPress,
-  disabled,
-  loading,
-  destructive,
-}: {
-  icon: FeatherName;
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  loading?: boolean;
-  destructive?: boolean;
-}) {
-  const scheme = useColorScheme();
-  const color = disabled
-    ? "#9CA3AF"
-    : destructive
-      ? "#DC2626"
-      : scheme === "dark"
-        ? "#E5E7EB"
-        : "#374151";
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      className={`flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1 ${
-        disabled ? "opacity-40" : "active:bg-gray-50 dark:active:bg-neutral-800"
-      }`}
-    >
-      {loading ? (
-        <ActivityIndicator size="small" color={color} />
-      ) : (
-        <Feather name={icon} size={18} color={color} />
-      )}
-      <Text
-        className={`text-base font-medium ${
-          destructive
-            ? "text-red-600 dark:text-red-400"
-            : "text-gray-800 dark:text-gray-100"
-        }`}
-      >
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 

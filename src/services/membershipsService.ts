@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/api";
+import { apiRequest, apiUrl, mediaUrl } from "../lib/api";
 
 /** Lifecycle status, mirrored from the backend `status` enum. */
 export type MembershipStatus =
@@ -290,6 +290,337 @@ export async function unfreezeMembership(
 /** DELETE /api/memberships/{id} — company admins only; must be canceled first. */
 export async function deleteMembership(token: string, id: number): Promise<void> {
   await apiRequest(`/api/memberships/${id}`, { method: "DELETE", token });
+}
+
+/* ------------------------------------------------------------------ */
+/* Membership detail (GET /api/memberships/{id}) + detail mutations    */
+/* ------------------------------------------------------------------ */
+
+export type MembershipVisit = {
+  id: number;
+  visitedAt: string | null;
+  result: "allowed" | "denied" | "override";
+  denialReason: string | null;
+  countedAgainstUsage: boolean;
+  locationName: string | null;
+  staffName: string | null;
+  notes: string | null;
+};
+
+export type MembershipPayment = {
+  id: number;
+  amount: number;
+  status: string;
+  transactionId: string | null;
+  description: string | null;
+  retryAttempt: number | null;
+  chargedAt: string | null;
+  failedAt: string | null;
+  failureReason: string | null;
+};
+
+export type MembershipNote = {
+  id: number;
+  content: string;
+  authorName: string | null;
+  createdAt: string | null;
+};
+
+export type MembershipAuditEntry = {
+  id: number;
+  action: string;
+  actorName: string | null;
+  note: string | null;
+  afterStatus: string | null;
+  afterResult: string | null;
+  createdAt: string | null;
+};
+
+export type MembershipRedemption = {
+  id: number;
+  label: string;
+  valueMode: string | null;
+  valueApplied: number | null;
+  staffName: string | null;
+  createdAt: string | null;
+};
+
+/** The full membership record backing the Membership Details screen. */
+export type MembershipDetail = {
+  id: number;
+  memberName: string;
+  holderName: string | null;
+  email: string;
+  phone: string | null;
+  status: MembershipStatus;
+  photoUrl: string | null;
+  planId: number | null;
+  planName: string;
+  billingInterval: string | null;
+  startedAt: string | null;
+  termStart: string | null;
+  termEnd: string | null;
+  visitsUsed: number | null;
+  visitsRemaining: number | null;
+  homeLocationName: string | null;
+  qrToken: string | null;
+  paymentMethodLabel: string | null;
+  isComped: boolean;
+  visits: MembershipVisit[];
+  payments: MembershipPayment[];
+  notes: MembershipNote[];
+  auditLog: MembershipAuditEntry[];
+  redemptions: MembershipRedemption[];
+};
+
+type RawPerson = { first_name?: string | null; last_name?: string | null } | null;
+
+const personName = (p: RawPerson): string | null => {
+  if (!p) return null;
+  const n = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
+  return n || null;
+};
+
+const titleize = (s: string | null | undefined): string =>
+  (s ?? "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+type RawMembershipDetail = RawMembership & {
+  photo_path?: string | null;
+  visits_used_this_term?: number | null;
+  visits_remaining?: number | null;
+  payment_method_label?: string | null;
+  plan?: {
+    id?: number;
+    name?: string | null;
+    billing_interval?: string | null;
+    billing_cycle?: string | null;
+  } | null;
+  visits?: {
+    id: number;
+    visited_at?: string | null;
+    result?: string | null;
+    denial_reason?: string | null;
+    counted_against_usage?: boolean | null;
+    notes?: string | null;
+    location?: { name?: string | null } | null;
+    staff?: RawPerson;
+  }[];
+  membership_payments?: {
+    id: number;
+    amount?: number | string | null;
+    status?: string | null;
+    transaction_id?: string | null;
+    description?: string | null;
+    retry_attempt?: number | null;
+    charged_at?: string | null;
+    failed_at?: string | null;
+    failure_reason?: string | null;
+  }[];
+  notes?: {
+    id: number;
+    content?: string | null;
+    created_at?: string | null;
+    user?: RawPerson;
+  }[];
+  audit_logs?: {
+    id: number;
+    actor_type?: string | null;
+    action?: string | null;
+    after?: { status?: string | null; result?: string | null } | null;
+    note?: string | null;
+    created_at?: string | null;
+    user?: RawPerson;
+  }[];
+  benefit_redemptions?: {
+    id: number;
+    benefit_type?: string | null;
+    value_mode?: string | null;
+    value_applied?: number | string | null;
+    created_at?: string | null;
+    benefit?: { label?: string | null; benefit_type?: string | null } | null;
+    staff?: RawPerson;
+  }[];
+};
+
+function mapDetail(raw: RawMembershipDetail): MembershipDetail {
+  const base = mapMembership(raw);
+  const plan = raw.plan ?? null;
+  const interval = plan?.billing_interval ?? plan?.billing_cycle ?? null;
+  return {
+    id: base.id,
+    memberName: base.holderName || base.memberName,
+    holderName: base.holderName,
+    email: base.memberEmail,
+    phone: base.memberPhone,
+    status: base.status,
+    photoUrl: mediaUrl(raw.photo_path),
+    planId: base.planId,
+    planName: base.planLabel,
+    billingInterval: interval ? titleize(interval) : null,
+    startedAt: raw.started_at ?? null,
+    termStart: raw.current_term_start ?? null,
+    termEnd: raw.current_term_end ?? null,
+    visitsUsed: raw.visits_used_this_term ?? null,
+    visitsRemaining: raw.visits_remaining ?? null,
+    homeLocationName: base.homeLocationName,
+    qrToken: base.qrToken,
+    paymentMethodLabel: raw.payment_method_label?.trim() || null,
+    isComped: base.isComped,
+    visits: (raw.visits ?? []).map((v) => ({
+      id: v.id,
+      visitedAt: v.visited_at ?? null,
+      result: (v.result as MembershipVisit["result"]) ?? "allowed",
+      denialReason: v.denial_reason ?? null,
+      countedAgainstUsage: v.counted_against_usage !== false,
+      locationName: v.location?.name?.trim() || null,
+      staffName: personName(v.staff ?? null),
+      notes: v.notes ?? null,
+    })),
+    payments: (raw.membership_payments ?? []).map((p) => ({
+      id: p.id,
+      amount: Number(p.amount ?? 0),
+      status: p.status ?? "pending",
+      transactionId: p.transaction_id ?? null,
+      description: p.description ?? null,
+      retryAttempt: p.retry_attempt ?? null,
+      chargedAt: p.charged_at ?? null,
+      failedAt: p.failed_at ?? null,
+      failureReason: p.failure_reason ?? null,
+    })),
+    notes: (raw.notes ?? []).map((n) => ({
+      id: n.id,
+      content: n.content ?? "",
+      authorName: personName(n.user ?? null),
+      createdAt: n.created_at ?? null,
+    })),
+    auditLog: (raw.audit_logs ?? []).map((a) => ({
+      id: a.id,
+      action: a.action ?? "",
+      actorName:
+        a.actor_type === "system"
+          ? "System"
+          : a.actor_type === "customer"
+            ? "Customer"
+            : personName(a.user ?? null) ?? (a.actor_type ?? null),
+      note: a.note ?? null,
+      afterStatus: a.after?.status ?? null,
+      afterResult: a.after?.result ?? null,
+      createdAt: a.created_at ?? null,
+    })),
+    redemptions: (raw.benefit_redemptions ?? []).map((r) => ({
+      id: r.id,
+      label: r.benefit?.label?.trim() || titleize(r.benefit_type) || "Benefit",
+      valueMode: r.value_mode ?? null,
+      valueApplied: r.value_applied != null ? Number(r.value_applied) : null,
+      staffName: personName(r.staff ?? null),
+      createdAt: r.created_at ?? null,
+    })),
+  };
+}
+
+/** GET /api/memberships/{id} — the full record (visits, payments, notes, audit…). */
+export async function fetchMembershipDetail(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<MembershipDetail> {
+  const res = await apiRequest<{ data?: RawMembershipDetail }>(
+    `/api/memberships/${id}`,
+    { token, signal },
+  );
+  if (!res.data) throw new Error("Membership not found");
+  return mapDetail(res.data);
+}
+
+/** PATCH /api/memberships/{id}/extend — push the term end to a new date. */
+export async function extendMembership(
+  token: string,
+  id: number,
+  newTermEnd: string,
+  note?: string,
+): Promise<void> {
+  await apiRequest(`/api/memberships/${id}/extend`, {
+    method: "PATCH",
+    token,
+    body: { new_term_end: newTermEnd, note },
+  });
+}
+
+/** PATCH /api/memberships/{id}/status — reactivate/unfreeze via a status change. */
+export async function updateMembershipStatus(
+  token: string,
+  id: number,
+  status: MembershipStatus,
+  note?: string,
+): Promise<void> {
+  await apiRequest(`/api/memberships/${id}/status`, {
+    method: "PATCH",
+    token,
+    body: { status, note },
+  });
+}
+
+/** POST /api/memberships/{id}/notes — add a staff note. */
+export async function addMembershipNote(
+  token: string,
+  id: number,
+  content: string,
+): Promise<void> {
+  await apiRequest(`/api/memberships/${id}/notes`, {
+    method: "POST",
+    token,
+    body: { content },
+  });
+}
+
+/** PATCH /api/memberships/{id}/payment-method — label-only edit (no card charge). */
+export async function updateMembershipPaymentMethod(
+  token: string,
+  id: number,
+  label: string,
+): Promise<void> {
+  await apiRequest(`/api/memberships/${id}/payment-method`, {
+    method: "PATCH",
+    token,
+    body: { payment_method_label: label },
+  });
+}
+
+/** POST /api/memberships/{id}/retry-payment — retry a failed/past-due charge. */
+export async function retryMembershipPayment(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/memberships/${id}/retry-payment`, {
+    method: "POST",
+    token,
+  });
+}
+
+/**
+ * POST /api/memberships/{id}/photo — multipart photo upload (field `photo`).
+ * Sent via a direct fetch so React Native sets the multipart boundary itself.
+ */
+export async function uploadMembershipPhoto(
+  token: string,
+  id: number,
+  asset: { uri: string; name?: string; type?: string },
+): Promise<void> {
+  const form = new FormData();
+  form.append("photo", {
+    uri: asset.uri,
+    name: asset.name ?? "membership-photo.jpg",
+    type: asset.type ?? "image/jpeg",
+  } as unknown as Blob);
+  const res = await fetch(apiUrl(`/api/memberships/${id}/photo`), {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error((data?.message as string) ?? "Photo upload failed.");
+  }
 }
 
 /* ------------------------------------------------------------------ */
