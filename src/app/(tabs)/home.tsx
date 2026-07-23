@@ -645,6 +645,9 @@ const Home = () => {
             </Text>
           </View>
 
+          <View>
+            <Text className="text-sm text-gray-500">Note: The selected location will be applied across all modules and pages.</Text>
+          </View>
           {/* Global active-location workspace selector (company-admin only;
               renders nothing for managers/attendants). Sits above the filters. */}
           <View className="mb-3">

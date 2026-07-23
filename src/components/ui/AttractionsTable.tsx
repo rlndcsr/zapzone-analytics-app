@@ -8,15 +8,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
 import {
-  AttractionStatusBadge,
   CARD_SHADOW,
   PRICING_SUFFIX,
   durationLabel,
   formatCreatedAt,
   formatMoney,
+  type FeatherIconName,
 } from "../../lib/attractions/attractionDisplay";
 import { buildPurchaseLink } from "../../lib/attractions/purchaseLink";
 import type { AttractionRow } from "../../services/attractionsService";
@@ -83,11 +83,162 @@ const PurchaseLinkCell = ({ attraction }: { attraction: AttractionRow }) => {
   );
 };
 
+/**
+ * Per-row action handlers, supplied by the parent screen and threaded through
+ * each cell's `render`. The status-select and actions cells are the only cells
+ * that need them; every other column ignores the second argument. Keeping the
+ * handlers in context (rather than closing over them in the module-level
+ * COLUMNS array) lets COLUMNS stay a static, shared definition.
+ */
+type RowContext = {
+  /** Eye icon — open the Attraction Details sheet (same as a row tap). */
+  onView: (attraction: AttractionRow) => void;
+  onEdit: (attraction: AttractionRow) => void;
+  /** Resolves once the duplicate round-trip finishes (drives the busy spinner). */
+  onDuplicate: (attraction: AttractionRow) => Promise<void> | void;
+  onDelete: (attraction: AttractionRow) => void;
+  /** Open the "Set Status" picker sheet for this row (parent-hosted). */
+  onStatusPress: (attraction: AttractionRow) => void;
+};
+
 type Column = {
   key: string;
   label: string;
   width: number;
-  render: (attraction: AttractionRow) => ReactNode;
+  render: (attraction: AttractionRow, ctx: RowContext) => ReactNode;
+};
+
+/**
+ * Status cell as a tap-to-change pill — mirrors the Manage Accounts table. The
+ * pill shows the current status with a caret; tapping it defers to the parent's
+ * "Set Status" BottomSheet (via `onStatusPress`) rather than opening its own
+ * menu, so the picker style stays consistent across the app. As a nested
+ * Pressable it swallows its own touch, so the row's open-details press never
+ * fires (same mechanism as PurchaseLinkCell).
+ */
+const StatusPill = ({
+  attraction,
+  onPress,
+}: {
+  attraction: AttractionRow;
+  onPress: () => void;
+}) => {
+  const active = attraction.status === "active";
+  return (
+    <View className="flex-row">
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`Change status for ${attraction.name}, currently ${attraction.status}`}
+        className={`flex-row items-center gap-1 px-2.5 py-1 rounded-full ${
+          active
+            ? "bg-green-50 dark:bg-green-900/30"
+            : "bg-gray-100 dark:bg-neutral-800"
+        } active:opacity-70`}
+      >
+        <Text
+          className={`text-xs font-semibold capitalize ${
+            active
+              ? "text-green-600 dark:text-green-400"
+              : "text-gray-500 dark:text-gray-400"
+          }`}
+        >
+          {attraction.status}
+        </Text>
+        <Feather
+          name="chevron-down"
+          size={12}
+          color={active ? "#16A34A" : "#6B7280"}
+        />
+      </Pressable>
+    </View>
+  );
+};
+
+/** A single icon action button inside the Actions cell. Nested Pressable, so it
+ *  handles its own touch and never triggers the row's open-details press. */
+const ActionIconButton = ({
+  icon,
+  color,
+  label,
+  busy = false,
+  onPress,
+}: {
+  icon: FeatherIconName;
+  color: string;
+  label: string;
+  busy?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    disabled={busy}
+    hitSlop={6}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className="w-8 h-8 items-center justify-center rounded-lg active:opacity-60"
+  >
+    {busy ? (
+      <ActivityIndicator size="small" color={color} />
+    ) : (
+      <Feather name={icon} size={16} color={color} />
+    )}
+  </Pressable>
+);
+
+/**
+ * Row Actions cell — View (eye → Details sheet), Edit, Duplicate, Delete,
+ * mirroring the web admin's per-row action buttons. Duplicate owns a local busy
+ * spinner because its handler awaits the create round-trip; Delete defers to
+ * the parent's confirm dialog, so it needs no local busy state.
+ */
+const ActionsCell = ({
+  attraction,
+  ctx,
+}: {
+  attraction: AttractionRow;
+  ctx: RowContext;
+}) => {
+  const [duplicating, setDuplicating] = useState(false);
+
+  const onDuplicate = useCallback(async () => {
+    setDuplicating(true);
+    try {
+      await ctx.onDuplicate(attraction);
+    } finally {
+      setDuplicating(false);
+    }
+  }, [attraction, ctx]);
+
+  return (
+    <View className="flex-row items-center gap-1">
+      <ActionIconButton
+        icon="eye"
+        color="#2563EB"
+        label={`View details for ${attraction.name}`}
+        onPress={() => ctx.onView(attraction)}
+      />
+      <ActionIconButton
+        icon="edit-2"
+        color="#0644C7"
+        label={`Edit ${attraction.name}`}
+        onPress={() => ctx.onEdit(attraction)}
+      />
+      <ActionIconButton
+        icon="copy"
+        color="#6B7280"
+        label={`Duplicate ${attraction.name}`}
+        busy={duplicating}
+        onPress={onDuplicate}
+      />
+      <ActionIconButton
+        icon="trash-2"
+        color="#dc2626"
+        label={`Delete ${attraction.name}`}
+        onPress={() => ctx.onDelete(attraction)}
+      />
+    </View>
+  );
 };
 
 /**
@@ -99,13 +250,13 @@ type Column = {
  * there is preserved without separate columns. Pricing type is surfaced through
  * the Price suffix exactly as the web default view does.
  *
- * Web-only affordances are intentionally excluded (see the deliverables): the
- * selection checkbox (no mobile bulk-select), the row Actions menu (mobile taps
- * the row to open the Details sheet instead), and the Order column's
- * drag-to-reorder chevrons (no reorder on mobile — the number is shown
- * read-only). Columns hidden by default on the web (ID, Updated, and the
- * stand-alone Pricing Type / Location / Description / Created toggles) are not
- * surfaced, matching what a web user actually sees.
+ * The trailing Actions column mirrors the web admin's per-row buttons — View
+ * (eye → Details sheet), Edit, Duplicate, Delete — and the Status column is an
+ * inline select for flipping active/inactive, both wired through {@link
+ * RowContext}. The Order column's drag-to-reorder chevrons are still omitted (no
+ * reorder on mobile — the number is shown read-only). Columns hidden by default
+ * on the web (ID, Updated, and the stand-alone Pricing Type / Location /
+ * Description / Created toggles) are not surfaced, matching what a web user sees.
  */
 const COLUMNS: Column[] = [
   {
@@ -228,11 +379,9 @@ const COLUMNS: Column[] = [
   {
     key: "status",
     label: "Status",
-    width: 110,
-    render: (a) => (
-      <View className="flex-row">
-        <AttractionStatusBadge status={a.status} />
-      </View>
+    width: 130,
+    render: (a, ctx) => (
+      <StatusPill attraction={a} onPress={() => ctx.onStatusPress(a)} />
     ),
   },
   {
@@ -240,6 +389,12 @@ const COLUMNS: Column[] = [
     label: "Purchase Link",
     width: 140,
     render: (a) => <PurchaseLinkCell attraction={a} />,
+  },
+  {
+    key: "actions",
+    label: "Actions",
+    width: 168,
+    render: (a, ctx) => <ActionsCell attraction={a} ctx={ctx} />,
   },
 ];
 
@@ -298,18 +453,36 @@ const CheckboxCell = ({
 export const AttractionsTable = memo(function AttractionsTable({
   attractions,
   onRowPress,
+  onEdit,
+  onDuplicate,
+  onDelete,
+  onStatusPress,
   selectedIds,
   onToggleRow,
   onToggleAll,
 }: {
   attractions: AttractionRow[];
   onRowPress: (attraction: AttractionRow) => void;
+  /** Row Actions — Edit, Duplicate, Delete, and the per-row status pill.
+   *  onView (the eye action) reuses onRowPress, since both open the Details. */
+  onEdit: (attraction: AttractionRow) => void;
+  onDuplicate: (attraction: AttractionRow) => Promise<void> | void;
+  onDelete: (attraction: AttractionRow) => void;
+  /** Open the parent-hosted "Set Status" picker for this row. */
+  onStatusPress: (attraction: AttractionRow) => void;
   /** Selected attraction ids (single source of truth lives in the parent). */
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   /** Select / deselect every row on the current page. */
   onToggleAll: () => void;
 }) {
+  const rowContext: RowContext = {
+    onView: onRowPress,
+    onEdit,
+    onDuplicate,
+    onDelete,
+    onStatusPress,
+  };
   const selectedOnPage = attractions.reduce(
     (n, a) => (selectedIds.has(a.id) ? n + 1 : n),
     0,
@@ -394,7 +567,7 @@ export const AttractionsTable = memo(function AttractionsTable({
                     className="justify-center px-4 py-4"
                     style={{ width: col.width }}
                   >
-                    {col.render(attraction)}
+                    {col.render(attraction, rowContext)}
                   </View>
                 ))}
               </Pressable>

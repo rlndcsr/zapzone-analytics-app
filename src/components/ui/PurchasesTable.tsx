@@ -1,7 +1,11 @@
-import { Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
+import { useMemo } from "react";
+import { Pressable, Text, View } from "react-native";
 
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
+
+const PRIMARY = "#0644C7";
 
 const money = (n: number) =>
   `$${n.toLocaleString("en-US", {
@@ -64,30 +68,82 @@ const STATUS_STYLE: Record<string, string> = {
 const prettyStatus = (s: string) =>
   s === "checked-in" ? "Checked In" : s.charAt(0).toUpperCase() + s.slice(1);
 
-const StatusPill = ({ status }: { status: PurchaseRow["status"] }) => {
+/**
+ * Status cell as a tap-to-change pill — the same pattern as the Manage Accounts
+ * / Attractions tables. Tapping defers to the parent's "Set Status" picker
+ * sheet (via `onPress`) so the picker style stays consistent app-wide. Nested
+ * Pressable, so it swallows its own touch and never opens the row's details.
+ */
+const StatusPill = ({
+  status,
+  onPress,
+}: {
+  status: PurchaseRow["status"];
+  onPress: () => void;
+}) => {
   const cls = STATUS_STYLE[status] ?? STATUS_STYLE.pending;
   const [bg1, bg2, fg1, fg2] = cls.split(" ");
   return (
     <View className="flex-row">
-      <View className={`px-2.5 py-1 rounded-full ${bg1} ${bg2}`}>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`Change status, currently ${prettyStatus(status)}`}
+        className={`flex-row items-center gap-1 px-2.5 py-1 rounded-full ${bg1} ${bg2} active:opacity-70`}
+      >
         <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>
           {prettyStatus(status)}
         </Text>
-      </View>
+        <Feather name="chevron-down" size={12} color="#6B7280" />
+      </Pressable>
     </View>
   );
 };
 
+/** A small circular icon button for the Actions column (matches AccountsTable). */
+const IconAction = ({
+  icon,
+  tint,
+  label,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  tint: string;
+  label: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    hitSlop={6}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+  >
+    <Feather name={icon} size={16} color={tint} />
+  </Pressable>
+);
+
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+
+type Handlers = {
+  /** Eye icon + row tap — open Purchase Details. */
+  onView: (purchase: PurchaseRow) => void;
+  /** Status pill — open the parent-hosted "Set Status" picker sheet. */
+  onStatusPress: (purchase: PurchaseRow) => void;
+  onDelete: (purchase: PurchaseRow) => void;
+};
 
 /**
  * Columns mirror the web `/attractions/purchases` default-visible set, in order
  * and label: Customer · Attraction · Quantity · Total · Paid · Payment ·
- * Purchase Date · Scheduled · Status. (Purchase #, Category and Duration are
- * `defaultVisible: false` on the web, so they're omitted here too.) Paid is
- * green when fully paid, amber otherwise — the same rule the web uses.
+ * Purchase Date · Scheduled · Status · Actions. (Purchase #, Category and
+ * Duration are `defaultVisible: false` on the web, so they're omitted here too.)
+ * Paid is green when fully paid, amber otherwise — the same rule the web uses.
+ * The Status cell is a tap-to-change pill and the trailing Actions cell carries
+ * the inline View (eye → Details) / Delete controls, matching the web table.
  */
-const COLUMNS: TableColumn<PurchaseRow>[] = [
+function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
+  return [
   {
     key: "customer",
     label: "Customer",
@@ -199,10 +255,34 @@ const COLUMNS: TableColumn<PurchaseRow>[] = [
   {
     key: "status",
     label: "Status",
-    width: 120,
-    render: (p) => <StatusPill status={p.status} />,
+    width: 140,
+    render: (p) => (
+      <StatusPill status={p.status} onPress={() => h.onStatusPress(p)} />
+    ),
   },
-];
+  {
+    key: "actions",
+    label: "Actions",
+    width: 110,
+    render: (p) => (
+      <View className="flex-row items-center gap-0.5">
+        <IconAction
+          icon="eye"
+          tint={PRIMARY}
+          label={`View details for ${p.customerName}`}
+          onPress={() => h.onView(p)}
+        />
+        <IconAction
+          icon="trash-2"
+          tint="#EF4444"
+          label={`Delete purchase for ${p.customerName}`}
+          onPress={() => h.onDelete(p)}
+        />
+      </View>
+    ),
+  },
+  ];
+}
 
 /**
  * Table layout for the Manage Purchases list. Thin wrapper over the generic
@@ -216,16 +296,25 @@ export function PurchasesTable({
   onToggleRow,
   onToggleAll,
   onRowPress,
+  onStatusPress,
+  onDelete,
 }: {
   purchases: PurchaseRow[];
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
   onRowPress: (purchase: PurchaseRow) => void;
+  /** Status pill — open the parent-hosted "Set Status" picker sheet. */
+  onStatusPress: (purchase: PurchaseRow) => void;
+  onDelete: (purchase: PurchaseRow) => void;
 }) {
+  const columns = useMemo(
+    () => buildColumns({ onView: onRowPress, onStatusPress, onDelete }),
+    [onRowPress, onStatusPress, onDelete],
+  );
   return (
     <SelectableTable
-      columns={COLUMNS}
+      columns={columns}
       rows={purchases}
       rowId={(p) => p.id}
       onRowPress={onRowPress}

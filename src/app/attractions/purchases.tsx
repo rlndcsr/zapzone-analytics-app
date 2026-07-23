@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import {
@@ -64,6 +65,17 @@ const CARD_SHADOW = {
 } as const;
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
+
+// Status options offered by the per-row "Set Status" picker, matching the web
+// purchase status dropdown (Confirmed · Pending · Checked In · Cancelled ·
+// Refunded).
+const STATUS_PICKER_OPTIONS: PurchaseStatus[] = [
+  "confirmed",
+  "pending",
+  "checked-in",
+  "cancelled",
+  "refunded",
+];
 
 const STATUS_BADGE: Record<PurchaseStatus, string> = {
   confirmed: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
@@ -335,6 +347,12 @@ const ManagePurchases = () => {
   // rows are selected; `bulkBusy` marks the in-flight bulk action.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState<PurchaseBulkAction | null>(null);
+  // Row whose "Set Status" picker sheet is open; `statusBusy` locks it while
+  // the status update is in flight.
+  const [statusPurchase, setStatusPurchase] = useState<PurchaseRow | null>(
+    null,
+  );
+  const [statusBusy, setStatusBusy] = useState(false);
 
   // Deleted ("trashed") view — loaded lazily when toggled on.
   const [showDeleted, setShowDeleted] = useState(false);
@@ -574,6 +592,74 @@ const ManagePurchases = () => {
       ],
     );
   }, [selectedIds, refetch]);
+
+  // Per-row delete (table Actions) — same soft-delete endpoint as the bulk bar.
+  const handleRowDelete = useCallback(
+    (p: PurchaseRow) => {
+      Alert.alert(
+        "Delete purchase",
+        `Are you sure you want to delete the purchase for ${p.customerName}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) return;
+              try {
+                await deleteAttractionPurchase(token, p.id);
+                await refetch();
+              } catch (err) {
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error
+                    ? err.message
+                    : "Could not delete the purchase.",
+                );
+              }
+            },
+          },
+        ],
+      );
+    },
+    [refetch],
+  );
+
+  // Per-row status — the pill opens a "Set Status" picker sheet (consistent
+  // with the Manage Accounts table). Applying calls the same per-id status
+  // endpoint the bulk bar loops over.
+  const applyPurchaseStatus = useCallback(
+    async (status: PurchaseStatus) => {
+      const p = statusPurchase;
+      if (!p) return;
+      if (p.status === status) {
+        setStatusPurchase(null);
+        return;
+      }
+      const token = getToken();
+      if (!token) {
+        Alert.alert("Not signed in", "Please sign in again.");
+        return;
+      }
+      setStatusBusy(true);
+      try {
+        await updateAttractionPurchaseStatus(token, p.id, status);
+        await refetch();
+        setStatusPurchase(null);
+      } catch (err) {
+        Alert.alert(
+          "Update failed",
+          err instanceof Error
+            ? err.message
+            : "Could not update the purchase status.",
+        );
+      } finally {
+        setStatusBusy(false);
+      }
+    },
+    [statusPurchase, refetch],
+  );
 
   const exportCsv = useCallback(async () => {
     if (filtered.length === 0) {
@@ -967,6 +1053,8 @@ const ManagePurchases = () => {
                         params: { id: String(purchase.id) },
                       })
                     }
+                    onStatusPress={setStatusPurchase}
+                    onDelete={handleRowDelete}
                   />
                 ) : (
                   paged.map((purchase) => (
@@ -1027,6 +1115,50 @@ const ManagePurchases = () => {
         onClose={closeDateRange}
         onApply={applyDateRange}
       />
+
+      {/* Per-row status picker (table Actions). Same sheet-based pattern as the
+          Manage Accounts "Set Status" picker, so the style stays consistent. */}
+      <BottomSheet
+        visible={statusPurchase !== null}
+        onClose={() => (statusBusy ? undefined : setStatusPurchase(null))}
+        title="Set Status"
+      >
+        <View className="px-4 pb-8">
+          {statusBusy ? (
+            <View className="py-6 items-center">
+              <ActivityIndicator color={PRIMARY} />
+            </View>
+          ) : (
+            STATUS_PICKER_OPTIONS.map((option) => {
+              const isSelected = statusPurchase?.status === option;
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() => applyPurchaseStatus(option)}
+                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  }`}
+                >
+                  <Text
+                    className={`text-base font-medium ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {prettyStatus(option)}
+                  </Text>
+                  {isSelected && (
+                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                      <Feather name="check" size={14} color="#FFFFFF" />
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+      </BottomSheet>
     </View>
   );
 };

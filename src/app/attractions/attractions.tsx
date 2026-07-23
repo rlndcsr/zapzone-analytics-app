@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   RefreshControl,
@@ -53,7 +54,11 @@ import { getToken } from "../../lib/session";
 import {
   bulkDeleteAttractions,
   bulkSetAttractionsActive,
+  deleteAttraction,
+  duplicateAttraction,
+  setAttractionActive,
   type AttractionRow,
+  type AttractionStatus,
 } from "../../services/attractionsService";
 
 const PRIMARY = "#0644C7";
@@ -122,6 +127,11 @@ const Attractions = () => {
   const [showExportSheet, setShowExportSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
     useState<AttractionRow | null>(null);
+  // Row whose "Set Status" picker sheet is open; `statusBusy` locks it while
+  // the activate/deactivate PATCH is in flight.
+  const [statusAttraction, setStatusAttraction] =
+    useState<AttractionRow | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -349,6 +359,105 @@ const Attractions = () => {
       ],
     );
   }, [selectedIds, refetch]);
+
+  // Per-row Actions (table view). Edit opens the full-screen edit page; the list
+  // refetches on focus via the stale flag the edit screen sets on save.
+  const handleRowEdit = useCallback((a: AttractionRow) => {
+    router.push(`/attractions/edit-attraction?id=${a.id}`);
+  }, []);
+
+  // Duplicate one row — same flow as the Details sheet (create an inactive
+  // "(Copy)"), then refetch so the copy appears. Awaited so the row's Duplicate
+  // icon can show a spinner until it resolves.
+  const handleRowDuplicate = useCallback(
+    async (a: AttractionRow) => {
+      const token = getToken();
+      if (!token) return Alert.alert("Not signed in", "Please sign in again.");
+      try {
+        await duplicateAttraction(token, a.id);
+        await refetch();
+      } catch (err) {
+        Alert.alert(
+          "Duplicate failed",
+          err instanceof Error
+            ? err.message
+            : "Could not duplicate attraction.",
+        );
+      }
+    },
+    [refetch],
+  );
+
+  // Delete one row — same confirmation copy as the Details sheet / web admin.
+  const handleRowDelete = useCallback(
+    (a: AttractionRow) => {
+      Alert.alert(
+        "Delete attraction",
+        "Are you sure you want to delete this attraction? This action cannot be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) {
+                Alert.alert("Not signed in", "Please sign in again.");
+                return;
+              }
+              try {
+                await deleteAttraction(token, a.id);
+                await refetch();
+              } catch (err) {
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error
+                    ? err.message
+                    : "Could not delete attraction.",
+                );
+              }
+            },
+          },
+        ],
+      );
+    },
+    [refetch],
+  );
+
+  // Per-row status — the pill opens a "Set Status" picker sheet (consistent
+  // with the Manage Accounts table). Applying calls the same per-id
+  // activate/deactivate endpoint the bulk bar uses.
+  const applyRowStatus = useCallback(
+    async (status: AttractionStatus) => {
+      const a = statusAttraction;
+      if (!a) return;
+      if (a.status === status) {
+        setStatusAttraction(null);
+        return;
+      }
+      const token = getToken();
+      if (!token) {
+        Alert.alert("Not signed in", "Please sign in again.");
+        return;
+      }
+      setStatusBusy(true);
+      try {
+        await setAttractionActive(token, a.id, status === "active");
+        await refetch();
+        setStatusAttraction(null);
+      } catch (err) {
+        Alert.alert(
+          "Update failed",
+          err instanceof Error
+            ? err.message
+            : "Could not update the attraction status.",
+        );
+      } finally {
+        setStatusBusy(false);
+      }
+    },
+    [statusAttraction, refetch],
+  );
 
   const activeFilterCount = countActiveAttractionFilters(filters);
 
@@ -696,6 +805,10 @@ const Attractions = () => {
                     onRowPress={(attraction) =>
                       setActionsAttraction(attraction)
                     }
+                    onEdit={handleRowEdit}
+                    onDuplicate={handleRowDuplicate}
+                    onDelete={handleRowDelete}
+                    onStatusPress={setStatusAttraction}
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
@@ -804,6 +917,50 @@ const Attractions = () => {
         onClose={() => setActionsAttraction(null)}
         onChanged={refetch}
       />
+
+      {/* Per-row status picker (table Actions). Same sheet-based pattern as the
+          Manage Accounts "Set Status" picker, so the style stays consistent. */}
+      <BottomSheet
+        visible={statusAttraction !== null}
+        onClose={() => (statusBusy ? undefined : setStatusAttraction(null))}
+        title="Set Status"
+      >
+        <View className="px-4 pb-8">
+          {statusBusy ? (
+            <View className="py-6 items-center">
+              <ActivityIndicator color={PRIMARY} />
+            </View>
+          ) : (
+            (["active", "inactive"] as AttractionStatus[]).map((option) => {
+              const isSelected = statusAttraction?.status === option;
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() => applyRowStatus(option)}
+                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  }`}
+                >
+                  <Text
+                    className={`text-base font-medium capitalize ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {option}
+                  </Text>
+                  {isSelected && (
+                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
+                      <Feather name="check" size={14} color="#FFFFFF" />
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+      </BottomSheet>
     </View>
   );
 };

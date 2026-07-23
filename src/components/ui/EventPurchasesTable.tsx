@@ -1,4 +1,6 @@
-import { Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
+import { useMemo } from "react";
+import { Pressable, Text, View } from "react-native";
 
 import type {
   EventPaymentStatus,
@@ -6,6 +8,8 @@ import type {
   EventPurchaseStatus,
 } from "../../services/eventPurchasesService";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
+
+const PRIMARY = "#0644C7";
 
 const money = (n: number) =>
   `$${n.toLocaleString("en-US", {
@@ -98,15 +102,80 @@ const Pill = ({ style, label }: { style: string; label: string }) => {
   );
 };
 
+/**
+ * Status cell as a tap-to-change pill — the same pattern as the Manage Accounts
+ * / Manage Purchases tables. Tapping defers to the parent's "Set Status" picker
+ * sheet (via `onPress`) so the picker style stays consistent app-wide. Nested
+ * Pressable, so it swallows its own touch and never opens the row's details.
+ */
+const StatusPill = ({
+  style,
+  label,
+  onPress,
+}: {
+  style: string;
+  label: string;
+  onPress: () => void;
+}) => {
+  const [bg1, bg2, fg1, fg2] = style.split(" ");
+  return (
+    <View className="flex-row">
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`Change status, currently ${label}`}
+        className={`flex-row items-center gap-1 px-2.5 py-1 rounded-full ${bg1} ${bg2} active:opacity-70`}
+      >
+        <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>{label}</Text>
+        <Feather name="chevron-down" size={12} color="#6B7280" />
+      </Pressable>
+    </View>
+  );
+};
+
+/** A small circular icon button for the Actions column (matches AccountsTable). */
+const IconAction = ({
+  icon,
+  tint,
+  label,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  tint: string;
+  label: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    hitSlop={6}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+  >
+    <Feather name={icon} size={16} color={tint} />
+  </Pressable>
+);
+
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+
+type Handlers = {
+  /** Eye icon + row tap — open Purchase Details. */
+  onView: (purchase: EventPurchaseRow) => void;
+  /** Status pill — open the parent-hosted "Set Status" picker sheet. */
+  onStatusPress: (purchase: EventPurchaseRow) => void;
+  onDelete: (purchase: EventPurchaseRow) => void;
+};
 
 /**
  * Columns mirror the web `/events/purchases` default-visible set, in order and
  * label: Reference · Customer · Event · Qty · Total · Paid · Method · Payment
- * Status · Scheduled · Created · Status. (Purchase # and Customer Type are
- * `defaultVisible: false` on the web, so they're omitted here too.)
+ * Status · Scheduled · Created · Status · Actions. (Purchase # and Customer Type
+ * are `defaultVisible: false` on the web, so they're omitted here too.) The
+ * Status cell is a tap-to-change pill and the trailing Actions cell carries the
+ * inline View (eye → Details) / Delete controls, matching the web table.
  */
-const COLUMNS: TableColumn<EventPurchaseRow>[] = [
+function buildColumns(h: Handlers): TableColumn<EventPurchaseRow>[] {
+  return [
   {
     key: "reference",
     label: "Reference",
@@ -235,15 +304,38 @@ const COLUMNS: TableColumn<EventPurchaseRow>[] = [
   {
     key: "status",
     label: "Status",
-    width: 120,
+    width: 140,
     render: (p) => (
-      <Pill
+      <StatusPill
         style={STATUS_STYLE[p.status] ?? STATUS_STYLE.pending}
         label={prettyStatus(p.status)}
+        onPress={() => h.onStatusPress(p)}
       />
     ),
   },
-];
+  {
+    key: "actions",
+    label: "Actions",
+    width: 110,
+    render: (p) => (
+      <View className="flex-row items-center gap-0.5">
+        <IconAction
+          icon="eye"
+          tint={PRIMARY}
+          label={`View details for ${p.customerName}`}
+          onPress={() => h.onView(p)}
+        />
+        <IconAction
+          icon="trash-2"
+          tint="#EF4444"
+          label={`Delete purchase for ${p.customerName}`}
+          onPress={() => h.onDelete(p)}
+        />
+      </View>
+    ),
+  },
+  ];
+}
 
 /**
  * Table layout for the Event Purchases list. Thin wrapper over the generic
@@ -256,16 +348,25 @@ export function EventPurchasesTable({
   onToggleRow,
   onToggleAll,
   onRowPress,
+  onStatusPress,
+  onDelete,
 }: {
   purchases: EventPurchaseRow[];
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
   onRowPress: (purchase: EventPurchaseRow) => void;
+  /** Status pill — open the parent-hosted "Set Status" picker sheet. */
+  onStatusPress: (purchase: EventPurchaseRow) => void;
+  onDelete: (purchase: EventPurchaseRow) => void;
 }) {
+  const columns = useMemo(
+    () => buildColumns({ onView: onRowPress, onStatusPress, onDelete }),
+    [onRowPress, onStatusPress, onDelete],
+  );
   return (
     <SelectableTable
-      columns={COLUMNS}
+      columns={columns}
       rows={purchases}
       rowId={(p) => p.id}
       onRowPress={onRowPress}
