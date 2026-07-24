@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -26,9 +26,11 @@ import { markEmailNotificationsStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
   createEmailNotification,
+  fetchEmailNotificationDetail,
   fetchEmailTemplates,
   NOTIFICATION_TRIGGER_GROUPS,
   NOTIFICATION_VARIABLE_GROUPS,
+  updateEmailNotification,
   type EmailTemplateRow,
   type NotificationEntityType,
   type NotificationRecipientType,
@@ -57,6 +59,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CreateNotification = () => {
   const insets = useSafeAreaInsets();
 
+  // Edit mode when navigated with an id (from the notification details/actions).
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const editId = id ? Number(id) : null;
+  const isEdit = editId != null && !Number.isNaN(editId);
+
   const [name, setName] = useState("");
   const [entityType, setEntityType] = useState<NotificationEntityType>("all");
   const [triggerType, setTriggerType] = useState("booking_created");
@@ -84,6 +91,35 @@ const CreateNotification = () => {
       .then((r) => setTemplates(r.rows))
       .catch(() => {});
   }, []);
+
+  // Edit mode: prefill every field from the existing notification.
+  useEffect(() => {
+    if (!isEdit || editId == null) return;
+    const token = getToken();
+    if (!token) return;
+    let active2 = true;
+    fetchEmailNotificationDetail(token, editId)
+      .then((d) => {
+        if (!active2) return;
+        setName(d.name);
+        setEntityType(d.entityType as NotificationEntityType);
+        setTriggerType(d.triggerType || "booking_created");
+        setActive(d.isActive);
+        setRecipients(d.recipientTypes as NotificationRecipientType[]);
+        setIncludeQr(d.includeQrCode);
+        setCustomEmails(d.customEmails);
+        setSubject(d.subject);
+        setBody(d.body);
+        if (d.emailTemplateId != null) {
+          setUseTemplate(true);
+          setTemplateId(d.emailTemplateId);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active2 = false;
+    };
+  }, [isEdit, editId]);
 
   const insert = (token: string) => {
     if (lastFocused.current === "subject") setSubject((s) => s + token);
@@ -126,7 +162,7 @@ const CreateNotification = () => {
 
     setSaving(true);
     try {
-      await createEmailNotification(token, {
+      const payload = {
         name: name.trim(),
         triggerType,
         entityType,
@@ -137,13 +173,16 @@ const CreateNotification = () => {
         includeQrCode: includeQr,
         isActive: active,
         emailTemplateId: useTemplate ? templateId : null,
-      });
+      };
+      // Update in edit mode, otherwise create — same payload either way.
+      if (isEdit && editId != null) await updateEmailNotification(token, editId, payload);
+      else await createEmailNotification(token, payload);
       markEmailNotificationsStale();
       router.back();
     } catch (e) {
       Alert.alert(
         "Failed",
-        e instanceof Error ? e.message : "Could not create the notification.",
+        e instanceof Error ? e.message : "Could not save the notification.",
       );
     } finally {
       setSaving(false);
@@ -154,12 +193,16 @@ const CreateNotification = () => {
     <View className="flex-1 bg-gray-50 dark:bg-black">
       <ComposerHeader
         icon="bell"
-        title="Create Email Notification"
-        subtitle="Set up automated email notifications for events"
+        title={isEdit ? "Edit Email Notification" : "Create Email Notification"}
+        subtitle={
+          isEdit
+            ? "Update this automated notification"
+            : "Set up automated email notifications for events"
+        }
         onBack={() => router.back()}
         actions={
           <HeaderAction
-            label="Create Notification"
+            label={isEdit ? "Save Changes" : "Create Notification"}
             icon="check"
             variant="primary"
             loading={saving}

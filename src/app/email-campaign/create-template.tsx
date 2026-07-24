@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -22,7 +22,9 @@ import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createEmailTemplate,
+  fetchEmailTemplateDetail,
   fetchEmailTemplateVariables,
+  updateEmailTemplate,
   type EmailTemplateStatus,
   type EmailVariableGroups,
 } from "../../services/emailService";
@@ -54,6 +56,11 @@ const CreateTemplate = () => {
   const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
   const { locations } = useLocationOptions();
 
+  // Edit mode when navigated with a template id (from the details screen).
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const editId = id ? Number(id) : null;
+  const isEdit = editId != null && !Number.isNaN(editId);
+
   const [name, setName] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [locationId, setLocationId] = useState<number | null>(null);
@@ -78,6 +85,27 @@ const CreateTemplate = () => {
       })
       .catch(() => {});
   }, []);
+
+  // Edit mode: prefill every field from the existing template.
+  useEffect(() => {
+    if (!isEdit || editId == null) return;
+    const token = getToken();
+    if (!token) return;
+    let active = true;
+    fetchEmailTemplateDetail(token, editId)
+      .then((t) => {
+        if (!active) return;
+        setName(t.name);
+        setCategory(t.category || null);
+        setLocationId(t.locationId);
+        setSubject(t.subject);
+        setBody(t.body);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isEdit, editId]);
 
   const insert = (token: string) => {
     if (lastFocused.current === "subject") setSubject((s) => s + token);
@@ -112,14 +140,17 @@ const CreateTemplate = () => {
     if (!token) return Alert.alert("Not signed in", "Please sign in again.");
     setSaving(status);
     try {
-      await createEmailTemplate(token, {
+      const payload = {
         name: name.trim(),
         subject: subject.trim(),
         body: body.trim(),
         status,
         category: category ?? undefined,
         locationId: locationId || null,
-      });
+      };
+      // Update in edit mode, otherwise create — same payload either way.
+      if (isEdit && editId != null) await updateEmailTemplate(token, editId, payload);
+      else await createEmailTemplate(token, payload);
       markEmailTemplatesStale();
       router.back();
     } catch (e) {
@@ -136,8 +167,12 @@ const CreateTemplate = () => {
     <View className="flex-1 bg-gray-50 dark:bg-black">
       <ComposerHeader
         icon="mail"
-        title="Create Email Template"
-        subtitle="Design a reusable email with dynamic variables"
+        title={isEdit ? "Edit Email Template" : "Create Email Template"}
+        subtitle={
+          isEdit
+            ? "Update this reusable email template"
+            : "Design a reusable email with dynamic variables"
+        }
         onBack={() => router.back()}
         actions={
           <>

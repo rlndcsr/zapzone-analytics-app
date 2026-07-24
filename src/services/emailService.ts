@@ -139,6 +139,74 @@ export async function fetchEmailTemplates(
   };
 }
 
+/** PATCH /api/email-templates/{id}/status — set a template's status (bulk-action write). */
+export async function updateEmailTemplateStatus(
+  token: string,
+  id: number,
+  status: EmailTemplateStatus,
+): Promise<void> {
+  await apiRequest(`/api/email-templates/${id}/status`, {
+    method: "PATCH",
+    token,
+    body: { status },
+  });
+}
+
+/** Full template incl. the HTML body — powers the Template Details screen. */
+export type EmailTemplateDetail = {
+  id: number;
+  name: string;
+  subject: string;
+  body: string;
+  status: EmailTemplateStatus;
+  category: string;
+  locationId: number | null;
+};
+
+type RawTemplateDetail = RawTemplate & {
+  body?: string | null;
+  location_id?: number | null;
+};
+
+/** GET /api/email-templates/{id} — full template (with body) for the details screen. */
+export async function fetchEmailTemplateDetail(
+  token: string,
+  id: number,
+): Promise<EmailTemplateDetail> {
+  const res = await apiRequest<{ data?: RawTemplateDetail }>(
+    `/api/email-templates/${id}`,
+    { token },
+  );
+  // Tolerate either a `{ data }` envelope or a bare object.
+  const raw = (res?.data ?? (res as unknown as RawTemplateDetail)) ?? ({} as RawTemplateDetail);
+  return {
+    id: raw.id,
+    name: raw.name?.trim() || "Untitled template",
+    subject: raw.subject?.trim() || "",
+    body: raw.body ?? "",
+    status: (raw.status ?? "draft") as EmailTemplateStatus,
+    category: raw.category?.trim() || "General",
+    locationId: raw.location_id ?? null,
+  };
+}
+
+/** PUT /api/email-templates/{id} — update an existing template (edit flow). */
+export async function updateEmailTemplate(
+  token: string,
+  id: number,
+  input: CreateEmailTemplateInput,
+): Promise<void> {
+  const body: Record<string, unknown> = {
+    name: input.name,
+    subject: input.subject,
+    body: input.body,
+    status: input.status,
+  };
+  if (input.category) body.category = input.category;
+  if (input.locationId != null) body.location_id = input.locationId;
+  await apiRequest(`/api/email-templates/${id}`, { method: "PUT", token, body });
+}
+
 /* ------------------------------------------------------------------ */
 /* Email campaigns                                                     */
 /* ------------------------------------------------------------------ */
@@ -259,6 +327,125 @@ export async function fetchEmailCampaignStats(
   };
 }
 
+/** One delivery-log row shown on the campaign details screen. */
+export type EmailCampaignLog = {
+  id: number;
+  recipientEmail: string;
+  recipientType: string;
+  status: string;
+  errorMessage: string | null;
+  sentAt: string | null;
+};
+
+/** Full campaign incl. recipients, dates, and delivery logs for the details screen. */
+export type EmailCampaignDetail = {
+  id: number;
+  name: string;
+  subject: string;
+  body: string;
+  status: string;
+  statusLabel: string;
+  recipientTypes: string[];
+  customEmails: string[];
+  totalRecipients: number;
+  sentCount: number;
+  failedCount: number;
+  scheduledAt: string | null;
+  sentAt: string | null;
+  completedAt: string | null;
+  createdAt: string | null;
+  createdByName: string | null;
+  locationName: string | null;
+  logs: EmailCampaignLog[];
+};
+
+type RawCampaignLog = {
+  id: number;
+  recipient_email?: string | null;
+  recipient_type?: string | null;
+  status?: string | null;
+  error_message?: string | null;
+  sent_at?: string | null;
+};
+
+type RawCampaignDetail = RawCampaign & {
+  body?: string | null;
+  recipient_types?: string[] | null;
+  custom_emails?: string[] | null;
+  scheduled_at?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+  location?: { name?: string | null } | null;
+  creator?: { first_name?: string | null; last_name?: string | null } | null;
+  logs?: RawCampaignLog[] | null;
+};
+
+/** GET /api/email-campaigns/{id} — full campaign for the details screen. */
+export async function fetchEmailCampaignDetail(
+  token: string,
+  id: number,
+): Promise<EmailCampaignDetail> {
+  const res = await apiRequest<{ data?: RawCampaignDetail }>(
+    `/api/email-campaigns/${id}`,
+    { token },
+  );
+  const d = (res?.data ?? (res as unknown as RawCampaignDetail)) ?? ({} as RawCampaignDetail);
+  const c = d.creator;
+  const createdBy = c ? `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() : "";
+  return {
+    id: d.id,
+    name: d.name?.trim() || "Untitled campaign",
+    subject: d.subject?.trim() || "",
+    body: d.body ?? "",
+    status: d.status ?? "draft",
+    statusLabel: humanize(d.status) || "Draft",
+    recipientTypes: Array.isArray(d.recipient_types) ? d.recipient_types : [],
+    customEmails: Array.isArray(d.custom_emails) ? d.custom_emails : [],
+    totalRecipients: Number(d.total_recipients ?? 0),
+    sentCount: Number(d.sent_count ?? 0),
+    failedCount: Number(d.failed_count ?? 0),
+    scheduledAt: d.scheduled_at ?? null,
+    sentAt: d.sent_at ?? null,
+    completedAt: d.completed_at ?? null,
+    createdAt: d.created_at ?? null,
+    createdByName: createdBy || null,
+    locationName: d.location?.name ?? null,
+    logs: Array.isArray(d.logs)
+      ? d.logs.map((l) => ({
+          id: l.id,
+          recipientEmail: l.recipient_email ?? "",
+          recipientType: l.recipient_type ?? "",
+          status: l.status ?? "pending",
+          errorMessage: l.error_message ?? null,
+          sentAt: l.sent_at ?? null,
+        }))
+      : [],
+  };
+}
+
+/** POST /api/email-campaigns/{id}/cancel — stop a pending/sending campaign. */
+export async function cancelEmailCampaign(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/email-campaigns/${id}/cancel`, { method: "POST", token });
+}
+
+/** POST /api/email-campaigns/{id}/resend — retry failed (or all) recipients. */
+export async function resendEmailCampaign(
+  token: string,
+  id: number,
+  type: "failed" | "all" = "failed",
+): Promise<void> {
+  await apiRequest(`/api/email-campaigns/${id}/resend`, {
+    method: "POST",
+    token,
+    body: { type },
+  });
+}
+
+/** DELETE /api/email-campaigns/{id} — remove a finished/cancelled campaign. */
+export async function deleteEmailCampaign(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/email-campaigns/${id}`, { method: "DELETE", token });
+}
+
 /* ------------------------------------------------------------------ */
 /* Email notifications                                                 */
 /* ------------------------------------------------------------------ */
@@ -319,6 +506,138 @@ export async function fetchEmailNotifications(
   };
 
   return { rows: mapped, total, stats };
+}
+
+/** PATCH /api/email-notifications/{id}/toggle-status — flip active/inactive (bulk-action write). */
+export async function toggleEmailNotificationStatus(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/email-notifications/${id}/toggle-status`, {
+    method: "PATCH",
+    token,
+  });
+}
+
+/** Full notification config (trigger/entity/recipients/content) for the details screen. */
+export type EmailNotificationDetail = {
+  id: number;
+  name: string;
+  triggerType: string;
+  triggerLabel: string;
+  entityType: string;
+  entityLabel: string;
+  recipientTypes: string[];
+  customEmails: string[];
+  subject: string;
+  body: string;
+  templateName: string | null;
+  emailTemplateId: number | null;
+  includeQrCode: boolean;
+  isActive: boolean;
+  isDefault: boolean;
+  sendBeforeHours: number | null;
+  sendAfterHours: number | null;
+  locationName: string | null;
+  createdAt: string | null;
+};
+
+type RawNotificationDetail = RawNotification & {
+  subject?: string | null;
+  body?: string | null;
+  custom_emails?: string[] | null;
+  include_qr_code?: boolean | null;
+  send_before_hours?: number | null;
+  send_after_hours?: number | null;
+  email_template_id?: number | null;
+  location?: { name?: string | null } | null;
+  email_template?: { name?: string | null } | null;
+  created_at?: string | null;
+};
+
+/** GET /api/email-notifications/{id} — full notification for the details screen. */
+export async function fetchEmailNotificationDetail(
+  token: string,
+  id: number,
+): Promise<EmailNotificationDetail> {
+  const res = await apiRequest<{ data?: RawNotificationDetail }>(
+    `/api/email-notifications/${id}`,
+    { token },
+  );
+  const d = (res?.data ?? (res as unknown as RawNotificationDetail)) ?? ({} as RawNotificationDetail);
+  return {
+    id: d.id,
+    name: d.name?.trim() || "Notification",
+    triggerType: d.trigger_type ?? "",
+    triggerLabel: humanize(d.trigger_type),
+    entityType: d.entity_type ?? "all",
+    entityLabel: humanize(d.entity_type) || "All Entities",
+    recipientTypes: Array.isArray(d.recipient_types) ? d.recipient_types : [],
+    customEmails: Array.isArray(d.custom_emails) ? d.custom_emails : [],
+    subject: d.subject?.trim() || "",
+    body: d.body ?? "",
+    templateName: d.email_template?.name ?? null,
+    emailTemplateId: d.email_template_id ?? null,
+    includeQrCode: !!d.include_qr_code,
+    isActive: d.is_active !== false,
+    isDefault: !!d.is_default,
+    sendBeforeHours: d.send_before_hours ?? null,
+    sendAfterHours: d.send_after_hours ?? null,
+    locationName: d.location?.name ?? null,
+    createdAt: d.created_at ?? null,
+  };
+}
+
+/** PUT /api/email-notifications/{id} — update an automated notification (edit flow). */
+export async function updateEmailNotification(
+  token: string,
+  id: number,
+  input: CreateEmailNotificationInput,
+): Promise<void> {
+  const body: Record<string, unknown> = {
+    name: input.name,
+    trigger_type: input.triggerType,
+    entity_type: input.entityType,
+    recipient_types: input.recipientTypes,
+    subject: input.subject,
+    body: input.body,
+    include_qr_code: input.includeQrCode,
+    is_active: input.isActive,
+  };
+  if (input.customEmails?.length) body.custom_emails = input.customEmails;
+  if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
+  await apiRequest(`/api/email-notifications/${id}`, { method: "PUT", token, body });
+}
+
+/** DELETE /api/email-notifications/{id} — remove a non-default notification. */
+export async function deleteEmailNotification(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/email-notifications/${id}`, { method: "DELETE", token });
+}
+
+/** POST /api/email-notifications/{id}/duplicate — clone a notification. */
+export async function duplicateEmailNotification(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/email-notifications/${id}/duplicate`, { method: "POST", token });
+}
+
+/** POST /api/email-notifications/{id}/send-test — send a test email to one address. */
+export async function sendTestEmailNotification(
+  token: string,
+  id: number,
+  email: string,
+): Promise<void> {
+  await apiRequest(`/api/email-notifications/${id}/send-test`, {
+    method: "POST",
+    token,
+    body: { email },
+  });
+}
+
+/** POST /api/email-notifications/{id}/reset-default — restore a default's template. */
+export async function resetDefaultNotification(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/email-notifications/${id}/reset-default`, {
+    method: "POST",
+    token,
+  });
 }
 
 export type NotificationEntityType = "all" | "package" | "attraction";

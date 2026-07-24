@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,13 +14,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
+import { EmailTemplatesTable } from "../../components/ui/EmailTemplatesTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { consumeEmailTemplatesStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
   fetchEmailTemplates,
+  updateEmailTemplateStatus,
   type EmailTemplateRow,
   type EmailTemplateStatus,
 } from "../../services/emailService";
@@ -82,6 +87,13 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "Active", value: "active" },
   { label: "Draft", value: "draft" },
   { label: "Archived", value: "archived" },
+];
+
+// Bulk actions mirror the web "Change Status" dropdown (Active / Draft / Archive).
+const TEMPLATE_BULK_CHIPS: EmailBulkChip[] = [
+  { key: "active", label: "Mark Active", icon: "check-circle", tint: "#16A34A" },
+  { key: "draft", label: "Mark Draft", icon: "clock", tint: "#B45309" },
+  { key: "archived", label: "Archive", icon: "archive", tint: "#6B7280" },
 ];
 
 type TColKey = "subject" | "category" | "date" | "status";
@@ -246,6 +258,70 @@ const EmailTemplates = () => {
   useEffect(() => {
     setPage(1);
   }, [search, statusFilter, categoryFilter, perPage]);
+
+  // --- Table view + bulk selection (parallel to the card view; same `paged`) ---
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // Header checkbox toggles every row on the current page.
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const all = paged.length > 0 && paged.every((t) => prev.has(t.id));
+      return all ? new Set() : new Set(paged.map((t) => t.id));
+    });
+  }, [paged]);
+
+  // Drop the selection whenever the visible set or view changes.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [search, statusFilter, categoryFilter, page, perPage, viewMode]);
+
+  // Tapping a row/card opens the Template Details screen.
+  const openDetails = useCallback(
+    (id: number) =>
+      router.push({
+        pathname: "/email-campaign/template-details",
+        params: { id: String(id) },
+      }),
+    [router],
+  );
+
+  // Bulk status change — mirrors the web "Change Status" action, applied per id.
+  const runBulkStatus = useCallback(
+    async (key: string) => {
+      const token = getToken();
+      if (!token || selectedIds.size === 0) return;
+      const ids = [...selectedIds];
+      setBulkBusy(key);
+      try {
+        await Promise.all(
+          ids.map((id) =>
+            updateEmailTemplateStatus(token, id, key as EmailTemplateStatus),
+          ),
+        );
+        setSelectedIds(new Set());
+        await load();
+      } catch (err) {
+        Alert.alert(
+          "Action failed",
+          err instanceof Error ? err.message : "Please try again.",
+        );
+      } finally {
+        setBulkBusy(null);
+      }
+    },
+    [selectedIds, load],
+  );
 
   const filtersActive = statusFilter !== "all" || categoryFilter !== "all";
 
@@ -421,6 +497,24 @@ const EmailTemplates = () => {
             </View>
           )}
 
+          {/* View toggle — Table is the default, Cards optional */}
+          <View className="flex-row items-center justify-between">
+            <Text className="text-sm text-gray-500 dark:text-gray-400">
+              {filtered.length} template{filtered.length === 1 ? "" : "s"}
+            </Text>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+          </View>
+
+          {viewMode === "table" && selectedIds.size > 0 && (
+            <EmailBulkBar
+              count={selectedIds.size}
+              busyKey={bulkBusy}
+              chips={TEMPLATE_BULK_CHIPS}
+              onAction={runBulkStatus}
+              onClear={clearSelection}
+            />
+          )}
+
           {/* States */}
           {loading && templates.length === 0 && (
             <Text className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
@@ -442,13 +536,24 @@ const EmailTemplates = () => {
             </View>
           )}
 
-          {/* List */}
-          {paged.map((t) => {
-            const pill = STATUS_PILL[t.status] ?? STATUS_PILL.draft;
+          {/* List — Table (default) or Cards over the same paged slice */}
+          {filtered.length > 0 &&
+            (viewMode === "table" ? (
+              <EmailTemplatesTable
+                templates={paged}
+                selectedIds={selectedIds}
+                onToggleRow={toggleRow}
+                onToggleAll={toggleAllVisible}
+                onRowPress={(t) => openDetails(t.id)}
+              />
+            ) : (
+              paged.map((t) => {
+                const pill = STATUS_PILL[t.status] ?? STATUS_PILL.draft;
             return (
-              <View
+              <Pressable
                 key={t.id}
-                className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
+                onPress={() => openDetails(t.id)}
+                className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-80"
                 style={CARD_SHADOW}
               >
                 <View className="flex-row items-start justify-between">
@@ -491,9 +596,10 @@ const EmailTemplates = () => {
                     )}
                   </View>
                 )}
-              </View>
-            );
-          })}
+              </Pressable>
+                );
+              })
+            ))}
 
           <Pagination
             page={page}

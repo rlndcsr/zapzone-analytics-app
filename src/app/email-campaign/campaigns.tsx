@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,17 +13,27 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
+import { EmailCampaignsTable } from "../../components/ui/EmailCampaignsTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { consumeEmailCampaignsStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
+  cancelEmailCampaign,
+  deleteEmailCampaign,
   fetchEmailCampaigns,
   fetchEmailCampaignStats,
   type EmailCampaignRow,
   type EmailCampaignStats,
 } from "../../services/emailService";
+
+// Bulk actions mirror the web Campaigns page (Export Selected only).
+const CAMPAIGN_BULK_CHIPS: EmailBulkChip[] = [
+  { key: "export", label: "Export Selected", icon: "download", tint: "#0644C7" },
+];
 
 const CARD_SHADOW = {
   shadowColor: "#000",
@@ -160,6 +171,123 @@ const EmailCampaigns = () => {
   useEffect(() => {
     setPage(1);
   }, [search, statusFilter, perPage]);
+
+  // --- Table view + bulk selection (parallel to the card view; same `paged`) ---
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // Header checkbox toggles every row on the current page.
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const all = paged.length > 0 && paged.every((c) => prev.has(c.id));
+      return all ? new Set() : new Set(paged.map((c) => c.id));
+    });
+  }, [paged]);
+
+  // Drop the selection whenever the visible set or view changes.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [search, statusFilter, page, perPage, viewMode]);
+
+  // Tapping a row/card opens the Campaign Details screen.
+  const openDetails = useCallback(
+    (cid: number) =>
+      router.push({
+        pathname: "/email-campaign/campaign-details",
+        params: { id: String(cid) },
+      }),
+    [router],
+  );
+
+  // Per-row Cancel/Delete (mirrors the web Actions), confirmed then reloads.
+  const confirmRowCancel = useCallback(
+    (c: EmailCampaignRow) =>
+      Alert.alert("Cancel campaign?", `Stop sending "${c.name}"?`, [
+        { text: "Keep sending", style: "cancel" },
+        {
+          text: "Cancel campaign",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) return;
+            try {
+              await cancelEmailCampaign(token, c.id);
+              await load();
+            } catch (err) {
+              Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
+            }
+          },
+        },
+      ]),
+    [load],
+  );
+  const confirmRowDelete = useCallback(
+    (c: EmailCampaignRow) =>
+      Alert.alert("Delete campaign?", `Permanently delete "${c.name}"?`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) return;
+            try {
+              await deleteEmailCampaign(token, c.id);
+              await load();
+            } catch (err) {
+              Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
+            }
+          },
+        },
+      ]),
+    [load],
+  );
+
+  // Export the selected campaigns to CSV + share — mirrors the web "Export Selected".
+  const exportSelected = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    const rows = campaigns.filter((c) => selectedIds.has(c.id));
+    setBulkBusy("export");
+    try {
+      // Lazy-loaded so these native modules never run at app startup.
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const header = ["ID", "Campaign", "Subject", "Recipients", "Sent", "Failed", "Status", "Sent At"];
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const lines = rows.map((c) =>
+        [c.id, c.name, c.subject, c.recipients, c.sentCount, c.failedCount, c.statusLabel, c.sentAt ? new Date(c.sentAt).toLocaleString() : ""]
+          .map(esc)
+          .join(","),
+      );
+      const csv = [header.map(esc).join(","), ...lines].join("\n");
+      const date = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}email-campaigns-export-${date}.csv`;
+      await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Email Campaigns",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+      }
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Could not export.");
+    } finally {
+      setBulkBusy(null);
+    }
+  }, [selectedIds, campaigns]);
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -304,6 +432,24 @@ const EmailCampaigns = () => {
             </View>
           )}
 
+          {/* View toggle — Table is the default, Cards optional */}
+          <View className="flex-row items-center justify-between">
+            <Text className="text-sm text-gray-500 dark:text-gray-400">
+              {filtered.length} campaign{filtered.length === 1 ? "" : "s"}
+            </Text>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
+          </View>
+
+          {viewMode === "table" && selectedIds.size > 0 && (
+            <EmailBulkBar
+              count={selectedIds.size}
+              busyKey={bulkBusy}
+              chips={CAMPAIGN_BULK_CHIPS}
+              onAction={() => exportSelected()}
+              onClear={clearSelection}
+            />
+          )}
+
           {/* States */}
           {loading && campaigns.length === 0 && (
             <Text className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
@@ -322,14 +468,27 @@ const EmailCampaigns = () => {
             </View>
           )}
 
-          {/* List */}
-          {paged.map((c) => {
-            const pill = statusPill(c.status);
-            const pct = c.recipients > 0 ? Math.round((c.sentCount / c.recipients) * 100) : 0;
+          {/* List — Table (default) or Cards over the same paged slice */}
+          {filtered.length > 0 &&
+            (viewMode === "table" ? (
+              <EmailCampaignsTable
+                campaigns={paged}
+                selectedIds={selectedIds}
+                onToggleRow={toggleRow}
+                onToggleAll={toggleAllVisible}
+                onRowPress={(c) => openDetails(c.id)}
+                onCancel={confirmRowCancel}
+                onDelete={confirmRowDelete}
+              />
+            ) : (
+              paged.map((c) => {
+                const pill = statusPill(c.status);
+                const pct = c.recipients > 0 ? Math.round((c.sentCount / c.recipients) * 100) : 0;
             return (
-              <View
+              <Pressable
                 key={c.id}
-                className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
+                onPress={() => openDetails(c.id)}
+                className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-80"
                 style={CARD_SHADOW}
               >
                 <View className="flex-row items-start justify-between">
@@ -375,9 +534,10 @@ const EmailCampaigns = () => {
                     {fmtDateTime(c.sentAt)}
                   </Text>
                 </View>
-              </View>
-            );
-          })}
+              </Pressable>
+                );
+              })
+            ))}
 
           <Pagination
             page={page}
