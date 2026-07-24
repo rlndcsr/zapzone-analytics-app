@@ -5,6 +5,8 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import type { WaiverTemplate } from "../../services/waiversService";
 import { StatusBadge } from "./StatusBadge";
 
+const PRIMARY = "#0644C7";
+
 const CARD_SHADOW = {
   shadowColor: "#000",
   shadowOffset: { width: 0, height: 2 },
@@ -34,6 +36,7 @@ type RowContext = {
   canManage: boolean;
   isCompanyAdmin: boolean;
   busy: boolean;
+  onKiosk: () => void;
   onEdit: () => void;
   onToggleStatus: () => void;
   onDelete: () => void;
@@ -163,38 +166,50 @@ const COLUMNS: Column[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 150,
+    width: 200,
     render: (_t, ctx) => {
-      // Active view: edit · power · delete (manage only). Trash view: restore
-      // (manage) · delete-forever (admin). Mirrors the web row action icons.
+      // Active view: kiosk (all) · power · edit · delete (manage only). Trash
+      // view: restore (manage) · delete-forever (admin). Mirrors the web row
+      // action icons, with the kiosk launcher added first.
       if (!ctx.deleted) {
-        if (!ctx.canManage) return <Text className={CELL_TEXT}>—</Text>;
         return (
           <View className="flex-row items-center gap-2">
             <IconButton
-              icon="edit-2"
-              color="#6B7280"
-              bg="bg-gray-100 dark:bg-neutral-800"
-              label="Edit template"
+              icon="tablet"
+              color={PRIMARY}
+              bg="bg-blue-50 dark:bg-blue-900/20"
+              label="Launch kiosk"
               disabled={ctx.busy}
-              onPress={ctx.onEdit}
+              onPress={ctx.onKiosk}
             />
-            <IconButton
-              icon="power"
-              color="#F59E0B"
-              bg="bg-amber-50 dark:bg-amber-900/20"
-              label="Toggle template status"
-              disabled={ctx.busy}
-              onPress={ctx.onToggleStatus}
-            />
-            <IconButton
-              icon="trash-2"
-              color="#EF4444"
-              bg="bg-red-50 dark:bg-red-900/30"
-              label="Delete template"
-              disabled={ctx.busy}
-              onPress={ctx.onDelete}
-            />
+            {ctx.canManage && (
+              <>
+                <IconButton
+                  icon="power"
+                  color="#F59E0B"
+                  bg="bg-amber-50 dark:bg-amber-900/20"
+                  label="Toggle template status"
+                  disabled={ctx.busy}
+                  onPress={ctx.onToggleStatus}
+                />
+                <IconButton
+                  icon="edit-2"
+                  color="#6B7280"
+                  bg="bg-gray-100 dark:bg-neutral-800"
+                  label="Edit template"
+                  disabled={ctx.busy}
+                  onPress={ctx.onEdit}
+                />
+                <IconButton
+                  icon="trash-2"
+                  color="#EF4444"
+                  bg="bg-red-50 dark:bg-red-900/30"
+                  label="Delete template"
+                  disabled={ctx.busy}
+                  onPress={ctx.onDelete}
+                />
+              </>
+            )}
           </View>
         );
       }
@@ -242,6 +257,7 @@ export const TemplatesTable = memo(function TemplatesTable({
   isCompanyAdmin,
   busy,
   onRowPress,
+  onKiosk,
   onEdit,
   onToggleStatus,
   onDelete,
@@ -254,6 +270,7 @@ export const TemplatesTable = memo(function TemplatesTable({
   isCompanyAdmin: boolean;
   busy: boolean;
   onRowPress: (t: WaiverTemplate) => void;
+  onKiosk: (t: WaiverTemplate) => void;
   onEdit: (t: WaiverTemplate) => void;
   onToggleStatus: (t: WaiverTemplate) => void;
   onDelete: (t: WaiverTemplate) => void;
@@ -299,6 +316,7 @@ export const TemplatesTable = memo(function TemplatesTable({
               canManage,
               isCompanyAdmin,
               busy,
+              onKiosk: () => onKiosk(t),
               onEdit: () => onEdit(t),
               onToggleStatus: () => onToggleStatus(t),
               onDelete: () => onDelete(t),

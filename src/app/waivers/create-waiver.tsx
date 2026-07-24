@@ -1,14 +1,16 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,10 +23,25 @@ import { getToken } from "../../lib/session";
 import {
   assignWaiver,
   fetchTemplates,
+  searchPurchaseLinks,
+  type PurchaseLink,
+  type PurchaseLinkType,
   type WaiverTemplate,
 } from "../../services/waiversService";
 
 const PRIMARY = "#0644C7";
+
+/** The three link tabs + their pill colors (mirrors the web AssignWaiverModal). */
+const LINK_TABS: {
+  type: PurchaseLinkType;
+  label: string;
+  activeBg: string;
+  activeText: string;
+}[] = [
+  { type: "booking", label: "Booking", activeBg: "bg-blue-100 dark:bg-blue-900/40", activeText: "text-blue-700 dark:text-blue-300" },
+  { type: "attraction_purchase", label: "Attraction", activeBg: "bg-violet-100 dark:bg-violet-900/40", activeText: "text-violet-700 dark:text-violet-300" },
+  { type: "event_purchase", label: "Event", activeBg: "bg-amber-100 dark:bg-amber-900/40", activeText: "text-amber-700 dark:text-amber-300" },
+];
 
 /** Local date as YYYY-MM-DD (backend `selected_date`). */
 function ymd(d: Date): string {
@@ -91,6 +108,72 @@ const CreateWaiver = () => {
   const [errors, setErrors] = useState<{ template?: string; contact?: string }>({});
   const submitLock = useRef(false);
 
+  // Link to purchase (optional) — ties the waiver to a specific transaction.
+  const [linkTab, setLinkTab] = useState<PurchaseLinkType>("booking");
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkResults, setLinkResults] = useState<PurchaseLink[]>([]);
+  const [linkSearching, setLinkSearching] = useState(false);
+  const [selectedLink, setSelectedLink] = useState<PurchaseLink | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const activeTab = LINK_TABS.find((t) => t.type === linkTab)!;
+
+  const runSearch = useCallback((tab: PurchaseLinkType, q: string) => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!q.trim()) {
+      setLinkResults([]);
+      setLinkSearching(false);
+      return;
+    }
+    setLinkSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      const token = getToken();
+      if (!token) {
+        setLinkSearching(false);
+        return;
+      }
+      try {
+        const rows = await searchPurchaseLinks(token, tab, q);
+        setLinkResults(rows);
+      } catch {
+        setLinkResults([]);
+      } finally {
+        setLinkSearching(false);
+      }
+    }, 350);
+  }, []);
+
+  const changeLinkTab = (tab: PurchaseLinkType) => {
+    setLinkTab(tab);
+    setLinkQuery("");
+    setLinkResults([]);
+    setSelectedLink(null);
+  };
+
+  const changeLinkQuery = (q: string) => {
+    setLinkQuery(q);
+    setSelectedLink(null);
+    runSearch(linkTab, q);
+  };
+
+  const selectLink = (r: PurchaseLink) => {
+    setSelectedLink(r);
+    setLinkResults([]);
+    setLinkQuery("");
+    if (r.date) setSelectedDate(r.date);
+  };
+
+  const clearLink = () => {
+    setSelectedLink(null);
+    setLinkQuery("");
+    setLinkResults([]);
+  };
+
+  // Cancel any pending debounce on unmount.
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+  }, []);
+
   // Load active templates to assign from (mirrors the web AssignWaiverModal).
   useEffect(() => {
     let active = true;
@@ -149,6 +232,16 @@ const CreateWaiver = () => {
         adultEmail: email,
         adultPhone: phone,
         activityName,
+        bookingId:
+          selectedLink?.type === "booking" ? selectedLink.id : undefined,
+        attractionPurchaseId:
+          selectedLink?.type === "attraction_purchase"
+            ? selectedLink.id
+            : undefined,
+        eventId:
+          selectedLink?.type === "event_purchase"
+            ? selectedLink.eventId
+            : undefined,
       });
       markWaiversStale();
       Alert.alert("Waiver assigned", "The signing link has been sent.", [
@@ -233,6 +326,138 @@ const CreateWaiver = () => {
               <Text className="ml-4 mt-1.5 text-xs text-red-500">
                 {templatesError}
               </Text>
+            )}
+
+            {/* Link to purchase (optional) */}
+            <Text className="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200">
+              Link to purchase{" "}
+              <Text className="text-gray-400 dark:text-gray-500 font-normal">
+                (optional)
+              </Text>
+            </Text>
+            <Text className="mt-0.5 mb-2.5 text-xs text-gray-400 dark:text-gray-500">
+              Ties this waiver to a specific transaction.
+            </Text>
+
+            <View className="flex-row gap-1.5 mb-2.5">
+              {LINK_TABS.map((tab) => {
+                const active = linkTab === tab.type;
+                return (
+                  <Pressable
+                    key={tab.type}
+                    onPress={() => changeLinkTab(tab.type)}
+                    className={`px-3.5 py-1.5 rounded-full ${
+                      active ? tab.activeBg : "bg-gray-100 dark:bg-neutral-800"
+                    }`}
+                  >
+                    <Text
+                      className={`text-xs font-semibold ${
+                        active
+                          ? tab.activeText
+                          : "text-gray-500 dark:text-gray-400"
+                      }`}
+                    >
+                      {tab.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {selectedLink ? (
+              <View className="flex-row items-center justify-between rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-900/20 px-3 py-2.5">
+                <View className="flex-row items-center gap-2 flex-1 mr-2">
+                  <View className={`px-2 py-0.5 rounded-full ${activeTab.activeBg}`}>
+                    <Text className={`text-[11px] font-semibold ${activeTab.activeText}`}>
+                      {activeTab.label}
+                    </Text>
+                  </View>
+                  <View className="flex-1">
+                    <Text
+                      className="text-sm font-medium text-gray-900 dark:text-white"
+                      numberOfLines={1}
+                    >
+                      {selectedLink.name}
+                    </Text>
+                    {!!selectedLink.sub && (
+                      <Text
+                        className="text-xs text-gray-400 dark:text-gray-500"
+                        numberOfLines={1}
+                      >
+                        {selectedLink.sub}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+                <Pressable onPress={clearLink} hitSlop={8}>
+                  <Feather name="x" size={16} color="#9CA3AF" />
+                </Pressable>
+              </View>
+            ) : (
+              <>
+                <View className="flex-row items-center gap-2 rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 h-12">
+                  <Feather name="search" size={16} color="#9CA3AF" />
+                  <TextInput
+                    value={linkQuery}
+                    onChangeText={changeLinkQuery}
+                    placeholder={`Search ${activeTab.label.toLowerCase()} by ref # or guest name…`}
+                    placeholderTextColor="#9CA3AF"
+                    autoCapitalize="none"
+                    className="flex-1 text-sm text-gray-900 dark:text-white"
+                    style={{ paddingVertical: 0 }}
+                  />
+                  {linkSearching && (
+                    <ActivityIndicator size="small" color="#9CA3AF" />
+                  )}
+                </View>
+
+                {linkResults.length > 0 && (
+                  <View className="mt-2 rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
+                    {linkResults.map((r, i) => (
+                      <Pressable
+                        key={`${r.type}-${r.id}-${i}`}
+                        onPress={() => selectLink(r)}
+                        className={`flex-row items-center gap-2.5 px-3 py-2.5 active:bg-gray-50 dark:active:bg-neutral-800 ${
+                          i > 0
+                            ? "border-t border-gray-100 dark:border-neutral-800"
+                            : ""
+                        }`}
+                      >
+                        <View className={`px-2 py-0.5 rounded-full ${activeTab.activeBg}`}>
+                          <Text className={`text-[11px] font-semibold ${activeTab.activeText}`}>
+                            {activeTab.label}
+                          </Text>
+                        </View>
+                        <View className="flex-1">
+                          <Text
+                            className="text-sm font-medium text-gray-900 dark:text-white"
+                            numberOfLines={1}
+                          >
+                            {r.name}
+                          </Text>
+                          {!!r.sub && (
+                            <Text
+                              className="text-xs text-gray-400 dark:text-gray-500"
+                              numberOfLines={1}
+                            >
+                              {r.sub}
+                            </Text>
+                          )}
+                        </View>
+                        <Feather name="chevron-right" size={16} color="#D1D5DB" />
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+
+                {!linkSearching &&
+                  linkQuery.trim().length > 0 &&
+                  linkResults.length === 0 && (
+                    <Text className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+                      No matches found.
+                    </Text>
+                  )}
+              </>
             )}
 
             {/* Visit date */}

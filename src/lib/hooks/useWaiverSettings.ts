@@ -10,6 +10,14 @@ import { getToken } from "../session";
 let cache: WaiverSettings | null = null;
 
 /**
+ * Replace the shared cache after a save so permission-gated actions across the
+ * waiver screens reflect the new settings without a refetch.
+ */
+export function primeWaiverSettings(next: WaiverSettings) {
+  cache = next;
+}
+
+/**
  * Company waiver permission flags (admin_delete_enabled, manager_* toggles).
  * Screens use these to mirror the backend's role gating — hiding actions the
  * caller's role would be rejected for. Falls back to permissive-but-safe

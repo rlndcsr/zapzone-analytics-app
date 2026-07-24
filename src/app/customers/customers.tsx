@@ -900,6 +900,7 @@ const Customers = () => {
         contact={sheetContact ?? null}
         companyId={companyId}
         locationId={user?.location_id ?? null}
+        availableTags={tagChoices}
         onClose={() => setSheetContact(undefined)}
         onChanged={afterMutation}
       />

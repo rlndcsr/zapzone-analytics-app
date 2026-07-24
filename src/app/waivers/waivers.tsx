@@ -829,6 +829,16 @@ const Waivers = () => {
             {NAV_ITEMS.map((item) => (
               <NavCard key={item.route} item={item} />
             ))}
+            {isCompanyAdmin && (
+              <NavCard
+                item={{
+                  label: "Settings",
+                  desc: "Company-wide waiver defaults",
+                  icon: "settings",
+                  route: "/waivers/waiver-settings",
+                }}
+              />
+            )}
           </View>
 
           <Pressable

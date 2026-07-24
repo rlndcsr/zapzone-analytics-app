@@ -94,6 +94,25 @@ const SORT_ORDER_OPTIONS: { label: string; value: SortOrder }[] = [
   { label: "Descending", value: "desc" },
 ];
 
+/** Natural alphanumeric sort of names (Table 2 before Table 10). */
+function naturalNameSort(a: string, b: string): number {
+  const ax = a.match(/(\d+|\D+)/g) || [];
+  const bx = b.match(/(\d+|\D+)/g) || [];
+  const n = Math.max(ax.length, bx.length);
+  for (let i = 0; i < n; i++) {
+    const ca = ax[i] ?? "";
+    const cb = bx[i] ?? "";
+    if (/^\d+$/.test(ca) && /^\d+$/.test(cb)) {
+      const d = parseInt(ca, 10) - parseInt(cb, 10);
+      if (d !== 0) return d;
+    } else {
+      const c = ca.toLowerCase().localeCompare(cb.toLowerCase());
+      if (c !== 0) return c;
+    }
+  }
+  return 0;
+}
+
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "";
   const d = new Date(dateStr);
@@ -457,7 +476,7 @@ const Space = () => {
             new Date(b.createdAt ?? 0).getTime()) *
           dir
         );
-      return a.name.localeCompare(b.name) * dir;
+      return naturalNameSort(a.name, b.name) * dir;
     });
     return list;
   }, [spaces, search, statusFilter, locationFilter, sortBy, sortOrder]);

@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { LaunchKioskSheet } from "../../components/ui/LaunchKioskSheet";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { TemplatesTable } from "../../components/ui/TemplatesTable";
@@ -153,15 +154,23 @@ const Templates = () => {
   // Template writes: admin, or manager when the company allows it.
   const canManage =
     isCompanyAdmin ||
-    (role === "location_manager" && (settings?.managerCanBuildTemplates ?? false));
+    (role === "location_manager" &&
+      (settings?.managerCanBuildTemplates ?? false));
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<TemplateStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<TemplateStatus | "all">(
+    "all",
+  );
   const [showDeleted, setShowDeleted] = useState(false);
   const [sheet, setSheet] = useState<null | "status">(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [actionsTemplate, setActionsTemplate] = useState<WaiverTemplate | null>(null);
+  const [actionsTemplate, setActionsTemplate] = useState<WaiverTemplate | null>(
+    null,
+  );
+  const [kioskTemplate, setKioskTemplate] = useState<WaiverTemplate | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   // Presentation layout only — table by default, card view on toggle. Both
   // layouts read the same `paged` slice, so switching never refetches.
@@ -224,7 +233,10 @@ const Templates = () => {
       markTemplatesStale();
       await refetch();
     } catch (e) {
-      Alert.alert(failMsg, e instanceof Error ? e.message : "Please try again.");
+      Alert.alert(
+        failMsg,
+        e instanceof Error ? e.message : "Please try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -288,7 +300,8 @@ const Templates = () => {
   };
 
   const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Statuses";
+    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ??
+    "All Statuses";
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -309,7 +322,9 @@ const Templates = () => {
           <Pressable
             onPress={() => setShowDeleted((v) => !v)}
             className={`p-2 rounded-full ${
-              showDeleted ? "bg-blue-100 dark:bg-blue-900/30" : "bg-gray-100 dark:bg-neutral-800"
+              showDeleted
+                ? "bg-blue-100 dark:bg-blue-900/30"
+                : "bg-gray-100 dark:bg-neutral-800"
             }`}
             accessibilityRole="button"
             accessibilityLabel="Toggle deleted templates"
@@ -349,6 +364,18 @@ const Templates = () => {
             </Text>
           </View>
 
+          <Pressable
+            onPress={() => router.push("/waivers/create-template")}
+            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text
+              className="text-sm font-semibold text-white"
+              numberOfLines={1}
+            >
+              New Template
+            </Text>
+          </Pressable>
           {/* Search */}
           <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3">
             <Feather name="search" size={16} color="#9CA3AF" />
@@ -385,7 +412,9 @@ const Templates = () => {
 
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
+              <Text className="text-red-600 font-semibold">
+                Something went wrong
+              </Text>
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
@@ -411,7 +440,11 @@ const Templates = () => {
           ) : !error && templates.length === 0 ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name={showDeleted ? "trash-2" : "layout"} size={26} color="#9CA3AF" />
+                <Feather
+                  name={showDeleted ? "trash-2" : "layout"}
+                  size={26}
+                  color="#9CA3AF"
+                />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
                 {showDeleted ? "Trash is empty" : "No templates found"}
@@ -437,8 +470,11 @@ const Templates = () => {
                     isCompanyAdmin={isCompanyAdmin}
                     busy={busy}
                     onRowPress={openTemplate}
+                    onKiosk={setKioskTemplate}
                     onEdit={(t) =>
-                      router.push(`/waivers/create-template?id=${t.id}` as never)
+                      router.push(
+                        `/waivers/create-template?id=${t.id}` as never,
+                      )
                     }
                     onToggleStatus={onToggleStatus}
                     onDelete={onDelete}
@@ -524,6 +560,19 @@ const Templates = () => {
 
           {actionsTemplate && !showDeleted && (
             <>
+              <Pressable
+                onPress={() => {
+                  const t = actionsTemplate;
+                  setActionsTemplate(null);
+                  setKioskTemplate(t);
+                }}
+                className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+              >
+                <Feather name="tablet" size={18} color={PRIMARY} />
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
+                  Launch kiosk
+                </Text>
+              </Pressable>
               {canManage && (
                 <Pressable
                   onPress={() => {
@@ -594,7 +643,7 @@ const Templates = () => {
                   className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
                 >
                   <Feather name="trash" size={18} color="#DC2626" />
-                  <Text className="text-base font-medium text-red-600">
+                  <Text className="text-base font-medium text-red-600 ">
                     Delete permanently
                   </Text>
                 </Pressable>
@@ -604,27 +653,12 @@ const Templates = () => {
         </View>
       </BottomSheet>
 
-      {/* FAB — New Template */}
-      {canManage && !showDeleted && (
-        <Pressable
-          onPress={() => router.push("/waivers/create-template" as never)}
-          accessibilityRole="button"
-          accessibilityLabel="Create template"
-          style={{
-            position: "absolute",
-            right: 20,
-            bottom: insets.bottom + 20,
-            shadowColor: PRIMARY,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.4,
-            shadowRadius: 12,
-            elevation: 8,
-          }}
-          className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
-        >
-          <Feather name="plus" size={26} color="#FFFFFF" />
-        </Pressable>
-      )}
+      {/* Launch Kiosk */}
+      <LaunchKioskSheet
+        template={kioskTemplate}
+        visible={kioskTemplate !== null}
+        onClose={() => setKioskTemplate(null)}
+      />
     </View>
   );
 };

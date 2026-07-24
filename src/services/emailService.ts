@@ -61,6 +61,63 @@ type RawTemplate = {
   created_at?: string | null;
 };
 
+/** One insertable merge variable, e.g. {@literal {{ recipient_email }}}. */
+export type EmailVariable = { name: string; description: string };
+
+/** Grouped merge variables for the composer's "Template Variables" panel. */
+export type EmailVariableGroups = {
+  default: EmailVariable[];
+  customer: EmailVariable[];
+  user: EmailVariable[];
+};
+
+const toVarList = (rec: Record<string, string> | undefined): EmailVariable[] =>
+  Object.entries(rec ?? {}).map(([name, description]) => ({ name, description }));
+
+/** GET /api/email-templates/variables — merge fields grouped default/customer/user. */
+export async function fetchEmailTemplateVariables(
+  token: string,
+): Promise<EmailVariableGroups> {
+  const res = await apiRequest<{
+    data?: {
+      default?: Record<string, string>;
+      customer?: Record<string, string>;
+      user?: Record<string, string>;
+    };
+  }>("/api/email-templates/variables", { token });
+  const d = res?.data ?? {};
+  return {
+    default: toVarList(d.default),
+    customer: toVarList(d.customer),
+    user: toVarList(d.user),
+  };
+}
+
+export type CreateEmailTemplateInput = {
+  name: string;
+  subject: string;
+  body: string;
+  status: EmailTemplateStatus;
+  category?: string;
+  locationId?: number | null;
+};
+
+/** POST /api/email-templates — create a reusable template. */
+export async function createEmailTemplate(
+  token: string,
+  input: CreateEmailTemplateInput,
+): Promise<void> {
+  const body: Record<string, unknown> = {
+    name: input.name,
+    subject: input.subject,
+    body: input.body,
+    status: input.status,
+  };
+  if (input.category) body.category = input.category;
+  if (input.locationId != null) body.location_id = input.locationId;
+  await apiRequest("/api/email-templates", { method: "POST", token, body });
+}
+
 /** GET /api/email-templates — reusable templates for the company. */
 export async function fetchEmailTemplates(
   token: string,
@@ -131,6 +188,42 @@ export async function fetchEmailCampaigns(
       sentAt: c.sent_at ?? null,
     })),
   };
+}
+
+export type CampaignRecipientType =
+  | "customers"
+  | "attendants"
+  | "company_admin"
+  | "location_managers"
+  | "custom";
+
+export type CreateEmailCampaignInput = {
+  name: string;
+  subject: string;
+  body: string;
+  recipientTypes: CampaignRecipientType[];
+  customEmails?: string[];
+  emailTemplateId?: number | null;
+  sendNow: boolean;
+  locationId?: number | null;
+};
+
+/** POST /api/email-campaigns — create a bulk send (draft when sendNow is false). */
+export async function createEmailCampaign(
+  token: string,
+  input: CreateEmailCampaignInput,
+): Promise<void> {
+  const body: Record<string, unknown> = {
+    name: input.name,
+    subject: input.subject,
+    body: input.body,
+    recipient_types: input.recipientTypes,
+    send_now: input.sendNow,
+  };
+  if (input.customEmails?.length) body.custom_emails = input.customEmails;
+  if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
+  if (input.locationId != null) body.location_id = input.locationId;
+  await apiRequest("/api/email-campaigns", { method: "POST", token, body });
 }
 
 export type EmailCampaignStats = {
@@ -227,3 +320,135 @@ export async function fetchEmailNotifications(
 
   return { rows: mapped, total, stats };
 }
+
+export type NotificationEntityType = "all" | "package" | "attraction";
+export type NotificationRecipientType =
+  | "customer"
+  | "staff"
+  | "company_admin"
+  | "location_manager"
+  | "custom";
+
+export type CreateEmailNotificationInput = {
+  name: string;
+  triggerType: string;
+  entityType: NotificationEntityType;
+  recipientTypes: NotificationRecipientType[];
+  customEmails?: string[];
+  subject: string;
+  body: string;
+  includeQrCode: boolean;
+  isActive: boolean;
+  emailTemplateId?: number | null;
+};
+
+/** POST /api/email-notifications — create an automated per-event email. */
+export async function createEmailNotification(
+  token: string,
+  input: CreateEmailNotificationInput,
+): Promise<void> {
+  const body: Record<string, unknown> = {
+    name: input.name,
+    trigger_type: input.triggerType,
+    entity_type: input.entityType,
+    recipient_types: input.recipientTypes,
+    subject: input.subject,
+    body: input.body,
+    include_qr_code: input.includeQrCode,
+    is_active: input.isActive,
+  };
+  if (input.customEmails?.length) body.custom_emails = input.customEmails;
+  if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
+  await apiRequest("/api/email-notifications", { method: "POST", token, body });
+}
+
+/** Trigger-event options for a notification, grouped for the picker. */
+export const NOTIFICATION_TRIGGER_GROUPS: {
+  label: string;
+  options: { value: string; label: string }[];
+}[] = [
+  {
+    label: "Booking Events",
+    options: [
+      { value: "booking_created", label: "Booking Created" },
+      { value: "booking_confirmed", label: "Booking Confirmed" },
+      { value: "booking_updated", label: "Booking Updated" },
+      { value: "booking_rescheduled", label: "Booking Rescheduled" },
+      { value: "booking_cancelled", label: "Booking Cancelled" },
+      { value: "booking_checked_in", label: "Booking Checked In" },
+      { value: "booking_completed", label: "Booking Completed" },
+      { value: "booking_reminder", label: "Booking Reminder" },
+      { value: "booking_followup", label: "Booking Follow-up" },
+      { value: "booking_no_show", label: "Booking No-Show" },
+    ],
+  },
+  {
+    label: "Purchase Events",
+    options: [
+      { value: "purchase_created", label: "Purchase Created" },
+      { value: "purchase_confirmed", label: "Purchase Confirmed" },
+      { value: "purchase_cancelled", label: "Purchase Cancelled" },
+      { value: "purchase_completed", label: "Purchase Completed" },
+      { value: "purchase_checked_in", label: "Purchase Checked In" },
+      { value: "purchase_refunded", label: "Purchase Refunded" },
+      { value: "purchase_reminder", label: "Purchase Reminder" },
+      { value: "purchase_followup", label: "Purchase Follow-up" },
+    ],
+  },
+  {
+    label: "Payment Events",
+    options: [
+      { value: "payment_received", label: "Payment Received" },
+      { value: "payment_failed", label: "Payment Failed" },
+      { value: "payment_refunded", label: "Payment Refunded" },
+      { value: "payment_partial", label: "Partial Payment" },
+      { value: "payment_pending", label: "Payment Pending" },
+    ],
+  },
+  {
+    label: "Reports",
+    options: [
+      { value: "end_of_day_sales_report", label: "End of Day Sales Report" },
+    ],
+  },
+];
+
+/** Curated merge variables for the notification composer (mirrors the web groups). */
+export const NOTIFICATION_VARIABLE_GROUPS: {
+  title: string;
+  vars: EmailVariable[];
+}[] = [
+  {
+    title: "Customer Variables",
+    vars: [
+      { name: "customer_name", description: "Full customer name" },
+      { name: "customer_first_name", description: "Customer first name" },
+      { name: "customer_last_name", description: "Customer last name" },
+      { name: "customer_email", description: "Customer email" },
+    ],
+  },
+  {
+    title: "Booking Variables",
+    vars: [
+      { name: "booking_reference", description: "Booking reference number" },
+      { name: "booking_date", description: "Booking date" },
+      { name: "booking_time", description: "Booking time" },
+      { name: "participants", description: "Number of participants" },
+      { name: "total_amount", description: "Total amount" },
+    ],
+  },
+  {
+    title: "Package Variables",
+    vars: [
+      { name: "package_name", description: "Package name" },
+      { name: "package_price", description: "Package price" },
+    ],
+  },
+  {
+    title: "Room Variables",
+    vars: [
+      { name: "room_name", description: "Room / space name" },
+      { name: "room_capacity", description: "Room capacity" },
+    ],
+  },
+];

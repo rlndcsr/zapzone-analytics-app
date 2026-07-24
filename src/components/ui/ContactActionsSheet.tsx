@@ -22,7 +22,7 @@ import {
   type ContactRow,
 } from "../../services/contactsService";
 import { BottomSheet } from "./BottomSheet";
-import { TextField, ToggleRow } from "./FormControls";
+import { SelectField, TextField } from "./FormControls";
 import { StatusBadge } from "./StatusBadge";
 
 const PRIMARY = "#0644C7";
@@ -108,9 +108,16 @@ type Props = {
   contact: ContactRow | null;
   companyId: number | null;
   locationId?: number | null;
+  /** Company tags offered as quick "add existing tags" chips on the create form. */
+  availableTags?: string[];
   onClose: () => void;
   onChanged: () => void;
 };
+
+const STATUS_OPTIONS = [
+  { label: "Active", value: "active" },
+  { label: "Inactive", value: "inactive" },
+];
 
 /**
  * Contact actions hub — View / Edit / Delete / tags for an existing contact, or
@@ -122,6 +129,7 @@ export function ContactActionsSheet({
   contact,
   companyId,
   locationId,
+  availableTags = [],
   onClose,
   onChanged,
 }: Props) {
@@ -135,6 +143,7 @@ export function ContactActionsSheet({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [address, setAddress] = useState("");
@@ -159,6 +168,7 @@ export function ContactActionsSheet({
     setFirstName(c?.firstName ?? "");
     setLastName(c?.lastName ?? "");
     setPhone(c?.phone ?? "");
+    setDateOfBirth(c?.dateOfBirth?.slice(0, 10) ?? "");
     setCompanyName(c?.companyName ?? "");
     setJobTitle(c?.jobTitle ?? "");
     setAddress(c?.address ?? "");
@@ -199,6 +209,7 @@ export function ContactActionsSheet({
     firstName: firstName.trim(),
     lastName: lastName.trim(),
     phone: phone.trim(),
+    dateOfBirth: dateOfBirth.trim() || null,
     companyName: companyName.trim(),
     jobTitle: jobTitle.trim(),
     address: address.trim(),
@@ -330,6 +341,14 @@ export function ContactActionsSheet({
     }
   };
 
+  const quickTags = availableTags.filter((t) => !formTags.includes(t));
+
+  const addFormTag = (raw: string) => {
+    const t = raw.trim();
+    if (t) setFormTags((prev) => [...new Set([...prev, t])]);
+    setNewFormTag("");
+  };
+
   const renderForm = () => (
     <ScrollView
       className="px-5"
@@ -338,15 +357,6 @@ export function ContactActionsSheet({
       keyboardShouldPersistTaps="handled"
     >
       <View className="gap-4 pt-2">
-        <TextField
-          label="Email"
-          required
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          placeholder="name@example.com"
-        />
         <View className="flex-row gap-3">
           <View className="flex-1">
             <TextField label="First name" value={firstName} onChangeText={setFirstName} />
@@ -355,41 +365,86 @@ export function ContactActionsSheet({
             <TextField label="Last name" value={lastName} onChangeText={setLastName} />
           </View>
         </View>
-        <TextField label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Company" value={companyName} onChangeText={setCompanyName} />
+            <TextField
+              label="Email"
+              required
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              placeholder="email@example.com"
+            />
           </View>
           <View className="flex-1">
-            <TextField label="Job title" value={jobTitle} onChangeText={setJobTitle} />
+            <TextField
+              label="Source"
+              value={source}
+              onChangeText={setSource}
+              placeholder="e.g. Website, Referral"
+            />
           </View>
         </View>
-        <TextField label="Source" value={source} onChangeText={setSource} placeholder="e.g. Walk-in" />
+
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <TextField
+              label="Phone"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+              placeholder="+1 (555) 000-0000"
+            />
+          </View>
+          <View className="flex-1">
+            <SelectField
+              label="Status"
+              value={active ? "active" : "inactive"}
+              options={STATUS_OPTIONS}
+              onSelect={(v) => setActive(v === "active")}
+            />
+          </View>
+        </View>
+
+        <TextField
+          label="Date of Birth"
+          value={dateOfBirth}
+          onChangeText={setDateOfBirth}
+          placeholder="YYYY-MM-DD"
+          hint="Format: YYYY-MM-DD"
+        />
 
         <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-1">
           Address
         </Text>
-        <TextField label="Street address" value={address} onChangeText={setAddress} />
+        <TextField
+          label="Street address"
+          value={address}
+          onChangeText={setAddress}
+          placeholder="123 Main St"
+        />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="City" value={city} onChangeText={setCity} />
+            <TextField label="City" value={city} onChangeText={setCity} placeholder="City" />
           </View>
           <View className="flex-1">
-            <TextField label="State" value={stateField} onChangeText={setStateField} />
+            <TextField label="State" value={stateField} onChangeText={setStateField} placeholder="State" />
           </View>
         </View>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="ZIP / Postal code" value={zip} onChangeText={setZip} />
+            <TextField label="ZIP code" value={zip} onChangeText={setZip} placeholder="12345" />
           </View>
           <View className="flex-1">
-            <TextField label="Country" value={country} onChangeText={setCountry} />
+            <TextField label="Country" value={country} onChangeText={setCountry} placeholder="Country" />
           </View>
         </View>
 
         {mode === "create" && (
           <View>
-            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+            <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-1 mb-2">
               Tags
             </Text>
             {formTags.length > 0 && (
@@ -408,6 +463,29 @@ export function ContactActionsSheet({
                 ))}
               </View>
             )}
+
+            {quickTags.length > 0 && (
+              <>
+                <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">
+                  Add existing tags:
+                </Text>
+                <View className="flex-row flex-wrap mb-2">
+                  {quickTags.map((t) => (
+                    <Pressable
+                      key={t}
+                      onPress={() => setFormTags((prev) => [...new Set([...prev, t])])}
+                      className="flex-row items-center gap-1 bg-gray-100 dark:bg-neutral-800 px-2.5 py-1 rounded-full mr-2 mb-2"
+                    >
+                      <Feather name="plus" size={11} color={PRIMARY} />
+                      <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+                        {t}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            )}
+
             <View className="flex-row items-center gap-2">
               <View className="flex-1 rounded-xl px-3.5 py-2.5 border border-gray-200 dark:border-neutral-800">
                 <TextInput
@@ -415,21 +493,13 @@ export function ContactActionsSheet({
                   onChangeText={setNewFormTag}
                   placeholder="Add a tag"
                   placeholderTextColor="#9CA3AF"
-                  onSubmitEditing={() => {
-                    const t = newFormTag.trim();
-                    if (t) setFormTags((prev) => [...new Set([...prev, t])]);
-                    setNewFormTag("");
-                  }}
+                  onSubmitEditing={() => addFormTag(newFormTag)}
                   className="text-sm text-gray-900 dark:text-white"
                   style={{ paddingVertical: 0 }}
                 />
               </View>
               <Pressable
-                onPress={() => {
-                  const t = newFormTag.trim();
-                  if (t) setFormTags((prev) => [...new Set([...prev, t])]);
-                  setNewFormTag("");
-                }}
+                onPress={() => addFormTag(newFormTag)}
                 className="px-4 py-2.5 rounded-xl bg-[#0644C7]"
               >
                 <Text className="text-sm font-semibold text-white">Add</Text>
@@ -438,9 +508,13 @@ export function ContactActionsSheet({
           </View>
         )}
 
-        <TextField label="Notes" value={notes} onChangeText={setNotes} multiline />
-        <ToggleRow label="Active" value={active} onValueChange={setActive} />
-        <ToggleRow label="SMS consent" value={smsConsent} onValueChange={setSmsConsent} />
+        <TextField
+          label="Notes"
+          value={notes}
+          onChangeText={setNotes}
+          multiline
+          placeholder="Add notes about this customer..."
+        />
 
         <View className="flex-row gap-3 mt-2">
           <Pressable
@@ -461,7 +535,7 @@ export function ContactActionsSheet({
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <Text className="text-sm font-semibold text-white">
-                {mode === "create" ? "Add customer" : "Save changes"}
+                {mode === "create" ? "Create Customer" : "Save changes"}
               </Text>
             )}
           </Pressable>

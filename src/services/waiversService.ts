@@ -156,14 +156,30 @@ export type GroupInvite = {
   completeCount: number;
 };
 
-/** Company-level waiver settings (permission flags + UI hints). */
+/** Company-level waiver settings (permission flags + company-wide defaults). */
 export type WaiverSettings = {
+  // Validity & duplicates
+  defaultValidityDays: number | null;
+  waiversExpire: boolean;
+  defaultExpirationDays: number | null;
+  requireNewOnTextChange: boolean;
+  defaultDuplicateRule: DuplicateRule;
+  // Reminders & confirmations
+  reminderWindowHours: number;
+  alwaysIncludeLinkInConfirmation: boolean;
+  // Search & kiosk
+  searchAutoRefreshSeconds: number;
+  kioskInactivityTimeoutSeconds: number;
+  kioskDisableAutofill: boolean;
+  // Permissions
   adminDeleteEnabled: boolean;
   managerPrintExportEnabled: boolean;
   managerCanBuildTemplates: boolean;
   managerCanViewDeletionLog: boolean;
+  // Marketing & CRM
   marketingConsentEnabled: boolean;
-  searchAutoRefreshSeconds: number;
+  crmSyncOnlyWhenConsented: boolean;
+  minorMarketingDisabled: boolean;
 };
 
 /* ------------------------------------------------------------- raw types -- */
@@ -521,6 +537,100 @@ export type AssignWaiverInput = {
   attractionPurchaseId?: number;
   customerId?: number;
 };
+
+/* --------------------------------------------------- purchase link search -- */
+
+/** The three transaction types a waiver can be tied to (mirrors the web). */
+export type PurchaseLinkType = "booking" | "attraction_purchase" | "event_purchase";
+
+/** A single searchable transaction the waiver can link to. */
+export type PurchaseLink = {
+  type: PurchaseLinkType;
+  /** booking id / attraction-purchase id / event-purchase id. */
+  id: number;
+  /** For event purchases, the underlying event id (sent as `event_id`). */
+  eventId?: number;
+  /** Guest name (or email fallback). */
+  name: string;
+  /** Reference / date / activity summary line. */
+  sub: string;
+  /** Booking/purchase date (YYYY-MM-DD) used to prefill the visit date. */
+  date: string | null;
+};
+
+type RawLinkParty = {
+  id?: number;
+  event_id?: number | null;
+  reference_number?: string | null;
+  guest_name?: string | null;
+  guest_email?: string | null;
+  booking_date?: string | null;
+  purchase_date?: string | null;
+  package?: { name?: string | null } | null;
+  attraction?: { name?: string | null } | null;
+  event?: { name?: string | null } | null;
+};
+
+const joinSub = (...parts: (string | null | undefined)[]) =>
+  parts.filter((p) => !!p && String(p).trim()).join(" · ");
+
+/**
+ * Search bookings / attraction purchases / event purchases by ref # or guest
+ * name for the "Link to purchase" picker. Mirrors the web AssignWaiverModal:
+ * bookings hit /api/bookings/search; purchases pass `search` + `per_page`.
+ */
+export async function searchPurchaseLinks(
+  token: string,
+  type: PurchaseLinkType,
+  query: string,
+  signal?: AbortSignal,
+): Promise<PurchaseLink[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  if (type === "booking") {
+    const res = await apiRequest<{ success?: boolean; data?: RawLinkParty[] }>(
+      `/api/bookings/search?query=${encodeURIComponent(q)}`,
+      { token, signal },
+    );
+    return (res?.data ?? []).slice(0, 8).map((d) => ({
+      type,
+      id: d.id ?? 0,
+      name: d.guest_name || d.guest_email || "—",
+      sub: joinSub(d.reference_number, d.booking_date, d.package?.name),
+      date: d.booking_date ?? null,
+    }));
+  }
+
+  if (type === "attraction_purchase") {
+    const params = new URLSearchParams({ search: q, per_page: "8" });
+    const res = await apiRequest<{
+      success?: boolean;
+      data?: { purchases?: RawLinkParty[] };
+    }>(`/api/attraction-purchases?${params.toString()}`, { token, signal });
+    return (res?.data?.purchases ?? []).map((d) => ({
+      type,
+      id: d.id ?? 0,
+      name: d.guest_name || d.guest_email || "—",
+      sub: joinSub(`#${d.id}`, d.purchase_date, d.attraction?.name),
+      date: d.purchase_date ?? null,
+    }));
+  }
+
+  const params = new URLSearchParams({ search: q, per_page: "8" });
+  const res = await apiRequest<{ success?: boolean; data?: RawLinkParty[] }>(
+    `/api/event-purchases?${params.toString()}`,
+    { token, signal },
+  );
+  return (res?.data ?? []).map((d) => ({
+    type,
+    id: d.id ?? 0,
+    eventId: d.event_id ?? undefined,
+    name: d.guest_name || d.guest_email || "—",
+    sub: joinSub(d.reference_number, d.purchase_date, d.event?.name),
+    date: d.purchase_date ?? null,
+  }));
+}
 
 /** POST /api/waivers/assign — create a pending, staff-sent waiver + send link. */
 export async function assignWaiver(
@@ -916,31 +1026,91 @@ export async function fetchDeletionLog(
 
 /* ------------------------------------------------------------- Settings -- */
 
-/** GET /api/waiver-settings — company permission flags + UI hints. */
-export async function fetchWaiverSettings(
-  token: string,
-  signal?: AbortSignal,
-): Promise<WaiverSettings> {
-  const res = await apiRequest<{
-    success: boolean;
-    data: {
-      admin_delete_enabled?: boolean;
-      manager_print_export_enabled?: boolean;
-      manager_can_build_templates?: boolean;
-      manager_can_view_deletion_log?: boolean;
-      marketing_consent_enabled?: boolean;
-      search_auto_refresh_seconds?: number;
-    };
-  }>(`/api/waiver-settings`, { token, signal });
-  const d = res?.data ?? {};
+type RawWaiverSettings = {
+  default_validity_days?: number | null;
+  waivers_expire?: boolean;
+  default_expiration_days?: number | null;
+  require_new_on_text_change?: boolean;
+  default_duplicate_rule?: DuplicateRule;
+  reminder_window_hours?: number;
+  always_include_link_in_confirmation?: boolean;
+  search_auto_refresh_seconds?: number;
+  kiosk_inactivity_timeout_seconds?: number;
+  kiosk_disable_autofill?: boolean;
+  admin_delete_enabled?: boolean;
+  manager_print_export_enabled?: boolean;
+  manager_can_build_templates?: boolean;
+  manager_can_view_deletion_log?: boolean;
+  marketing_consent_enabled?: boolean;
+  crm_sync_only_when_consented?: boolean;
+  minor_marketing_disabled?: boolean;
+};
+
+/** Map the raw API payload → the camelCased WaiverSettings shape. */
+function mapWaiverSettings(d: RawWaiverSettings): WaiverSettings {
   return {
+    defaultValidityDays: d.default_validity_days ?? null,
+    waiversExpire: d.waivers_expire ?? true,
+    defaultExpirationDays: d.default_expiration_days ?? null,
+    requireNewOnTextChange: d.require_new_on_text_change ?? true,
+    defaultDuplicateRule: d.default_duplicate_rule ?? "manager_only",
+    reminderWindowHours: d.reminder_window_hours ?? 24,
+    alwaysIncludeLinkInConfirmation:
+      d.always_include_link_in_confirmation ?? true,
+    searchAutoRefreshSeconds: d.search_auto_refresh_seconds ?? 30,
+    kioskInactivityTimeoutSeconds: d.kiosk_inactivity_timeout_seconds ?? 60,
+    kioskDisableAutofill: d.kiosk_disable_autofill ?? true,
     adminDeleteEnabled: d.admin_delete_enabled ?? true,
     managerPrintExportEnabled: d.manager_print_export_enabled ?? true,
     managerCanBuildTemplates: d.manager_can_build_templates ?? false,
     managerCanViewDeletionLog: d.manager_can_view_deletion_log ?? false,
     marketingConsentEnabled: d.marketing_consent_enabled ?? true,
-    searchAutoRefreshSeconds: d.search_auto_refresh_seconds ?? 30,
+    crmSyncOnlyWhenConsented: d.crm_sync_only_when_consented ?? true,
+    minorMarketingDisabled: d.minor_marketing_disabled ?? true,
   };
+}
+
+/** GET /api/waiver-settings — company permission flags + company-wide defaults. */
+export async function fetchWaiverSettings(
+  token: string,
+  signal?: AbortSignal,
+): Promise<WaiverSettings> {
+  const res = await apiRequest<{ success: boolean; data: RawWaiverSettings }>(
+    `/api/waiver-settings`,
+    { token, signal },
+  );
+  return mapWaiverSettings(res?.data ?? {});
+}
+
+/** PUT /api/waiver-settings — save company-wide waiver defaults (admin only). */
+export async function updateWaiverSettings(
+  token: string,
+  input: WaiverSettings,
+): Promise<WaiverSettings> {
+  const body: RawWaiverSettings = {
+    default_validity_days: input.defaultValidityDays,
+    waivers_expire: input.waiversExpire,
+    default_expiration_days: input.defaultExpirationDays,
+    require_new_on_text_change: input.requireNewOnTextChange,
+    default_duplicate_rule: input.defaultDuplicateRule,
+    reminder_window_hours: input.reminderWindowHours,
+    always_include_link_in_confirmation: input.alwaysIncludeLinkInConfirmation,
+    search_auto_refresh_seconds: input.searchAutoRefreshSeconds,
+    kiosk_inactivity_timeout_seconds: input.kioskInactivityTimeoutSeconds,
+    kiosk_disable_autofill: input.kioskDisableAutofill,
+    admin_delete_enabled: input.adminDeleteEnabled,
+    manager_print_export_enabled: input.managerPrintExportEnabled,
+    manager_can_build_templates: input.managerCanBuildTemplates,
+    manager_can_view_deletion_log: input.managerCanViewDeletionLog,
+    marketing_consent_enabled: input.marketingConsentEnabled,
+    crm_sync_only_when_consented: input.crmSyncOnlyWhenConsented,
+    minor_marketing_disabled: input.minorMarketingDisabled,
+  };
+  const res = await apiRequest<{ success: boolean; data: RawWaiverSettings }>(
+    `/api/waiver-settings`,
+    { method: "PUT", token, body },
+  );
+  return mapWaiverSettings(res?.data ?? body);
 }
 
 /* --------------------------------------------- Entity waiver connections -- */
@@ -1000,6 +1170,72 @@ export function buildWaiverKioskUrl(
   entityId: number,
 ): string {
   return webUrl(`/waiver/kiosk/${entityType}/${entityId}`);
+}
+
+/**
+ * Generic (walk-in) kiosk URL for a template — the customer fills in all of
+ * their own info. Mirrors the web Assign/Kiosk modal's generic launch, which
+ * opens `/waiver/kiosk/{templateId}?location_id=…`.
+ */
+export function buildTemplateKioskUrl(
+  templateId: number,
+  opts: { locationId?: number | null; preview?: boolean } = {},
+): string {
+  const params = new URLSearchParams();
+  if (opts.preview) params.set("preview", "1");
+  if (opts.locationId != null) params.set("location_id", String(opts.locationId));
+  const qs = params.toString();
+  return webUrl(`/waiver/kiosk/${templateId}${qs ? `?${qs}` : ""}`);
+}
+
+/** The source kinds a prefilled kiosk session can bind to (mirrors the web). */
+export type KioskSourceType =
+  | "booking"
+  | "attraction_purchase"
+  | "event_purchase"
+  | "package"
+  | "attraction"
+  | "event";
+
+/** Result of creating a prefilled kiosk session. */
+export type KioskSession = {
+  kioskUrl: string | null;
+  status: string | null;
+  alreadyCompleted: boolean;
+};
+
+/**
+ * POST /api/waivers/kiosk-session — create a prefilled kiosk session bound to a
+ * booking / purchase / activity and return the URL to open. Mirrors the web
+ * `waiverService.createKioskSession`.
+ */
+export async function createKioskSession(
+  token: string,
+  sourceType: KioskSourceType,
+  sourceId: number,
+  opts: { templateId?: number; selectedDate?: string; locationId?: number } = {},
+): Promise<KioskSession> {
+  const body: Record<string, unknown> = {
+    source_type: sourceType,
+    source_id: sourceId,
+  };
+  if (opts.templateId != null) body.template_id = opts.templateId;
+  if (opts.selectedDate) body.selected_date = opts.selectedDate;
+  if (opts.locationId != null) body.location_id = opts.locationId;
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: {
+      kiosk_url?: string | null;
+      status?: string | null;
+      already_completed?: boolean;
+    };
+  }>(`/api/waivers/kiosk-session`, { method: "POST", token, body });
+  const d = res?.data ?? {};
+  return {
+    kioskUrl: d.kiosk_url ?? null,
+    status: d.status ?? null,
+    alreadyCompleted: d.already_completed ?? false,
+  };
 }
 
 /**

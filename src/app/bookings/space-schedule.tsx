@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -103,11 +103,31 @@ function naturalSort(a: string, b: string): number {
 // Only these statuses occupy a space on the schedule (matches the web).
 const SCHEDULE_STATUSES = new Set(["confirmed", "checked-in", "pending"]);
 
+// Grid geometry — one row per 15-minute slot, one column per space. Blocks are
+// absolutely positioned over the slot grid to emulate the web table's rowSpan.
+const SLOT_MIN = 15;
+const ROW_H = 66;
+const COL_W = 156;
+const TIME_W = 64;
+
 type ScheduleItem =
   | { kind: "booking"; start: number; booking: ScheduleBooking }
   | { kind: "break"; start: number; brk: SpaceBreak };
 
-const BookingBlock = ({
+type GridBlock =
+  | { kind: "booking"; startIdx: number; span: number; booking: ScheduleBooking }
+  | { kind: "break"; startIdx: number; span: number; brk: SpaceBreak };
+
+type GridColumn = { space: Space; blocks: GridBlock[] };
+type GridModel = { slots: number[]; columns: GridColumn[] };
+
+type ViewMode = "grid" | "list";
+
+/* ------------------------------------------------------------------ */
+/* List (card) view                                                    */
+/* ------------------------------------------------------------------ */
+
+const BookingCard = ({
   booking,
   onPress,
 }: {
@@ -121,65 +141,57 @@ const BookingBlock = ({
     <Pressable
       onPress={onPress}
       style={{ backgroundColor: pkg.bg }}
-      className="rounded-2xl mb-2.5 overflow-hidden flex-row active:opacity-80"
+      className="rounded-2xl mb-2.5 p-3.5 active:opacity-80"
     >
-      <View style={{ width: 5, backgroundColor: pkg.text }} />
-      <View className="flex-1 p-3.5">
-        <View className="flex-row items-center justify-between mb-1.5">
-          <View className="flex-row items-center gap-1.5">
-            <View
-              style={{ backgroundColor: statusColor(booking.status) }}
-              className="px-2 py-0.5 rounded-full"
-            >
-              <Text className="text-[10px] font-bold uppercase text-white">
-                {booking.status}
-              </Text>
-            </View>
-          </View>
-          {!!booking.referenceNumber && (
-            <Text style={{ color: pkg.text }} className="text-[10px] font-medium opacity-70">
-              #{booking.referenceNumber.slice(-6)}
-            </Text>
-          )}
-        </View>
-
-        <Text style={{ color: pkg.text }} className="text-sm font-bold">
-          {formatMinutes(start)} – {formatMinutes(start + booking.durationMinutes)}
-        </Text>
-        <Text style={{ color: pkg.text }} className="text-sm font-semibold mt-0.5" numberOfLines={1}>
-          {booking.customerName}
-        </Text>
-        <Text style={{ color: pkg.text }} className="text-xs opacity-80 mt-0.5" numberOfLines={1}>
-          {booking.packageName}
-        </Text>
-
+      <View className="flex-row items-center justify-between mb-1.5">
         <View
-          style={{ borderColor: pkg.text }}
-          className="flex-row items-center justify-between mt-2 pt-2 border-t"
+          style={{ backgroundColor: statusColor(booking.status) }}
+          className="px-2 py-0.5 rounded-full"
         >
-          <View className="flex-row items-center gap-3">
-            <View className="flex-row items-center gap-1">
-              <Feather name="users" size={12} color={pkg.text} />
-              <Text style={{ color: pkg.text }} className="text-xs font-medium">
-                {booking.participants}
-              </Text>
-            </View>
-            <Text style={{ color: pkg.text }} className="text-xs font-bold">
-              {formatMoney(booking.totalAmount)}
+          <Text className="text-[10px] font-bold uppercase text-white">
+            {booking.status}
+          </Text>
+        </View>
+        {!!booking.referenceNumber && (
+          <Text style={{ color: pkg.text }} className="text-[10px] font-medium opacity-70">
+            #{booking.referenceNumber.slice(-6)}
+          </Text>
+        )}
+      </View>
+
+      <Text style={{ color: pkg.text }} className="text-sm font-bold">
+        {formatMinutes(start)} – {formatMinutes(start + booking.durationMinutes)}
+      </Text>
+      <Text style={{ color: pkg.text }} className="text-sm font-semibold mt-0.5" numberOfLines={1}>
+        {booking.customerName}
+      </Text>
+      <Text style={{ color: pkg.text }} className="text-xs opacity-80 mt-0.5" numberOfLines={1}>
+        {booking.packageName}
+      </Text>
+
+      <View className="flex-row items-center justify-between mt-2.5 pt-2.5 border-t border-black/5 dark:border-white/10">
+        <View className="flex-row items-center gap-3">
+          <View className="flex-row items-center gap-1">
+            <Feather name="users" size={12} color={pkg.text} />
+            <Text style={{ color: pkg.text }} className="text-xs font-medium">
+              {booking.participants}
             </Text>
           </View>
-          <View className={`px-1.5 py-0.5 rounded ${pay.bg}`}>
-            <Text className={`text-[10px] font-medium ${pay.text}`}>
-              {capitalize(booking.paymentStatus)}
-            </Text>
-          </View>
+          <Text style={{ color: pkg.text }} className="text-xs font-bold">
+            {formatMoney(booking.totalAmount)}
+          </Text>
+        </View>
+        <View className={`px-1.5 py-0.5 rounded ${pay.bg}`}>
+          <Text className={`text-[10px] font-medium ${pay.text}`}>
+            {capitalize(booking.paymentStatus)}
+          </Text>
         </View>
       </View>
     </Pressable>
   );
 };
 
-const BreakBlock = ({ brk }: { brk: SpaceBreak }) => (
+const BreakCard = ({ brk }: { brk: SpaceBreak }) => (
   <View className="rounded-2xl mb-2.5 p-3.5 bg-gray-100 dark:bg-neutral-800 border border-dashed border-gray-300 dark:border-neutral-600 flex-row items-center gap-2.5">
     <Feather name="coffee" size={16} color="#6b7280" />
     <View>
@@ -224,18 +236,303 @@ const SpaceSection = ({
     ) : (
       items.map((item) =>
         item.kind === "booking" ? (
-          <BookingBlock
+          <BookingCard
             key={`b-${item.booking.id}`}
             booking={item.booking}
             onPress={() => onBookingPress(item.booking.id)}
           />
         ) : (
-          <BreakBlock key={`k-${space.id}-${item.brk.startTime}`} brk={item.brk} />
+          <BreakCard key={`k-${space.id}-${item.brk.startTime}`} brk={item.brk} />
         ),
       )
     )}
   </View>
 );
+
+/* ------------------------------------------------------------------ */
+/* Grid (timeline) view                                                */
+/* ------------------------------------------------------------------ */
+
+const GridBookingBlock = ({
+  block,
+  onPress,
+}: {
+  block: Extract<GridBlock, { kind: "booking" }>;
+  onPress: () => void;
+}) => {
+  const b = block.booking;
+  const pkg = packageColor(b.packageName);
+  const start = timeToMinutes(b.time);
+  const pay = paymentTone(b.paymentStatus);
+  const tall = block.span >= 4;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        position: "absolute",
+        top: block.startIdx * ROW_H + 3,
+        height: block.span * ROW_H - 6,
+        left: 3,
+        right: 3,
+        backgroundColor: pkg.bg,
+      }}
+      className="rounded-xl overflow-hidden p-2 active:opacity-80"
+    >
+      <View className="flex-row items-center justify-between mb-1">
+        <View
+          style={{ backgroundColor: statusColor(b.status) }}
+          className="px-1.5 py-0.5 rounded-full"
+        >
+          <Text className="text-[9px] font-bold uppercase text-white">{b.status}</Text>
+        </View>
+        {!!b.referenceNumber && (
+          <Text style={{ color: pkg.text }} className="text-[9px] font-medium opacity-70">
+            #{b.referenceNumber.slice(-6)}
+          </Text>
+        )}
+      </View>
+
+      <Text style={{ color: pkg.text }} className="text-[11px] font-bold" numberOfLines={1}>
+        {formatMinutes(start)} – {formatMinutes(start + b.durationMinutes)}
+      </Text>
+      <Text style={{ color: pkg.text }} className="text-[11px] font-semibold" numberOfLines={1}>
+        {b.customerName}
+      </Text>
+      <Text style={{ color: pkg.text }} className="text-[10px] opacity-80" numberOfLines={1}>
+        {b.packageName}
+      </Text>
+      {tall && (
+        <View className="flex-row items-center gap-1 mt-0.5">
+          <Feather name="users" size={10} color={pkg.text} />
+          <Text style={{ color: pkg.text }} className="text-[10px] opacity-80">
+            {b.participants} {b.participants === 1 ? "guest" : "guests"}
+          </Text>
+        </View>
+      )}
+
+      <View className="flex-1" />
+
+      <View className="flex-row items-center justify-between">
+        <Text style={{ color: pkg.text }} className="text-[10px] font-bold">
+          {formatMoney(b.totalAmount)}
+        </Text>
+        <View className={`px-1 py-0.5 rounded ${pay.bg}`}>
+          <Text className={`text-[9px] font-medium ${pay.text}`}>
+            {b.paymentStatus}
+          </Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+};
+
+const GridBreakBlock = ({
+  block,
+}: {
+  block: Extract<GridBlock, { kind: "break" }>;
+}) => (
+  <View
+    style={{
+      position: "absolute",
+      top: block.startIdx * ROW_H + 3,
+      height: block.span * ROW_H - 6,
+      left: 3,
+      right: 3,
+    }}
+    className="rounded-xl bg-gray-100 dark:bg-neutral-800 border border-dashed border-gray-300 dark:border-neutral-600 items-center justify-center p-1"
+  >
+    <Feather name="coffee" size={16} color="#6b7280" />
+    <Text className="text-[10px] font-semibold text-gray-600 dark:text-gray-300 mt-1">
+      Break
+    </Text>
+    <Text className="text-[9px] text-gray-500 dark:text-gray-400" numberOfLines={1}>
+      {formatMinutes(timeToMinutes(block.brk.startTime))} –{" "}
+      {formatMinutes(timeToMinutes(block.brk.endTime))}
+    </Text>
+  </View>
+);
+
+const ScheduleGrid = ({
+  model,
+  onBookingPress,
+  refreshControl,
+  bottomInset,
+}: {
+  model: GridModel;
+  onBookingPress: (id: number) => void;
+  refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
+  bottomInset: number;
+}) => {
+  const headerScrollRef = useRef<ScrollView>(null);
+  const { slots, columns } = model;
+  const bodyHeight = slots.length * ROW_H;
+
+  return (
+    <View className="flex-1">
+      {/* Header row — sticky at top; scrolls horizontally in sync with body */}
+      <View className="flex-row border-b border-gray-200 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-900">
+        <View
+          style={{ width: TIME_W }}
+          className="px-2 py-3 border-r border-gray-200 dark:border-neutral-800 justify-center"
+        >
+          <View className="flex-row items-center gap-1">
+            <Feather name="clock" size={12} color="#6b7280" />
+            <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+              Time
+            </Text>
+          </View>
+        </View>
+        <ScrollView
+          ref={headerScrollRef}
+          horizontal
+          scrollEnabled={false}
+          showsHorizontalScrollIndicator={false}
+          className="flex-1"
+        >
+          <View className="flex-row">
+            {columns.map(({ space }) => (
+              <View
+                key={space.id}
+                style={{ width: COL_W }}
+                className="px-2 py-2 border-r border-gray-200 dark:border-neutral-800 items-center justify-center"
+              >
+                <Text
+                  className="text-[13px] font-semibold text-gray-700 dark:text-gray-200"
+                  numberOfLines={1}
+                >
+                  {space.name}
+                </Text>
+                {space.capacity != null && (
+                  <View className="flex-row items-center gap-1 mt-0.5">
+                    <Feather name="users" size={10} color="#9ca3af" />
+                    <Text className="text-[10px] text-gray-400 dark:text-gray-500">
+                      Max {space.capacity}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* Body — vertical scroll; time column fixed, space columns scroll horizontally */}
+      <ScrollView
+        refreshControl={refreshControl}
+        showsVerticalScrollIndicator
+        contentContainerStyle={{ paddingBottom: bottomInset }}
+      >
+        <View className="flex-row">
+          {/* Fixed time column */}
+          <View style={{ width: TIME_W }}>
+            {slots.map((m) => (
+              <View
+                key={m}
+                style={{ height: ROW_H }}
+                className="px-2 pt-1 border-r border-b border-gray-100 dark:border-neutral-800"
+              >
+                <Text className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
+                  {formatMinutes(m)}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Scrollable space columns */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator
+            scrollEventThrottle={16}
+            onScroll={(e) =>
+              headerScrollRef.current?.scrollTo({
+                x: e.nativeEvent.contentOffset.x,
+                animated: false,
+              })
+            }
+            className="flex-1"
+          >
+            <View className="flex-row">
+              {columns.map(({ space, blocks }) => (
+                <View key={space.id} style={{ width: COL_W, height: bodyHeight }}>
+                  {/* Background slot lines */}
+                  {slots.map((m) => (
+                    <View
+                      key={m}
+                      style={{ height: ROW_H }}
+                      className="border-r border-b border-gray-100 dark:border-neutral-800"
+                    />
+                  ))}
+                  {/* Booking / break blocks */}
+                  {blocks.map((block) =>
+                    block.kind === "booking" ? (
+                      <GridBookingBlock
+                        key={`b-${block.booking.id}`}
+                        block={block}
+                        onPress={() => onBookingPress(block.booking.id)}
+                      />
+                    ) : (
+                      <GridBreakBlock
+                        key={`k-${space.id}-${block.startIdx}`}
+                        block={block}
+                      />
+                    ),
+                  )}
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </ScrollView>
+    </View>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/* View toggle                                                         */
+/* ------------------------------------------------------------------ */
+
+const TOGGLE_ACTIVE_SHADOW = {
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.08,
+  shadowRadius: 2,
+  elevation: 1,
+} as const;
+
+const GridListToggle = ({
+  mode,
+  onChange,
+}: {
+  mode: ViewMode;
+  onChange: (m: ViewMode) => void;
+}) => (
+  <View className="flex-row items-center bg-gray-100 dark:bg-neutral-800 rounded-xl p-1">
+    {(["grid", "list"] as const).map((m) => {
+      const active = mode === m;
+      return (
+        <Pressable
+          key={m}
+          onPress={() => onChange(m)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: active }}
+          accessibilityLabel={m === "grid" ? "Grid view" : "List view"}
+          className={`px-3 py-1.5 rounded-lg ${active ? "bg-white dark:bg-neutral-700" : ""}`}
+          style={active ? TOGGLE_ACTIVE_SHADOW : undefined}
+        >
+          <Feather
+            name={m === "grid" ? "grid" : "list"}
+            size={16}
+            color={active ? PRIMARY : "#9CA3AF"}
+          />
+        </Pressable>
+      );
+    })}
+  </View>
+);
+
+/* ------------------------------------------------------------------ */
+/* Screen                                                              */
+/* ------------------------------------------------------------------ */
 
 const SpaceScheduleScreen = () => {
   const insets = useSafeAreaInsets();
@@ -248,6 +545,7 @@ const SpaceScheduleScreen = () => {
   const [pickerMonth, setPickerMonth] = useState<Date>(new Date());
   const [showLegend, setShowLegend] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   const selectedKey = dateKey(selectedDate);
   const todayKey = dateKey(new Date());
@@ -299,6 +597,52 @@ const SpaceScheduleScreen = () => {
     });
   }, [sortedSpaces, bookingsByRoom, currentDayName]);
 
+  // Timeline grid model: a 15-minute slot range spanning the earliest start to
+  // the latest end across every space, plus each space's blocks placed on it.
+  const gridModel = useMemo<GridModel | null>(() => {
+    let minStart = Infinity;
+    let maxEnd = -Infinity;
+    for (const { items } of sections) {
+      for (const it of items) {
+        const s = it.start;
+        const e =
+          it.kind === "booking"
+            ? s + it.booking.durationMinutes
+            : timeToMinutes(it.brk.endTime);
+        if (s < minStart) minStart = s;
+        if (e > maxEnd) maxEnd = e;
+      }
+    }
+    if (!isFinite(minStart) || !isFinite(maxEnd) || maxEnd <= minStart) {
+      return null;
+    }
+    const rangeStart = Math.floor(minStart / SLOT_MIN) * SLOT_MIN;
+    const rangeEnd = Math.ceil(maxEnd / SLOT_MIN) * SLOT_MIN;
+    const count = Math.max(1, Math.round((rangeEnd - rangeStart) / SLOT_MIN));
+    const slots = Array.from({ length: count }, (_, i) => rangeStart + i * SLOT_MIN);
+
+    const columns: GridColumn[] = sections.map(({ space, items }) => {
+      const blocks: GridBlock[] = items.map((it) => {
+        const startIdx = Math.max(
+          0,
+          Math.min(count - 1, Math.round((it.start - rangeStart) / SLOT_MIN)),
+        );
+        const durMin =
+          it.kind === "booking"
+            ? it.booking.durationMinutes
+            : timeToMinutes(it.brk.endTime) - timeToMinutes(it.brk.startTime);
+        let span = Math.max(1, Math.round(durMin / SLOT_MIN));
+        if (startIdx + span > count) span = count - startIdx;
+        return it.kind === "booking"
+          ? { kind: "booking", startIdx, span, booking: it.booking }
+          : { kind: "break", startIdx, span, brk: it.brk };
+      });
+      return { space, blocks };
+    });
+
+    return { slots, columns };
+  }, [sections]);
+
   const stepDay = (dir: number) => {
     const next = new Date(selectedDate);
     next.setDate(selectedDate.getDate() + dir);
@@ -331,6 +675,48 @@ const SpaceScheduleScreen = () => {
 
   const dateLabel = `${WEEKDAY_FULL[selectedDate.getDay()]}, ${MONTH_NAMES[selectedDate.getMonth()]} ${selectedDate.getDate()}, ${selectedDate.getFullYear()}`;
 
+  const refreshControl = (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      tintColor={PRIMARY}
+      colors={[PRIMARY]}
+      progressBackgroundColor="#FFFFFF"
+    />
+  );
+
+  const noSchedule = !loading && !error && (bookings.length === 0 || !gridModel);
+
+  const renderEmpty = () => (
+    <View className="px-5 pt-6">
+      {bookings.length === 0 ? (
+        <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
+          <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
+            <Feather name="calendar" size={28} color={PRIMARY} />
+          </View>
+          <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
+            No Bookings Found
+          </Text>
+          <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+            There are no bookings scheduled for{" "}
+            {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()},{" "}
+            {selectedDate.getFullYear()}.
+          </Text>
+        </View>
+      ) : (
+        <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
+          <Feather name="grid" size={28} color="#9ca3af" />
+          <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
+            No spaces occupied
+          </Text>
+          <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+            No confirmed, pending or checked-in bookings for this day.
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
@@ -347,7 +733,6 @@ const SpaceScheduleScreen = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Space Schedule
           </Text>
-          {/* Legend */}
           <Pressable
             onPress={() => setShowLegend(true)}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
@@ -359,72 +744,44 @@ const SpaceScheduleScreen = () => {
         </View>
       </View>
 
-      <ScrollView
-        className="flex-1"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={PRIMARY}
-            colors={[PRIMARY]}
-            progressBackgroundColor="#FFFFFF"
-          />
-        }
-      >
-        <View className="px-5 pt-6">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Space Schedule
+      {/* Controls (fixed) */}
+      <View className="bg-white dark:bg-neutral-900 px-5 pt-4 pb-4 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={() => stepDay(-1)}
+            className="w-10 h-10 rounded-full bg-gray-50 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 items-center justify-center"
+          >
+            <Feather name="chevron-left" size={20} color="#6b7280" />
+          </Pressable>
+          <Pressable
+            onPress={openPicker}
+            className="flex-1 flex-row items-center justify-center gap-2 bg-gray-50 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl py-2.5 px-3"
+          >
+            <Feather name="calendar" size={16} color={PRIMARY} />
+            <Text
+              className="text-sm font-bold text-gray-900 dark:text-white flex-shrink"
+              numberOfLines={1}
+            >
+              {dateLabel}
             </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Daily space allocation and booking timeline
-            </Text>
-          </View>
+            {loading && <ActivityIndicator size="small" color="#9ca3af" />}
+          </Pressable>
+          <Pressable
+            onPress={() => stepDay(1)}
+            className="w-10 h-10 rounded-full bg-gray-50 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 items-center justify-center"
+          >
+            <Feather name="chevron-right" size={20} color="#6b7280" />
+          </Pressable>
+        </View>
 
-          {/* Date navigation */}
-          <View className="flex-row items-center gap-2 mb-3">
-            <Pressable
-              onPress={() => stepDay(-1)}
-              className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
-            >
-              <Feather name="chevron-left" size={20} color="#6b7280" />
-            </Pressable>
-            <Pressable
-              onPress={openPicker}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-xl py-2.5 px-3 shadow-sm"
-            >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text
-                className="text-sm font-bold text-gray-900 dark:text-white flex-shrink"
-                numberOfLines={1}
-              >
-                {dateLabel}
-              </Text>
-              {loading && <ActivityIndicator size="small" color="#9ca3af" />}
-            </Pressable>
-            <Pressable
-              onPress={() => stepDay(1)}
-              className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
-            >
-              <Feather name="chevron-right" size={20} color="#6b7280" />
-            </Pressable>
-          </View>
-
-          {/* Today shortcut */}
+        <View className="flex-row items-center justify-between mt-3">
           <Pressable
             onPress={goToToday}
-            className={`self-start flex-row items-center gap-1.5 px-4 py-2 rounded-full mb-5 ${
+            className={`flex-row items-center gap-1.5 px-4 py-2 rounded-full ${
               isToday ? "bg-[#0644C7]" : "bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
             }`}
           >
-            <Feather
-              name="sun"
-              size={14}
-              color={isToday ? "#FFFFFF" : PRIMARY}
-            />
+            <Feather name="sun" size={14} color={isToday ? "#FFFFFF" : PRIMARY} />
             <Text
               className={`text-sm font-semibold ${
                 isToday ? "text-white" : "text-[#0644C7]"
@@ -434,51 +791,51 @@ const SpaceScheduleScreen = () => {
             </Text>
           </Pressable>
 
-          {/* Error */}
-          {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">Something went wrong</Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
-          )}
+          <GridListToggle mode={viewMode} onChange={setViewMode} />
+        </View>
+      </View>
 
-          {/* Body */}
-          {loading ? (
-            <CalendarDaySkeleton />
-          ) : !error && bookings.length === 0 ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-              <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
-                <Feather name="calendar" size={28} color={PRIMARY} />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No Bookings Found
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                There are no bookings scheduled for{" "}
-                {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()},{" "}
-                {selectedDate.getFullYear()}.
-              </Text>
-            </View>
-          ) : !error && spaces.length === 0 ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-              <Feather name="grid" size={28} color="#9ca3af" />
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
-                No spaces available
-              </Text>
-            </View>
-          ) : (
-            !error &&
-            sections.map(({ space, items }) => (
+      {/* Error */}
+      {!loading && error && (
+        <View className="mx-5 mt-4 bg-red-50 border border-red-100 rounded-2xl p-5">
+          <Text className="text-red-600 font-semibold">Something went wrong</Text>
+          <Text className="text-red-500 text-sm mt-1">{error}</Text>
+        </View>
+      )}
+
+      {/* Body */}
+      {loading ? (
+        <View className="px-5 pt-6">
+          <CalendarDaySkeleton />
+        </View>
+      ) : error ? null : noSchedule ? (
+        <ScrollView refreshControl={refreshControl}>{renderEmpty()}</ScrollView>
+      ) : viewMode === "grid" && gridModel ? (
+        <ScheduleGrid
+          model={gridModel}
+          onBookingPress={setSelectedBookingId}
+          refreshControl={refreshControl}
+          bottomInset={insets.bottom + 24}
+        />
+      ) : (
+        <ScrollView
+          className="flex-1"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          refreshControl={refreshControl}
+        >
+          <View className="px-5 pt-6">
+            {sections.map(({ space, items }) => (
               <SpaceSection
                 key={space.id}
                 space={space}
                 items={items}
                 onBookingPress={setSelectedBookingId}
               />
-            ))
-          )}
-        </View>
-      </ScrollView>
+            ))}
+          </View>
+        </ScrollView>
+      )}
 
       {/* Month date picker */}
       <BottomSheet

@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
+import { consumeEmailCampaignsStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
   fetchEmailCampaigns,
@@ -105,6 +106,12 @@ const EmailCampaigns = () => {
   useEffect(() => {
     load();
   }, [load]);
+  // Refetch when returning from Create Campaign so the new row appears.
+  useFocusEffect(
+    useCallback(() => {
+      if (consumeEmailCampaignsStale()) load();
+    }, [load]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
