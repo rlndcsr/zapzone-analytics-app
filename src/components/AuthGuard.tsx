@@ -18,11 +18,22 @@ export function AuthGuard() {
   const router = useRouter();
   const navState = useRootNavigationState();
 
+  if (__DEV__)
+    console.count(
+      "[render] AuthGuard (authed=" + authed + " path=" + pathname +
+        " navKey=" + String(navState?.key) + ")",
+    );
+
   // Redirect unauthed users off protected routes only. Depends on `pathname`
   // (stable) not `useSegments()`, and a ref fires it once — both avoid the
   // render-loop crash; the ref re-arms once authed or on a public route.
   const redirectedRef = useRef(false);
   useEffect(() => {
+    if (__DEV__)
+      console.log(
+        "[AuthGuard] redirect-effect run: authed=" + authed + " path=" +
+          pathname + " navKey=" + String(navState?.key),
+      );
     if (!navState?.key) return; // wait until the navigator is mounted
     const isPublic = pathname === "/" || pathname.startsWith("/splash");
     if (authed || isPublic) {
@@ -33,7 +44,11 @@ export function AuthGuard() {
       redirectedRef.current = true;
       // Reset the stack, not just navigate: dismissAll() pops pushed module
       // screens so Back can't re-enter them, then replace() swaps in Login.
-      if (router.canDismiss()) router.dismissAll();
+      if (router.canDismiss()) {
+        if (__DEV__) console.log("[AuthGuard] router.dismissAll()");
+        router.dismissAll();
+      }
+      if (__DEV__) console.log('[AuthGuard] router.replace("/")');
       router.replace("/");
     }
   }, [authed, pathname, navState?.key, router]);

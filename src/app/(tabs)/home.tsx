@@ -416,9 +416,11 @@ const RecentEventPurchases = ({ rows }: { rows: RecentEventPurchase[] }) => (
 );
 
 const Home = () => {
+  if (__DEV__) console.count("[render] Home");
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === "dark";
+  if (__DEV__) console.log("[Home] colorScheme=" + String(colorScheme));
 
   const dashboardConfig = useMemo(
     () => getDashboardConfig(getCurrentUser()?.role),

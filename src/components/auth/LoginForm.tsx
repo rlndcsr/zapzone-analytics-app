@@ -75,7 +75,9 @@ export function LoginForm() {
       // its storage writes and notifies before this runs, so the replace happens
       // after the auth state has settled — not during a render.
       await setSession(result.token, result.user);
+      if (__DEV__) console.log('[LoginForm] router.replace("/home")');
       router.replace("/home");
+      if (__DEV__) console.log("[LoginForm] router.replace returned");
     } catch (error) {
       if (
         error instanceof ApiError &&

@@ -23,10 +23,12 @@ export const unstable_settings = {
 };
 
 export default function RootLayout() {
+  if (__DEV__) console.count("[render] RootLayout");
   const [sessionRestored, setSessionRestored] = useState(false);
   const [fontsLoaded] = useFonts(montserratFonts);
 
   useEffect(() => {
+    if (__DEV__) console.log("[RootLayout] restore effect run");
     // Restore theme + location + session, and validate a restored token against
     // the backend before lifting the gate so a dead token never flashes a screen.
     Promise.all([

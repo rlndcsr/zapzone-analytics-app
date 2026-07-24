@@ -31,11 +31,17 @@ let sessionInvalidated = false;
 // Makes auth changes update the app immediately
 const listeners = new Set<() => void>();
 function notify(): void {
+  if (__DEV__)
+    console.log(
+      "[SESSION] notify() -> " + listeners.size + " listeners; authed=" +
+        isAuthenticated(),
+    );
   listeners.forEach((l) => l());
 }
 
 // Saves the session after login and starts the inactivity timer
 export async function setSession(token: string, user: AuthUser): Promise<void> {
+  if (__DEV__) console.log("[SESSION] setSession() begin");
   const now = Date.now();
   authToken = token;
   authUser = user;
@@ -210,5 +216,6 @@ function getAuthSnapshot(): string | null {
 /** Reactive authentication status for the global guard. */
 export function useAuthStatus(): boolean {
   useSyncExternalStore(subscribeAuth, getAuthSnapshot, getAuthSnapshot);
+  if (__DEV__) console.count("[render] useAuthStatus consumer tick");
   return isAuthenticated();
 }

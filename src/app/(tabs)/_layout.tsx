@@ -77,6 +77,7 @@ const FloatingTabBar = ({
   descriptors,
   navigation,
 }: BottomTabBarProps) => {
+  if (__DEV__) console.count("[render] FloatingTabBar");
   const insets = useSafeAreaInsets();
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -277,6 +278,7 @@ const FloatingTabBar = ({
 };
 
 const TabLayout = () => {
+  if (__DEV__) console.count("[render] TabLayout");
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
