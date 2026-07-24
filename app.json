@@ -47,7 +47,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#FFFFFF",
-          "image": "./assets/zapzone-assests/zapzone.png",
+          "image": "./assets/zapzone-assests/ZZ-icon.png",
           "imageWidth": 200
         }
       ],
