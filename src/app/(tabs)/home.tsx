@@ -245,22 +245,27 @@ const MetricCard = ({
         elevation: 1,
       }}
     >
-      <View className="flex-row items-start justify-between mb-4">
-        <View className="flex-row items-center gap-1.5 flex-1 mr-2">
-          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200 shrink">
-            {metric.title}
-          </Text>
-          <Pressable
-            onPress={() => onInfo(metric.key)}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={`About ${metric.title}`}
-          >
-            <Info size={14} color="#9CA3AF" strokeWidth={2} />
-          </Pressable>
-        </View>
+      {/* Icons on their own row so the title below spans the full card width. */}
+      <View className="flex-row items-center justify-between mb-3">
         <MetricIconBadge metric={metric} layoutKey={layoutKey} index={index} />
+        <Pressable
+          onPress={() => onInfo(metric.key)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`About ${metric.title}`}
+        >
+          <Info size={14} color="#9CA3AF" strokeWidth={2} />
+        </Pressable>
       </View>
+
+      {/* Full-width title: wraps between words, capped at 2 lines with ellipsis. */}
+      <Text
+        numberOfLines={2}
+        ellipsizeMode="tail"
+        className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2"
+      >
+        {metric.title}
+      </Text>
 
       <Text className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
         {value}
