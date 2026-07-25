@@ -8,8 +8,8 @@ const TOKEN_KEY = "zapzone_auth_token";
 const USER_KEY = "zapzone_auth_user";
 const EXPIRY_KEY = "zapzone_auth_expires_at";
 
-// Extends the session after user activity. Logs out after 1 hour of inactivity
-export const SESSION_TTL_MS = 60 * 60 * 1000;
+// TEMP: 30-day session while debugging the login nav bug; was 60 * 60 * 1000 (1h).
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // Limits how often the updated session expiry is saved to storage
 const EXPIRY_PERSIST_THROTTLE_MS = 60 * 1000;
