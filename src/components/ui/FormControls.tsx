@@ -184,16 +184,24 @@ export function ToggleRow({
 export function CheckboxRow({
   label,
   checked,
+  alignTop = false,
   onToggle,
 }: {
-  label: string;
+  label: React.ReactNode;
   checked: boolean;
+  /** Top-align the box for multi-line labels (e.g. consent copy). */
+  alignTop?: boolean;
   onToggle: () => void;
 }) {
   return (
-    <Pressable onPress={onToggle} className="flex-row items-center gap-2.5">
+    <Pressable
+      onPress={onToggle}
+      className={`flex-row gap-2.5 ${alignTop ? "items-start" : "items-center"}`}
+    >
       <View
         className={`w-5 h-5 rounded border items-center justify-center ${
+          alignTop ? "mt-0.5" : ""
+        } ${
           checked
             ? "bg-[#0644C7] border-[#0644C7]"
             : "bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700"
@@ -201,9 +209,13 @@ export function CheckboxRow({
       >
         {checked && <Feather name="check" size={13} color="#FFFFFF" />}
       </View>
-      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1">
-        {label}
-      </Text>
+      {typeof label === "string" ? (
+        <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1">
+          {label}
+        </Text>
+      ) : (
+        <View className="flex-1">{label}</View>
+      )}
     </Pressable>
   );
 }

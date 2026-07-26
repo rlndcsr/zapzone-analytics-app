@@ -13,6 +13,7 @@ import {
   Alert,
   Dimensions,
   KeyboardAvoidingView,
+  Linking,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
@@ -20,15 +21,19 @@ import {
   ScrollView,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CountryPickerSheet } from "../../components/ui/CountryPickerSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
+import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { mediaUrl } from "../../lib/api";
+import { countryName } from "../../lib/countries";
 import {
   availableTimeSlotsForDate,
   computeDayOffAvailability,
@@ -48,6 +53,22 @@ import {
   type CreateAttractionPurchaseInput,
 } from "../../services/attractionPurchasesService";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
+import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import { SignaturePad } from "../../components/ui/SignaturePad";
+import {
+  CARD_MONTHS,
+  cardYears,
+  formatCardNumber,
+  getCardType,
+  getPaymentErrorMessage,
+  isTestCardNumber,
+  validateCardNumber,
+} from "../../lib/payments/cardUtils";
+import {
+  fetchAuthorizeNetPublicKey,
+  tokenizeCard,
+  type AuthorizeNetPublicKey,
+} from "../../services/paymentsService";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -71,6 +92,18 @@ const pricingSuffix = (t: string) =>
         ? "/hour"
         : "";
 
+/** Unit-price row label in the Order Summary (web parity). */
+const pricingTypeLabel = (t: string) =>
+  t === "per_person"
+    ? "Per person"
+    : t === "per_group"
+      ? "Per group"
+      : t === "per_hour"
+        ? "Per hour"
+        : t === "per_game"
+          ? "Per game"
+          : "Fixed price";
+
 function formatTime(value: string): string {
   const [h, m] = value.split(":");
   let hour = Number(h);
@@ -82,17 +115,21 @@ function formatTime(value: string): string {
 const Section = ({
   icon,
   title,
+  subtitle,
   children,
 }: {
   icon: IconName;
   title: string;
+  subtitle?: string;
   children: React.ReactNode;
 }) => (
   <View
     className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm"
     style={CARD_SHADOW}
   >
-    <View className="flex-row items-center gap-2 mb-4">
+    <View
+      className={`flex-row items-center gap-2 ${subtitle ? "mb-1" : "mb-4"}`}
+    >
       <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
         <Feather name={icon} size={16} color={PRIMARY} />
       </View>
@@ -100,6 +137,14 @@ const Section = ({
         {title}
       </Text>
     </View>
+    {subtitle ? (
+      <Text
+        numberOfLines={1}
+        className="text-xs text-gray-500 dark:text-gray-400 mb-4"
+      >
+        {subtitle}
+      </Text>
+    ) : null}
     {children}
   </View>
 );
@@ -134,6 +179,24 @@ const SelectRow = ({
     </Text>
     <Feather name="chevron-down" size={18} color="#9CA3AF" />
   </Pressable>
+);
+
+/** Accepted-card badges, mirroring the web admin's four payment marks. */
+const CardBrandRow = () => (
+  <View className="flex-row items-center gap-1.5">
+    <View className="h-6 px-1.5 rounded bg-[#1A1F71] items-center justify-center">
+      <Text className="text-[9px] font-extrabold italic text-white">VISA</Text>
+    </View>
+    <View className="h-6 px-1.5 rounded bg-[#EB001B] items-center justify-center">
+      <Text className="text-[8px] font-bold text-white">MC</Text>
+    </View>
+    <View className="h-6 px-1.5 rounded bg-[#2E77BC] items-center justify-center">
+      <Text className="text-[8px] font-bold text-white">AMEX</Text>
+    </View>
+    <View className="h-6 px-1.5 rounded bg-[#F76B1C] items-center justify-center">
+      <Text className="text-[8px] font-bold text-white">DISC</Text>
+    </View>
+  </View>
 );
 
 /** +/- stepper (shared with the on-site purchase screen's pattern). */
@@ -200,12 +263,37 @@ const PurchasePageScreen = () => {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"in-store" | "paylater">(
-    "in-store",
-  );
+  const [smsConsent, setSmsConsent] = useState(false);
+  const [address, setAddress] = useState("");
+  const [address2, setAddress2] = useState("");
+  const [city, setCity] = useState("");
+  const [stateField, setStateField] = useState("");
+  const [zip, setZip] = useState("");
+  // 2-letter code, like the web `customerInfo.country`.
+  const [country, setCountry] = useState("");
+  // Card-only, like the web purchase page (no method selector there).
+  const [paymentMethod] = useState<"card" | "in-store" | "paylater">("card");
   const [sendEmail, setSendEmail] = useState(true);
 
-  const [sheet, setSheet] = useState<null | "date" | "time">(null);
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardMonth, setCardMonth] = useState("");
+  const [cardYear, setCardYear] = useState("");
+  const [cardCVV, setCardCVV] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  const [signatureImage, setSignatureImage] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [signatureTermsErrors, setSignatureTermsErrors] = useState<{
+    signature?: string;
+    terms?: string;
+  }>({});
+  const [authorizeCredentials, setAuthorizeCredentials] =
+    useState<AuthorizeNetPublicKey | null>(null);
+
+  const [sheet, setSheet] = useState<
+    null | "date" | "time" | "country" | "month" | "year"
+  >(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   // Location day-offs backing the calendar's blocked / limited dates (same
@@ -258,6 +346,24 @@ const PurchasePageScreen = () => {
       .then(setDayOffs)
       .catch(() => {
         if (!controller.signal.aborted) setDayOffs([]);
+      });
+    return () => controller.abort();
+  }, [detail?.locationId]);
+
+  // Public Accept.js credentials for this location (web `initializeAuthorizeNet`).
+  // Errors are swallowed like the web; the card leg reports the missing config.
+  useEffect(() => {
+    const token = getToken();
+    const locId = detail?.locationId;
+    if (!token || locId == null) {
+      setAuthorizeCredentials(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetchAuthorizeNetPublicKey(token, locId, controller.signal)
+      .then(setAuthorizeCredentials)
+      .catch(() => {
+        if (!controller.signal.aborted) setAuthorizeCredentials(null);
       });
     return () => controller.abort();
   }, [detail?.locationId]);
@@ -334,22 +440,97 @@ const PurchasePageScreen = () => {
     }
   }, [availableTimeSlots, scheduledTime]);
 
-  const subtotal = detail ? detail.price * quantity : 0;
-  const addOnsTotal = useMemo(() => {
-    if (!detail) return 0;
-    return detail.addOns.reduce(
-      (sum, a) => sum + a.price * (addonQty[a.id] ?? 0),
-      0,
-    );
-  }, [detail, addonQty]);
-  const total = Math.max(0, subtotal + addOnsTotal);
+  // Same pricing pipeline the web purchase page uses: server-side fee support
+  // (Venue Fee) applied to the base price, special pricing subtracted.
+  const {
+    subtotal,
+    feeBreakdown,
+    specialPricingDiscount,
+    total,
+    appliedFees,
+    appliedDiscounts,
+  } = useOnsitePricing({
+    entity: detail,
+    entityType: "attraction",
+    quantity,
+    addonQty,
+    discountNum: 0,
+    purchaseDate: scheduledDate,
+    purchaseTime: "",
+  });
 
   const setAddon = (addonId: number, n: number) =>
     setAddonQty((prev) => ({ ...prev, [addonId]: n }));
 
+  const cardValid = validateCardNumber(cardNumber);
+  // Same disabled rule as the web Pay button.
+  const cardIncomplete =
+    !cardNumber || !cardMonth || !cardYear || !cardCVV || !cardValid;
+  const submitDisabled =
+    submitting ||
+    isProcessingPayment ||
+    (paymentMethod === "card" && cardIncomplete);
+
   const onGalleryScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / galleryWidth);
     if (idx !== imageIndex) setImageIndex(idx);
+  };
+
+  // Card leg — signature / terms / card validation in the web's order, then
+  // tokenization. Tokenization runs before any record is created, so nothing is
+  // written while it is still a stub.
+  const runCardPayment = async () => {
+    const stErrors: { signature?: string; terms?: string } = {};
+    if (!signatureImage) {
+      stErrors.signature = "Please provide your signature before proceeding.";
+    }
+    if (!termsAccepted) {
+      stErrors.terms = "You must agree to the Terms & Conditions to proceed.";
+    }
+    if (Object.keys(stErrors).length > 0) {
+      setSignatureTermsErrors(stErrors);
+      return;
+    }
+    setSignatureTermsErrors({});
+
+    if (!cardNumber || !cardMonth || !cardYear || !cardCVV) {
+      setPaymentError("Please fill in all card details");
+      return;
+    }
+    if (!validateCardNumber(cardNumber)) {
+      setPaymentError("Invalid card number");
+      return;
+    }
+    if (isTestCardNumber(cardNumber)) {
+      setPaymentError(
+        "Test card numbers are not allowed. Please use a real card.",
+      );
+      return;
+    }
+    if (!authorizeCredentials?.apiLoginId) {
+      setPaymentError(
+        "Payment system not initialized. Please reopen this page and try again.",
+      );
+      return;
+    }
+
+    setPaymentError("");
+    setIsProcessingPayment(true);
+    try {
+      await tokenizeCard(
+        {
+          cardNumber: cardNumber.replace(/\s/g, ""),
+          month: cardMonth,
+          year: cardYear,
+          cardCode: cardCVV,
+        },
+        authorizeCredentials,
+      );
+    } catch (err) {
+      setPaymentError(getPaymentErrorMessage(err));
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
 
   const handlePurchase = async () => {
@@ -366,6 +547,19 @@ const PurchasePageScreen = () => {
       );
       return;
     }
+    if (
+      !address.trim() ||
+      !city.trim() ||
+      !stateField.trim() ||
+      !zip.trim() ||
+      !country
+    ) {
+      Alert.alert(
+        "Missing billing information",
+        "Please enter your street address, city, state / province, ZIP / postal code and country.",
+      );
+      return;
+    }
     if (!scheduledDate || !scheduledTime) {
       Alert.alert(
         "Select a visit date & time",
@@ -378,6 +572,11 @@ const PurchasePageScreen = () => {
     const token = getToken();
     if (!token) {
       Alert.alert("Not signed in", "Please sign in again.");
+      return;
+    }
+
+    if (paymentMethod === "card") {
+      await runCardPayment();
       return;
     }
 
@@ -397,6 +596,16 @@ const PurchasePageScreen = () => {
       guest_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
       guest_email: email.trim() || undefined,
       guest_phone: phone.trim() || undefined,
+      // The purchase record has no separate address2 column, so the apartment /
+      // suite line is appended to the street address.
+      guest_address: [address.trim(), address2.trim()]
+        .filter(Boolean)
+        .join(", "),
+      guest_city: city.trim(),
+      guest_state: stateField.trim(),
+      guest_zip: zip.trim(),
+      guest_country: country,
+      sms_consent: smsConsent,
       quantity,
       amount: total,
       total_amount: total,
@@ -412,6 +621,11 @@ const PurchasePageScreen = () => {
       notes: `Attraction Purchase: ${detail.name} (${quantity} ticket${quantity > 1 ? "s" : ""})`,
       send_email: paymentMethod === "in-store" ? sendEmail : false,
       additional_addons: additionalAddons.length > 0 ? additionalAddons : undefined,
+      applied_fees: appliedFees.length > 0 ? appliedFees : undefined,
+      discount_amount:
+        specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
+      applied_discounts:
+        appliedDiscounts.length > 0 ? appliedDiscounts : undefined,
     };
 
     submitLockRef.current = true;
@@ -534,6 +748,35 @@ const PurchasePageScreen = () => {
                 </Text>
               </View>
             </View>
+          </View>
+
+          <View
+            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-4 shadow-sm"
+            style={CARD_SHADOW}
+          >
+            <View className="flex-row items-center gap-2 mb-3">
+              <Feather name="map-pin" size={15} color="#6B7280" />
+              <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                Billing Address
+              </Text>
+            </View>
+            <Text className="text-sm font-medium text-gray-900 dark:text-white">
+              {firstName} {lastName}
+            </Text>
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              {address}
+            </Text>
+            {!!address2 && (
+              <Text className="text-sm text-gray-600 dark:text-gray-300">
+                {address2}
+              </Text>
+            )}
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              {city}, {stateField} {zip}
+            </Text>
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              {countryName(country)}
+            </Text>
           </View>
 
           <Pressable
@@ -758,7 +1001,7 @@ const PurchasePageScreen = () => {
               <View className="flex-row gap-3 mb-4">
                 <View className="flex-1">
                   <InputField
-                    label="First Name"
+                    label="First Name *"
                     value={firstName}
                     onChangeText={setFirstName}
                     placeholder="First"
@@ -766,7 +1009,7 @@ const PurchasePageScreen = () => {
                 </View>
                 <View className="flex-1">
                   <InputField
-                    label="Last Name"
+                    label="Last Name *"
                     value={lastName}
                     onChangeText={setLastName}
                     placeholder="Last"
@@ -774,7 +1017,7 @@ const PurchasePageScreen = () => {
                 </View>
               </View>
               <InputField
-                label="Email"
+                label="Email *"
                 value={email}
                 onChangeText={setEmail}
                 placeholder="you@example.com"
@@ -789,64 +1032,279 @@ const PurchasePageScreen = () => {
                 placeholder="(555) 123-4567"
                 keyboardType="phone-pad"
               />
+
+              <View className="mt-4">
+                <CheckboxRow
+                  checked={smsConsent}
+                  onToggle={() => setSmsConsent((v) => !v)}
+                  alignTop
+                  label={
+                    <Text className="text-xs leading-5 text-gray-500 dark:text-gray-400">
+                      I agree to receive automated delivery notifications and
+                      promotional text messages from Zap Zone at the phone number
+                      provided. Consent is not a condition of purchase. Message
+                      frequency varies. Message and data rates may apply. Reply
+                      STOP to cancel or HELP for help. View our{" "}
+                      <Text
+                        className="text-[#0644C7] dark:text-blue-400 underline"
+                        onPress={() =>
+                          Linking.openURL(
+                            "https://zap-zone.com/terms-conditions/",
+                          )
+                        }
+                      >
+                        Terms and Conditions
+                      </Text>
+                      .
+                    </Text>
+                  }
+                />
+              </View>
             </Section>
 
-            {/* Payment */}
-            <Section icon="credit-card" title="Payment">
-              <View className="flex-row gap-3">
-                {(
-                  [
-                    { key: "in-store", label: "In-Store", icon: "dollar-sign" },
-                    { key: "paylater", label: "Pay Later", icon: "clock" },
-                  ] as const
-                ).map((opt) => {
-                  const active = paymentMethod === opt.key;
-                  return (
-                    <Pressable
-                      key={opt.key}
-                      onPress={() => setPaymentMethod(opt.key)}
-                      className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-2xl border ${
-                        active
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <Feather
-                        name={opt.icon}
-                        size={16}
-                        color={active ? "#FFFFFF" : "#6B7280"}
-                      />
-                      <Text
-                        className={`text-sm font-semibold ${
-                          active ? "text-white" : "text-gray-600 dark:text-gray-300"
-                        }`}
-                      >
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+            {/* Billing information */}
+            <Section icon="map-pin" title="Billing Information">
+              <InputField
+                label="Street Address *"
+                value={address}
+                onChangeText={setAddress}
+                placeholder="123 Main Street"
+                containerClassName="mb-4"
+              />
+              <InputField
+                label="Apartment, Suite, Unit (Optional)"
+                value={address2}
+                onChangeText={setAddress2}
+                placeholder="Apt 4B, Suite 200, etc."
+                containerClassName="mb-4"
+              />
+              <View className="flex-row gap-3 mb-4">
+                <View className="flex-1">
+                  <InputField
+                    label="City *"
+                    value={city}
+                    onChangeText={setCity}
+                    placeholder="City"
+                  />
+                </View>
+                <View className="flex-1">
+                  <InputField
+                    label="State / Province *"
+                    value={stateField}
+                    onChangeText={setStateField}
+                    placeholder="State"
+                  />
+                </View>
               </View>
-              {paymentMethod === "paylater" && (
-                <View className="mt-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-3">
-                  <Text className="text-xs text-amber-800 dark:text-amber-300">
-                    No payment is collected now. Payment is due on arrival.
+              <InputField
+                label="ZIP / Postal Code *"
+                value={zip}
+                onChangeText={setZip}
+                placeholder="12345"
+                keyboardType="number-pad"
+                containerClassName="mb-4"
+              />
+              <View>
+                <FieldLabel>Country *</FieldLabel>
+                <SelectRow
+                  icon="globe"
+                  value={country ? countryName(country) : null}
+                  placeholder="Select country"
+                  onPress={() => setSheet("country")}
+                />
+              </View>
+            </Section>
+
+            {/* Payment Information — web admin step 3 */}
+            <Section
+              icon="credit-card"
+              title="Payment Information"
+              subtitle="Secure payment powered by Authorize.Net"
+            >
+              <View className="mb-4">
+                <CardBrandRow />
+              </View>
+
+              <View className="mb-4">
+                <FieldLabel>Card Number</FieldLabel>
+                <View
+                  className={`h-14 flex-row items-center rounded-xl border px-4 bg-white dark:bg-neutral-900 ${
+                    cardNumber && cardValid
+                      ? "border-green-400 bg-green-50 dark:bg-green-900/10"
+                      : cardNumber
+                        ? "border-red-400"
+                        : "border-gray-200 dark:border-neutral-700"
+                  }`}
+                >
+                  <TextInput
+                    value={cardNumber}
+                    onChangeText={(v) => {
+                      const formatted = formatCardNumber(v);
+                      if (formatted.replace(/\s/g, "").length <= 16) {
+                        setCardNumber(formatted);
+                        setPaymentError("");
+                      }
+                    }}
+                    placeholder="1234 5678 9012 3456"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    maxLength={19}
+                    editable={!isProcessingPayment}
+                    className="flex-1 text-base text-gray-900 dark:text-white"
+                  />
+                  {cardNumber.length > 0 && cardValid && (
+                    <Feather name="check-circle" size={18} color="#16A34A" />
+                  )}
+                </View>
+                {!!cardNumber && (
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                    {getCardType(cardNumber)}
+                  </Text>
+                )}
+              </View>
+
+              <View className="flex-row gap-3 mb-4">
+                <View className="flex-1">
+                  <FieldLabel>Exp Month</FieldLabel>
+                  <SelectRow
+                    icon="calendar"
+                    value={cardMonth || null}
+                    placeholder="MM"
+                    onPress={() => setSheet("month")}
+                  />
+                </View>
+                <View className="flex-1">
+                  <FieldLabel>Exp Year</FieldLabel>
+                  <SelectRow
+                    icon="calendar"
+                    value={cardYear || null}
+                    placeholder="YYYY"
+                    onPress={() => setSheet("year")}
+                  />
+                </View>
+              </View>
+
+              <View>
+                <FieldLabel>CVV</FieldLabel>
+                <View className="h-14 flex-row items-center rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4">
+                  <TextInput
+                    value={cardCVV}
+                    onChangeText={(v) => {
+                      const digits = v.replace(/\D/g, "");
+                      if (digits.length <= 4) setCardCVV(digits);
+                    }}
+                    placeholder="123"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    secureTextEntry
+                    editable={!isProcessingPayment}
+                    className="flex-1 text-base text-gray-900 dark:text-white"
+                  />
+                </View>
+              </View>
+
+              {!!paymentError && (
+                <View className="flex-row items-start gap-2 mt-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3">
+                  <Feather name="x-circle" size={16} color="#B91C1C" />
+                  <Text className="flex-1 text-xs text-red-800 dark:text-red-300">
+                    {paymentError}
                   </Text>
                 </View>
               )}
-              <Text className="text-xs text-gray-400 dark:text-gray-500 mt-3">
-                Card (Authorize.Net) payments are available on the web purchase page.
-              </Text>
+
+              <View className="flex-row items-start gap-2 mt-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3">
+                <Feather name="lock" size={16} color="#0644C7" />
+                <View className="flex-1">
+                  <Text className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+                    Secure Payment
+                  </Text>
+                  <Text className="text-[11px] text-blue-800 dark:text-blue-300 mt-0.5">
+                    256-bit SSL encrypted • PCI compliant • Powered by
+                    Authorize.Net
+                  </Text>
+                </View>
+              </View>
             </Section>
+
+            {/* Signature & Agreement — web admin step 3 */}
+            <View
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm"
+              style={CARD_SHADOW}
+            >
+              <Text className="text-base font-bold text-gray-900 dark:text-white mb-4">
+                Signature & Agreement
+              </Text>
+
+              <SignaturePad
+                onSignatureChange={(base64) => {
+                  setSignatureImage(base64);
+                  if (base64) {
+                    setSignatureTermsErrors((prev) => ({
+                      ...prev,
+                      signature: "",
+                    }));
+                  }
+                }}
+                required
+                error={signatureTermsErrors.signature}
+              />
+
+              <View className="mt-4">
+                <CheckboxRow
+                  checked={termsAccepted}
+                  onToggle={() => {
+                    setTermsAccepted((v) => {
+                      if (!v) {
+                        setSignatureTermsErrors((prev) => ({
+                          ...prev,
+                          terms: "",
+                        }));
+                      }
+                      return !v;
+                    });
+                  }}
+                  label={
+                    <Text className="text-sm leading-5 text-gray-700 dark:text-gray-200">
+                      I agree to the{" "}
+                      <Text
+                        className="font-medium text-[#0644C7] dark:text-blue-400 underline"
+                        onPress={() =>
+                          Linking.openURL(
+                            "https://zap-zone.com/terms-conditions/",
+                          )
+                        }
+                      >
+                        Terms &amp; Conditions
+                      </Text>
+                      <Text className="text-red-500"> *</Text>
+                    </Text>
+                  }
+                />
+                {!!signatureTermsErrors.terms && (
+                  <Text className="text-xs text-red-500 mt-1.5 ml-7">
+                    {signatureTermsErrors.terms}
+                  </Text>
+                )}
+              </View>
+            </View>
 
             {/* Order summary */}
             <Section icon="file-text" title="Order Summary">
               <View className="flex-row justify-between mb-2">
                 <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  {quantity} × {money(detail.price)}
+                  {pricingTypeLabel(detail.pricingType)}
                 </Text>
                 <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                  {money(subtotal)}
+                  {money(detail.price)}
+                </Text>
+              </View>
+              <View className="flex-row justify-between mb-2">
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
+                  Quantity
+                </Text>
+                <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                  {quantity}
                 </Text>
               </View>
               {orderedAddOns
@@ -861,6 +1319,35 @@ const PurchasePageScreen = () => {
                     </Text>
                   </View>
                 ))}
+              {specialPricingDiscount > 0 && (
+                <View className="flex-row justify-between mb-2">
+                  <Text className="text-sm text-green-600 dark:text-green-400">
+                    Special Pricing
+                  </Text>
+                  <Text className="text-sm font-medium text-green-600 dark:text-green-400">
+                    -{money(specialPricingDiscount)}
+                  </Text>
+                </View>
+              )}
+              {feeBreakdown?.fees.map((f) => (
+                <View
+                  key={f.fee_support_id}
+                  className="flex-row justify-between mb-2"
+                >
+                  <Text
+                    className="text-sm text-gray-500 dark:text-gray-400 flex-1 mr-2"
+                    numberOfLines={1}
+                  >
+                    {f.fee_name} ({f.fee_label})
+                    {f.fee_application_type === "inclusive" ? " · Included" : ""}
+                  </Text>
+                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                    {f.fee_application_type === "additive"
+                      ? `+${money(f.fee_amount)}`
+                      : money(f.fee_amount)}
+                  </Text>
+                </View>
+              ))}
               <View className="flex-row justify-between pt-3 mt-1 border-t border-gray-200 dark:border-neutral-700">
                 <Text className="text-base font-bold text-gray-900 dark:text-white">Total</Text>
                 <Text className="text-base font-bold text-gray-900 dark:text-white">
@@ -885,18 +1372,29 @@ const PurchasePageScreen = () => {
 
             <Pressable
               onPress={handlePurchase}
-              disabled={submitting}
+              disabled={submitDisabled}
               className={`h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] ${
-                submitting ? "opacity-70" : "active:opacity-90"
+                submitDisabled ? "opacity-50" : "active:opacity-90"
               }`}
             >
-              {submitting ? (
-                <ActivityIndicator color="#FFFFFF" />
+              {submitting || isProcessingPayment ? (
+                <>
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text className="text-base font-semibold text-white">
+                    {isProcessingPayment ? "Processing Payment..." : "Processing..."}
+                  </Text>
+                </>
               ) : (
                 <>
-                  <Feather name="shopping-bag" size={18} color="#FFFFFF" />
+                  <Feather
+                    name={paymentMethod === "card" ? "lock" : "shopping-bag"}
+                    size={18}
+                    color="#FFFFFF"
+                  />
                   <Text className="text-base font-semibold text-white">
-                    Complete Purchase · {money(total)}
+                    {paymentMethod === "card"
+                      ? `Pay ${money(total)}`
+                      : `Complete Purchase · ${money(total)}`}
                   </Text>
                 </>
               )}
@@ -919,8 +1417,62 @@ const PurchasePageScreen = () => {
         onClose={() => setSheet(null)}
         onSelect={(date) => {
           setScheduledDate(date);
+          // Chain straight into the time picker; the sheets are native Modals,
+          // so the calendar must fully close before the next one opens.
           setSheet(null);
+          setTimeout(() => setSheet("time"), 280);
         }}
+      />
+
+      {/* Card expiry pickers — the sheet form of the web's MM / YYYY selects. */}
+      <BottomSheet
+        visible={sheet === "month" || sheet === "year"}
+        onClose={() => setSheet(null)}
+        title={sheet === "year" ? "Expiration Year" : "Expiration Month"}
+      >
+        <ScrollView
+          className="px-4 pb-6"
+          style={{ maxHeight: 360 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {(sheet === "year" ? cardYears() : CARD_MONTHS).map((option) => {
+            const isSelected =
+              sheet === "year" ? cardYear === option : cardMonth === option;
+            return (
+              <Pressable
+                key={option}
+                onPress={() => {
+                  if (sheet === "year") setCardYear(option);
+                  else setCardMonth(option);
+                  setPaymentError("");
+                  setSheet(null);
+                }}
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium ${
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
+                  }`}
+                >
+                  {option}
+                </Text>
+                {isSelected && <Feather name="check" size={16} color={PRIMARY} />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Billing country picker (searchable, like the web country field) */}
+      <CountryPickerSheet
+        visible={sheet === "country"}
+        value={country}
+        onClose={() => setSheet(null)}
+        onSelect={setCountry}
       />
 
       {/* Time picker */}

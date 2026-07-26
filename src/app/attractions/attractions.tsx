@@ -49,11 +49,13 @@ import {
   formatMoney,
   type FeatherIconName,
 } from "../../lib/attractions/attractionDisplay";
+import { openPurchasePage } from "../../lib/attractions/purchaseLink";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
 import {
   bulkDeleteAttractions,
   bulkSetAttractionsActive,
+  compareAttractionsByDisplayOrder,
   deleteAttraction,
   duplicateAttraction,
   setAttractionActive,
@@ -185,8 +187,8 @@ const Attractions = () => {
     return { total, active, inactive, avgPrice, capacity };
   }, [locationScoped]);
 
-  // Search + the full web-admin filter set over the location-scoped data,
-  // sorted by display order. Predicate semantics mirror the web `useAdminTable`
+  // Search + the full web-admin filter set over the location-scoped data, in the
+  // web table's row order. Predicate semantics mirror the web `useAdminTable`
   // exactly (select equality, inclusive numeric ranges with empty = unbounded,
   // inclusive YYYY-MM-DD created-date range). All client-side, like the web.
   const filtered = useMemo(() => {
@@ -244,7 +246,7 @@ const Attractions = () => {
         }
         return true;
       })
-      .sort((a, b) => a.displayOrder - b.displayOrder);
+      .sort(compareAttractionsByDisplayOrder);
   }, [locationScoped, search, filters]);
 
   // Client-side pagination over the filtered list (matches the notifications
@@ -805,6 +807,7 @@ const Attractions = () => {
                     onRowPress={(attraction) =>
                       setActionsAttraction(attraction)
                     }
+                    onViewPurchase={openPurchasePage}
                     onEdit={handleRowEdit}
                     onDuplicate={handleRowDuplicate}
                     onDelete={handleRowDelete}

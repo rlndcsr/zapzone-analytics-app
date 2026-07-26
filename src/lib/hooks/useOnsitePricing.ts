@@ -12,7 +12,6 @@ import {
   type PricingEntityType,
   type SpecialPricingBreakdown,
 } from "../../services/pricingService";
-import type { EventRow } from "../../services/eventsService";
 
 /** Debounce for the fee / special-pricing lookups (matches the web's 500ms). */
 const PRICING_DEBOUNCE_MS = 500;
@@ -41,8 +40,17 @@ export type OnsitePricing = {
   appliedDiscounts: AppliedDiscount[];
 };
 
+/** The priced thing — an event or attraction row/detail satisfies this. */
+export type PricingEntity = {
+  id: number;
+  price: number;
+  locationId: number | null;
+  addOns: { id: number; price: number }[];
+};
+
 type Args = {
-  event: EventRow | null;
+  entity: PricingEntity | null;
+  entityType: PricingEntityType;
   quantity: number;
   addonQty: Record<number, number>;
   /** Manual discount in dollars (already clamped ≥ 0). */
@@ -52,30 +60,29 @@ type Args = {
 };
 
 /**
- * Computes onsite-purchase pricing exactly like the web
- * (`OnsitePurchaseEvent.tsx`): base = subtotal + add-ons − manual discount, then
+ * Computes purchase pricing exactly like the web (`OnsitePurchaseEvent.tsx`,
+ * `PurchaseAttraction.tsx`): base = subtotal + add-ons − manual discount, then
  * server-side fees applied and special-pricing discounts subtracted, both
  * fetched (debounced) from the shared `/for-entity` endpoints. Keeps this
  * business logic out of the screen.
  */
 export function useOnsitePricing({
-  event,
+  entity,
+  entityType,
   quantity,
   addonQty,
   discountNum,
   purchaseDate,
   purchaseTime,
 }: Args): OnsitePricing {
-  const entityType: PricingEntityType = "event";
-
-  const subtotal = event ? event.price * quantity : 0;
+  const subtotal = entity ? entity.price * quantity : 0;
   const addOnsTotal = useMemo(() => {
-    if (!event) return 0;
-    return event.addOns.reduce(
+    if (!entity) return 0;
+    return entity.addOns.reduce(
       (sum, a) => sum + a.price * (addonQty[a.id] ?? 0),
       0,
     );
-  }, [event, addonQty]);
+  }, [entity, addonQty]);
   const baseTotal = Math.max(0, subtotal + addOnsTotal - discountNum);
 
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
@@ -90,15 +97,15 @@ export function useOnsitePricing({
     };
   }, []);
 
-  // Reset when the selected event changes (or clears), like the web.
+  // Reset when the selected entity changes (or clears), like the web.
   useEffect(() => {
     setFeeBreakdown(null);
     setSpecialPricing(null);
-  }, [event]);
+  }, [entity]);
 
   // Fees — recompute on any base-price change.
   useEffect(() => {
-    if (!event) return;
+    if (!entity) return;
     const token = getToken();
     if (!token) return;
     const controller = new AbortController();
@@ -107,9 +114,9 @@ export function useOnsitePricing({
         const fb = await fetchFeeBreakdown({
           token,
           entityType,
-          entityId: event.id,
+          entityId: entity.id,
           basePrice: baseTotal,
-          locationId: event.locationId ?? undefined,
+          locationId: entity.locationId ?? undefined,
           signal: controller.signal,
         });
         if (mountedRef.current) setFeeBreakdown(fb);
@@ -123,11 +130,11 @@ export function useOnsitePricing({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [event, baseTotal]);
+  }, [entity, entityType, baseTotal]);
 
   // Special pricing — also depends on the chosen date/time.
   useEffect(() => {
-    if (!event) return;
+    if (!entity) return;
     const token = getToken();
     if (!token) return;
     const controller = new AbortController();
@@ -136,11 +143,11 @@ export function useOnsitePricing({
         const sp = await fetchSpecialPricing({
           token,
           entityType,
-          entityId: event.id,
+          entityId: entity.id,
           basePrice: baseTotal,
           date: purchaseDate || todayISO(),
           time: purchaseTime || undefined,
-          locationId: event.locationId ?? undefined,
+          locationId: entity.locationId ?? undefined,
           signal: controller.signal,
         });
         if (mountedRef.current) setSpecialPricing(sp);
@@ -154,7 +161,7 @@ export function useOnsitePricing({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [event, baseTotal, purchaseDate, purchaseTime]);
+  }, [entity, entityType, baseTotal, purchaseDate, purchaseTime]);
 
   const specialPricingDiscount = specialPricing?.has_special_pricing
     ? specialPricing.total_discount

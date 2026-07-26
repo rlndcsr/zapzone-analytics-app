@@ -91,6 +91,8 @@ const PurchaseLinkCell = ({ attraction }: { attraction: AttractionRow }) => {
  * COLUMNS array) lets COLUMNS stay a static, shared definition.
  */
 type RowContext = {
+  /** Cart icon — open the in-app purchase page (web "View Purchase Page"). */
+  onViewPurchase: (attraction: AttractionRow) => void;
   /** Eye icon — open the Attraction Details sheet (same as a row tap). */
   onView: (attraction: AttractionRow) => void;
   onEdit: (attraction: AttractionRow) => void;
@@ -187,10 +189,11 @@ const ActionIconButton = ({
 );
 
 /**
- * Row Actions cell — View (eye → Details sheet), Edit, Duplicate, Delete,
- * mirroring the web admin's per-row action buttons. Duplicate owns a local busy
- * spinner because its handler awaits the create round-trip; Delete defers to
- * the parent's confirm dialog, so it needs no local busy state.
+ * Row Actions cell — View Purchase Page, View (eye → Details sheet), Edit,
+ * Duplicate, Delete, in the same order as the web admin's per-row action
+ * buttons. Duplicate owns a local busy spinner because its handler awaits the
+ * create round-trip; Delete defers to the parent's confirm dialog, so it needs
+ * no local busy state.
  */
 const ActionsCell = ({
   attraction,
@@ -212,6 +215,12 @@ const ActionsCell = ({
 
   return (
     <View className="flex-row items-center gap-1">
+      <ActionIconButton
+        icon="shopping-cart"
+        color="#6B7280"
+        label={`View purchase page for ${attraction.name}`}
+        onPress={() => ctx.onViewPurchase(attraction)}
+      />
       <ActionIconButton
         icon="eye"
         color="#2563EB"
@@ -251,12 +260,13 @@ const ActionsCell = ({
  * the Price suffix exactly as the web default view does.
  *
  * The trailing Actions column mirrors the web admin's per-row buttons — View
- * (eye → Details sheet), Edit, Duplicate, Delete — and the Status column is an
- * inline select for flipping active/inactive, both wired through {@link
- * RowContext}. The Order column's drag-to-reorder chevrons are still omitted (no
- * reorder on mobile — the number is shown read-only). Columns hidden by default
- * on the web (ID, Updated, and the stand-alone Pricing Type / Location /
- * Description / Created toggles) are not surfaced, matching what a web user sees.
+ * Purchase Page, View (eye → Details sheet), Edit, Duplicate, Delete — and the
+ * Status column is an inline select for flipping active/inactive, both wired
+ * through {@link RowContext}. The Order column's drag-to-reorder chevrons are
+ * still omitted (no reorder on mobile — the number is shown read-only). Columns
+ * hidden by default on the web (ID, Updated, and the stand-alone Pricing Type /
+ * Location / Description / Created toggles) are not surfaced, matching what a
+ * web user sees.
  */
 const COLUMNS: Column[] = [
   {
@@ -393,7 +403,7 @@ const COLUMNS: Column[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 168,
+    width: 208,
     render: (a, ctx) => <ActionsCell attraction={a} ctx={ctx} />,
   },
 ];
@@ -453,6 +463,7 @@ const CheckboxCell = ({
 export const AttractionsTable = memo(function AttractionsTable({
   attractions,
   onRowPress,
+  onViewPurchase,
   onEdit,
   onDuplicate,
   onDelete,
@@ -463,8 +474,10 @@ export const AttractionsTable = memo(function AttractionsTable({
 }: {
   attractions: AttractionRow[];
   onRowPress: (attraction: AttractionRow) => void;
-  /** Row Actions — Edit, Duplicate, Delete, and the per-row status pill.
-   *  onView (the eye action) reuses onRowPress, since both open the Details. */
+  /** Row Actions — View Purchase Page, Edit, Duplicate, Delete, and the per-row
+   *  status pill. onView (the eye action) reuses onRowPress, since both open
+   *  the Details. */
+  onViewPurchase: (attraction: AttractionRow) => void;
   onEdit: (attraction: AttractionRow) => void;
   onDuplicate: (attraction: AttractionRow) => Promise<void> | void;
   onDelete: (attraction: AttractionRow) => void;
@@ -477,6 +490,7 @@ export const AttractionsTable = memo(function AttractionsTable({
   onToggleAll: () => void;
 }) {
   const rowContext: RowContext = {
+    onViewPurchase,
     onView: onRowPress,
     onEdit,
     onDuplicate,

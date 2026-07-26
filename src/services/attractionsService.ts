@@ -120,6 +120,15 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
   };
 }
 
+/** Web `/attractions` row order: display_order asc, ties alphabetical by name. */
+export function compareAttractionsByDisplayOrder(
+  a: AttractionRow,
+  b: AttractionRow,
+): number {
+  if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+
 /** One availability window: which weekdays + the daily open/close times. */
 export type AvailabilitySchedule = {
   days: string[];
@@ -376,8 +385,8 @@ type FetchParams = {
 };
 
 /**
- * GET /api/attractions — the same endpoint the web `/attractions` page uses.
- * Returns the display-ordered attraction list (newest schedules first).
+ * GET /api/attractions — the same endpoint (and the same params) the web
+ * `/attractions` page uses, so the API's default name-ascending order is kept.
  */
 export async function fetchAttractions({
   token,
@@ -388,8 +397,6 @@ export async function fetchAttractions({
   const params = new URLSearchParams({
     per_page: String(PER_PAGE),
     user_id: String(userId),
-    sort_by: "display_order",
-    sort_order: "asc",
   });
   if (locationId != null) params.append("location_id", String(locationId));
 

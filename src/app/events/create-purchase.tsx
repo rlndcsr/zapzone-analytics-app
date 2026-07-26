@@ -426,7 +426,8 @@ const CreateEventPurchaseScreen = () => {
     appliedFees,
     appliedDiscounts,
   } = useOnsitePricing({
-    event: selected,
+    entity: selected,
+    entityType: "event",
     quantity,
     addonQty,
     discountNum,

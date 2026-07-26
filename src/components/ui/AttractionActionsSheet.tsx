@@ -12,10 +12,12 @@ import {
   View,
 } from "react-native";
 
-import { buildPurchaseLink } from "../../lib/attractions/purchaseLink";
+import {
+  buildPurchaseLink,
+  openPurchasePage,
+} from "../../lib/attractions/purchaseLink";
 import { mediaUrl } from "../../lib/api";
 import { getToken } from "../../lib/session";
-import { createSlugWithId } from "../../lib/slug";
 import { formatTimeRange } from "../../lib/time";
 import {
   deleteAttraction,
@@ -224,17 +226,9 @@ export function AttractionActionsSheet({
     copyTimer.current = setTimeout(() => setCopied(false), 2000);
   };
 
-  // Opens the in-app customer purchase page for this attraction (the internal
-  // equivalent of the web `/purchase/attraction/...` route) instead of an
-  // external browser. Passes the attraction id + slug so the screen can load
-  // the record and mirror the public purchase URL.
   const handleViewPurchasePage = () => {
-    const slug = createSlugWithId(attraction.name, attraction.id);
     onClose();
-    router.push({
-      pathname: "/attractions/purchase-page",
-      params: { id: String(attraction.id), slug },
-    });
+    openPurchasePage(attraction);
   };
 
   const handleDuplicate = async () => {

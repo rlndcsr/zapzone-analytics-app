@@ -184,6 +184,131 @@ export async function forceDeletePayment(token: string, id: number): Promise<voi
   await apiRequest(`/api/payments/${id}/force-delete`, { method: "DELETE", token });
 }
 
+/* ------------------------------------------------- card payments (Authorize.Net) */
+
+/** Public Accept.js credentials for a location (web `getAuthorizeNetPublicKey`). */
+export type AuthorizeNetPublicKey = {
+  apiLoginId: string;
+  clientKey: string;
+  environment: "sandbox" | "production";
+  acceptJsUrl: string;
+};
+
+/** Opaque payment nonce the charge endpoint requires (never the raw card). */
+export type PaymentOpaqueData = {
+  dataDescriptor: string;
+  dataValue: string;
+};
+
+/** Payable kinds accepted by POST /api/payments/charge (web `PAYMENT_TYPE`). */
+export const PAYMENT_TYPE = {
+  BOOKING: "booking",
+  ATTRACTION_PURCHASE: "attraction_purchase",
+  EVENT_PURCHASE: "event_purchase",
+} as const;
+
+export type PaymentPayableType =
+  (typeof PAYMENT_TYPE)[keyof typeof PAYMENT_TYPE];
+
+/** POST /api/payments/charge body (mirrors the web `PaymentChargeRequest`). */
+export type PaymentChargeRequest = {
+  location_id: number;
+  opaqueData: PaymentOpaqueData;
+  amount: number;
+  order_id?: string;
+  customer_id?: number;
+  description?: string;
+  customer?: {
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    address2?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    country?: string;
+  };
+  signature_image?: string;
+  terms_accepted?: boolean;
+  payable_id?: number;
+  payable_type?: PaymentPayableType;
+  send_email?: boolean;
+  qr_code?: string;
+};
+
+export type PaymentChargeResponse = {
+  success: boolean;
+  message?: string;
+  transaction_id?: string;
+  auth_code?: string;
+};
+
+type PublicKeyResponse = {
+  api_login_id?: string;
+  client_key?: string;
+  environment?: string;
+  accept_js_url?: string;
+};
+
+/** GET /api/authorize-net/public-key/{locationId} — same endpoint as the web. */
+export async function fetchAuthorizeNetPublicKey(
+  token: string,
+  locationId: number,
+  signal?: AbortSignal,
+): Promise<AuthorizeNetPublicKey> {
+  const res = await apiRequest<PublicKeyResponse>(
+    `/api/authorize-net/public-key/${locationId}`,
+    { token, signal },
+  );
+  const environment = res?.environment === "production" ? "production" : "sandbox";
+  return {
+    apiLoginId: res?.api_login_id ?? "",
+    clientKey: res?.client_key ?? "",
+    environment,
+    acceptJsUrl:
+      res?.accept_js_url ??
+      (environment === "production"
+        ? "https://js.authorize.net/v1/Accept.js"
+        : "https://jstest.authorize.net/v1/Accept.js"),
+  };
+}
+
+export type CardData = {
+  cardNumber: string;
+  month: string;
+  year: string;
+  cardCode: string;
+};
+
+/**
+ * Turns card data into Authorize.Net opaque data. The web does this with
+ * Accept.js (`window.Accept.dispatchData`), which needs a DOM — on native it
+ * requires a WebView host that ships in the next native build, so this stub
+ * throws until then. Nothing here ever sends a card number anywhere.
+ */
+export async function tokenizeCard(
+  _cardData: CardData,
+  _credentials: AuthorizeNetPublicKey,
+): Promise<PaymentOpaqueData> {
+  throw new Error(
+    "Card tokenization is not implemented yet. Card payments become available in the next app build.",
+  );
+}
+
+/** POST /api/payments/charge — charges an already-tokenized card. */
+export async function chargePayment(
+  token: string,
+  body: PaymentChargeRequest,
+): Promise<PaymentChargeResponse> {
+  return apiRequest<PaymentChargeResponse>("/api/payments/charge", {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
 /** Filters for the Package Invoices PDF export. */
 export type PackageInvoiceParams = {
   packageId: number;

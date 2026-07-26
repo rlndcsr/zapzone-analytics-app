@@ -1,4 +1,8 @@
 import { apiRequest } from "../lib/api";
+import type {
+  AppliedDiscount as PayloadAppliedDiscount,
+  AppliedFee as PayloadAppliedFee,
+} from "./pricingService";
 
 /** Purchase status, normalized like the web ("completed" -> "confirmed"). */
 export type PurchaseStatus =
@@ -168,6 +172,15 @@ export type CreateAttractionPurchaseInput = {
   guest_name: string;
   guest_email?: string;
   guest_phone?: string;
+  /** Billing address — the same fields the web purchase form collects. */
+  guest_address?: string;
+  guest_city?: string;
+  guest_state?: string;
+  guest_zip?: string;
+  /** 2-letter country code, as the web submits it. */
+  guest_country?: string;
+  /** Opt-in for automated / promotional SMS (web `sms_consent`). */
+  sms_consent?: boolean;
   quantity: number;
   amount: number;
   total_amount: number;
@@ -183,6 +196,10 @@ export type CreateAttractionPurchaseInput = {
   notes?: string;
   send_email: boolean;
   additional_addons?: PurchaseAddonInput[];
+  /** Fee-support / special-pricing lines, as the web purchase page sends them. */
+  applied_fees?: PayloadAppliedFee[];
+  discount_amount?: number;
+  applied_discounts?: PayloadAppliedDiscount[];
 };
 
 type CreatePurchaseResponse = {
