@@ -36,7 +36,7 @@ type UseWaiversParams = {
   perPage?: number;
 };
 
-export function useWaivers({ filters, page, perPage = 25 }: UseWaiversParams) {
+export function useWaivers({ filters, page, perPage = 5 }: UseWaiversParams) {
   const [waivers, setWaivers] = useState<Waiver[]>([]);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);

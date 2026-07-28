@@ -8,7 +8,10 @@ type InputFieldProps = TextInputProps & {
   error?: string;
   rightAccessory?: ReactNode;
   containerClassName?: string;
-  /** Pill (fully rounded) by default; pass false for a rounded-rect field. */
+  /**
+   * Rounded-rect by default (matching the web's inputs). Pass `pill` for the
+   * fully-rounded variant — nothing uses it today; it exists for one-offs.
+   */
   pill?: boolean;
   ref?: Ref<TextInput>;
 };
@@ -19,7 +22,7 @@ export function InputField({
   error,
   rightAccessory,
   containerClassName,
-  pill = true,
+  pill = false,
   ref,
   ...inputProps
 }: InputFieldProps) {
@@ -33,7 +36,7 @@ export function InputField({
 
       <View
         className={`h-14 flex-row items-center border bg-white dark:bg-neutral-900 px-5 ${
-          pill ? "rounded-full" : "rounded-xl"
+          pill ? "rounded-full" : "rounded-lg"
         } ${
           error ? "border-red-400" : "border-gray-200 dark:border-neutral-700"
         }`}

@@ -1,7 +1,15 @@
 import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { type ComponentProps, type ReactNode } from "react";
-import { type LayoutChangeEvent, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  type LayoutChangeEvent,
+  Pressable,
+  Text,
+  View,
+} from "react-native";
 
+import { formatDurationDisplay } from "../../lib/attractions/attractionDisplay";
 import type { AvailabilitySchedule } from "../../services/attractionsService";
 
 export const PRIMARY = "#0644C7";
@@ -107,7 +115,10 @@ export const FieldLabel = ({ children }: { children: ReactNode }) => (
   </Text>
 );
 
-/** A pressable that opens a picker sheet, showing the current value. */
+/**
+ * A pressable that opens a picker sheet, showing the current value. Rounded-lg
+ * (never a pill) so it matches the web's inputs and the rest of this form.
+ */
 export const SelectRow = ({
   icon,
   value,
@@ -123,7 +134,7 @@ export const SelectRow = ({
 }) => (
   <Pressable
     onPress={onPress}
-    className={`h-14 flex-row items-center gap-3 rounded-full border bg-white dark:bg-neutral-900 px-5 ${
+    className={`h-14 flex-row items-center gap-3 rounded-lg border bg-white dark:bg-neutral-900 px-5 ${
       error ? "border-red-400" : "border-gray-200 dark:border-neutral-700"
     }`}
   >
@@ -142,5 +153,170 @@ export const SelectRow = ({
 
 export const ErrorText = ({ error }: { error?: string }) =>
   error ? (
-    <Text className="ml-4 mt-1.5 text-xs text-red-500">{error}</Text>
+    <Text className="mt-1.5 text-xs text-red-500">{error}</Text>
   ) : null;
+
+/**
+ * Primary / secondary form button. Square-ish corners (rounded-lg) — the
+ * attraction form deliberately uses no pill shapes, matching the web.
+ */
+export const FormButton = ({
+  label,
+  onPress,
+  variant = "primary",
+  disabled,
+  loading,
+  icon,
+}: {
+  label: string;
+  onPress: () => void;
+  variant?: "primary" | "secondary";
+  disabled?: boolean;
+  loading?: boolean;
+  icon?: IconName;
+}) => {
+  const primary = variant === "primary";
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      className={`h-14 flex-1 flex-row items-center justify-center gap-2 rounded-lg ${
+        primary
+          ? "bg-[#0644C7]"
+          : "border border-gray-300 bg-white dark:border-neutral-700 dark:bg-neutral-900"
+      } ${disabled || loading ? "opacity-60" : "active:opacity-90"}`}
+    >
+      {loading ? (
+        <ActivityIndicator color={primary ? "#FFFFFF" : PRIMARY} size="small" />
+      ) : (
+        <>
+          {!!icon && (
+            <Feather name={icon} size={16} color={primary ? "#FFFFFF" : "#374151"} />
+          )}
+          <Text
+            className={`text-base font-semibold ${
+              primary ? "text-white" : "text-gray-700 dark:text-gray-200"
+            }`}
+          >
+            {label}
+          </Text>
+        </>
+      )}
+    </Pressable>
+  );
+};
+
+/** Pricing-type suffixes the live preview shows next to the price. */
+const PREVIEW_SUFFIX: Record<string, string> = {
+  per_person: "/person",
+  per_hour: "/hour",
+  per_game: "/game",
+};
+
+/**
+ * "Live Preview" card — how the attraction will read to customers. Mirrors the
+ * web's sticky right-rail preview on both Create and Edit, so the two forms
+ * stay in sync. Values come straight from the form state; `imageUri` is already
+ * resolved by the caller (a data URI while creating, a media URL when editing).
+ */
+export const AttractionLivePreview = ({
+  name,
+  category,
+  description,
+  price,
+  pricingType,
+  duration,
+  durationUnit,
+  maxCapacity,
+  schedules,
+  imageUri,
+}: {
+  name: string;
+  category: string;
+  description: string;
+  price: string;
+  pricingType: string;
+  duration: string;
+  durationUnit: "minutes" | "hours";
+  maxCapacity: string;
+  schedules: AvailabilitySchedule[];
+  imageUri?: string | null;
+}) => {
+  const durationText =
+    !duration || Number(duration) === 0
+      ? "Unlimited"
+      : formatDurationDisplay(Number(duration), durationUnit);
+
+  return (
+    <View className="rounded-lg border border-gray-200 bg-white p-5 mb-4 dark:border-neutral-800 dark:bg-neutral-900">
+      <Text className="mb-4 text-xl font-bold text-[#0644C7] dark:text-blue-400">
+        Live Preview
+      </Text>
+
+      {!!imageUri && (
+        <Image
+          source={{ uri: imageUri }}
+          style={{ width: "100%", height: 160, borderRadius: 8 }}
+          contentFit="cover"
+        />
+      )}
+
+      <View className={imageUri ? "mt-4" : undefined}>
+        <Text className="text-lg font-semibold text-gray-800 dark:text-white">
+          {name.trim() || "Attraction Name"}
+        </Text>
+        <Text className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          {category || "Category"}
+        </Text>
+      </View>
+
+      <Text className="mt-3 text-sm text-gray-800 dark:text-gray-200">
+        {description.trim() || "No description provided"}
+      </Text>
+
+      <View className="mt-3 flex-row items-center justify-between">
+        <Text className="text-lg font-bold text-[#0644C7] dark:text-blue-400">
+          {price ? `$${price}` : "$0.00"}
+          <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
+            {" "}
+            {PREVIEW_SUFFIX[pricingType] ?? ""}
+          </Text>
+        </Text>
+        <Text className="text-sm text-gray-600 dark:text-gray-400">
+          {durationText}
+        </Text>
+      </View>
+
+      <Text className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+        <Text className="font-medium">Capacity:</Text>{" "}
+        {maxCapacity ? `Up to ${maxCapacity} people` : "Not specified"}
+      </Text>
+
+      <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
+        <Text className="mb-2 font-medium text-gray-800 dark:text-gray-100">
+          Availability Schedules:
+        </Text>
+        {schedules.map((s, i) => (
+          <View key={i} className="mb-2">
+            <View className="flex-row flex-wrap gap-1">
+              {s.days.map((day) => (
+                <View
+                  key={day}
+                  className="rounded bg-blue-100 px-2 py-1 dark:bg-blue-900/40"
+                >
+                  <Text className="text-xs text-[#0644C7] dark:text-blue-300">
+                    {day.slice(0, 3)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+              {formatTime(s.start_time)} – {formatTime(s.end_time)}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};

@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import {
   useEffect,
@@ -14,7 +15,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Switch,
   Text,
   TextInput,
   View,
@@ -23,11 +23,30 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
+import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
-import { formatShortDate, pad, toKey } from "../../lib/date/calendar";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
+import { mediaUrl } from "../../lib/api";
+import {
+  availableTimeSlotsForDate,
+  computeDayOffAvailability,
+} from "../../lib/attractions/dayOffAvailability";
+import {
+  PRICING_SUFFIX,
+  formatDurationDisplay,
+} from "../../lib/attractions/attractionDisplay";
+import { toKey } from "../../lib/date/calendar";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
+import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import {
+  CARD_MONTHS,
+  cardYears,
+  formatCardNumber,
+  getCardType,
+  getPaymentErrorMessage,
+  isTestCardNumber,
+  validateCardNumber,
+} from "../../lib/payments/cardUtils";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createAttractionPurchase,
@@ -38,6 +57,15 @@ import {
   type AttractionRow,
 } from "../../services/attractionsService";
 import { searchCustomers, type CustomerHit } from "../../services/customersService";
+import {
+  fetchDayOffsByLocation,
+  type DayOff,
+} from "../../services/dayOffsService";
+import {
+  fetchAuthorizeNetPublicKey,
+  tokenizeCard,
+  type AuthorizeNetPublicKey,
+} from "../../services/paymentsService";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -50,29 +78,21 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-// Hourly slots 08:00–21:00 — the mobile stand-in for the web's availability
-// time-slot generator (day-off / per-attraction windows are a later refinement).
-const TIME_OPTIONS = Array.from({ length: 14 }, (_, i) => `${pad(8 + i)}:00`);
-
-function formatTime(value: string): string {
-  const [h, m] = value.split(":");
-  let hour = Number(h);
-  const meridian = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  return `${hour}:${m} ${meridian}`;
-}
+/** Height cap on the attraction picker, mirroring the web's `max-h-96` list. */
+const ATTRACTION_LIST_MAX_HEIGHT = 340;
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 
-const pricingSuffix = (t: string) =>
-  t === "per_person" ? "/person" : t === "per_group" ? "/group" : t === "per_hour" ? "/hour" : "";
+const pricingSuffix = (t: string) => PRICING_SUFFIX[t] ?? "";
+
+type PaymentMethod = "authorize.net" | "in-store" | "paylater";
 
 const Section = ({
   icon,
   title,
   children,
 }: {
-  icon: IconName;
+  icon?: IconName;
   title: string;
   children: React.ReactNode;
 }) => (
@@ -81,9 +101,11 @@ const Section = ({
     style={CARD_SHADOW}
   >
     <View className="flex-row items-center gap-2 mb-4">
-      <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-        <Feather name={icon} size={16} color={PRIMARY} />
-      </View>
+      {!!icon && (
+        <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
+          <Feather name={icon} size={16} color={PRIMARY} />
+        </View>
+      )}
       <Text className="text-base font-bold text-gray-900 dark:text-white">
         {title}
       </Text>
@@ -103,19 +125,15 @@ const SelectRow = ({
   value,
   placeholder,
   onPress,
-  error,
 }: {
   icon: IconName;
   value: string | null;
   placeholder: string;
   onPress: () => void;
-  error?: boolean;
 }) => (
   <Pressable
     onPress={onPress}
-    className={`h-14 flex-row items-center gap-3 rounded-full border bg-white dark:bg-neutral-900 px-5 ${
-      error ? "border-red-400" : "border-gray-200 dark:border-neutral-700"
-    }`}
+    className="h-14 flex-row items-center gap-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5"
   >
     <Feather name={icon} size={18} color="#9CA3AF" />
     <Text
@@ -169,26 +187,105 @@ const Stepper = ({
   </View>
 );
 
+/** Square thumbnail with the web's "No Image" placeholder. */
+const Thumb = ({
+  uri,
+  size,
+  placeholder = "No Image",
+}: {
+  uri: string | null;
+  size: number;
+  placeholder?: string;
+}) => (
+  <View
+    style={{ width: size, height: size }}
+    className="rounded-lg overflow-hidden border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800 items-center justify-center"
+  >
+    {uri ? (
+      <Image source={{ uri }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+    ) : (
+      <Text className="text-[10px] text-gray-400">{placeholder}</Text>
+    )}
+  </View>
+);
+
+/**
+ * One attraction in the picker (and, with `selected`, the chosen-attraction
+ * card). Same anatomy as the web: thumbnail, name, category, then price with
+ * its pricing-type suffix on the left and the duration on the right.
+ */
+const AttractionCard = ({
+  attraction,
+  selected,
+  onPress,
+  onClear,
+}: {
+  attraction: AttractionRow;
+  selected?: boolean;
+  onPress?: () => void;
+  onClear?: () => void;
+}) => {
+  const body = (
+    <View className="flex-row items-start gap-3">
+      <Thumb uri={mediaUrl(attraction.images[0])} size={72} />
+      <View className="flex-1">
+        <Text
+          className="font-semibold text-gray-900 dark:text-white"
+          numberOfLines={2}
+        >
+          {attraction.name}
+        </Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
+          {attraction.category}
+        </Text>
+        <View className="flex-row items-center justify-between">
+          <Text className="text-lg font-bold text-[#0644C7] dark:text-blue-400">
+            {money(attraction.price)}
+            <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
+              {" "}
+              {pricingSuffix(attraction.pricingType)}
+            </Text>
+          </Text>
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {formatDurationDisplay(attraction.duration, attraction.durationUnit)}
+          </Text>
+        </View>
+      </View>
+      {!!onClear && (
+        <Pressable onPress={onClear} hitSlop={8} accessibilityLabel="Clear selection">
+          <Feather name="x" size={18} color="#9CA3AF" />
+        </Pressable>
+      )}
+    </View>
+  );
+
+  if (selected) {
+    return (
+      <View className="rounded-xl border border-[#0644C7] bg-[#0644C7]/5 dark:bg-blue-900/20 p-4">
+        {body}
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={onPress}
+      className="rounded-xl border border-gray-200 dark:border-neutral-700 p-4 mb-3 active:border-[#0644C7]/50"
+    >
+      {body}
+    </Pressable>
+  );
+};
+
 const CreatePurchaseScreen = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const user = getCurrentUser();
-  const isCompanyAdmin = user?.role === "company_admin";
 
-  // Location (company admins) — options from dashboard metrics locationStats.
-  // Default to "All Locations" (null), exactly like the web, so every
-  // location's attractions are available until one is chosen.
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
-  const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
-  const locationOptions = useMemo(() => {
-    if (!metrics?.locationStats) return [];
-    return Object.entries(metrics.locationStats)
-      .map(([id, s]) => ({ id: Number(id), name: s.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics]);
-
-  // Attraction catalog (active, location-scoped).
+  // Attraction catalog — active only, already scoped to the caller's locations
+  // by the API (the web takes its scope from the global location context, so
+  // there is no per-screen location picker on either platform).
   const [attractions, setAttractions] = useState<AttractionRow[]>([]);
   const [loadingAttractions, setLoadingAttractions] = useState(true);
   const [search, setSearch] = useState("");
@@ -199,11 +296,7 @@ const CreatePurchaseScreen = () => {
     if (!token || !user?.id) return;
     let active = true;
     setLoadingAttractions(true);
-    fetchAttractions({
-      token,
-      userId: user.id,
-      locationId: selectedLocationId ?? undefined,
-    })
+    fetchAttractions({ token, userId: user.id })
       .then((rows) => {
         if (active) setAttractions(rows.filter((a) => a.status === "active"));
       })
@@ -214,18 +307,28 @@ const CreatePurchaseScreen = () => {
     return () => {
       active = false;
     };
-  }, [selectedLocationId, user?.id]);
+  }, [user?.id]);
 
   // Purchase details.
   const [quantity, setQuantity] = useState(1);
-  const [discount, setDiscount] = useState("");
-  const [amountPaid, setAmountPaid] = useState("");
+  const [discount, setDiscount] = useState("0");
+  const [amountPaid, setAmountPaid] = useState("0");
   const [notes, setNotes] = useState("");
   const [addonQty, setAddonQty] = useState<Record<number, number>>({});
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"in-store" | "paylater">("in-store");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("authorize.net");
   const [sendEmail, setSendEmail] = useState(true);
+
+  // Card (Authorize.Net) fields — same anatomy as the web Card Details panel.
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardMonth, setCardMonth] = useState("");
+  const [cardYear, setCardYear] = useState("");
+  const [cardCVV, setCardCVV] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [authorizeCredentials, setAuthorizeCredentials] =
+    useState<AuthorizeNetPublicKey | null>(null);
 
   // Customer (email search-as-you-type).
   const [customerEmail, setCustomerEmail] = useState("");
@@ -236,8 +339,9 @@ const CreatePurchaseScreen = () => {
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showCustomerList, setShowCustomerList] = useState(false);
 
+  const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [sheet, setSheet] = useState<null | "location" | "date" | "time">(null);
+  const [sheet, setSheet] = useState<null | "month" | "year">(null);
   const submitLockRef = useRef(false);
 
   // Debounced customer lookup by email (mirrors the web).
@@ -276,6 +380,42 @@ const CreatePurchaseScreen = () => {
     };
   }, [customerEmail]);
 
+  // Day-offs for the chosen attraction's location — feeds the calendar's
+  // blocked / limited-hours dates.
+  useEffect(() => {
+    const locationId = selected?.locationId;
+    if (locationId == null) {
+      setDayOffs([]);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchDayOffsByLocation(token, locationId, controller.signal)
+      .then((rows) => setDayOffs(rows))
+      .catch(() => {
+        if (!controller.signal.aborted) setDayOffs([]);
+      });
+    return () => controller.abort();
+  }, [selected]);
+
+  // Accept.js credentials for the attraction's location (web parity: fetched
+  // as soon as the card method is active so the form can tokenize).
+  useEffect(() => {
+    if (paymentMethod !== "authorize.net" || !selected) return;
+    const locationId = selected.locationId;
+    if (locationId == null) return;
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchAuthorizeNetPublicKey(token, locationId, controller.signal)
+      .then((creds) => setAuthorizeCredentials(creds))
+      .catch(() => {
+        if (!controller.signal.aborted) setAuthorizeCredentials(null);
+      });
+    return () => controller.abort();
+  }, [paymentMethod, selected]);
+
   const selectCustomer = (c: CustomerHit) => {
     setSelectedCustomerId(c.id);
     setCustomerEmail(c.email);
@@ -287,8 +427,8 @@ const CreatePurchaseScreen = () => {
   const pickAttraction = (a: AttractionRow) => {
     setSelected(a);
     setQuantity(1);
-    setDiscount("");
-    setAmountPaid("");
+    setDiscount("0");
+    setAmountPaid("0");
     setAddonQty({});
     setScheduledDate("");
     setScheduledTime("");
@@ -319,45 +459,132 @@ const CreatePurchaseScreen = () => {
     );
   }, [attractions, search]);
 
-  // Totals — base pricing (fees/special-pricing are a later refinement).
-  const subtotal = selected ? selected.price * quantity : 0;
-  const addOnsTotal = useMemo(() => {
-    if (!selected) return 0;
-    return selected.addOns.reduce(
-      (sum, a) => sum + a.price * (addonQty[a.id] ?? 0),
-      0,
+  // Local midnight "now" for the day-off past-date checks.
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
+  // Calendar availability (full day-offs / limited hours / open weekdays),
+  // computed from the same Laravel day-off data the web uses.
+  const dayOffAvailability = useMemo(
+    () =>
+      computeDayOffAvailability({
+        dayOffs,
+        attractionId: selected?.id ?? -1,
+        availability: selected?.availability ?? [],
+        today,
+      }),
+    [dayOffs, selected?.id, selected?.availability, today],
+  );
+
+  const availableTimeSlots = useMemo(() => {
+    if (!scheduledDate || !selected) return [];
+    return availableTimeSlotsForDate(
+      scheduledDate,
+      selected.availability,
+      dayOffAvailability.partialClosuresByDate,
     );
-  }, [selected, addonQty]);
+  }, [scheduledDate, selected, dayOffAvailability]);
+
+  // Drop a chosen time that is no longer valid for the newly picked date.
+  useEffect(() => {
+    if (scheduledTime && !availableTimeSlots.includes(scheduledTime)) {
+      setScheduledTime("");
+    }
+  }, [availableTimeSlots, scheduledTime]);
+
   const discountNum = Math.max(0, Number(discount) || 0);
-  const total = Math.max(0, subtotal + addOnsTotal - discountNum);
+
+  // Same pricing pipeline as the web: base = subtotal + add-ons − manual
+  // discount, then server-side fees applied and special pricing subtracted.
+  const {
+    subtotal,
+    feeBreakdown,
+    specialPricing,
+    specialPricingDiscount,
+    total,
+    appliedFees,
+    appliedDiscounts,
+  } = useOnsitePricing({
+    entity: selected,
+    entityType: "attraction",
+    quantity,
+    addonQty,
+    discountNum,
+    purchaseDate: scheduledDate,
+    purchaseTime: scheduledTime,
+  });
 
   // Today's key (YYYY-MM-DD) — the visit-date floor and the transaction's
   // `purchase_date`. Computed once, timezone-safe.
   const todayKey = useMemo(() => toKey(new Date()), []);
-  const dateLabel = !scheduledDate
-    ? null
-    : scheduledDate === todayKey
-      ? "Today"
-      : formatShortDate(scheduledDate);
-
-  const locationName =
-    selectedLocationId == null
-      ? "All Locations"
-      : (locationOptions.find((l) => l.id === selectedLocationId)?.name ??
-        user?.location?.name ??
-        null);
 
   const setAddon = (id: number, n: number) =>
     setAddonQty((prev) => ({ ...prev, [id]: n }));
+
+  const cardValid = validateCardNumber(cardNumber);
+  const cardIncomplete =
+    !cardNumber || !cardMonth || !cardYear || !cardCVV || !cardValid;
+  const submitDisabled =
+    submitting ||
+    isProcessingPayment ||
+    !selected ||
+    (paymentMethod === "authorize.net" && cardIncomplete);
+
+  /**
+   * Card leg — the web's validation order, then tokenization. Tokenization runs
+   * before any record is created, so nothing is written while native Accept.js
+   * is still a stub (`paymentsService.tokenizeCard`).
+   */
+  const runCardPayment = async () => {
+    if (!cardNumber || !cardMonth || !cardYear || !cardCVV) {
+      setPaymentError("Please fill in all card details");
+      return;
+    }
+    if (!validateCardNumber(cardNumber)) {
+      setPaymentError("Invalid card number");
+      return;
+    }
+    if (isTestCardNumber(cardNumber)) {
+      setPaymentError("Test card numbers are not allowed. Please use a real card.");
+      return;
+    }
+    if (!authorizeCredentials?.apiLoginId) {
+      setPaymentError(
+        "Payment system not initialized. Please reopen this screen and try again.",
+      );
+      return;
+    }
+
+    setPaymentError("");
+    setIsProcessingPayment(true);
+    try {
+      await tokenizeCard(
+        {
+          cardNumber: cardNumber.replace(/\s/g, ""),
+          month: cardMonth,
+          year: cardYear,
+          cardCode: cardCVV,
+        },
+        authorizeCredentials,
+      );
+    } catch (err) {
+      setPaymentError(getPaymentErrorMessage(err));
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!selected) {
       Alert.alert("Select an attraction", "Choose an attraction to purchase.");
       return;
     }
-    // The purchase belongs to the attraction's own location (the web uses
-    // `selectedAttraction.locationId`), so "All Locations" still submits fine.
-    const effectiveLocationId = selected.locationId ?? selectedLocationId;
+    // The purchase belongs to the attraction's own location, exactly like the
+    // web's `selectedAttraction.locationId`.
+    const effectiveLocationId = selected.locationId;
     if (effectiveLocationId == null) {
       Alert.alert("Location unavailable", "This attraction has no location set.");
       return;
@@ -374,6 +601,11 @@ const CreatePurchaseScreen = () => {
     const token = getToken();
     if (!token) {
       Alert.alert("Not authenticated", "Please sign in again.");
+      return;
+    }
+
+    if (paymentMethod === "authorize.net") {
+      await runCardPayment();
       return;
     }
 
@@ -413,6 +645,11 @@ const CreatePurchaseScreen = () => {
         `Attraction Purchase: ${selected.name} (${quantity} ticket${quantity > 1 ? "s" : ""})`,
       send_email: paymentMethod === "in-store" ? sendEmail : false,
       additional_addons: additionalAddons.length > 0 ? additionalAddons : undefined,
+      applied_fees: appliedFees.length > 0 ? appliedFees : undefined,
+      discount_amount:
+        specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
+      applied_discounts:
+        appliedDiscounts.length > 0 ? appliedDiscounts : undefined,
     };
 
     submitLockRef.current = true;
@@ -434,11 +671,17 @@ const CreatePurchaseScreen = () => {
     }
   };
 
+  const paymentOptions: { key: PaymentMethod; label: string; icon: IconName }[] = [
+    { key: "authorize.net", label: "Authorize.Net", icon: "credit-card" },
+    { key: "in-store", label: "In-Store", icon: "dollar-sign" },
+    { key: "paylater", label: "Pay Later", icon: "clock" },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3 relative z-10">
           <Pressable
             onPress={() => router.back()}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
@@ -447,8 +690,14 @@ const CreatePurchaseScreen = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">New Purchase</Text>
-          <View style={{ width: 36 }} />
+          <View className="flex-1">
+            <Text className="text-gray-900 dark:text-white text-lg font-bold">
+              Create New Purchase
+            </Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
+              Process on-site ticket purchases for customers
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -462,44 +711,19 @@ const CreatePurchaseScreen = () => {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
         >
-          {/* Location */}
-          {isCompanyAdmin && (
-            <Section icon="map-pin" title="Location">
-              <SelectRow
-                icon="map-pin"
-                value={locationName}
-                placeholder="Select a location"
-                onPress={() => setSheet("location")}
-              />
-            </Section>
-          )}
+          
 
           {/* Select attraction */}
-          <Section icon="shopping-cart" title="Select Attraction">
+          <Section title="Select Attraction">
             {selected ? (
-              <View className="flex-row items-center gap-3 border border-[#0644C7]/40 bg-[#0644C7]/5 rounded-2xl p-3">
-                <View className="flex-1">
-                  <Text className="font-semibold text-gray-900 dark:text-white">
-                    {selected.name}
-                  </Text>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {selected.category}
-                  </Text>
-                  <Text className="text-sm font-bold text-[#0644C7] mt-1">
-                    {money(selected.price)}
-                    <Text className="text-xs font-normal text-gray-400">
-                      {" "}
-                      {pricingSuffix(selected.pricingType)}
-                    </Text>
-                  </Text>
-                </View>
-                <Pressable onPress={() => setSelected(null)} hitSlop={8}>
-                  <Feather name="x" size={20} color="#9CA3AF" />
-                </Pressable>
-              </View>
+              <AttractionCard
+                attraction={selected}
+                selected
+                onClear={() => setSelected(null)}
+              />
             ) : (
               <>
-                <View className="h-12 flex-row items-center rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 mb-3">
+                <View className="h-12 flex-row items-center rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 mb-4">
                   <Feather name="search" size={16} color="#9CA3AF" />
                   <TextInput
                     value={search}
@@ -518,36 +742,30 @@ const CreatePurchaseScreen = () => {
                     No active attractions found.
                   </Text>
                 ) : (
-                  filteredAttractions.map((a) => (
-                    <Pressable
-                      key={a.id}
-                      onPress={() => pickAttraction(a)}
-                      className="flex-row items-center gap-3 border border-gray-100 dark:border-neutral-800 rounded-2xl p-3 mb-2"
-                    >
-                      <View className="flex-1">
-                        <Text className="font-semibold text-gray-900 dark:text-white">
-                          {a.name}
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          {a.category}
-                        </Text>
-                      </View>
-                      <Text className="text-sm font-bold text-[#0644C7]">
-                        {money(a.price)}
-                      </Text>
-                      <Feather name="chevron-right" size={18} color="#9CA3AF" />
-                    </Pressable>
-                  ))
+                  <ScrollView
+                    style={{ maxHeight: ATTRACTION_LIST_MAX_HEIGHT }}
+                    nestedScrollEnabled
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator
+                  >
+                    {filteredAttractions.map((a) => (
+                      <AttractionCard
+                        key={a.id}
+                        attraction={a}
+                        onPress={() => pickAttraction(a)}
+                      />
+                    ))}
+                  </ScrollView>
                 )}
               </>
             )}
           </Section>
 
           {/* Customer */}
-          <Section icon="user" title="Customer Information">
+          <Section title="Customer Information">
             <View className="mb-1">
               <InputField
-                label="Email"
+                label={selectedCustomerId ? "Email  (Customer Found)" : "Email"}
                 value={customerEmail}
                 onChangeText={(t) => {
                   setCustomerEmail(t);
@@ -603,40 +821,45 @@ const CreatePurchaseScreen = () => {
 
           {selected && (
             <>
-              {/* Purchase details */}
+              {/* Purchase details — quantity / discount / paid / notes, then
+                  add-ons and the schedule, matching the web card. */}
               <Section icon="tag" title="Purchase Details">
-                <View className="flex-row items-center justify-between mb-4">
-                  <FieldLabel>Quantity</FieldLabel>
+                <FieldLabel>Quantity</FieldLabel>
+                <View className="flex-row items-center gap-3 mb-4">
                   <Stepper value={quantity} onChange={setQuantity} min={1} />
-                </View>
-                <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-4">
-                  {money(selected.price)} × {quantity} ={" "}
-                  <Text className="font-semibold text-gray-600 dark:text-gray-300">
-                    {money(subtotal)}
+                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    {money(selected.price)} × {quantity} ={" "}
+                    <Text className="font-semibold text-gray-800 dark:text-gray-200">
+                      {money(subtotal)}
+                    </Text>
                   </Text>
-                </Text>
+                </View>
 
                 <InputField
                   label="Discount ($)"
                   value={discount}
                   onChangeText={setDiscount}
-                  placeholder="0.00"
+                  placeholder="0"
                   keyboardType="decimal-pad"
                   containerClassName="mb-4"
                 />
 
                 <InputField
-                  label="Amount Paid"
+                  label={
+                    paymentMethod === "paylater"
+                      ? "Amount Paid  (Auto: $0.00)"
+                      : "Amount Paid"
+                  }
                   value={paymentMethod === "paylater" ? "0" : amountPaid}
                   onChangeText={setAmountPaid}
                   editable={paymentMethod !== "paylater"}
-                  placeholder={money(total)}
+                  placeholder="0.00"
                   keyboardType="decimal-pad"
                   containerClassName="mb-4"
                 />
 
                 <FieldLabel>Notes</FieldLabel>
-                <View className="rounded-2xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-3">
+                <View className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-3">
                   <TextInput
                     value={notes}
                     onChangeText={setNotes}
@@ -644,86 +867,95 @@ const CreatePurchaseScreen = () => {
                     placeholderTextColor="#9CA3AF"
                     multiline
                     textAlignVertical="top"
-                    className="min-h-[64px] text-base text-gray-900 dark:text-white"
+                    className="min-h-[56px] text-base text-gray-900 dark:text-white"
                   />
                 </View>
-              </Section>
 
-              {/* Add-ons */}
-              {orderedAddOns.length > 0 && (
-                <Section icon="plus-circle" title="Add-ons">
-                  {orderedAddOns.map((addOn) => (
-                    <View
-                      key={addOn.id}
-                      className="flex-row items-center gap-3 py-2.5 border-b border-gray-100 dark:border-neutral-800"
-                    >
-                      <View className="flex-1">
-                        <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                          {addOn.name}
-                        </Text>
-                        <Text className="text-xs text-gray-400">
-                          {money(addOn.price)} each
-                        </Text>
-                      </View>
-                      <Stepper
-                        value={addonQty[addOn.id] ?? 0}
-                        onChange={(n) => setAddon(addOn.id, n)}
-                        min={0}
-                        max={addOn.maxQuantity}
-                      />
+                {/* Add-ons */}
+                {orderedAddOns.length > 0 && (
+                  <View className="mt-6 pt-5 border-t border-gray-100 dark:border-neutral-800">
+                    <View className="flex-row items-center gap-2 mb-3">
+                      <Feather name="tag" size={14} color="#6B7280" />
+                      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                        Add-ons
+                      </Text>
                     </View>
-                  ))}
-                </Section>
-              )}
+                    {orderedAddOns.map((addOn) => (
+                      <View
+                        key={addOn.id}
+                        className="flex-row items-center gap-2.5 p-2 mb-2 rounded-lg bg-gray-50 dark:bg-neutral-800"
+                      >
+                        <Thumb
+                          uri={mediaUrl(addOn.image)}
+                          size={40}
+                          placeholder="No Img"
+                        />
+                        <View className="flex-1">
+                          <Text
+                            className="text-xs font-medium text-gray-800 dark:text-gray-100"
+                            numberOfLines={1}
+                          >
+                            {addOn.name}
+                          </Text>
+                          <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+                            {money(addOn.price)} each
+                          </Text>
+                        </View>
+                        <Stepper
+                          value={addonQty[addOn.id] ?? 0}
+                          onChange={(n) => setAddon(addOn.id, n)}
+                          min={0}
+                          max={addOn.maxQuantity}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                )}
 
-              {/* Schedule */}
-              <Section icon="calendar" title="Schedule">
-                <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-3">
-                  A visit date and time are required.
-                </Text>
-                <View className="flex-row gap-3">
-                  <View className="flex-1">
-                    <FieldLabel>Date</FieldLabel>
-                    <SelectRow
-                      icon="calendar"
-                      value={dateLabel}
-                      placeholder="Select date"
-                      onPress={() => setSheet("date")}
+                {/* Schedule */}
+                {selected.availability.length > 0 && (
+                  <View className="mt-6 pt-5 border-t border-gray-100 dark:border-neutral-800">
+                    <View className="flex-row items-center gap-2 mb-1">
+                      <Feather name="calendar" size={14} color="#6B7280" />
+                      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                        Schedule <Text className="text-red-500">*</Text>
+                      </Text>
+                    </View>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                      A visit date and time are required.
+                    </Text>
+                    <ScheduleCalendar
+                      availability={selected.availability}
+                      dayOffDates={dayOffAvailability.fullDayOffDates}
+                      limitedDates={dayOffAvailability.partialDates}
+                      scheduledDate={scheduledDate}
+                      scheduledTime={scheduledTime}
+                      availableTimeSlots={availableTimeSlots}
+                      minDate={todayKey}
+                      onDateSelect={setScheduledDate}
+                      onTimeSelect={setScheduledTime}
                     />
                   </View>
-                  <View className="flex-1">
-                    <FieldLabel>Time</FieldLabel>
-                    <SelectRow
-                      icon="clock"
-                      value={scheduledTime ? formatTime(scheduledTime) : null}
-                      placeholder="Select time"
-                      onPress={() => setSheet("time")}
-                    />
-                  </View>
-                </View>
+                )}
               </Section>
 
               {/* Payment */}
               <Section icon="credit-card" title="Payment">
-                <View className="flex-row gap-3">
-                  {(
-                    [
-                      { key: "in-store", label: "In-Store", icon: "dollar-sign" },
-                      { key: "paylater", label: "Pay Later", icon: "clock" },
-                    ] as const
-                  ).map((opt) => {
+                <View className="flex-row gap-2 mb-4">
+                  {paymentOptions.map((opt) => {
                     const active = paymentMethod === opt.key;
                     return (
                       <Pressable
                         key={opt.key}
                         onPress={() => {
                           setPaymentMethod(opt.key);
+                          setPaymentError("");
                           if (opt.key === "in-store") setAmountPaid(String(total));
                         }}
-                        className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-2xl border ${
+                        className={`flex-1 items-center justify-center gap-1 py-3 rounded-lg border ${
                           active
                             ? "bg-[#0644C7] border-[#0644C7]"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                            : "bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700"
                         }`}
                       >
                         <Feather
@@ -732,7 +964,7 @@ const CreatePurchaseScreen = () => {
                           color={active ? "#FFFFFF" : "#6B7280"}
                         />
                         <Text
-                          className={`text-sm font-semibold ${
+                          className={`text-xs font-semibold ${
                             active ? "text-white" : "text-gray-600 dark:text-gray-300"
                           }`}
                         >
@@ -742,33 +974,184 @@ const CreatePurchaseScreen = () => {
                     );
                   })}
                 </View>
+
                 {paymentMethod === "paylater" && (
-                  <View className="mt-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-3">
-                    <Text className="text-xs text-amber-800 dark:text-amber-300">
-                      No payment is collected now. The customer will pay later.
-                    </Text>
+                  <View className="flex-row gap-2 rounded-lg border border-orange-200 dark:border-orange-900/40 bg-orange-50 dark:bg-orange-900/20 p-4">
+                    <Feather name="info" size={16} color="#EA580C" />
+                    <View className="flex-1">
+                      <Text className="text-sm font-medium text-orange-800 dark:text-orange-300">
+                        Payment will be collected later
+                      </Text>
+                      <Text className="text-xs text-orange-700 dark:text-orange-400 mt-1">
+                        No payment is being processed now. Customer will pay at a
+                        later time.
+                      </Text>
+                    </View>
                   </View>
                 )}
-                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-3">
-                  Card (Authorize.Net) payments are available on the web admin.
-                </Text>
-              </Section>
 
-              {/* Order summary */}
-              <Section icon="file-text" title="Order Summary">
+                {paymentMethod === "authorize.net" && (
+                  <View className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-4">
+                    <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+                      Card Details
+                    </Text>
+
+                    <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
+                      Card Number
+                    </Text>
+                    <View
+                      className={`h-12 flex-row items-center rounded-lg border px-3 bg-white dark:bg-neutral-900 ${
+                        cardNumber && cardValid
+                          ? "border-green-400"
+                          : cardNumber
+                            ? "border-red-400"
+                            : "border-gray-300 dark:border-neutral-700"
+                      }`}
+                    >
+                      <TextInput
+                        value={cardNumber}
+                        onChangeText={(v) => {
+                          const formatted = formatCardNumber(v);
+                          if (formatted.replace(/\s/g, "").length <= 16) {
+                            setCardNumber(formatted);
+                            setPaymentError("");
+                          }
+                        }}
+                        placeholder="1234 5678 9012 3456"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="number-pad"
+                        maxLength={19}
+                        editable={!isProcessingPayment}
+                        className="flex-1 text-sm text-gray-900 dark:text-white"
+                      />
+                      {!!cardNumber && cardValid && (
+                        <Feather name="check-circle" size={16} color="#16A34A" />
+                      )}
+                    </View>
+                    {!!cardNumber && (
+                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {getCardType(cardNumber)}
+                      </Text>
+                    )}
+
+                    <View className="flex-row gap-2 mt-3">
+                      <View className="flex-1">
+                        <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
+                          Month
+                        </Text>
+                        <SelectRow
+                          icon="calendar"
+                          value={cardMonth || null}
+                          placeholder="MM"
+                          onPress={() => setSheet("month")}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
+                          Year
+                        </Text>
+                        <SelectRow
+                          icon="calendar"
+                          value={cardYear || null}
+                          placeholder="YYYY"
+                          onPress={() => setSheet("year")}
+                        />
+                      </View>
+                    </View>
+
+                    <View className="mt-3">
+                      <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
+                        CVV
+                      </Text>
+                      <View className="h-12 flex-row items-center rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3">
+                        <TextInput
+                          value={cardCVV}
+                          onChangeText={(v) => {
+                            const digits = v.replace(/\D/g, "");
+                            if (digits.length <= 4) setCardCVV(digits);
+                          }}
+                          placeholder="123"
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="number-pad"
+                          maxLength={4}
+                          editable={!isProcessingPayment}
+                          className="flex-1 text-sm text-gray-900 dark:text-white"
+                        />
+                      </View>
+                    </View>
+
+                    {!!paymentError && (
+                      <View className="mt-3 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-2">
+                        <Text className="text-xs text-red-800 dark:text-red-300">
+                          {paymentError}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View className="flex-row items-center gap-2 mt-3">
+                      <Feather name="lock" size={14} color="#9CA3AF" />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        Secure payment powered by Authorize.Net
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </Section>
+            </>
+          )}
+
+          {/* Order summary */}
+          <Section title="Order Summary">
+            {selected ? (
+              <>
+                <View className="flex-row items-start gap-3 mb-4 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800">
+                  <Thumb uri={mediaUrl(selected.images[0])} size={56} placeholder="N/A" />
+                  <View className="flex-1">
+                    <View className="flex-row items-start justify-between gap-1">
+                      <Text
+                        className="flex-1 text-sm font-semibold text-gray-800 dark:text-white"
+                        numberOfLines={1}
+                      >
+                        {selected.name}
+                      </Text>
+                      <Pressable
+                        onPress={() => setSelected(null)}
+                        hitSlop={8}
+                        accessibilityLabel="Remove attraction"
+                      >
+                        <Feather name="x" size={14} color="#9CA3AF" />
+                      </Pressable>
+                    </View>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      {selected.category}
+                    </Text>
+                    <Text className="text-sm font-bold text-[#0644C7] dark:text-blue-400 mt-1">
+                      {money(selected.price)}
+                      <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                        {" "}
+                        {pricingSuffix(selected.pricingType)}
+                      </Text>
+                    </Text>
+                  </View>
+                </View>
+
                 <View className="flex-row justify-between mb-2">
                   <Text className="text-sm text-gray-500 dark:text-gray-400">
-                    Qty {quantity} × {money(selected.price)}
+                    Qty: {quantity} × {money(selected.price)}
                   </Text>
                   <Text className="text-sm font-medium text-gray-900 dark:text-white">
                     {money(subtotal)}
                   </Text>
                 </View>
+
                 {orderedAddOns
                   .filter((a) => (addonQty[a.id] ?? 0) > 0)
                   .map((a) => (
                     <View key={a.id} className="flex-row justify-between mb-2">
-                      <Text className="text-sm text-gray-500 dark:text-gray-400">
+                      <Text
+                        className="flex-1 mr-2 text-sm text-gray-500 dark:text-gray-400"
+                        numberOfLines={1}
+                      >
                         {a.name} × {addonQty[a.id]}
                       </Text>
                       <Text className="text-sm font-medium text-gray-900 dark:text-white">
@@ -776,6 +1159,7 @@ const CreatePurchaseScreen = () => {
                       </Text>
                     </View>
                   ))}
+
                 {discountNum > 0 && (
                   <View className="flex-row justify-between mb-2">
                     <Text className="text-sm text-red-500">Discount</Text>
@@ -784,127 +1168,128 @@ const CreatePurchaseScreen = () => {
                     </Text>
                   </View>
                 )}
+
+                {specialPricing?.has_special_pricing &&
+                  specialPricing.discounts_applied.map((d, i) => (
+                    <View key={i} className="flex-row justify-between mb-2">
+                      <Text
+                        className="flex-1 mr-2 text-sm text-green-700 dark:text-green-400"
+                        numberOfLines={1}
+                      >
+                        {d.name}
+                      </Text>
+                      <Text className="text-sm font-medium text-green-700 dark:text-green-400">
+                        -{money(d.discount_amount)}
+                      </Text>
+                    </View>
+                  ))}
+
+                {feeBreakdown?.fees.map((f) => (
+                  <View
+                    key={f.fee_support_id}
+                    className="flex-row justify-between mb-2"
+                  >
+                    <Text
+                      className="flex-1 mr-2 text-sm text-gray-500 dark:text-gray-400"
+                      numberOfLines={1}
+                    >
+                      {f.fee_name} ({f.fee_label})
+                      {f.fee_application_type === "inclusive" ? " · Included" : ""}
+                    </Text>
+                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                      {f.fee_application_type === "additive"
+                        ? `+${money(f.fee_amount)}`
+                        : money(f.fee_amount)}
+                    </Text>
+                  </View>
+                ))}
+
                 <View className="flex-row justify-between pt-3 mt-1 border-t border-gray-200 dark:border-neutral-700">
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">
+                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
                     Total
                   </Text>
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">
+                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
                     {money(total)}
                   </Text>
                 </View>
+                {paymentMethod === "paylater" && (
+                  <View className="flex-row justify-between mt-1">
+                    <Text className="text-sm font-semibold text-orange-700 dark:text-orange-400">
+                      Amount Due Now
+                    </Text>
+                    <Text className="text-sm font-semibold text-orange-700 dark:text-orange-400">
+                      $0.00
+                    </Text>
+                  </View>
+                )}
 
-                <View className="flex-row items-center justify-between mt-4">
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">
-                    Send email receipt
-                  </Text>
-                  <Switch
-                    value={sendEmail}
-                    onValueChange={setSendEmail}
-                    trackColor={{ false: "#D1D5DB", true: "#22C55E" }}
-                    thumbColor="#FFFFFF"
+                <View className="mt-4 mb-4">
+                  <CheckboxRow
+                    checked={sendEmail}
+                    onToggle={() => setSendEmail((v) => !v)}
+                    label={
+                      <View className="flex-row items-center gap-1.5">
+                        <Feather name="mail" size={14} color="#9CA3AF" />
+                        <Text className="text-sm text-gray-700 dark:text-gray-200">
+                          Send email receipt
+                        </Text>
+                      </View>
+                    }
                   />
                 </View>
-              </Section>
 
-              {/* Actions */}
-              <View className="flex-row gap-3 mt-1">
-                <Pressable
-                  onPress={() => router.back()}
-                  disabled={submitting}
-                  className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
-                >
-                  <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
-                    Cancel
-                  </Text>
-                </Pressable>
                 <Pressable
                   onPress={handleSubmit}
-                  disabled={submitting}
-                  className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] ${
-                    submitting ? "opacity-70" : "active:opacity-90"
+                  disabled={submitDisabled}
+                  className={`h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] ${
+                    submitDisabled ? "opacity-50" : "active:opacity-90"
                   }`}
                 >
-                  {submitting ? (
-                    <ActivityIndicator color="#FFFFFF" />
+                  {submitting || isProcessingPayment ? (
+                    <>
+                      <ActivityIndicator color="#FFFFFF" />
+                      <Text className="text-base font-semibold text-white">
+                        Processing...
+                      </Text>
+                    </>
                   ) : (
-                    <Text className="text-base font-semibold text-white">
-                      Complete Purchase
-                    </Text>
+                    <>
+                      <Feather name="shopping-cart" size={18} color="#FFFFFF" />
+                      <Text className="text-base font-semibold text-white">
+                        Complete Purchase
+                      </Text>
+                    </>
                   )}
                 </Pressable>
+              </>
+            ) : (
+              <View className="items-center py-8">
+                <Feather name="shopping-cart" size={44} color="#D1D5DB" />
+                <Text className="text-sm text-gray-500 dark:text-gray-400 mt-4">
+                  Select an attraction to begin
+                </Text>
               </View>
-            </>
-          )}
+            )}
+          </Section>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Location picker */}
+      {/* Card expiry pickers */}
       <BottomSheet
-        visible={sheet === "location"}
+        visible={sheet === "month" || sheet === "year"}
         onClose={() => setSheet(null)}
-        title="Select Location"
+        title={sheet === "year" ? "Expiry Year" : "Expiry Month"}
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: null as number | null, name: "All Locations" }, ...locationOptions].map((loc) => {
-            const isSelected = selectedLocationId === loc.id;
+          {(sheet === "year" ? cardYears() : CARD_MONTHS).map((option) => {
+            const isSelected =
+              sheet === "year" ? cardYear === option : cardMonth === option;
             return (
               <Pressable
-                key={String(loc.id)}
+                key={option}
                 onPress={() => {
-                  setSelectedLocationId(loc.id);
-                  setSelected(null);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {loc.name}
-                </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Date picker — native calendar (browse months, tap a day). Past dates
-          are disabled; the selected date flows through the same `scheduledDate`
-          state as before. */}
-      <DatePickerSheet
-        visible={sheet === "date"}
-        value={scheduledDate || null}
-        minDate={todayKey}
-        title="Select Visit Date"
-        onClose={() => setSheet(null)}
-        onSelect={(date) => {
-          setScheduledDate(date);
-          setSheet(null);
-        }}
-      />
-
-      {/* Time picker */}
-      <BottomSheet
-        visible={sheet === "time"}
-        onClose={() => setSheet(null)}
-        title="Select Time"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {TIME_OPTIONS.map((t) => {
-            const isSelected = scheduledTime === t;
-            return (
-              <Pressable
-                key={t}
-                onPress={() => {
-                  setScheduledTime(t);
+                  if (sheet === "year") setCardYear(option);
+                  else setCardMonth(option);
                   setSheet(null);
                 }}
                 className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
@@ -918,7 +1303,7 @@ const CreatePurchaseScreen = () => {
                       : "text-gray-700 dark:text-gray-200"
                   }`}
                 >
-                  {formatTime(t)}
+                  {option}
                 </Text>
                 {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
               </Pressable>

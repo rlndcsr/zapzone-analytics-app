@@ -287,15 +287,16 @@ function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
 /**
  * Table layout for the Manage Purchases list. Thin wrapper over the generic
  * SelectableTable (same shell as BookingsTable), rendering the web-parity
- * purchase columns from the same `PurchaseRow[]` as the card view; tapping a row
- * opens Purchase Details (via onRowPress), the checkbox toggles selection only.
+ * purchase columns from the same `PurchaseRow[]` as the card view. Rows are
+ * inert: Purchase Details opens from the row's eye action only, so the checkbox
+ * / status pill / actions own every touch and a stray tap can't navigate.
  */
 export function PurchasesTable({
   purchases,
   selectedIds,
   onToggleRow,
   onToggleAll,
-  onRowPress,
+  onView,
   onStatusPress,
   onDelete,
 }: {
@@ -303,21 +304,21 @@ export function PurchasesTable({
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
-  onRowPress: (purchase: PurchaseRow) => void;
+  /** Eye action — open Purchase Details. */
+  onView: (purchase: PurchaseRow) => void;
   /** Status pill — open the parent-hosted "Set Status" picker sheet. */
   onStatusPress: (purchase: PurchaseRow) => void;
   onDelete: (purchase: PurchaseRow) => void;
 }) {
   const columns = useMemo(
-    () => buildColumns({ onView: onRowPress, onStatusPress, onDelete }),
-    [onRowPress, onStatusPress, onDelete],
+    () => buildColumns({ onView, onStatusPress, onDelete }),
+    [onView, onStatusPress, onDelete],
   );
   return (
     <SelectableTable
       columns={columns}
       rows={purchases}
       rowId={(p) => p.id}
-      onRowPress={onRowPress}
       selectedIds={selectedIds}
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}

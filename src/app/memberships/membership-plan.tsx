@@ -187,7 +187,7 @@ const MembershipPlans = () => {
 
   // Client-side pagination over the plans list.
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   const paged = useMemo(
     () => plans.slice((page - 1) * perPage, page * perPage),
     [plans, page, perPage],

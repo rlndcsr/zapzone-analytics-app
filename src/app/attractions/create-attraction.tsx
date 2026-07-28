@@ -1,12 +1,10 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  type LayoutChangeEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -20,25 +18,23 @@ import { useColorScheme } from "nativewind";
 
 import {
   ALL_DAY_KEYS,
-  CARD_SHADOW,
+  AttractionLivePreview,
   DAYS,
   ErrorText,
   FieldLabel,
+  FormButton,
   formatTime,
-  type IconName,
   MAX_IMAGES,
-  money,
   newSchedule,
   PRICING_TYPES,
   PRIMARY,
-  scheduleDaysLabel,
   Section,
   SelectRow,
   TIME_OPTIONS,
 } from "../../components/ui/attractionFormKit";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { InputField } from "../../components/ui/InputField";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { markAttractionsStale } from "../../lib/hooks/useAttractions";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -56,59 +52,10 @@ import {
   type Category,
 } from "../../services/categoriesService";
 
-/** Review card: a Section-styled card with a per-section "Edit" affordance. */
-const OverviewCard = ({
-  icon,
-  title,
-  onEdit,
-  children,
-}: {
-  icon: IconName;
-  title: string;
-  onEdit: () => void;
-  children: React.ReactNode;
-}) => (
-  <View
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm"
-    style={CARD_SHADOW}
-  >
-    <View className="flex-row items-center justify-between mb-3">
-      <View className="flex-row items-center gap-2 flex-1 mr-2">
-        <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-          <Feather name={icon} size={16} color={PRIMARY} />
-        </View>
-        <Text className="text-base font-bold text-gray-900 dark:text-white">
-          {title}
-        </Text>
-      </View>
-      <Pressable
-        onPress={onEdit}
-        hitSlop={8}
-        className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-neutral-800 active:opacity-70"
-        accessibilityRole="button"
-        accessibilityLabel={`Edit ${title}`}
-      >
-        <Feather name="edit-2" size={13} color={PRIMARY} />
-        <Text className="text-xs font-semibold text-[#0644C7]">Edit</Text>
-      </Pressable>
-    </View>
-    {children}
-  </View>
-);
-
-/** Label / value line used inside {@link OverviewCard}. */
-const OverviewRow = ({ label, value }: { label: string; value: string }) => (
-  <View className="flex-row items-start justify-between py-1.5">
-    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">{label}</Text>
-    <Text className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-right">
-      {value}
-    </Text>
-  </View>
-);
-
 type FormErrors = Partial<
   Record<"name" | "description" | "category" | "price" | "maxCapacity" | "location", string>
 >;
+
 
 const CreateAttractionScreen = () => {
   const insets = useSafeAreaInsets();
@@ -147,58 +94,19 @@ const CreateAttractionScreen = () => {
     | null
     | { kind: "category" }
     | { kind: "pricing" }
-    | { kind: "location" }
     | { kind: "time"; index: number; field: "start_time" | "end_time" }
   >(null);
 
-  // Two-phase flow: edit the form, then a final "Overview" (review) step where
-  // the attraction is actually created. All values live in the state above, so
-  // switching between phases never loses data and no refetch is needed.
-  const [mode, setMode] = useState<"form" | "overview">("form");
-  const scrollRef = useRef<ScrollView>(null);
-  const sectionY = useRef<Record<string, number>>({});
-  const pendingScroll = useRef<string | null>(null);
-
-  // Records each form section's Y offset so "Edit" can scroll straight to it.
-  const registerSection = (key: string) => (e: LayoutChangeEvent) => {
-    const { y } = e.nativeEvent.layout;
-    sectionY.current[key] = y;
-    if (pendingScroll.current === key) {
-      scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
-      pendingScroll.current = null;
-    }
-  };
-
-  // Return to the form and jump to a section (from an Overview "Edit" or a
-  // validation error). If the form is remounting, the section's onLayout does
-  // the scroll; otherwise scroll immediately using the cached offset.
-  const goToSection = (key: string) => {
-    pendingScroll.current = key;
-    setMode("form");
-    const y = sectionY.current[key];
-    if (y != null) {
-      requestAnimationFrame(() =>
-        scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }),
-      );
-    }
-  };
-
-  // Company admins choose a location; options come from the dashboard metrics
-  // locationStats (the /api/locations endpoint is too heavy for mobile).
-  const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
-  const locationOptions = useMemo(() => {
-    if (!metrics?.locationStats) return [];
-    return Object.entries(metrics.locationStats)
-      .map(([id, s]) => ({ id: Number(id), name: s.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics]);
+  // Locations for the selectable grid (name + address, like the web's
+  // LocationSelector cards).
+  const { locations } = useLocationOptions();
 
   // Default the location once options arrive (admins with no prior selection).
   useEffect(() => {
-    if (isCompanyAdmin && selectedLocationId == null && locationOptions.length) {
-      setSelectedLocationId(locationOptions[0].id);
+    if (isCompanyAdmin && selectedLocationId == null && locations.length) {
+      setSelectedLocationId(locations[0].id);
     }
-  }, [isCompanyAdmin, selectedLocationId, locationOptions]);
+  }, [isCompanyAdmin, selectedLocationId, locations]);
 
   // Load categories once, and add-ons whenever the location changes.
   useEffect(() => {
@@ -218,13 +126,6 @@ const CreateAttractionScreen = () => {
       .then(setAddOns)
       .catch(() => {});
   }, [selectedLocationId, user?.id]);
-
-  const locationName = useMemo(
-    () =>
-      locationOptions.find((l) => l.id === selectedLocationId)?.name ??
-      (user?.location?.name ?? null),
-    [locationOptions, selectedLocationId, user],
-  );
 
   const pricingLabel =
     PRICING_TYPES.find((p) => p.value === pricingType)?.label ?? "Per Person";
@@ -275,6 +176,12 @@ const CreateAttractionScreen = () => {
         ? prev.filter((n) => n !== addOnName)
         : [...prev, addOnName],
     );
+
+  const allAddOnsSelected =
+    addOns.length > 0 && selectedAddOns.length === addOns.length;
+
+  const toggleAllAddOns = () =>
+    setSelectedAddOns(allAddOnsSelected ? [] : addOns.map((a) => a.name));
 
   // --- images ---
   const pickImages = useCallback(async () => {
@@ -346,41 +253,10 @@ const CreateAttractionScreen = () => {
     return next;
   };
 
-  // Maps the first validation error to the form section that owns it, so we can
-  // send the user straight there.
-  const errorSection = (errs: FormErrors): string | null => {
-    if (errs.location) return "location";
-    if (errs.name || errs.description || errs.category) return "basic";
-    if (errs.price || errs.maxCapacity) return "pricing";
-    return null;
-  };
-
-  // Form "Review" action: validate, then advance to the Overview step. On any
-  // error, stay on the form, highlight fields, and jump to the first gap.
-  const handleReview = () => {
-    const found = validate();
-    setErrors(found);
-    if (Object.keys(found).length > 0) {
-      const sec = errorSection(found);
-      if (sec) goToSection(sec);
-      Alert.alert("Missing information", "Please fix the highlighted fields.");
-      return;
-    }
-    setMode("overview");
-  };
-
-  // Header back: from Overview returns to the form; from the form leaves.
-  const goBack = () => {
-    if (mode === "overview") setMode("form");
-    else router.back();
-  };
-
   const handleSubmit = async () => {
     const found = validate();
     setErrors(found);
     if (Object.keys(found).length > 0) {
-      const sec = errorSection(found);
-      if (sec) goToSection(sec);
       Alert.alert("Missing information", "Please fix the highlighted fields.");
       return;
     }
@@ -434,62 +310,96 @@ const CreateAttractionScreen = () => {
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3 relative z-10">
           <Pressable
-            onPress={goBack}
+            onPress={() => router.back()}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            {mode === "overview" ? "Review Attraction" : "New Attraction"}
-          </Text>
-          <View style={{ width: 36 }} />
+          <View className="flex-1">
+            <Text className="text-gray-900 dark:text-white text-lg font-bold">
+              Create New Attraction
+            </Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
+              Set up a new attraction that customers can purchase tickets for
+            </Text>
+          </View>
         </View>
       </View>
 
-      {mode === "form" && (
       <KeyboardAvoidingView
         className="flex-1"
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          ref={scrollRef}
           className="flex-1"
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
         >
-          {/* Location (company admins only) */}
+          {/* Select Location — the web's LocationSelector card grid */}
           {isCompanyAdmin && (
-            <Section
-              icon="map-pin"
-              title="Location"
-              onLayout={registerSection("location")}
-            >
-              <FieldLabel>Location</FieldLabel>
-              <SelectRow
-                icon="map-pin"
-                value={locationName}
-                placeholder="Select a location"
-                onPress={() => setSheet({ kind: "location" })}
-                error={!!errors.location}
-              />
+            <Section icon="map-pin" title="Select Location">
+              {locations.length === 0 ? (
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
+                  No locations available.
+                </Text>
+              ) : (
+                locations.map((loc) => {
+                  const active = selectedLocationId === loc.id;
+                  return (
+                    <Pressable
+                      key={loc.id}
+                      onPress={() => setSelectedLocationId(loc.id)}
+                      className={`mb-2 flex-row items-center gap-3 rounded-lg border p-3 ${
+                        active
+                          ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
+                          : "border-gray-200 dark:border-neutral-700"
+                      }`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <View className="h-9 w-9 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/40">
+                        <Feather name="map-pin" size={16} color={PRIMARY} />
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          className="text-sm font-semibold text-gray-900 dark:text-white"
+                          numberOfLines={1}
+                        >
+                          {loc.name}
+                        </Text>
+                        {!!loc.address && (
+                          <Text
+                            className="text-xs text-gray-500 dark:text-gray-400"
+                            numberOfLines={1}
+                          >
+                            {loc.address}
+                          </Text>
+                        )}
+                      </View>
+                      {active && (
+                        <View className="h-5 w-5 items-center justify-center rounded-full bg-[#0644C7]">
+                          <Feather name="check" size={12} color="#FFFFFF" />
+                        </View>
+                      )}
+                    </Pressable>
+                  );
+                })
+              )}
               <ErrorText error={errors.location} />
             </Section>
           )}
 
           {/* Basic Information */}
-          <Section
-            icon="info"
-            title="Basic Information"
-            onLayout={registerSection("basic")}
-          >
+          <Section icon="info" title="Basic Information">
             <InputField
               label="Attraction Name"
+              pill={false}
               value={name}
               onChangeText={setName}
               placeholder="e.g., Laser Tag, Bowling, Escape Room"
@@ -499,8 +409,10 @@ const CreateAttractionScreen = () => {
 
             <FieldLabel>Description</FieldLabel>
             <View
-              className={`rounded-2xl border bg-white dark:bg-neutral-900 px-4 py-3 mb-1 ${
-                errors.description ? "border-red-400" : "border-gray-200 dark:border-neutral-700"
+              className={`rounded-lg border bg-white dark:bg-neutral-900 px-4 py-3 mb-1 ${
+                errors.description
+                  ? "border-red-400"
+                  : "border-gray-300 dark:border-neutral-700"
               }`}
             >
               <TextInput
@@ -529,13 +441,10 @@ const CreateAttractionScreen = () => {
           </Section>
 
           {/* Pricing & Capacity */}
-          <Section
-            icon="tag"
-            title="Pricing & Capacity"
-            onLayout={registerSection("pricing")}
-          >
+          <Section icon="tag" title="Pricing & Capacity">
             <InputField
               label="Price"
+              pill={false}
               value={price}
               onChangeText={setPrice}
               placeholder="0.00"
@@ -556,6 +465,7 @@ const CreateAttractionScreen = () => {
 
             <InputField
               label="Maximum Capacity"
+              pill={false}
               value={maxCapacity}
               onChangeText={setMaxCapacity}
               placeholder="e.g., 10"
@@ -564,45 +474,47 @@ const CreateAttractionScreen = () => {
               containerClassName="mb-3"
             />
 
-            <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-sm text-gray-700 dark:text-gray-200 flex-1 mr-3">
-                Display capacity to customers
-              </Text>
+            <View className="flex-row items-center gap-3">
               <Switch
                 value={displayCapacity}
                 onValueChange={setDisplayCapacity}
                 trackColor={{ false: "#D1D5DB", true: "#22C55E" }}
                 thumbColor="#FFFFFF"
               />
+              <Text className="flex-1 text-sm text-gray-700 dark:text-gray-200">
+                Display capacity to customers
+              </Text>
             </View>
+            <Text className="mt-1 mb-4 text-xs text-gray-400 dark:text-gray-500">
+              When unchecked, customers will not see the capacity on the
+              attraction page
+            </Text>
 
             <FieldLabel>Duration (0 for unlimited)</FieldLabel>
-            <View className="flex-row items-center gap-3">
-              <View className="flex-1">
-                <InputField
-                  label=""
-                  value={duration}
-                  onChangeText={setDuration}
-                  placeholder="0"
-                  keyboardType="decimal-pad"
-                />
-              </View>
-              {/* Segmented control: a pill track with a pill-shaped selection so
-                  the active corners match the container radius. */}
-              <View className="h-14 flex-row items-center rounded-full bg-gray-100 dark:bg-neutral-800 p-1">
+            {/* Input + unit joined into one bordered control, like the web. */}
+            <View className="h-14 flex-row items-center overflow-hidden rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900">
+              <TextInput
+                value={duration}
+                onChangeText={setDuration}
+                placeholder="0 = unlimited"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="decimal-pad"
+                className="h-full flex-1 px-4 text-base text-gray-900 dark:text-white"
+              />
+              <View className="h-full flex-row items-center border-l border-gray-300 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800">
                 {(["minutes", "hours"] as const).map((u) => {
                   const active = durationUnit === u;
                   return (
                     <Pressable
                       key={u}
                       onPress={() => setDurationUnit(u)}
-                      className={`h-full px-5 items-center justify-center rounded-full ${
+                      className={`h-full items-center justify-center px-3 ${
                         active ? "bg-[#0644C7]" : ""
                       }`}
                     >
                       <Text
                         className={`text-sm font-semibold capitalize ${
-                          active ? "text-white" : "text-gray-500 dark:text-gray-300"
+                          active ? "text-white" : "text-gray-600 dark:text-gray-300"
                         }`}
                       >
                         {u}
@@ -615,93 +527,113 @@ const CreateAttractionScreen = () => {
           </Section>
 
           {/* Availability Schedules */}
-          <Section
-            icon="calendar"
-            title="Availability Schedules"
-            onLayout={registerSection("availability")}
-          >
-            {schedules.map((schedule, index) => (
-              <View
-                key={index}
-                className="border border-gray-200 dark:border-neutral-700 rounded-2xl p-4 mb-3"
-              >
-                <View className="flex-row items-center justify-between mb-3">
-                  <Text className="font-semibold text-gray-800 dark:text-gray-100">
-                    Schedule {index + 1}
-                  </Text>
-                  {schedules.length > 1 && (
-                    <Pressable onPress={() => removeScheduleRow(index)} hitSlop={8}>
-                      <Feather name="trash-2" size={18} color="#EF4444" />
-                    </Pressable>
-                  )}
-                </View>
-
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                    Days
-                  </Text>
-                  <Pressable onPress={() => toggleAllDays(index)} hitSlop={8}>
-                    <Text className="text-xs font-semibold text-[#0644C7]">
-                      {ALL_DAY_KEYS.every((d) => schedule.days.includes(d))
-                        ? "Deselect All"
-                        : "Select All"}
+          <Section icon="calendar" title="Availability Schedules">
+            {schedules.map((schedule, index) => {
+              const allDays = ALL_DAY_KEYS.every((d) => schedule.days.includes(d));
+              return (
+                <View
+                  key={index}
+                  className="border border-gray-200 dark:border-neutral-700 rounded-lg p-4 mb-3"
+                >
+                  <View className="flex-row items-center justify-between mb-3">
+                    <Text className="font-semibold text-gray-800 dark:text-gray-100">
+                      Schedule {index + 1}
                     </Text>
-                  </Pressable>
-                </View>
+                    {schedules.length > 1 && (
+                      <Pressable onPress={() => removeScheduleRow(index)} hitSlop={8}>
+                        <Feather name="trash-2" size={18} color="#EF4444" />
+                      </Pressable>
+                    )}
+                  </View>
 
-                <View className="flex-row flex-wrap gap-2 mb-3">
-                  {DAYS.map((day) => {
-                    const on = schedule.days.includes(day.key);
-                    return (
-                      <Pressable
-                        key={day.key}
-                        onPress={() => toggleDay(index, day.key)}
-                        className={`px-3 py-1.5 rounded-full ${
-                          on ? "bg-[#0644C7]" : "bg-gray-100 dark:bg-neutral-800"
+                  <View className="flex-row items-center justify-between mb-2">
+                    <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      Days
+                    </Text>
+                    <Pressable
+                      onPress={() => toggleAllDays(index)}
+                      className={`rounded px-2 py-1 ${
+                        allDays
+                          ? "bg-gray-200 dark:bg-neutral-700"
+                          : "bg-blue-100 dark:bg-blue-900/40"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-medium ${
+                          allDays
+                            ? "text-gray-700 dark:text-gray-200"
+                            : "text-[#0644C7] dark:text-blue-300"
                         }`}
                       >
-                        <Text
-                          className={`text-xs font-semibold ${
-                            on ? "text-white" : "text-gray-600 dark:text-gray-300"
+                        {allDays ? "Deselect All" : "Select All"}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  <View className="flex-row flex-wrap gap-2 mb-3">
+                    {DAYS.map((day) => {
+                      const on = schedule.days.includes(day.key);
+                      return (
+                        <Pressable
+                          key={day.key}
+                          onPress={() => toggleDay(index, day.key)}
+                          className={`px-3 py-1.5 rounded-md ${
+                            on ? "bg-[#0644C7]" : "bg-gray-100 dark:bg-neutral-800"
                           }`}
                         >
-                          {day.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                          <Text
+                            className={`text-sm font-medium ${
+                              on ? "text-white" : "text-gray-700 dark:text-gray-300"
+                            }`}
+                          >
+                            {day.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
 
-                <View className="flex-row gap-3">
-                  <View className="flex-1">
-                    <FieldLabel>Start Time</FieldLabel>
-                    <SelectRow
-                      icon="clock"
-                      value={formatTime(schedule.start_time)}
-                      placeholder="Start"
-                      onPress={() =>
-                        setSheet({ kind: "time", index, field: "start_time" })
-                      }
-                    />
-                  </View>
-                  <View className="flex-1">
-                    <FieldLabel>End Time</FieldLabel>
-                    <SelectRow
-                      icon="clock"
-                      value={formatTime(schedule.end_time)}
-                      placeholder="End"
-                      onPress={() =>
-                        setSheet({ kind: "time", index, field: "end_time" })
-                      }
-                    />
+                  <View className="flex-row gap-3">
+                    <View className="flex-1">
+                      <View className="mb-2 flex-row items-center gap-1">
+                        <Feather name="clock" size={14} color="#6B7280" />
+                        <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                          Start Time
+                        </Text>
+                      </View>
+                      <SelectRow
+                        icon="clock"
+                        value={formatTime(schedule.start_time)}
+                        placeholder="Start"
+                        onPress={() =>
+                          setSheet({ kind: "time", index, field: "start_time" })
+                        }
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <View className="mb-2 flex-row items-center gap-1">
+                        <Feather name="clock" size={14} color="#6B7280" />
+                        <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                          End Time
+                        </Text>
+                      </View>
+                      <SelectRow
+                        icon="clock"
+                        value={formatTime(schedule.end_time)}
+                        placeholder="End"
+                        onPress={() =>
+                          setSheet({ kind: "time", index, field: "end_time" })
+                        }
+                      />
+                    </View>
                   </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
 
             <Pressable
               onPress={addScheduleRow}
-              className="flex-row items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-gray-300 dark:border-neutral-700"
+              className="flex-row items-center justify-center gap-2 py-3 rounded-lg border border-gray-300 dark:border-neutral-700"
             >
               <Feather name="plus" size={16} color={PRIMARY} />
               <Text className="text-sm font-semibold text-[#0644C7]">
@@ -711,315 +643,183 @@ const CreateAttractionScreen = () => {
           </Section>
 
           {/* Add-ons */}
-          <Section
-            icon="plus-circle"
-            title="Add-ons"
-            onLayout={registerSection("addons")}
-          >
+          <Section icon="info" title="Add-ons">
+            {addOns.length > 0 && (
+              <Pressable
+                onPress={toggleAllAddOns}
+                className="mb-3 self-end"
+                hitSlop={8}
+              >
+                <Text className="text-sm font-semibold text-[#0644C7]">
+                  {allAddOnsSelected ? "Deselect All" : "Select All"}
+                </Text>
+              </Pressable>
+            )}
+
+            {/* Chosen add-ons, in the order they'll be shown to customers. */}
+            {selectedAddOns.length > 0 && (
+              <View className="mb-4">
+                <Text className="mb-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+                  Selected Add-ons
+                </Text>
+                {selectedAddOns.map((addOnName) => {
+                  const addOn = addOns.find((a) => a.name === addOnName);
+                  return (
+                    <View
+                      key={addOnName}
+                      className="mb-2 flex-row items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-2 dark:border-green-900/40 dark:bg-green-900/20"
+                    >
+                      <Text
+                        className="flex-1 text-sm font-medium text-gray-800 dark:text-gray-100"
+                        numberOfLines={1}
+                      >
+                        {addOnName}
+                      </Text>
+                      {!!addOn && (
+                        <Text className="text-xs text-green-700 dark:text-green-400">
+                          ${addOn.price}
+                        </Text>
+                      )}
+                      <Pressable
+                        onPress={() => toggleAddOn(addOnName)}
+                        hitSlop={8}
+                        accessibilityLabel={`Remove ${addOnName}`}
+                      >
+                        <Feather name="x" size={14} color="#EF4444" />
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
             {addOns.length === 0 ? (
               <Text className="text-sm text-gray-400 dark:text-gray-500">
-                No add-ons available for this location.
+                No add-ons available. Create add-ons from the Add-ons management
+                page.
               </Text>
             ) : (
               <View className="flex-row flex-wrap gap-2">
-                {addOns.map((addOn) => {
-                  const on = selectedAddOns.includes(addOn.name);
-                  return (
+                {addOns
+                  .filter((a) => !selectedAddOns.includes(a.name))
+                  .map((addOn) => (
                     <Pressable
                       key={addOn.id}
                       onPress={() => toggleAddOn(addOn.name)}
-                      className={`flex-row items-center gap-1.5 px-3 py-2 rounded-full border ${
-                        on
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
+                      className="flex-row items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
                     >
-                      {on && <Feather name="check" size={13} color="#FFFFFF" />}
-                      <Text
-                        className={`text-sm font-medium ${
-                          on ? "text-white" : "text-gray-700 dark:text-gray-200"
-                        }`}
-                      >
+                      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
                         {addOn.name}
                       </Text>
-                      <Text
-                        className={`text-xs ${on ? "text-white/80" : "text-gray-400"}`}
-                      >
+                      <Text className="text-xs text-gray-400">
                         ${addOn.price}
                       </Text>
                     </Pressable>
-                  );
-                })}
+                  ))}
               </View>
             )}
           </Section>
 
           {/* Images */}
-          <Section
-            icon="image"
-            title="Images"
-            onLayout={registerSection("images")}
-          >
+          <Section icon="image" title="Images">
+            <FieldLabel>Upload Images (Max {MAX_IMAGES})</FieldLabel>
             <Pressable
               onPress={pickImages}
-              className="flex-row items-center justify-center gap-2 py-4 rounded-2xl border border-dashed border-gray-300 dark:border-neutral-700"
+              className="flex-row items-center justify-center gap-2 py-3 rounded-lg border border-gray-300 dark:border-neutral-700 bg-blue-50 dark:bg-blue-900/20"
             >
-              <Feather name="upload" size={18} color={PRIMARY} />
+              <Feather name="upload" size={16} color={PRIMARY} />
               <Text className="text-sm font-semibold text-[#0644C7]">
-                Upload Images ({images.length}/{MAX_IMAGES})
+                Choose Files ({images.length}/{MAX_IMAGES})
               </Text>
             </Pressable>
-            <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-              Up to {MAX_IMAGES} images. 16:9 photos look best.
+
+            <View className="mt-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
+              <Text className="text-xs font-medium text-blue-800 dark:text-blue-300">
+                📐 Recommended: 16:9 aspect ratio (1280×720 or 1920×1080 pixels)
+              </Text>
+              <Text className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                Images will be cropped to fit the display area. Center your
+                subject for best results.
+              </Text>
+            </View>
+            <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Max file size: 20MB. Use optimized images for faster loading.
             </Text>
 
             {images.length > 0 && (
-              <View className="flex-row flex-wrap gap-3 mt-3">
-                {images.map((uri, index) => (
-                  <View
-                    key={index}
-                    className="rounded-xl overflow-hidden bg-gray-100 dark:bg-neutral-800"
-                    style={{ width: 96, height: 72 }}
-                  >
-                    <Image
-                      source={{ uri }}
-                      style={{ width: "100%", height: "100%" }}
-                      contentFit="cover"
-                    />
-                    <Pressable
-                      onPress={() => removeImage(index)}
-                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 items-center justify-center"
-                      hitSlop={6}
+              <View className="mt-4">
+                <FieldLabel>Image Previews (as customers will see)</FieldLabel>
+                <View className="flex-row flex-wrap gap-3">
+                  {images.map((uri, index) => (
+                    <View
+                      key={index}
+                      className="rounded-lg overflow-hidden bg-gray-100 dark:bg-neutral-800"
+                      style={{ width: 112, height: 63 }}
                     >
-                      <Feather name="x" size={13} color="#FFFFFF" />
-                    </Pressable>
-                  </View>
-                ))}
+                      <Image
+                        source={{ uri }}
+                        style={{ width: "100%", height: "100%" }}
+                        contentFit="cover"
+                      />
+                      <Pressable
+                        onPress={() => removeImage(index)}
+                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 items-center justify-center"
+                        hitSlop={6}
+                      >
+                        <Feather name="x" size={13} color="#FFFFFF" />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
               </View>
             )}
           </Section>
 
           {/* Display Order */}
-          <Section
-            icon="list"
-            title="Display Order"
-            onLayout={registerSection("order")}
-          >
+          <Section icon="list" title="Display Order">
             <InputField
               label="Order Position"
+              pill={false}
               value={displayOrder}
               onChangeText={setDisplayOrder}
               placeholder="0"
               keyboardType="number-pad"
             />
-            <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Lower numbers appear first on the store page.
             </Text>
           </Section>
 
-          {/* Actions — advance to the Overview (review) step. The attraction is
-              only created from the Overview screen. */}
-          <View className="flex-row gap-3 mt-2">
-            <Pressable
+          {/* Live Preview — the web's sticky right-rail card, stacked here */}
+          <AttractionLivePreview
+            name={name}
+            category={category}
+            description={description}
+            price={price}
+            pricingType={pricingType}
+            duration={duration}
+            durationUnit={durationUnit}
+            maxCapacity={maxCapacity}
+            schedules={schedules}
+            imageUri={images[0] ?? null}
+          />
+
+          {/* Actions */}
+          <View className="flex-row gap-3 border-t border-gray-200 pt-5 dark:border-neutral-800">
+            <FormButton
+              label="Cancel"
+              variant="secondary"
               onPress={() => router.back()}
-              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
-            >
-              <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
-                Cancel
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={handleReview}
-              className="flex-1 h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] active:opacity-90"
-            >
-              <Text className="text-base font-semibold text-white">Review</Text>
-              <Feather name="arrow-right" size={18} color="#FFFFFF" />
-            </Pressable>
+              disabled={submitting}
+            />
+            <FormButton
+              label={submitting ? "Creating..." : "Create Attraction"}
+              onPress={handleSubmit}
+              loading={submitting}
+            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-      )}
-
-      {mode === "overview" && (
-        <ScrollView
-          className="flex-1"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
-        >
-          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Review everything below, then create the attraction. Tap Edit on any
-            section to make changes.
-          </Text>
-
-          {isCompanyAdmin && (
-            <OverviewCard
-              icon="map-pin"
-              title="Location"
-              onEdit={() => goToSection("location")}
-            >
-              <OverviewRow label="Location" value={locationName || "—"} />
-            </OverviewCard>
-          )}
-
-          <OverviewCard
-            icon="info"
-            title="Basic Information"
-            onEdit={() => goToSection("basic")}
-          >
-            <OverviewRow label="Name" value={name.trim() || "—"} />
-            <OverviewRow label="Category" value={category || "—"} />
-            <OverviewRow label="Status" value="Active" />
-            {!!description.trim() && (
-              <View className="pt-1.5">
-                <Text className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                  Description
-                </Text>
-                <Text className="text-sm text-gray-800 dark:text-gray-100 leading-5">
-                  {description.trim()}
-                </Text>
-              </View>
-            )}
-          </OverviewCard>
-
-          <OverviewCard
-            icon="tag"
-            title="Pricing & Capacity"
-            onEdit={() => goToSection("pricing")}
-          >
-            <OverviewRow label="Base Price" value={money(Number(price) || 0)} />
-            <OverviewRow label="Pricing Type" value={pricingLabel} />
-            <OverviewRow
-              label="Max Capacity"
-              value={maxCapacity ? `${maxCapacity} people` : "—"}
-            />
-            <OverviewRow
-              label="Show capacity to customers"
-              value={displayCapacity ? "Yes" : "No"}
-            />
-            <OverviewRow
-              label="Duration"
-              value={
-                !duration || Number(duration) === 0
-                  ? "Unlimited"
-                  : `${duration} ${durationUnit}`
-              }
-            />
-          </OverviewCard>
-
-          <OverviewCard
-            icon="calendar"
-            title="Availability"
-            onEdit={() => goToSection("availability")}
-          >
-            {schedules.map((s, i) => (
-              <View
-                key={i}
-                className={`py-2 ${
-                  i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""
-                }`}
-              >
-                <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                  {scheduleDaysLabel(s.days)}
-                </Text>
-                <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {formatTime(s.start_time)} – {formatTime(s.end_time)}
-                </Text>
-              </View>
-            ))}
-          </OverviewCard>
-
-          <OverviewCard
-            icon="plus-circle"
-            title="Add-ons"
-            onEdit={() => goToSection("addons")}
-          >
-            {selectedAddOns.length === 0 ? (
-              <Text className="text-sm text-gray-400 dark:text-gray-500">
-                None selected
-              </Text>
-            ) : (
-              selectedAddOns.map((n) => {
-                const addOn = addOns.find((a) => a.name === n);
-                return (
-                  <View
-                    key={n}
-                    className="flex-row items-center justify-between py-1.5"
-                  >
-                    <Text className="text-sm text-gray-800 dark:text-gray-100 flex-1 mr-2">
-                      {n}
-                    </Text>
-                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                      +{money(addOn?.price ?? 0)}
-                    </Text>
-                  </View>
-                );
-              })
-            )}
-          </OverviewCard>
-
-          <OverviewCard
-            icon="image"
-            title="Images"
-            onEdit={() => goToSection("images")}
-          >
-            {images.length === 0 ? (
-              <Text className="text-sm text-gray-400 dark:text-gray-500">
-                No images added
-              </Text>
-            ) : (
-              <View className="flex-row flex-wrap gap-3">
-                {images.map((uri, i) => (
-                  <View
-                    key={i}
-                    className="rounded-xl overflow-hidden bg-gray-100 dark:bg-neutral-800"
-                    style={{ width: 96, height: 72 }}
-                  >
-                    <Image
-                      source={{ uri }}
-                      style={{ width: "100%", height: "100%" }}
-                      contentFit="cover"
-                    />
-                  </View>
-                ))}
-              </View>
-            )}
-          </OverviewCard>
-
-          <OverviewCard
-            icon="list"
-            title="Display Order"
-            onEdit={() => goToSection("order")}
-          >
-            <OverviewRow label="Order Position" value={displayOrder || "0"} />
-          </OverviewCard>
-
-          {/* Create — the only place the attraction is actually created. */}
-          <Pressable
-            onPress={handleSubmit}
-            disabled={submitting}
-            className={`h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] mt-2 ${
-              submitting ? "opacity-70" : "active:opacity-90"
-            }`}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text className="text-base font-semibold text-white">
-                Create Attraction
-              </Text>
-            )}
-          </Pressable>
-          <Pressable
-            onPress={() => setMode("form")}
-            disabled={submitting}
-            className="h-12 items-center justify-center mt-2"
-          >
-            <Text className="text-sm font-semibold text-gray-500 dark:text-gray-400">
-              Back to editing
-            </Text>
-          </Pressable>
-        </ScrollView>
-      )}
 
       {/* Category picker */}
       <BottomSheet
@@ -1032,15 +832,18 @@ const CreateAttractionScreen = () => {
             <View className="flex-1">
               <InputField
                 label=""
+                pill={false}
                 value={newCategory}
                 onChangeText={setNewCategory}
-                placeholder="Add new category"
+                placeholder="Add category"
                 onSubmitEditing={addCategory}
               />
             </View>
             <Pressable
               onPress={addCategory}
-              className="h-14 px-4 items-center justify-center rounded-full bg-[#0644C7]"
+              className="h-14 px-4 items-center justify-center rounded-lg bg-[#0644C7]"
+              accessibilityRole="button"
+              accessibilityLabel="Add category"
             >
               <Feather name="plus" size={20} color="#FFFFFF" />
             </Pressable>
@@ -1061,7 +864,7 @@ const CreateAttractionScreen = () => {
                   setCategory(cat.name);
                   setSheet(null);
                 }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-lg mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
@@ -1074,11 +877,7 @@ const CreateAttractionScreen = () => {
                 >
                   {cat.name}
                 </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
+                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
               </Pressable>
             );
           })}
@@ -1101,7 +900,7 @@ const CreateAttractionScreen = () => {
                   setPricingType(option.value);
                   setSheet(null);
                 }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-lg mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
@@ -1114,57 +913,7 @@ const CreateAttractionScreen = () => {
                 >
                   {option.label}
                 </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Location picker */}
-      <BottomSheet
-        visible={sheet?.kind === "location"}
-        onClose={() => setSheet(null)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {locationOptions.length === 0 && (
-            <Text className="text-sm text-gray-400 px-4 py-3">
-              No locations available.
-            </Text>
-          )}
-          {locationOptions.map((loc) => {
-            const isSelected = selectedLocationId === loc.id;
-            return (
-              <Pressable
-                key={loc.id}
-                onPress={() => {
-                  setSelectedLocationId(loc.id);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {loc.name}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
+                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
               </Pressable>
             );
           })}
@@ -1193,7 +942,7 @@ const CreateAttractionScreen = () => {
                   }
                   setSheet(null);
                 }}
-                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
+                className={`flex-row items-center justify-between px-4 py-3 rounded-lg mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
@@ -1206,9 +955,7 @@ const CreateAttractionScreen = () => {
                 >
                   {formatTime(t)}
                 </Text>
-                {isSelected && (
-                  <Feather name="check" size={16} color="#3B82F6" />
-                )}
+                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
               </Pressable>
             );
           })}

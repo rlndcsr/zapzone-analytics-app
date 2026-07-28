@@ -39,7 +39,7 @@ type UseActivityParams = {
   perPage?: number;
 };
 
-export function useActivityLogs({ filters, page, perPage = 15 }: UseActivityParams) {
+export function useActivityLogs({ filters, page, perPage = 5 }: UseActivityParams) {
   const [logs, setLogs] = useState<ActivityLogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);

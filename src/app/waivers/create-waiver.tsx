@@ -295,7 +295,7 @@ const CreateWaiver = () => {
             <Pressable
               onPress={() => setTemplateSheet(true)}
               disabled={templatesLoading}
-              className={`h-14 flex-row items-center justify-between rounded-full border bg-white dark:bg-neutral-900 px-5 ${
+              className={`h-14 flex-row items-center justify-between rounded-lg border bg-white dark:bg-neutral-900 px-5 ${
                 errors.template
                   ? "border-red-400"
                   : "border-gray-200 dark:border-neutral-700"
@@ -395,7 +395,7 @@ const CreateWaiver = () => {
               </View>
             ) : (
               <>
-                <View className="flex-row items-center gap-2 rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 h-12">
+                <View className="flex-row items-center gap-2 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 h-12">
                   <Feather name="search" size={16} color="#9CA3AF" />
                   <TextInput
                     value={linkQuery}

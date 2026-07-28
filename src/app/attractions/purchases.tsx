@@ -339,7 +339,7 @@ const ManagePurchases = () => {
   const [dateTarget, setDateTarget] = useState<PurchaseDateTarget>("created");
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   // Presentation layout for the active list — table by default (card view via
   // toggle). Both render the same `paged` slice, so switching never refetches.
   const [viewMode, setViewMode] = useState<ViewMode>("table");
@@ -1047,7 +1047,7 @@ const ManagePurchases = () => {
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
-                    onRowPress={(purchase) =>
+                    onView={(purchase) =>
                       router.push({
                         pathname: "/attractions/purchase-details",
                         params: { id: String(purchase.id) },

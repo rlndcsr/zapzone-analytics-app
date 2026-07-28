@@ -36,7 +36,7 @@ type UseStaffParams = {
   perPage?: number;
 };
 
-export function useStaffAccounts({ filters, page, perPage = 15 }: UseStaffParams) {
+export function useStaffAccounts({ filters, page, perPage = 5 }: UseStaffParams) {
   const [users, setUsers] = useState<StaffUser[]>([]);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);

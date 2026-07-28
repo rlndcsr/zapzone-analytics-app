@@ -65,7 +65,7 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-const PER_PAGE_OPTIONS = [10, 25, 50];
+const PER_PAGE_OPTIONS = [5, 10, 25, 50];
 
 const DEPARTMENTS = [
   "Guest Services",
@@ -559,7 +559,7 @@ const ManageAccounts = () => {
   const [hireTo, setHireTo] = useState("");
 
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
 
   // Presentation layout for the accounts list — table by default (grid/card view
   // via the toggle), mirroring the web admin's Manage Accounts table.

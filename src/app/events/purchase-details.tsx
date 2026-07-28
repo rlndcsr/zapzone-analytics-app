@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
 import { EventPurchaseQRSheet } from "../../components/ui/EventPurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
@@ -29,7 +30,6 @@ import {
 } from "../../services/eventPurchasesService";
 import {
   fetchEntityWaivers,
-  type ConnectedWaiver,
   type EntityWaivers,
 } from "../../services/waiversService";
 
@@ -130,22 +130,6 @@ const InfoRow = ({
     >
       {value}
     </Text>
-  </View>
-);
-
-const WaiverRow = ({ waiver }: { waiver: ConnectedWaiver }) => (
-  <View className="flex-row items-start justify-between py-2.5 border-b border-gray-100 dark:border-neutral-800">
-    <View className="flex-1 mr-2">
-      <Text className="text-sm font-medium text-gray-900 dark:text-white">
-        {waiver.adultName}
-      </Text>
-      <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-        {waiver.template ? `${waiver.template} · ` : ""}
-        {waiver.selectedDate ?? ""}
-        {waiver.minors.length > 0 ? ` · Minors: ${waiver.minors.join(", ")}` : ""}
-      </Text>
-    </View>
-    <StatusBadge status={waiver.status} />
   </View>
 );
 
@@ -537,31 +521,13 @@ const EventPurchaseDetailsScreen = () => {
 
         {/* Waivers */}
         <SectionCard icon="shield" title="Waivers">
-          {waiversLoading ? (
-            <View className="py-4 items-center">
-              <ActivityIndicator color={PRIMARY} />
-            </View>
-          ) : !waivers || waivers.summary.total === 0 ? (
-            <Text className="text-sm text-gray-400 dark:text-gray-500">
-              No waiver connected to this event purchase.
-            </Text>
-          ) : (
-            <>
-              <View className="flex-row items-center gap-3 mb-2">
-                <Text className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                  {waivers.summary.completed} complete
-                </Text>
-                {waivers.summary.pending > 0 && (
-                  <Text className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                    {waivers.summary.pending} pending
-                  </Text>
-                )}
-              </View>
-              {waivers.waivers.map((w) => (
-                <WaiverRow key={w.id} waiver={w} />
-              ))}
-            </>
-          )}
+          <ConnectedWaiversPanel
+            sourceType="event_purchase"
+            sourceId={purchaseId ?? 0}
+            entityLabel="event purchase"
+            waivers={waivers}
+            loading={waiversLoading}
+          />
         </SectionCard>
 
         {/* Delete Purchase */}

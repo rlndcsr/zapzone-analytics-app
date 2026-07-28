@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
 import { PurchaseQRSheet } from "../../components/ui/PurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
@@ -29,7 +30,6 @@ import {
 } from "../../services/attractionPurchasesService";
 import {
   fetchEntityWaivers,
-  type ConnectedWaiver,
   type EntityWaivers,
 } from "../../services/waiversService";
 
@@ -56,17 +56,21 @@ const prettyMethod = (m: string): string => {
   return t.replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+/** "July 27, 2026 at 06:48 PM" — the web `formatLocalDateTime` output. */
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "N/A";
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
-    month: "short",
+  if (Number.isNaN(d.getTime())) return "N/A";
+  const date = d.toLocaleDateString("en-US", {
+    month: "long",
     day: "numeric",
     year: "numeric",
-    hour: "numeric",
+  });
+  const time = d.toLocaleTimeString("en-US", {
+    hour: "2-digit",
     minute: "2-digit",
   });
+  return `${date} at ${time}`;
 }
 
 function formatScheduledDate(dateStr: string): string {
@@ -94,12 +98,14 @@ function durationLabel(detail: AttractionPurchaseDetail): string {
 
 /* --- Presentational helpers (match the app's card/section convention) ----- */
 
+/**
+ * A titled section. The web page stacks these as bordered bands inside one
+ * card; on mobile each is its own card, which reads the same way when scrolled.
+ */
 const SectionCard = ({
-  icon,
   title,
   children,
 }: {
-  icon: IconName;
   title: string;
   children: React.ReactNode;
 }) => (
@@ -107,51 +113,63 @@ const SectionCard = ({
     className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm"
     style={CARD_SHADOW}
   >
-    <View className="flex-row items-center gap-2 mb-4">
-      <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-        <Feather name={icon} size={16} color={PRIMARY} />
-      </View>
-      <Text className="text-base font-bold text-gray-900 dark:text-white">
-        {title}
-      </Text>
-    </View>
+    <Text className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      {title}
+    </Text>
     {children}
   </View>
 );
 
-const InfoRow = ({
+/**
+ * One icon-led field in a section's two-column grid — icon tile, muted label,
+ * value, plus optional extra lines beneath (e.g. the customer's email/phone or
+ * an attraction's category), exactly as the web page lays them out.
+ */
+const InfoTile = ({
+  icon,
   label,
   value,
-  valueClass = "",
+  extra,
+  valueClass = "text-sm font-medium text-gray-900 dark:text-white",
+  full,
+  children,
 }: {
+  icon: IconName;
   label: string;
-  value: string;
+  value?: string;
+  /** Muted lines under the value. Falsy entries are skipped. */
+  extra?: (string | null | undefined)[];
   valueClass?: string;
+  full?: boolean;
+  /** Rendered instead of `value` — used for the Status badge. */
+  children?: React.ReactNode;
 }) => (
-  <View className="flex-row items-start justify-between py-1.5">
-    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">{label}</Text>
-    <Text
-      className={`text-sm font-medium text-gray-900 dark:text-white flex-1 text-right ${valueClass}`}
-    >
-      {value}
-    </Text>
+  <View className={`${full ? "w-full" : "w-1/2"} px-1.5 mb-4`}>
+    <View className="flex-row items-start gap-2.5">
+      <View className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
+        <Feather name={icon} size={16} color={PRIMARY} />
+      </View>
+      <View className="flex-1">
+        <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
+        {children ?? <Text className={valueClass}>{value}</Text>}
+        {extra
+          ?.filter((line): line is string => !!line)
+          .map((line) => (
+            <Text
+              key={line}
+              className="text-xs text-gray-500 dark:text-gray-400"
+            >
+              {line}
+            </Text>
+          ))}
+      </View>
+    </View>
   </View>
 );
 
-const WaiverRow = ({ waiver }: { waiver: ConnectedWaiver }) => (
-  <View className="flex-row items-start justify-between py-2.5 border-b border-gray-100 dark:border-neutral-800">
-    <View className="flex-1 mr-2">
-      <Text className="text-sm font-medium text-gray-900 dark:text-white">
-        {waiver.adultName}
-      </Text>
-      <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-        {waiver.template ? `${waiver.template} · ` : ""}
-        {waiver.selectedDate ?? ""}
-        {waiver.minors.length > 0 ? ` · Minors: ${waiver.minors.join(", ")}` : ""}
-      </Text>
-    </View>
-    <StatusBadge status={waiver.status} />
-  </View>
+/** Two-column grid wrapper for {@link InfoTile}s. */
+const TileGrid = ({ children }: { children: React.ReactNode }) => (
+  <View className="flex-row flex-wrap -mx-1.5">{children}</View>
 );
 
 const PurchaseDetailsScreen = () => {
@@ -272,8 +290,8 @@ const PurchaseDetailsScreen = () => {
   };
 
   const Header = () => (
-    <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-      <View className="flex-row items-center justify-between">
+    <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
+      <View className="flex-row items-center gap-3">
         <Pressable
           onPress={() => router.back()}
           className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
@@ -282,17 +300,16 @@ const PurchaseDetailsScreen = () => {
         >
           <Feather name="chevron-left" size={20} color={headerIcon} />
         </Pressable>
-        <View className="items-center">
+        <View className="flex-1">
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Purchase Details
           </Text>
           {detail && (
-            <Text className="text-xs text-gray-400 dark:text-gray-500">
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
               Purchase ID: #{detail.id}
             </Text>
           )}
         </View>
-        <View style={{ width: 36 }} />
       </View>
     </View>
   );
@@ -347,63 +364,67 @@ const PurchaseDetailsScreen = () => {
         </Pressable>
 
         {/* Purchase Information */}
-        <SectionCard icon="user" title="Purchase Information">
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1">
-            Customer
-          </Text>
-          <Text className="text-base font-semibold text-gray-900 dark:text-white">
-            {detail.customerName}
-          </Text>
-          {!!detail.email && (
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {detail.email}
-            </Text>
-          )}
-          {!!detail.phone && (
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {detail.phone}
-            </Text>
-          )}
-
-          <View className="mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-            <InfoRow label="Purchase Date" value={formatDateTime(detail.createdAt)} />
-            <View className="flex-row items-center justify-between py-1.5">
-              <Text className="text-sm text-gray-500 dark:text-gray-400">Status</Text>
-              <StatusBadge status={detail.status} />
-            </View>
-          </View>
+        <SectionCard title="Purchase Information">
+          <TileGrid>
+            <InfoTile
+              icon="user"
+              label="Customer"
+              value={detail.customerName}
+              extra={[detail.email, detail.phone]}
+            />
+            <InfoTile
+              icon="calendar"
+              label="Purchase Date"
+              value={formatDateTime(detail.createdAt)}
+            />
+            <InfoTile icon="check-circle" label="Status">
+              <View className="flex-row mt-0.5">
+                <StatusBadge status={detail.status} />
+              </View>
+            </InfoTile>
+          </TileGrid>
         </SectionCard>
 
         {/* Attraction Details */}
-        <SectionCard icon="zap" title="Attraction Details">
-          <InfoRow label="Attraction" value={detail.attractionName} />
-          {!!detail.category && <InfoRow label="Category" value={detail.category} />}
-          <InfoRow
-            label="Quantity"
-            value={`${detail.quantity} ticket${detail.quantity > 1 ? "s" : ""}`}
-          />
-          {!!detail.scheduledDate && (
-            <InfoRow
-              label="Scheduled Date"
-              value={formatScheduledDate(detail.scheduledDate)}
+        <SectionCard title="Attraction Details">
+          <TileGrid>
+            <InfoTile
+              icon="map-pin"
+              label="Attraction Name"
+              value={detail.attractionName}
+              extra={[detail.category]}
             />
-          )}
-          {!!detail.scheduledTime && (
-            <InfoRow
-              label="Scheduled Time"
-              value={convertTo12Hour(detail.scheduledTime)}
+            <InfoTile
+              icon="tag"
+              label="Quantity"
+              value={`${detail.quantity} ticket${detail.quantity > 1 ? "s" : ""}`}
             />
-          )}
-          <InfoRow label="Duration" value={durationLabel(detail)} />
+            {!!detail.scheduledDate && (
+              <InfoTile
+                icon="calendar"
+                label="Scheduled"
+                value={`${formatScheduledDate(detail.scheduledDate)}${
+                  detail.scheduledTime
+                    ? ` at ${convertTo12Hour(detail.scheduledTime)}`
+                    : ""
+                }`}
+              />
+            )}
+            <InfoTile
+              icon="clock"
+              label="Duration"
+              value={durationLabel(detail)}
+            />
+          </TileGrid>
         </SectionCard>
 
         {/* Purchased Add-ons */}
         {detail.addOns.length > 0 && (
-          <SectionCard icon="plus-circle" title="Purchased Add-ons">
+          <SectionCard title="Purchased Add-ons">
             {detail.addOns.map((a) => (
               <View
                 key={a.id}
-                className="flex-row items-center justify-between py-2 border-b border-gray-100 dark:border-neutral-800"
+                className="flex-row items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4 mb-2 dark:border-neutral-700 dark:bg-neutral-800/40"
               >
                 <View className="flex-1 mr-2">
                   <Text className="text-sm font-medium text-gray-900 dark:text-white">
@@ -422,38 +443,54 @@ const PurchaseDetailsScreen = () => {
         )}
 
         {/* Payment Information */}
-        <SectionCard icon="credit-card" title="Payment Information">
-          <View className="flex-row items-start justify-between py-1.5">
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              Total Amount
-            </Text>
-            <Text className="text-2xl font-bold text-gray-900 dark:text-white">
-              {money(detail.totalAmount)}
-            </Text>
-          </View>
-          <InfoRow label="Payment Method" value={prettyMethod(detail.paymentMethod)} />
-          {!!detail.transactionId && (
-            <InfoRow label="Transaction ID" value={detail.transactionId} />
-          )}
-          {!!detail.paymentId && (
-            <InfoRow label="Payment ID" value={detail.paymentId} />
-          )}
+        <SectionCard title="Payment Information">
+          <TileGrid>
+            <InfoTile
+              icon="dollar-sign"
+              label="Total Amount"
+              value={money(detail.totalAmount)}
+              valueClass="text-2xl font-medium text-gray-900 dark:text-white"
+            />
+            <InfoTile
+              icon="credit-card"
+              label="Payment Method"
+              value={prettyMethod(detail.paymentMethod)}
+            />
+            {!!detail.transactionId && (
+              <InfoTile
+                icon="file-text"
+                label="Transaction ID"
+                value={detail.transactionId}
+              />
+            )}
+            {!!detail.paymentId && (
+              <InfoTile
+                icon="file-text"
+                label="Payment ID"
+                value={detail.paymentId}
+              />
+            )}
+          </TileGrid>
 
           {detail.appliedFees.length > 0 && (
-            <View className="mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-              <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+            <View>
+              <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                 Applied Fees
               </Text>
               {detail.appliedFees.map((f, i) => (
                 <View
                   key={`${f.name}-${i}`}
-                  className="flex-row items-center justify-between py-1.5"
+                  className="flex-row items-center justify-between py-1"
                 >
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">
-                    {f.name}
+                  <Text className="flex-1 mr-2 text-sm text-gray-600 dark:text-gray-300">
+                    {f.name}{" "}
+                    <Text className="text-xs text-gray-400 dark:text-gray-500">
+                      ({f.applicationType})
+                    </Text>
                   </Text>
-                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                    +{money(f.amount)}
+                  <Text className="text-sm font-medium text-red-500">
+                    {f.applicationType === "additive" ? "+" : ""}
+                    {money(f.amount)}
                   </Text>
                 </View>
               ))}
@@ -462,7 +499,7 @@ const PurchaseDetailsScreen = () => {
         </SectionCard>
 
         {/* Notes */}
-        <SectionCard icon="file-text" title="Notes">
+        <SectionCard title="Notes">
           <Text
             className={`text-sm ${
               detail.notes
@@ -475,32 +512,14 @@ const PurchaseDetailsScreen = () => {
         </SectionCard>
 
         {/* Waivers */}
-        <SectionCard icon="shield" title="Waivers">
-          {waiversLoading ? (
-            <View className="py-4 items-center">
-              <ActivityIndicator color={PRIMARY} />
-            </View>
-          ) : !waivers || waivers.summary.total === 0 ? (
-            <Text className="text-sm text-gray-400 dark:text-gray-500">
-              No waiver connected to this attraction purchase.
-            </Text>
-          ) : (
-            <>
-              <View className="flex-row items-center gap-3 mb-2">
-                <Text className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                  {waivers.summary.completed} complete
-                </Text>
-                {waivers.summary.pending > 0 && (
-                  <Text className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                    {waivers.summary.pending} pending
-                  </Text>
-                )}
-              </View>
-              {waivers.waivers.map((w) => (
-                <WaiverRow key={w.id} waiver={w} />
-              ))}
-            </>
-          )}
+        <SectionCard title="Waivers">
+          <ConnectedWaiversPanel
+            sourceType="attraction_purchase"
+            sourceId={purchaseId ?? 0}
+            entityLabel="attraction purchase"
+            waivers={waivers}
+            loading={waiversLoading}
+          />
         </SectionCard>
 
         {/* Delete Purchase */}

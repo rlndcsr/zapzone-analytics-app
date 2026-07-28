@@ -371,7 +371,7 @@ export function LaunchKioskSheet({
               </View>
             ) : (
               <>
-                <View className="flex-row items-center gap-2 rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 h-12">
+                <View className="flex-row items-center gap-2 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 h-12">
                   <Feather name="search" size={16} color="#9CA3AF" />
                   <TextInput
                     value={query}

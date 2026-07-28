@@ -16,7 +16,7 @@ export function PasswordInput({
   label = "Password",
   error,
   containerClassName,
-  pill = true,
+  pill = false,
   value,
   onChangeText,
   ...inputProps

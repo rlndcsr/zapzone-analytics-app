@@ -22,7 +22,13 @@ import {
 } from "../../components/ui/AttractionsBulkBar";
 import { AttractionsExportSheet } from "../../components/ui/AttractionsExportSheet";
 import { AttractionsImportSheet } from "../../components/ui/AttractionsImportSheet";
-import { AttractionsTable } from "../../components/ui/AttractionsTable";
+import {
+  ATTRACTION_COLUMNS,
+  AttractionsTable,
+  allAttractionColumnKeys,
+  defaultAttractionColumnKeys,
+} from "../../components/ui/AttractionsTable";
+import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import {
   AttractionFiltersSheet,
   EMPTY_ATTRACTION_FILTERS,
@@ -31,7 +37,11 @@ import {
 } from "../../components/ui/AttractionFiltersSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import {
+  FilterPill,
+  PillDivider,
+  PillSegment,
+} from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -49,6 +59,10 @@ import {
   formatMoney,
   type FeatherIconName,
 } from "../../lib/attractions/attractionDisplay";
+import {
+  attractionsCsvFilename,
+  buildAttractionsCsv,
+} from "../../lib/attractions/attractionsCsv";
 import { openPurchasePage } from "../../lib/attractions/purchaseLink";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
@@ -123,6 +137,11 @@ const Attractions = () => {
     EMPTY_ATTRACTION_FILTERS,
   );
   const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showColumnsSheet, setShowColumnsSheet] = useState(false);
+  // Which table columns are on. Starts at the web's default-visible set.
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
+    defaultAttractionColumnKeys,
+  );
   const [showCreatedDateSheet, setShowCreatedDateSheet] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [showImportSheet, setShowImportSheet] = useState(false);
@@ -136,7 +155,7 @@ const Attractions = () => {
   const [statusBusy, setStatusBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   // Presentation layout only — table by default, card view on toggle. Kept in
   // component state so it survives filter/search/page changes while mounted and
   // never triggers a refetch (both layouts read the same `paged` collection).
@@ -482,8 +501,44 @@ const Attractions = () => {
 
   const hasResults = filtered.length > 0;
 
+  /**
+   * "Export CSV" — the web action exports every filtered row straight to a file
+   * with no selection step, so this does the same: build the CSV, write it to
+   * the cache directory, and hand it to the OS share sheet (the same mechanism
+   * the JSON export sheet uses).
+   */
+  const exportCsv = useCallback(async () => {
+    if (filtered.length === 0) {
+      Alert.alert("Nothing to export", "No attractions match the current filters.");
+      return;
+    }
+    try {
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const uri = `${FileSystem.cacheDirectory}${attractionsCsvFilename()}`;
+      await FileSystem.writeAsStringAsync(uri, buildAttractionsCsv(filtered), {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        mimeType: "text/csv",
+        dialogTitle: "Export CSV",
+        UTI: "public.comma-separated-values-text",
+      });
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export the CSV.",
+      );
+    }
+  }, [filtered]);
+
   // Mirrors the web "More" action menu. Fee Supports / Special Pricing link to
-  // their management screens; Import / Export open their dedicated sheets.
+  // their management screens; Import / Export open their dedicated sheets, and
+  // Export CSV downloads the filtered rows directly.
   const moreActions: {
     label: string;
     icon: FeatherIconName;
@@ -526,6 +581,18 @@ const Attractions = () => {
         setShowExportSheet(true);
       },
     },
+    {
+      label: "Export CSV",
+      icon: "file-text",
+      hint:
+        filtered.length === 0
+          ? "Nothing to export"
+          : `All ${filtered.length} filtered ${filtered.length === 1 ? "row" : "rows"} as a spreadsheet`,
+      onPress: () => {
+        setShowMoreSheet(false);
+        exportCsv();
+      },
+    },
   ];
 
   return (
@@ -544,6 +611,7 @@ const Attractions = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Attractions
           </Text>
+          
           <View style={{ width: 36 }} />
         </View>
       </View>
@@ -564,9 +632,8 @@ const Attractions = () => {
       >
         <View className="px-5 mt-5">
           {/* Global workspace location selector (company-admin only). */}
-          <View className="mb-5">
-            <LocationWorkspaceSelector />
-          </View>
+          
+          
 
           {/* Overview intro */}
           <View className="flex-row items-stretch gap-3 mb-5">
@@ -732,7 +799,8 @@ const Attractions = () => {
             )}
           </View>
 
-          {/* Filters — opens the full filter panel (all web-admin filters). */}
+          {/* Filters + Columns — mirrors the web table toolbar's button pair.
+              Columns only applies to the table layout, so it's hidden in Cards. */}
           <FilterPill>
             <PillSegment
               label={
@@ -744,6 +812,19 @@ const Attractions = () => {
               onPress={() => setShowFilterSheet(true)}
               renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
+            {viewMode === "table" && (
+              <>
+                <PillDivider />
+                <PillSegment
+                  label="Columns"
+                  active={showColumnsSheet}
+                  onPress={() => setShowColumnsSheet(true)}
+                  renderIcon={(c) => (
+                    <Feather name="columns" size={15} color={c} />
+                  )}
+                />
+              </>
+            )}
           </FilterPill>
 
           {/* List header + layout toggle (Table default / Cards) */}
@@ -804,9 +885,7 @@ const Attractions = () => {
                 {viewMode === "table" ? (
                   <AttractionsTable
                     attractions={paged}
-                    onRowPress={(attraction) =>
-                      setActionsAttraction(attraction)
-                    }
+                    onView={(attraction) => setActionsAttraction(attraction)}
                     onViewPurchase={openPurchasePage}
                     onEdit={handleRowEdit}
                     onDuplicate={handleRowDuplicate}
@@ -815,6 +894,7 @@ const Attractions = () => {
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
+                    visibleColumns={visibleColumns}
                   />
                 ) : (
                   paged.map((attraction) => (
@@ -850,6 +930,24 @@ const Attractions = () => {
         onClear={() => setFilters(EMPTY_ATTRACTION_FILTERS)}
         onClose={() => setShowFilterSheet(false)}
         onOpenCreatedDate={openCreatedDate}
+      />
+
+      {/* Toggle Columns — mirrors the web table toolbar's Columns dropdown. */}
+      <ColumnsSheet
+        visible={showColumnsSheet}
+        columns={ATTRACTION_COLUMNS}
+        visibleKeys={visibleColumns}
+        onToggle={(key) =>
+          setVisibleColumns((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          })
+        }
+        onShowAll={() => setVisibleColumns(allAttractionColumnKeys())}
+        onReset={() => setVisibleColumns(defaultAttractionColumnKeys())}
+        onClose={() => setShowColumnsSheet(false)}
       />
 
       {/* Created-date range calendar (shared component), opened after the filter

@@ -16,6 +16,7 @@ import {
   buildPurchaseLink,
   openPurchasePage,
 } from "../../lib/attractions/purchaseLink";
+import { formatDurationDisplay } from "../../lib/attractions/attractionDisplay";
 import { mediaUrl } from "../../lib/api";
 import { getToken } from "../../lib/session";
 import { formatTimeRange } from "../../lib/time";
@@ -97,20 +98,47 @@ const ActionRow = ({
   );
 };
 
+/** Section heading, matching the web details page's `<h2>` treatment. */
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
-  <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-5 mb-2">
+  <Text className="text-lg font-semibold text-gray-900 dark:text-white mt-6 mb-3">
     {children}
   </Text>
 );
 
-const Row = ({ label, value }: { label: string; value: string }) => (
-  <View className="flex-row items-start justify-between py-1.5">
-    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">
-      {label}
-    </Text>
-    <Text className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-right">
-      {value}
-    </Text>
+/**
+ * One icon-led detail in the "Attraction Details" grid — icon tile, muted
+ * label, value. Two per row, as on the web.
+ */
+const DetailTile = ({
+  icon,
+  label,
+  value,
+  extra,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  label: string;
+  value: string;
+  /** Muted qualifier after the value, e.g. "(per person)". */
+  extra?: string;
+}) => (
+  <View className="w-1/2 px-1.5 mb-4">
+    <View className="flex-row items-start gap-2.5">
+      <View className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
+        <Feather name={icon} size={16} color={PRIMARY} />
+      </View>
+      <View className="flex-1">
+        <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
+        <Text className="text-sm font-medium text-gray-900 dark:text-white">
+          {value}
+          {!!extra && (
+            <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
+              {"  "}
+              {extra}
+            </Text>
+          )}
+        </Text>
+      </View>
+    </View>
   </View>
 );
 
@@ -291,20 +319,27 @@ export function AttractionActionsSheet({
 
   /* --- Render -------------------------------------------------------------- */
 
-  // Primary image (first image, like the web admin), resolved to an absolute
-  // URL via the shared media resolver. Null when the attraction has no image.
-  const primaryImage =
-    detail && detail.images.length > 0 ? mediaUrl(detail.images[0]) : null;
+  // Add-ons in their saved display order (`addOnsOrder`, by name), matching the
+  // web details page's sort.
+  const orderedAddOns = detail
+    ? [...detail.addOns].sort((a, b) => {
+        const order = detail.addOnsOrder ?? [];
+        if (order.length === 0) return 0;
+        const ia = order.indexOf(a.name);
+        const ib = order.indexOf(b.name);
+        if (ia === -1 && ib === -1) return 0;
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      })
+    : [];
 
-  // Price with its pricing type in words, e.g. "$31.99 (per person)" — matching
+  // Pricing type in words as a muted qualifier, e.g. "(per person)" — matching
   // the web admin. Flat "fixed" pricing carries no per-unit qualifier.
-  const priceValue = detail
-    ? `${money(detail.price)}${
-        detail.pricingType && detail.pricingType !== "fixed"
-          ? ` (${pricingLabel(detail.pricingType).toLowerCase()})`
-          : ""
-      }`
-    : "";
+  const priceQualifier =
+    detail?.pricingType && detail.pricingType !== "fixed"
+      ? `(${pricingLabel(detail.pricingType).toLowerCase()})`
+      : undefined;
 
   // Created date in the web admin's numeric locale form, e.g. "2/22/2026".
   const createdValue = (() => {
@@ -354,89 +389,158 @@ export function AttractionActionsSheet({
               )}
             </View>
 
-            {/* Primary image (web admin parity) — first image if present, else
-                  the shared placeholder. Fixed aspect ratio keeps it undistorted
-                  with the app's standard rounded-corner card style. */}
-            <View
-              className="w-full rounded-2xl overflow-hidden bg-gray-100 dark:bg-neutral-800 mt-4 items-center justify-center"
-              style={{ aspectRatio: 16 / 9 }}
-            >
-              {primaryImage ? (
-                <Image
-                  source={{ uri: primaryImage }}
-                  style={{ width: "100%", height: "100%" }}
-                  contentFit="cover"
-                />
-              ) : (
+            {/* Images — every image, two per row, like the web's grid. */}
+            <SectionTitle>Images</SectionTitle>
+            {detail.images.length > 0 ? (
+              <View className="flex-row flex-wrap -mx-1.5">
+                {detail.images.map((img, i) => (
+                  <View key={i} className="w-1/2 px-1.5 mb-3">
+                    <View
+                      className="w-full rounded-lg overflow-hidden border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800"
+                      style={{ aspectRatio: 16 / 9 }}
+                    >
+                      <Image
+                        source={{ uri: mediaUrl(img) ?? undefined }}
+                        style={{ width: "100%", height: "100%" }}
+                        contentFit="cover"
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View
+                className="w-full rounded-lg overflow-hidden border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800 items-center justify-center"
+                style={{ aspectRatio: 16 / 9 }}
+              >
                 <Feather name="image" size={36} color="#9CA3AF" />
-              )}
-            </View>
-
-            {!!detail.description && (
-              <>
-                <SectionTitle>Description</SectionTitle>
-                <Text className="text-sm text-gray-700 dark:text-gray-200 leading-5">
-                  {detail.description}
-                </Text>
-              </>
+              </View>
             )}
 
+            <SectionTitle>Description</SectionTitle>
+            <Text className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">
+              {detail.description || "No description provided."}
+            </Text>
+
             <SectionTitle>Attraction Details</SectionTitle>
-            <Row label="Category" value={detail.category} />
-            <Row label="Price" value={priceValue} />
-            <Row label="Max Capacity" value={`${detail.maxCapacity} people`} />
-            <Row
-              label="Duration"
-              value={
-                detail.duration
-                  ? `${detail.duration} ${detail.durationUnit}`
-                  : "Unlimited"
-              }
-            />
-            <Row label="Location" value={detail.locationName || "—"} />
-            <Row label="Created" value={createdValue} />
+            <View className="flex-row flex-wrap -mx-1.5">
+              <DetailTile icon="tag" label="Category" value={detail.category} />
+              <DetailTile
+                icon="dollar-sign"
+                label="Price"
+                value={money(detail.price)}
+                extra={priceQualifier}
+              />
+              <DetailTile
+                icon="users"
+                label="Max Capacity"
+                value={`${detail.maxCapacity} people`}
+              />
+              <DetailTile
+                icon="clock"
+                label="Duration"
+                value={formatDurationDisplay(detail.duration, detail.durationUnit)}
+              />
+              <DetailTile
+                icon="map-pin"
+                label="Location"
+                value={detail.locationName || "N/A"}
+              />
+              <DetailTile icon="calendar" label="Created" value={createdValue} />
+            </View>
 
             {detail.addOns.length > 0 && (
               <>
-                <SectionTitle>Add-ons ({detail.addOns.length})</SectionTitle>
-                {detail.addOns.map((a) => (
-                  <View
-                    key={a.id}
-                    className="flex-row items-center justify-between py-1.5 border-b border-gray-100 dark:border-neutral-800"
-                  >
-                    <Text className="text-sm text-gray-700 dark:text-gray-200 flex-1 mr-2">
-                      {a.name}
-                    </Text>
-                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                      {money(a.price)}
-                    </Text>
-                  </View>
-                ))}
+                <SectionTitle>Add-ons</SectionTitle>
+                {orderedAddOns.map((a) => {
+                  const thumb = mediaUrl(a.image);
+                  return (
+                    <View
+                      key={a.id}
+                      className="flex-row items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2 dark:border-neutral-700 dark:bg-neutral-800/40"
+                    >
+                      <View
+                        className="rounded-md overflow-hidden bg-gray-100 dark:bg-neutral-800 items-center justify-center"
+                        style={{ width: 48, height: 48 }}
+                      >
+                        {thumb ? (
+                          <Image
+                            source={{ uri: thumb }}
+                            style={{ width: "100%", height: "100%" }}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <Text className="text-[10px] text-gray-400">No Img</Text>
+                        )}
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          className="text-sm font-medium text-gray-900 dark:text-white"
+                          numberOfLines={1}
+                        >
+                          {a.name}
+                        </Text>
+                        {!!a.description && (
+                          <Text
+                            className="text-xs text-gray-500 dark:text-gray-400"
+                            numberOfLines={1}
+                          >
+                            {a.description}
+                          </Text>
+                        )}
+                      </View>
+                      <View className="items-end">
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {money(a.price)}
+                        </Text>
+                        <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+                          Min: {a.minQuantity} · Max: {a.maxQuantity}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
               </>
             )}
 
-            {detail.availability.length > 0 && (
-              <>
-                <SectionTitle>Availability Schedule</SectionTitle>
-                {detail.availability.map((s, i) => (
-                  <View
-                    key={i}
-                    className="py-2 border-b border-gray-100 dark:border-neutral-800"
-                  >
-                    <View className="flex-row items-center justify-between">
-                      <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                        {formatTimeRange(s.start_time, s.end_time) ||
-                          `${s.start_time}–${s.end_time}`}
-                      </Text>
+            {/* Availability — one card per schedule: blue day chips, then the
+                open hours beside a clock (web parity). */}
+            <SectionTitle>Availability Schedule</SectionTitle>
+            {detail.availability.length > 0 ? (
+              detail.availability.map((s, i) => (
+                <View
+                  key={i}
+                  className="rounded-lg border border-gray-200 bg-gray-50 p-4 mb-2 dark:border-neutral-700 dark:bg-neutral-800/40"
+                >
+                  {s.days.length > 0 && (
+                    <View className="flex-row flex-wrap gap-2 mb-3">
+                      {s.days.map((day) => (
+                        <View
+                          key={day}
+                          className="rounded bg-[#0644C7] px-3 py-1.5"
+                        >
+                          <Text className="text-sm font-medium capitalize text-white">
+                            {day}
+                          </Text>
+                        </View>
+                      ))}
                     </View>
-                    {s.days.length > 0 && (
-                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1 capitalize">
-                        {s.days.join(", ")}
-                      </Text>
-                    )}
+                  )}
+                  <View className="flex-row items-center gap-2">
+                    <Feather name="clock" size={14} color={PRIMARY} />
+                    <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      {formatTimeRange(s.start_time, s.end_time) ||
+                        `${s.start_time}–${s.end_time}`}
+                    </Text>
                   </View>
-                ))}
-              </>
+                </View>
+              ))
+            ) : (
+              <View className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/40">
+                <Text className="text-sm text-gray-600 dark:text-gray-300">
+                  No availability schedule configured for this attraction.
+                </Text>
+              </View>
             )}
 
             {/* Purchase-page actions (relocated here from the old overflow

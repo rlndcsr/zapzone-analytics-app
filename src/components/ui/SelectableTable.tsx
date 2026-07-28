@@ -68,8 +68,12 @@ type Props<T> = {
   rows: T[];
   /** Stable numeric id for a row (selection key + React key). */
   rowId: (row: T) => number;
-  /** Tapping a row (anywhere but the checkbox) opens its detail. */
-  onRowPress: (row: T) => void;
+  /**
+   * Tapping a row (anywhere but the checkbox) opens its detail. Omit to make
+   * rows inert — for tables where the detail is reached only from an explicit
+   * row action, so a stray tap can't navigate.
+   */
+  onRowPress?: (row: T) => void;
   /** Selected ids — the single source of truth lives in the parent screen. */
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
@@ -159,10 +163,11 @@ function SelectableTableInner<T>({
             return (
               <Pressable
                 key={id}
-                onPress={() => onRowPress(row)}
-                accessibilityRole="button"
+                onPress={onRowPress ? () => onRowPress(row) : undefined}
+                disabled={!onRowPress}
+                accessibilityRole={onRowPress ? "button" : undefined}
                 accessibilityLabel={
-                  rowLabel ? `View ${rowLabel(row)}` : undefined
+                  onRowPress && rowLabel ? `View ${rowLabel(row)}` : undefined
                 }
                 className={`flex-row items-center ${
                   selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
@@ -173,7 +178,7 @@ function SelectableTableInner<T>({
                 }`}
                 style={({ pressed }) => ({
                   minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed ? 0.6 : 1,
+                  opacity: pressed && onRowPress ? 0.6 : 1,
                 })}
               >
                 <CheckboxCell

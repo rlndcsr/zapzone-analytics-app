@@ -424,7 +424,7 @@ const CreateTemplate = () => {
               </Text>
               <Pressable
                 onPress={() => setSheet("status")}
-                className="h-14 flex-row items-center justify-between rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5 mb-4"
+                className="h-14 flex-row items-center justify-between rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5 mb-4"
               >
                 <Text className="text-base text-gray-900 dark:text-white">
                   {statusLabel}
@@ -488,7 +488,7 @@ const CreateTemplate = () => {
               </Text>
               <Pressable
                 onPress={() => setSheet("duplicate")}
-                className="h-14 flex-row items-center justify-between rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5 mb-2"
+                className="h-14 flex-row items-center justify-between rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5 mb-2"
               >
                 <Text className="text-base text-gray-900 dark:text-white">
                   {duplicateLabel}

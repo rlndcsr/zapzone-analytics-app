@@ -115,7 +115,7 @@ const Packages = () => {
 
   // Client-side pagination over the filtered list.
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
 
   const [showSortSheet, setShowSortSheet] = useState(false);
 

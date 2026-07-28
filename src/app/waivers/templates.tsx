@@ -194,7 +194,7 @@ const Templates = () => {
 
   // Client-side pagination over the loaded templates list.
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   const paged = useMemo(
     () => templates.slice((page - 1) * perPage, page * perPage),
     [templates, page, perPage],

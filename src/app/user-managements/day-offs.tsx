@@ -41,7 +41,7 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-const PER_PAGE_OPTIONS = [10, 25, 50];
+const PER_PAGE_OPTIONS = [5, 10, 25, 50];
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
@@ -421,7 +421,7 @@ const DayOffs = () => {
     | "bulkLocation"
   >(null);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   const [refreshing, setRefreshing] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm(ownLocationId));
   const [saving, setSaving] = useState(false);

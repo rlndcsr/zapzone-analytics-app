@@ -52,6 +52,35 @@ export function durationLabel(row: AttractionRow): string {
   return `${row.duration} ${row.durationUnit}`;
 }
 
+/**
+ * Compact duration for purchase cards — a port of the web
+ * `formatDurationDisplay` ("5 min", "1 hr 30 min", "2 hours", "Unlimited"),
+ * so the onsite purchase flow reads the same on both platforms.
+ */
+export function formatDurationDisplay(
+  duration: number | null | undefined,
+  durationUnit: string | null | undefined,
+): string {
+  if (duration == null || Number.isNaN(duration)) return "Not specified";
+  if (duration === 0) return "Unlimited";
+
+  const hoursLabel = (h: number) => (h === 1 ? "1 hour" : `${h} hours`);
+
+  if (durationUnit === "minutes") {
+    if (duration < 60) return `${Math.round(duration)} min`;
+    const hours = Math.floor(duration / 60);
+    const mins = Math.round(duration % 60);
+    return mins === 0 ? hoursLabel(hours) : `${hours} hr ${mins} min`;
+  }
+
+  // "hours" and "hours and minutes" both render whole hours plus leftover mins.
+  const hours = Math.floor(duration);
+  const mins = Math.round((duration % 1) * 60);
+  if (mins === 0) return hoursLabel(hours);
+  if (hours === 0) return `${mins} min`;
+  return `${hours} hr ${mins} min`;
+}
+
 export type FeatherIconName = ComponentProps<typeof Feather>["name"];
 
 /** A small icon + label metric used in the attraction card footer. */

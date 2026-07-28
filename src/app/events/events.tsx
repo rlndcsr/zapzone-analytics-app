@@ -272,7 +272,7 @@ const Events = () => {
   const [dateTarget, setDateTarget] = useState<EventDateTarget>("start");
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   const [exporting, setExporting] = useState(false);
 
   const onRefresh = useCallback(async () => {

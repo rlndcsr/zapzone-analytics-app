@@ -38,7 +38,7 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-const PER_PAGE_OPTIONS = [15, 25, 50];
+const PER_PAGE_OPTIONS = [5, 15, 25, 50];
 
 // Category badge → Tailwind classes (mirrors CATEGORY_TONE slugs).
 const TONE_CLASS: Record<string, string> = {
@@ -625,7 +625,7 @@ const ActivityLogs = () => {
     null | "action" | "resource" | "attendant" | "daterange"
   >(null);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(15);
+  const [perPage, setPerPage] = useState(5);
   const [refreshing, setRefreshing] = useState(false);
   const [statsNonce, setStatsNonce] = useState(0);
   const [selected, setSelected] = useState<ActivityLogEntry | null>(null);

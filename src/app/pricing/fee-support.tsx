@@ -396,7 +396,7 @@ const FeeSupport = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   // Presentation layout only — table by default, card view on toggle. Both
   // layouts read the same `paged` slice, so switching never refetches.
   const [viewMode, setViewMode] = useState<ViewMode>("table");

@@ -61,7 +61,7 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-const PER_PAGE_OPTIONS = [10, 25, 50];
+const PER_PAGE_OPTIONS = [5, 10, 25, 50];
 
 // Mirrors the web AttendantEditModal option lists.
 const DEPARTMENTS = [
@@ -444,7 +444,7 @@ const ManageAttendants = () => {
   );
 
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
 
   const [sheet, setSheet] = useState<
     | null

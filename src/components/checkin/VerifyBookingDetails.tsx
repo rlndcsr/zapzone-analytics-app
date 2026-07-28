@@ -1,14 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import * as WebBrowser from "expo-web-browser";
 import React from "react";
-import { Alert, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
+import { launchKioskSession } from "../../lib/waivers/kiosk";
 import type { BookingDetail } from "../../services/bookingsService";
-import {
-  buildWaiverKioskUrl,
-  type ConnectedWaiver,
-  type EntityWaivers,
+import type {
+  ConnectedWaiver,
+  EntityWaivers,
 } from "../../services/waiversService";
 
 const MONTHS = [
@@ -120,20 +119,21 @@ export function VerifyBookingDetails({
     ? `${detail.duration} ${detail.durationUnit}`
     : "—";
 
-  // The kiosk page (web) shows either "Already Completed" or the waiver form.
-  const kioskUrl = buildWaiverKioskUrl("booking", detail.id);
+  const [launchingKiosk, setLaunchingKiosk] = React.useState(false);
 
-  const openKiosk = async (url?: string | null) => {
+  const openKiosk = async () => {
+    setLaunchingKiosk(true);
     try {
-      await WebBrowser.openBrowserAsync(url || kioskUrl);
-    } catch {
-      Alert.alert("Unable to open", "Could not open the waiver kiosk.");
+      await launchKioskSession("booking", detail.id);
+    } finally {
+      setLaunchingKiosk(false);
     }
   };
 
   const copyLink = async (w: ConnectedWaiver) => {
+    if (!w.signingUrl) return;
     try {
-      await Clipboard.setStringAsync(w.kioskUrl || kioskUrl);
+      await Clipboard.setStringAsync(w.signingUrl);
       Alert.alert("Link copied", "The waiver link was copied to your clipboard.");
     } catch {
       Alert.alert("Copy failed", "Could not copy the waiver link.");
@@ -196,15 +196,21 @@ export function VerifyBookingDetails({
                   {waivers.summary.pending} pending
                 </Text>
               </View>
-              {/* Kiosk — opens the web waiver kiosk (Already Completed / form). */}
+              {/* Kiosk — opens a prefilled session (Already Completed / form). */}
               <Pressable
-                onPress={() => openKiosk()}
+                onPress={openKiosk}
+                disabled={launchingKiosk}
                 hitSlop={6}
                 className="flex-row items-center gap-1 active:opacity-70"
+                style={launchingKiosk ? { opacity: 0.5 } : undefined}
                 accessibilityRole="button"
                 accessibilityLabel="Open waiver kiosk"
               >
-                <Feather name="monitor" size={12} color="#0644C7" />
+                {launchingKiosk ? (
+                  <ActivityIndicator size="small" color="#0644C7" />
+                ) : (
+                  <Feather name="monitor" size={12} color="#0644C7" />
+                )}
                 <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
                   Kiosk
                 </Text>
@@ -264,19 +270,21 @@ export function VerifyBookingDetails({
                       </View>
                     </View>
 
-                    {/* Copy link */}
-                    <Pressable
-                      onPress={() => copyLink(w)}
-                      hitSlop={6}
-                      className="flex-row items-center gap-1 active:opacity-70"
-                      accessibilityRole="button"
-                      accessibilityLabel="Copy waiver link"
-                    >
-                      <Feather name="link" size={12} color="#0644C7" />
-                      <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
-                        Copy link
-                      </Text>
-                    </Pressable>
+                    {/* Copy link — only pending waivers still have one. */}
+                    {!!w.signingUrl && (
+                      <Pressable
+                        onPress={() => copyLink(w)}
+                        hitSlop={6}
+                        className="flex-row items-center gap-1 active:opacity-70"
+                        accessibilityRole="button"
+                        accessibilityLabel="Copy waiver link"
+                      >
+                        <Feather name="link" size={12} color="#0644C7" />
+                        <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                          Copy link
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
 
                   {!!w.template && (

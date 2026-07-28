@@ -395,7 +395,7 @@ const EventPurchases = () => {
     useState<EventPurchaseDateTarget>("created");
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   // Presentation layout for the active list — table by default (cards via
   // toggle). Both render the same `paged` slice, so switching never refetches.
   const [viewMode, setViewMode] = useState<ViewMode>("table");

@@ -212,7 +212,7 @@ const GiftCards = () => {
   const [showStatusSheet, setShowStatusSheet] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
 
   const loader = useCallback(
     ({ token }: { token: string }) => fetchGiftCardList(token),

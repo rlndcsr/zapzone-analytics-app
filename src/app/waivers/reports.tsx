@@ -278,7 +278,7 @@ const WaiverReportsScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
 
   const requestIdRef = useRef(0);
   const dated = isDated(type);

@@ -9,16 +9,26 @@ import {
   type PurchaseRow,
   type PurchaseStatus,
 } from "../../services/attractionPurchasesService";
+import {
+  fetchEntityWaivers,
+  type EntityWaivers,
+} from "../../services/waiversService";
 import { parseTicketPurchaseId } from "../checkin/parseTicketQr";
 
 /**
  * Screen phase for the check-in flow (a "stay-and-rescan" loop, matching web):
+ * - `idle`       — camera off, waiting for "Start Camera" (the web's landing state).
  * - `scanning`   — camera live, waiting for a QR.
  * - `processing` — a code was read; verifying with the backend.
  * - `review`     — a valid, confirmed ticket is loaded, awaiting staff approval.
  * - `result`     — a terminal outcome (success / blocked / error) is shown.
  */
-export type CheckInPhase = "scanning" | "processing" | "review" | "result";
+export type CheckInPhase =
+  | "idle"
+  | "scanning"
+  | "processing"
+  | "review"
+  | "result";
 
 export type ResultTone = "success" | "warning" | "error";
 
@@ -79,11 +89,18 @@ function gateStatus(
 export type UseAttractionCheckIn = {
   phase: CheckInPhase;
   review: PurchaseRow | null;
+  /** Waivers connected to the ticket under review (null while loading / on failure). */
+  waivers: EntityWaivers | null;
   result: CheckInResult | null;
   busy: boolean;
   handleScan: (decoded: string) => void;
   confirm: () => void;
   cancelReview: () => void;
+  /** Turn the camera on (web "Start Camera"). */
+  startScanning: () => void;
+  /** Turn the camera off, back to the landing state (web "Stop Camera"). */
+  stopScanning: () => void;
+  /** Clear the current result and return to the camera. */
   reset: () => void;
 };
 
@@ -94,8 +111,9 @@ export type UseAttractionCheckIn = {
  * endpoints as the web) and reads auth from the session module.
  */
 export function useAttractionCheckIn(): UseAttractionCheckIn {
-  const [phase, setPhase] = useState<CheckInPhase>("scanning");
+  const [phase, setPhase] = useState<CheckInPhase>("idle");
   const [review, setReview] = useState<PurchaseRow | null>(null);
+  const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
   const [result, setResult] = useState<CheckInResult | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -231,8 +249,26 @@ export function useAttractionCheckIn(): UseAttractionCheckIn {
           return;
         }
 
+        // Connected waivers for the verify surface (same panel as the web
+        // modal). Best-effort — a failure never blocks check-in.
+        let entityWaivers: EntityWaivers | null = null;
+        try {
+          entityWaivers = await fetchEntityWaivers(
+            token,
+            "attraction_purchase",
+            purchase.id,
+            signal,
+          );
+        } catch {
+          if (signal.aborted) return;
+          entityWaivers = null;
+        }
+
+        if (!mountedRef.current) return;
+
         // Eligible → hand off to the confirm surface.
         setReview(purchase);
+        setWaivers(entityWaivers);
         setResult(null);
         setPhase("review");
       } finally {
@@ -300,12 +336,29 @@ export function useAttractionCheckIn(): UseAttractionCheckIn {
 
   const cancelReview = useCallback(() => {
     setReview(null);
+    setWaivers(null);
     setResult(null);
     setPhase("scanning");
   }, []);
 
+  const startScanning = useCallback(() => {
+    setReview(null);
+    setWaivers(null);
+    setResult(null);
+    setPhase("scanning");
+  }, []);
+
+  const stopScanning = useCallback(() => {
+    abortRef.current?.abort();
+    setReview(null);
+    setWaivers(null);
+    setResult(null);
+    setPhase("idle");
+  }, []);
+
   const reset = useCallback(() => {
     setReview(null);
+    setWaivers(null);
     setResult(null);
     setPhase("scanning");
   }, []);
@@ -313,11 +366,14 @@ export function useAttractionCheckIn(): UseAttractionCheckIn {
   return {
     phase,
     review,
+    waivers,
     result,
     busy,
     handleScan,
     confirm,
     cancelReview,
+    startScanning,
+    stopScanning,
     reset,
   };
 }

@@ -322,7 +322,7 @@ const Location = () => {
 
   // Client-side pagination over the filtered list.
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   const paged = useMemo(
     () => filteredLocations.slice((page - 1) * perPage, page * perPage),
     [filteredLocations, page, perPage],

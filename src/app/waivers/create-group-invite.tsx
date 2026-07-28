@@ -208,7 +208,7 @@ const CreateGroupInvite = () => {
             <Pressable
               onPress={() => setTemplateSheet(true)}
               disabled={templatesLoading}
-              className={`h-14 flex-row items-center justify-between rounded-full border bg-white dark:bg-neutral-900 px-5 ${
+              className={`h-14 flex-row items-center justify-between rounded-lg border bg-white dark:bg-neutral-900 px-5 ${
                 errors.template
                   ? "border-red-400"
                   : "border-gray-200 dark:border-neutral-700"

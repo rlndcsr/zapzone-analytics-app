@@ -159,7 +159,7 @@ const DATE_OPTIONS: { label: string; value: DateFilter }[] = [
   { label: "Today", value: "today" },
 ];
 
-const PER_PAGE_OPTIONS = [10, 25, 50];
+const PER_PAGE_OPTIONS = [5, 10, 25, 50];
 
 type SourceFilter = "all" | WaiverSource;
 type MarketingFilter = "all" | MarketingConsentStatus;
@@ -488,7 +488,7 @@ const Waivers = () => {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sheet, setSheet] = useState<null | "status" | "date" | "manage">(null);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(25);
+  const [perPage, setPerPage] = useState(5);
   const [refreshing, setRefreshing] = useState(false);
   const [statsNonce, setStatsNonce] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);

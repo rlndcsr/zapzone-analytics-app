@@ -43,7 +43,7 @@ import {
 } from "../../services/contactsService";
 
 const PRIMARY = "#0644C7";
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 5;
 const CARD_SHADOW = {
   shadowColor: "#000",
   shadowOffset: { width: 0, height: 2 },

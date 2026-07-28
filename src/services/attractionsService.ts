@@ -30,12 +30,16 @@ export type AttractionRow = {
   locationId: number | null;
   locationName: string;
   createdAt: string | null;
+  updatedAt: string | null;
   displayOrder: number;
   displayCapacityToCustomers: boolean;
   images: string[];
   addOns: AttractionAddOn[];
   /** Preferred display order of add-ons, by name. */
   addOnsOrder: string[];
+  /** Open weekdays + daily hours. The list endpoint returns these too, so the
+   *  onsite purchase calendar can schedule straight off a list row. */
+  availability: AvailabilitySchedule[];
 };
 
 /** Raw attraction as returned by GET /api/attractions (snake_case). */
@@ -51,6 +55,7 @@ type RawAttraction = {
   duration_unit?: string | null;
   is_active?: boolean | null;
   created_at?: string | null;
+  updated_at?: string | null;
   display_order?: number | null;
   display_capacity_to_customers?: boolean | null;
   location?: { id?: number; name?: string | null } | null;
@@ -104,6 +109,7 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
     locationId: raw.location?.id ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
+    updatedAt: raw.updated_at ?? null,
     displayOrder: Number(raw.display_order ?? 0),
     displayCapacityToCustomers: raw.display_capacity_to_customers ?? true,
     images: raw.image ? (Array.isArray(raw.image) ? raw.image : [raw.image]) : [],
@@ -117,6 +123,7 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
       maxQuantity: Number(a.max_quantity ?? 99),
     })),
     addOnsOrder: raw.add_ons_order ?? [],
+    availability: mapAvailability(raw.availability),
   };
 }
 
@@ -177,11 +184,10 @@ export async function createAttraction(
   return mapAttraction(res.data);
 }
 
-/** Full attraction record (list row + availability schedules) as returned by
- *  GET /api/attractions/{id}. Backs the View / Edit / Duplicate flows. */
-export type AttractionDetail = AttractionRow & {
-  availability: AvailabilitySchedule[];
-};
+/** Full attraction record as returned by GET /api/attractions/{id}. Identical
+ *  in shape to a list row; kept as a named alias for the View / Edit /
+ *  Duplicate call sites. */
+export type AttractionDetail = AttractionRow;
 
 /** Coerce the raw `availability` field into the array form the create/update
  *  endpoints expect. The API may return an array of schedules, a weekday->bool
@@ -198,9 +204,7 @@ function mapAvailability(
   return [];
 }
 
-function mapDetail(raw: RawAttraction): AttractionDetail {
-  return { ...mapAttraction(raw), availability: mapAvailability(raw.availability) };
-}
+const mapDetail = mapAttraction;
 
 type DetailResponse = { success: boolean; data: RawAttraction };
 

@@ -27,6 +27,9 @@ export type PurchaseRow = {
   amountPaid: number;
   paymentMethod: string;
   createdAt: string;
+  /** Transaction date (YYYY-MM-DD), distinct from the scheduled visit. */
+  purchaseDate: string | null;
+  notes: string | null;
   scheduledDate: string | null;
   scheduledTime: string | null;
   locationId: number | null;
@@ -44,6 +47,8 @@ type RawPurchase = {
   created_at?: string | null;
   deleted_at?: string | null;
   location_id?: number | null;
+  purchase_date?: string | null;
+  notes?: string | null;
   scheduled_date?: string | null;
   scheduled_time?: string | null;
   guest_name?: string | null;
@@ -105,6 +110,8 @@ function mapPurchase(raw: RawPurchase): PurchaseRow {
     amountPaid: Number(raw.amount_paid ?? 0),
     paymentMethod: raw.payment_method ?? "",
     createdAt: raw.created_at ?? "",
+    purchaseDate: raw.purchase_date ?? null,
+    notes: raw.notes?.trim() || null,
     scheduledDate: raw.scheduled_date ?? null,
     scheduledTime: raw.scheduled_time ?? null,
     locationId: raw.location_id ?? null,

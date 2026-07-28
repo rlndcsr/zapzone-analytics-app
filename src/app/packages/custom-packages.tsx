@@ -42,7 +42,7 @@ const CustomPackages = () => {
 
   // Client-side pagination over the custom package list.
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   const paged = useMemo(
     () => customPackages.slice((page - 1) * perPage, page * perPage),
     [customPackages, page, perPage],

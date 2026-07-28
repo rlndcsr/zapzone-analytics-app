@@ -107,6 +107,12 @@ type Column = {
   key: string;
   label: string;
   width: number;
+  /** Heading in the "Toggle Columns" sheet (mirrors the web's column groups). */
+  group: string;
+  /** Always visible — can't be switched off (the web's `lockVisible`). */
+  lockVisible?: boolean;
+  /** Off until the user turns it on, matching the web's default view. */
+  defaultHidden?: boolean;
   render: (attraction: AttractionRow, ctx: RowContext) => ReactNode;
 };
 
@@ -251,27 +257,27 @@ const ActionsCell = ({
 };
 
 /**
- * Columns mirror the web `/attractions` admin table's default-visible set, in
- * the same order and with the same labels: Order, Attraction, Category, Price,
- * Capacity, Duration, Status, Purchase Link. The Attraction cell is the same
- * rich, multi-line cell as the web (name + Copy badge, location, description,
- * created date), so the location / description / created data the web folds in
- * there is preserved without separate columns. Pricing type is surfaced through
- * the Price suffix exactly as the web default view does.
+ * Every column the web `/attractions` admin table offers, in the same order,
+ * with the same labels, groups, and default visibility — so the "Columns" sheet
+ * shows exactly what a web user sees. Order / Attraction / Category / Price /
+ * Capacity / Duration / Status / Purchase Link start visible; ID, Description,
+ * Location, Pricing Type, Capacity Visibility, Created and Updated start hidden.
+ *
+ * The Attraction cell is the same rich, multi-line cell as the web (name + Copy
+ * badge, location, description, created date), so that context is present even
+ * with the stand-alone columns switched off.
  *
  * The trailing Actions column mirrors the web admin's per-row buttons — View
  * Purchase Page, View (eye → Details sheet), Edit, Duplicate, Delete — and the
  * Status column is an inline select for flipping active/inactive, both wired
  * through {@link RowContext}. The Order column's drag-to-reorder chevrons are
- * still omitted (no reorder on mobile — the number is shown read-only). Columns
- * hidden by default on the web (ID, Updated, and the stand-alone Pricing Type /
- * Location / Description / Created toggles) are not surfaced, matching what a
- * web user sees.
+ * still omitted (no reorder on mobile — the number is shown read-only).
  */
 const COLUMNS: Column[] = [
   {
     key: "order",
     label: "Order",
+    group: "Ordering",
     width: 80,
     render: (a) => (
       <Text numberOfLines={1} className={CELL_TEXT}>
@@ -280,8 +286,22 @@ const COLUMNS: Column[] = [
     ),
   },
   {
+    key: "id",
+    label: "ID",
+    group: "Identifiers",
+    width: 80,
+    defaultHidden: true,
+    render: (a) => (
+      <Text numberOfLines={1} className={CELL_TEXT}>
+        #{a.id}
+      </Text>
+    ),
+  },
+  {
     key: "attraction",
     label: "Attraction",
+    group: "Attraction",
+    lockVisible: true,
     width: 240,
     render: (a) => {
       const created = formatCreatedAt(a.createdAt);
@@ -337,6 +357,7 @@ const COLUMNS: Column[] = [
   {
     key: "category",
     label: "Category",
+    group: "Attraction",
     width: 130,
     render: (a) => (
       <Text numberOfLines={1} className={CELL_TEXT}>
@@ -345,8 +366,33 @@ const COLUMNS: Column[] = [
     ),
   },
   {
+    key: "description",
+    label: "Description",
+    group: "Attraction",
+    width: 240,
+    defaultHidden: true,
+    render: (a) => (
+      <Text numberOfLines={3} className={`${CELL_TEXT} leading-4`}>
+        {a.description || "—"}
+      </Text>
+    ),
+  },
+  {
+    key: "location",
+    label: "Location",
+    group: "Location",
+    width: 160,
+    defaultHidden: true,
+    render: (a) => (
+      <Text numberOfLines={1} className={CELL_TEXT}>
+        {a.locationName || "—"}
+      </Text>
+    ),
+  },
+  {
     key: "price",
     label: "Price",
+    group: "Pricing",
     width: 130,
     render: (a) => {
       const suffix = PRICING_SUFFIX[a.pricingType] ?? "";
@@ -364,8 +410,21 @@ const COLUMNS: Column[] = [
     },
   },
   {
+    key: "pricingType",
+    label: "Pricing Type",
+    group: "Pricing",
+    width: 140,
+    defaultHidden: true,
+    render: (a) => (
+      <Text numberOfLines={1} className={`${CELL_TEXT} capitalize`}>
+        {a.pricingType.replace(/_/g, " ")}
+      </Text>
+    ),
+  },
+  {
     key: "capacity",
     label: "Capacity",
+    group: "Capacity",
     width: 140,
     render: (a) => (
       <Text numberOfLines={1} className={CELL_TEXT}>
@@ -377,8 +436,21 @@ const COLUMNS: Column[] = [
     ),
   },
   {
+    key: "capacityVisibility",
+    label: "Capacity Visibility",
+    group: "Capacity",
+    width: 160,
+    defaultHidden: true,
+    render: (a) => (
+      <Text numberOfLines={1} className={CELL_TEXT}>
+        {a.displayCapacityToCustomers ? "Shown to customers" : "Hidden"}
+      </Text>
+    ),
+  },
+  {
     key: "duration",
     label: "Duration",
+    group: "Details",
     width: 110,
     render: (a) => (
       <Text numberOfLines={1} className={CELL_TEXT}>
@@ -389,6 +461,7 @@ const COLUMNS: Column[] = [
   {
     key: "status",
     label: "Status",
+    group: "Status",
     width: 130,
     render: (a, ctx) => (
       <StatusPill attraction={a} onPress={() => ctx.onStatusPress(a)} />
@@ -397,19 +470,72 @@ const COLUMNS: Column[] = [
   {
     key: "purchaseLink",
     label: "Purchase Link",
+    group: "Links",
     width: 140,
     render: (a) => <PurchaseLinkCell attraction={a} />,
   },
   {
+    key: "createdAt",
+    label: "Created",
+    group: "Dates",
+    width: 140,
+    defaultHidden: true,
+    render: (a) => (
+      <Text numberOfLines={1} className={CELL_TEXT}>
+        {formatCreatedAt(a.createdAt) || "—"}
+      </Text>
+    ),
+  },
+  {
+    key: "updatedAt",
+    label: "Updated",
+    group: "Dates",
+    width: 140,
+    defaultHidden: true,
+    render: (a) => (
+      <Text numberOfLines={1} className={CELL_TEXT}>
+        {formatCreatedAt(a.updatedAt) || "—"}
+      </Text>
+    ),
+  },
+  {
     key: "actions",
     label: "Actions",
+    group: "Actions",
+    lockVisible: true,
     width: 208,
     render: (a, ctx) => <ActionsCell attraction={a} ctx={ctx} />,
   },
 ];
 
-const TABLE_WIDTH =
-  CHECKBOX_WIDTH + COLUMNS.reduce((sum, c) => sum + c.width, 0);
+/** Column metadata for the "Toggle Columns" sheet (no render functions). */
+export type AttractionColumnMeta = {
+  key: string;
+  label: string;
+  group: string;
+  lockVisible: boolean;
+};
+
+/**
+ * The toggleable columns, in table order. `actions` is excluded — it is the
+ * row's control cluster, not data, and the web has no switch for it.
+ */
+export const ATTRACTION_COLUMNS: AttractionColumnMeta[] = COLUMNS.filter(
+  (c) => c.key !== "actions",
+).map((c) => ({
+  key: c.key,
+  label: c.label,
+  group: c.group,
+  lockVisible: !!c.lockVisible,
+}));
+
+/** The set of column keys shown before the user changes anything. */
+export const defaultAttractionColumnKeys = (): Set<string> =>
+  new Set(COLUMNS.filter((c) => !c.defaultHidden).map((c) => c.key));
+
+/** Every column key, for the sheet's "Show All". */
+export const allAttractionColumnKeys = (): Set<string> =>
+  new Set(COLUMNS.map((c) => c.key));
 
 /**
  * Selection checkbox cell. A nested Pressable, so it handles the touch itself —
@@ -462,7 +588,7 @@ const CheckboxCell = ({
  */
 export const AttractionsTable = memo(function AttractionsTable({
   attractions,
-  onRowPress,
+  onView,
   onViewPurchase,
   onEdit,
   onDuplicate,
@@ -471,12 +597,17 @@ export const AttractionsTable = memo(function AttractionsTable({
   selectedIds,
   onToggleRow,
   onToggleAll,
+  visibleColumns,
 }: {
   attractions: AttractionRow[];
-  onRowPress: (attraction: AttractionRow) => void;
+  /**
+   * Open the Attraction Details — wired only to the row's eye action. Rows
+   * themselves are inert so a stray tap while scanning the table (or reaching
+   * for a checkbox) never navigates.
+   */
+  onView: (attraction: AttractionRow) => void;
   /** Row Actions — View Purchase Page, Edit, Duplicate, Delete, and the per-row
-   *  status pill. onView (the eye action) reuses onRowPress, since both open
-   *  the Details. */
+   *  status pill. */
   onViewPurchase: (attraction: AttractionRow) => void;
   onEdit: (attraction: AttractionRow) => void;
   onDuplicate: (attraction: AttractionRow) => Promise<void> | void;
@@ -488,10 +619,21 @@ export const AttractionsTable = memo(function AttractionsTable({
   onToggleRow: (id: number) => void;
   /** Select / deselect every row on the current page. */
   onToggleAll: () => void;
+  /**
+   * Column keys to render, from the "Columns" sheet. Omit to show the default
+   * set. Locked columns are always drawn regardless of what's in the set.
+   */
+  visibleColumns?: Set<string>;
 }) {
+  const columns = COLUMNS.filter(
+    (c) => c.lockVisible || !visibleColumns || visibleColumns.has(c.key),
+  );
+  const tableWidth =
+    CHECKBOX_WIDTH + columns.reduce((sum, c) => sum + c.width, 0);
+
   const rowContext: RowContext = {
     onViewPurchase,
-    onView: onRowPress,
+    onView,
     onEdit,
     onDuplicate,
     onDelete,
@@ -518,7 +660,7 @@ export const AttractionsTable = memo(function AttractionsTable({
         showsHorizontalScrollIndicator={false}
         nestedScrollEnabled
       >
-        <View style={{ width: TABLE_WIDTH }}>
+        <View style={{ width: tableWidth }}>
           {/* Header */}
           <View
             className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
@@ -533,7 +675,7 @@ export const AttractionsTable = memo(function AttractionsTable({
                   : "Select all rows on this page"
               }
             />
-            {COLUMNS.map((col) => (
+            {columns.map((col) => (
               <View
                 key={col.key}
                 className="justify-center px-4 py-3"
@@ -553,11 +695,10 @@ export const AttractionsTable = memo(function AttractionsTable({
           {attractions.map((attraction, i) => {
             const selected = selectedIds.has(attraction.id);
             return (
-              <Pressable
+              // Inert row — details open from the eye action only, so the cells
+              // (checkbox, status pill, copy link, actions) own every touch.
+              <View
                 key={attraction.id}
-                onPress={() => onRowPress(attraction)}
-                accessibilityRole="button"
-                accessibilityLabel={`View details for ${attraction.name}`}
                 className={`flex-row items-center ${
                   selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 } ${
@@ -565,17 +706,14 @@ export const AttractionsTable = memo(function AttractionsTable({
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={({ pressed }) => ({
-                  minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                style={{ minHeight: ROW_MIN_HEIGHT }}
               >
                 <CheckboxCell
                   state={selected ? "on" : "off"}
                   onPress={() => onToggleRow(attraction.id)}
                   label={`${selected ? "Deselect" : "Select"} ${attraction.name}`}
                 />
-                {COLUMNS.map((col) => (
+                {columns.map((col) => (
                   <View
                     key={col.key}
                     className="justify-center px-4 py-4"
@@ -584,7 +722,7 @@ export const AttractionsTable = memo(function AttractionsTable({
                     {col.render(attraction, rowContext)}
                   </View>
                 ))}
-              </Pressable>
+              </View>
             );
           })}
         </View>

@@ -168,7 +168,7 @@ const SelectRow = ({
 }) => (
   <Pressable
     onPress={onPress}
-    className="h-14 flex-row items-center gap-3 rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5"
+    className="h-14 flex-row items-center gap-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5"
   >
     <Feather name={icon} size={18} color="#9CA3AF" />
     <Text

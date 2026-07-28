@@ -176,7 +176,7 @@ const Payments = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
   // Presentation layout only — table by default, card view on toggle. Both read
   // the same `visible` slice, so switching never refetches.
   const [viewMode, setViewMode] = useState<ViewMode>("table");
@@ -439,19 +439,7 @@ const Payments = () => {
                 <ViewToggle mode={viewMode} onChange={setViewMode} />
               </View>
 
-              {/* Top pagination (above the list) — same state as the bottom pager */}
-              <Pagination
-                compact
-                page={currentPage}
-                perPage={perPage}
-                total={filtered.length}
-                onPageChange={setPage}
-                onPerPageChange={(pp) => {
-                  setPerPage(pp);
-                  setPage(1);
-                }}
-              />
-
+             
               {/* List — table (default) and card layouts render from the same
                   `visible` slice, so switching is instant and never refetches. */}
               {visible.length > 0 &&

@@ -1,10 +1,21 @@
 import { Feather } from "@expo/vector-icons";
+import { scanFromURLAsync } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { QrScannerView } from "../../components/checkin/QrScannerView";
+import { VerifyTicketDetails } from "../../components/checkin/VerifyTicketDetails";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
   useAttractionCheckIn,
@@ -183,19 +194,77 @@ function PaymentBreakdown({ purchase }: { purchase: PurchaseRow }) {
   );
 }
 
+/** The web's numbered "How to Use" steps, verbatim. */
+const HOW_TO_USE: { lead?: string; text: string }[] = [
+  { text: 'Tap "Start Camera" to begin scanning or upload a QR code image from your device' },
+  {
+    lead: "Mobile recommended:",
+    text: "Point your phone/tablet camera at the customer's QR code ticket",
+  },
+  { text: "Review the ticket details and verify customer information" },
+  { text: 'Tap "Check In" to mark the ticket as used, or "Cancel" to scan again' },
+  {
+    text: "Each ticket can only be used once - already used tickets will be rejected automatically",
+  },
+];
+
 export default function AttractionCheckInScreen() {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
-  const { phase, review, result, busy, handleScan, confirm, cancelReview, reset } =
-    useAttractionCheckIn();
+  const {
+    phase,
+    review,
+    waivers,
+    result,
+    busy,
+    handleScan,
+    confirm,
+    cancelReview,
+    startScanning,
+    stopScanning,
+    reset,
+  } = useAttractionCheckIn();
+
+  // "Upload Image" — pick a photo of a ticket and decode the QR out of it,
+  // the mobile equivalent of the web's file input.
+  const [decoding, setDecoding] = useState(false);
+  const uploadImage = async () => {
+    if (decoding) return;
+    try {
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: false,
+        quality: 1,
+      });
+      if (picked.canceled) return;
+      const uri = picked.assets[0]?.uri;
+      if (!uri) return;
+
+      setDecoding(true);
+      const codes = await scanFromURLAsync(uri, ["qr"]);
+      const data = codes[0]?.data;
+      if (!data) {
+        Alert.alert(
+          "No QR code found",
+          "That image doesn't contain a readable QR code. Try a clearer photo of the ticket.",
+        );
+        return;
+      }
+      handleScan(data);
+    } catch {
+      Alert.alert("Couldn't read the image", "Please try again.");
+    } finally {
+      setDecoding(false);
+    }
+  };
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Sub-screen header (matches the Attractions module chrome). */}
-      <View className="w-full border-b border-gray-100 bg-white px-5 pb-5 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
-        <View className="flex-row items-center justify-between">
+      <View className="w-full border-b border-gray-100 bg-white px-5 pb-4 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
             className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
@@ -204,10 +273,17 @@ export default function AttractionCheckInScreen() {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            Check-in Scanner
-          </Text>
-          <View style={{ width: 36 }} />
+          <View className="flex-1">
+            <View className="flex-row items-center gap-2">
+              <Feather name="camera" size={16} color={headerIcon} />
+              <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                Attraction Ticket Check-In
+              </Text>
+            </View>
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
+              Scan QR codes to check in customers and mark tickets as used
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -217,19 +293,79 @@ export default function AttractionCheckInScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
         <View className="px-5">
-          {/* Intro */}
-          <View className="mb-5 mt-6 rounded-2xl bg-white p-5 shadow-sm dark:bg-neutral-900" style={CARD_SHADOW}>
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Attraction Ticket Check-In
-            </Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Scan a customer’s ticket QR code to verify it and mark it as used.
-            </Text>
-          </View>
+          {/* Page heading + tip banner (mirrors the web page header) */}
+          {/* Tip banner (mirrors the web page header). Hidden once a ticket is
+              on screen — the web covers the page with the verify modal there. */}
+          {(phase === "idle" || phase === "scanning") && (
+            <View className="mt-6 flex-row items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
+              <Feather name="smartphone" size={18} color="#2563EB" />
+              <Text className="flex-1 text-sm text-blue-800 dark:text-blue-300">
+                <Text className="font-bold">Tip:</Text> For best scanning
+                experience, hold the device steady with the ticket fully in frame
+              </Text>
+            </View>
+          )}
+
+          {/* Landing state — camera off, matching the web's dashed panel */}
+          {phase === "idle" && (
+            <View
+              className="mb-5 mt-5 rounded-xl bg-white p-4 shadow-sm dark:bg-neutral-900"
+              style={CARD_SHADOW}
+            >
+              <View className="items-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-5 py-12 dark:border-neutral-700 dark:bg-neutral-800/40">
+                <Feather name="camera" size={56} color="#9CA3AF" />
+                <Text className="mt-4 text-base text-gray-600 dark:text-gray-300">
+                  Ready to scan QR codes
+                </Text>
+                <View className="mt-2 flex-row items-center gap-1.5">
+                  <Feather name="smartphone" size={14} color="#9CA3AF" />
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
+                    Works best on mobile devices
+                  </Text>
+                </View>
+
+                <View className="mt-6 flex-row gap-3 self-stretch">
+                  <Pressable
+                    onPress={startScanning}
+                    disabled={decoding}
+                    className={`flex-1 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] py-3.5 active:opacity-90 ${
+                      decoding ? "opacity-60" : ""
+                    }`}
+                    accessibilityRole="button"
+                  >
+                    <Feather name="camera" size={16} color="#FFFFFF" />
+                    <Text className="text-sm font-semibold text-white">
+                      Start Camera
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={uploadImage}
+                    disabled={decoding}
+                    className={`flex-1 flex-row items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-3.5 active:opacity-80 dark:border-neutral-700 dark:bg-neutral-900 ${
+                      decoding ? "opacity-60" : ""
+                    }`}
+                    accessibilityRole="button"
+                  >
+                    {decoding ? (
+                      <ActivityIndicator size="small" color={PRIMARY} />
+                    ) : (
+                      <Feather name="upload" size={16} color="#374151" />
+                    )}
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      Upload Image
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          )}
 
           {/* Scanner / processing */}
           {(phase === "scanning" || phase === "processing") && (
-            <View>
+            <View
+              className="mb-5 mt-5 rounded-xl bg-white p-4 shadow-sm dark:bg-neutral-900"
+              style={CARD_SHADOW}
+            >
               <View className="relative">
                 <QrScannerView
                   active={phase === "scanning"}
@@ -239,7 +375,7 @@ export default function AttractionCheckInScreen() {
                   <View className="absolute inset-0 items-center justify-center rounded-3xl bg-black/60">
                     <ActivityIndicator color="#FFFFFF" size="large" />
                     <Text className="mt-3 text-sm font-medium text-white">
-                      Verifying ticket…
+                      Processing QR code…
                     </Text>
                   </View>
                 )}
@@ -247,56 +383,28 @@ export default function AttractionCheckInScreen() {
               <Text className="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">
                 Point the camera at the ticket’s QR code.
               </Text>
+
+              {phase === "scanning" && (
+                <Pressable
+                  onPress={stopScanning}
+                  className="mt-4 items-center justify-center self-center rounded-lg border border-red-200 bg-red-50 px-6 py-3 active:opacity-80 dark:border-red-900/40 dark:bg-red-900/20"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
+                    Stop Camera
+                  </Text>
+                </Pressable>
+              )}
             </View>
           )}
 
           {/* Review — a valid, confirmed ticket awaiting approval */}
           {phase === "review" && review && (
-            <View className="rounded-3xl bg-white p-5 shadow-sm dark:bg-neutral-900" style={CARD_SHADOW}>
-              <View className="flex-row items-center">
-                <View className="mr-3 h-10 w-10 items-center justify-center rounded-xl bg-[#0644C7]/10">
-                  <Feather name="check-circle" size={20} color={PRIMARY} />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">
-                    Valid Ticket
-                  </Text>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    Confirm to check this customer in.
-                  </Text>
-                </View>
-              </View>
-
-              <TicketDetails purchase={review} />
-
-              <View className="mt-5 flex-row gap-3">
-                <Pressable
-                  onPress={cancelReview}
-                  disabled={busy}
-                  className="flex-1 items-center justify-center rounded-full border border-gray-200 py-3.5 active:opacity-80 dark:border-neutral-700"
-                  accessibilityRole="button"
-                >
-                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                    Cancel
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={confirm}
-                  disabled={busy}
-                  className={`flex-1 flex-row items-center justify-center rounded-full bg-[#0644C7] py-3.5 active:opacity-90 ${
-                    busy ? "opacity-60" : ""
-                  }`}
-                  accessibilityRole="button"
-                >
-                  {busy ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text className="text-sm font-semibold text-white">
-                      Check In
-                    </Text>
-                  )}
-                </Pressable>
-              </View>
+            <View className="mt-1">
+              <Text className="mb-3 text-lg font-bold text-gray-800 dark:text-white">
+                Verify Ticket Details
+              </Text>
+              <VerifyTicketDetails purchase={review} waivers={waivers} />
             </View>
           )}
 
@@ -349,23 +457,27 @@ export default function AttractionCheckInScreen() {
             </View>
           )}
 
-          {/* How to use — only while scanning, to keep the surface calm */}
-          {phase === "scanning" && (
-            <View className="mt-5 rounded-2xl bg-[#0644C7]/5 p-4">
-              <Text className="mb-2 text-sm font-bold text-gray-900 dark:text-white">
-                How to use
-              </Text>
-              {[
-                "Ask the customer to open their ticket QR code.",
-                "Hold the code steady inside the frame.",
-                "Review the ticket details, then tap Check In.",
-              ].map((tip, i) => (
+          {/* How to Use — shown on the calm surfaces, as on the web page */}
+          {(phase === "idle" || phase === "scanning") && (
+            <View className="mt-1 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-900/20">
+              <View className="mb-3 flex-row items-center gap-2">
+                <Feather name="alert-circle" size={16} color="#1E3A8A" />
+                <Text className="text-base font-bold text-gray-900 dark:text-white">
+                  How to Use
+                </Text>
+              </View>
+              {HOW_TO_USE.map((step, i) => (
                 <View key={i} className="mb-1.5 flex-row">
-                  <Text className="mr-2 text-sm font-bold text-[#0644C7]">
+                  <Text className="mr-2 text-sm font-medium text-blue-800 dark:text-blue-300">
                     {i + 1}.
                   </Text>
-                  <Text className="flex-1 text-sm text-gray-600 dark:text-gray-300">
-                    {tip}
+                  <Text className="flex-1 text-sm text-blue-800 dark:text-blue-300">
+                    {step.lead ? (
+                      <Text className="font-bold text-gray-900 dark:text-white">
+                        {step.lead}{" "}
+                      </Text>
+                    ) : null}
+                    {step.text}
                   </Text>
                 </View>
               ))}
@@ -373,6 +485,44 @@ export default function AttractionCheckInScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Verify footer — Deny / Approve, pinned like the web modal's footer */}
+      {phase === "review" && review && (
+        <View
+          className="flex-row gap-3 border-t border-gray-100 bg-white px-5 pt-3 dark:border-neutral-800 dark:bg-neutral-900"
+          style={{ paddingBottom: insets.bottom + 12 }}
+        >
+          <Pressable
+            onPress={cancelReview}
+            disabled={busy}
+            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-red-600 py-3.5 active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Deny check-in"
+          >
+            <Feather name="x-circle" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">Deny</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={confirm}
+            disabled={busy}
+            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-green-600 py-3.5 active:opacity-90 ${
+              busy ? "opacity-60" : ""
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel="Approve check-in"
+          >
+            {busy ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <>
+                <Feather name="check-circle" size={16} color="#FFFFFF" />
+                <Text className="text-sm font-semibold text-white">Approve</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

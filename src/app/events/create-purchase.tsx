@@ -156,7 +156,7 @@ const SelectRow = ({
 }) => (
   <Pressable
     onPress={onPress}
-    className="h-14 flex-row items-center gap-3 rounded-full border bg-white dark:bg-neutral-900 px-5 border-gray-200 dark:border-neutral-700"
+    className="h-14 flex-row items-center gap-3 rounded-lg border bg-white dark:bg-neutral-900 px-5 border-gray-200 dark:border-neutral-700"
   >
     <Feather name={icon} size={18} color="#9CA3AF" />
     <Text
@@ -603,7 +603,7 @@ const CreateEventPurchaseScreen = () => {
               </View>
             ) : (
               <>
-                <View className="h-12 flex-row items-center rounded-full border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 mb-3">
+                <View className="h-12 flex-row items-center rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 mb-3">
                   <Feather name="search" size={16} color="#9CA3AF" />
                   <TextInput
                     value={search}

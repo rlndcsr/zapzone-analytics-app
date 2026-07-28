@@ -33,7 +33,7 @@ type UseDayOffsParams = {
   perPage?: number;
 };
 
-export function useDayOffs({ filters, page, perPage = 15 }: UseDayOffsParams) {
+export function useDayOffs({ filters, page, perPage = 5 }: UseDayOffsParams) {
   const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);

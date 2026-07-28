@@ -1134,8 +1134,12 @@ export type ConnectedWaiver = {
   /** Whether the participant has been checked in (distinct from waiver signed). */
   checkedIn: boolean;
   checkedInAt: string | null;
-  /** Public completion link if the API provides one; otherwise built client-side. */
-  kioskUrl: string | null;
+  /**
+   * Public completion link (`/waiver/{token}`). The backend only returns one for
+   * pending waivers — completed records have no link left to share, so the UI
+   * hides "Copy link" when this is null (same rule as the web panel).
+   */
+  signingUrl: string | null;
 };
 
 /** Connected-waiver summary + list for one entity. */
@@ -1154,23 +1158,8 @@ type RawConnectedWaiver = {
   minors?: string[] | null;
   checked_in?: boolean | number | null;
   checked_in_at?: string | null;
-  kiosk_url?: string | null;
-  link?: string | null;
-  url?: string | null;
+  signing_url?: string | null;
 };
-
-/**
- * Public kiosk URL where a customer completes the waiver for a booking. The web
- * WaiverConnectionPanel's "Kiosk" / "Copy link" open this page; the mobile app
- * has no window.origin, so it builds the same path on the web frontend host
- * (EXPO_PUBLIC_WEB_URL). NOTE: adjust this path if your kiosk route differs.
- */
-export function buildWaiverKioskUrl(
-  entityType: WaiverEntityType,
-  entityId: number,
-): string {
-  return webUrl(`/waiver/kiosk/${entityType}/${entityId}`);
-}
 
 /**
  * Generic (walk-in) kiosk URL for a template — the customer fills in all of
@@ -1281,7 +1270,7 @@ export async function fetchEntityWaivers(
     minors: w.minors ?? [],
     checkedIn: w.checked_in === true || w.checked_in === 1 || !!w.checked_in_at,
     checkedInAt: w.checked_in_at ?? null,
-    kioskUrl: w.kiosk_url?.trim() || w.link?.trim() || w.url?.trim() || null,
+    signingUrl: w.signing_url?.trim() || null,
   }));
   const s = res?.data?.summary ?? {};
   return {

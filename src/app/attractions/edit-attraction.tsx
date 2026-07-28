@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   ALL_DAY_KEYS,
+  AttractionLivePreview,
   DAYS,
   ErrorText,
   FieldLabel,
@@ -456,6 +457,7 @@ const EditAttractionScreen = () => {
               onLayout={registerSection("basic")}
             >
               <InputField
+                pill={false}
                 label="Attraction Name"
                 value={name}
                 onChangeText={setName}
@@ -466,7 +468,7 @@ const EditAttractionScreen = () => {
 
               <FieldLabel>Description</FieldLabel>
               <View
-                className={`rounded-2xl border bg-white dark:bg-neutral-900 px-4 py-3 mb-1 ${
+                className={`rounded-lg border bg-white dark:bg-neutral-900 px-4 py-3 mb-1 ${
                   errors.description
                     ? "border-red-400"
                     : "border-gray-200 dark:border-neutral-700"
@@ -516,6 +518,7 @@ const EditAttractionScreen = () => {
               onLayout={registerSection("pricing")}
             >
               <InputField
+                pill={false}
                 label="Price"
                 value={price}
                 onChangeText={setPrice}
@@ -536,6 +539,7 @@ const EditAttractionScreen = () => {
               </View>
 
               <InputField
+                pill={false}
                 label="Maximum Capacity"
                 value={maxCapacity}
                 onChangeText={setMaxCapacity}
@@ -558,24 +562,24 @@ const EditAttractionScreen = () => {
               </View>
 
               <FieldLabel>Duration (0 for unlimited)</FieldLabel>
-              <View className="flex-row items-center gap-3">
-                <View className="flex-1">
-                  <InputField
-                    label=""
-                    value={duration}
-                    onChangeText={setDuration}
-                    placeholder="0"
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-                <View className="h-14 flex-row items-center rounded-full bg-gray-100 dark:bg-neutral-800 p-1">
+              {/* Input + unit joined into one bordered control, like the web. */}
+              <View className="h-14 flex-row items-center overflow-hidden rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900">
+                <TextInput
+                  value={duration}
+                  onChangeText={setDuration}
+                  placeholder="0 = unlimited"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="decimal-pad"
+                  className="h-full flex-1 px-4 text-base text-gray-900 dark:text-white"
+                />
+                <View className="h-full flex-row items-center border-l border-gray-300 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800">
                   {(["minutes", "hours"] as const).map((u) => {
                     const active = durationUnit === u;
                     return (
                       <Pressable
                         key={u}
                         onPress={() => setDurationUnit(u)}
-                        className={`h-full px-5 items-center justify-center rounded-full ${
+                        className={`h-full items-center justify-center px-3 ${
                           active ? "bg-[#0644C7]" : ""
                         }`}
                       >
@@ -583,7 +587,7 @@ const EditAttractionScreen = () => {
                           className={`text-sm font-semibold capitalize ${
                             active
                               ? "text-white"
-                              : "text-gray-500 dark:text-gray-300"
+                              : "text-gray-600 dark:text-gray-300"
                           }`}
                         >
                           {u}
@@ -604,7 +608,7 @@ const EditAttractionScreen = () => {
               {schedules.map((schedule, index) => (
                 <View
                   key={index}
-                  className="border border-gray-200 dark:border-neutral-700 rounded-2xl p-4 mb-3"
+                  className="border border-gray-200 dark:border-neutral-700 rounded-lg p-4 mb-3"
                 >
                   <View className="flex-row items-center justify-between mb-3">
                     <Text className="font-semibold text-gray-800 dark:text-gray-100">
@@ -640,7 +644,7 @@ const EditAttractionScreen = () => {
                         <Pressable
                           key={day.key}
                           onPress={() => toggleDay(index, day.key)}
-                          className={`px-3 py-1.5 rounded-full ${
+                          className={`px-3 py-1.5 rounded-md ${
                             on
                               ? "bg-[#0644C7]"
                               : "bg-gray-100 dark:bg-neutral-800"
@@ -689,7 +693,7 @@ const EditAttractionScreen = () => {
 
               <Pressable
                 onPress={addScheduleRow}
-                className="flex-row items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-gray-300 dark:border-neutral-700"
+                className="flex-row items-center justify-center gap-2 py-3 rounded-lg border border-gray-300 dark:border-neutral-700"
               >
                 <Feather name="plus" size={16} color={PRIMARY} />
                 <Text className="text-sm font-semibold text-[#0644C7]">
@@ -712,7 +716,7 @@ const EditAttractionScreen = () => {
                       <Pressable
                         key={addOn.id}
                         onPress={() => toggleAddOn(addOn.name)}
-                        className={`flex-row items-center gap-1.5 px-3 py-2 rounded-full border ${
+                        className={`flex-row items-center gap-1.5 px-3 py-2 rounded-md border ${
                           on
                             ? "bg-[#0644C7] border-[#0644C7]"
                             : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
@@ -748,7 +752,7 @@ const EditAttractionScreen = () => {
             <Section icon="image" title="Images">
               <Pressable
                 onPress={pickImages}
-                className="flex-row items-center justify-center gap-2 py-4 rounded-2xl border border-dashed border-gray-300 dark:border-neutral-700"
+                className="flex-row items-center justify-center gap-2 py-4 rounded-lg border border-gray-300 dark:border-neutral-700"
               >
                 <Feather name="upload" size={18} color={PRIMARY} />
                 <Text className="text-sm font-semibold text-[#0644C7]">
@@ -788,6 +792,7 @@ const EditAttractionScreen = () => {
             {/* Display Order */}
             <Section icon="list" title="Display Order">
               <InputField
+                pill={false}
                 label="Order Position"
                 value={displayOrder}
                 onChangeText={setDisplayOrder}
@@ -798,6 +803,20 @@ const EditAttractionScreen = () => {
                 Lower numbers appear first on the store page.
               </Text>
             </Section>
+
+            {/* Live Preview — same card as Create (web parity). */}
+            <AttractionLivePreview
+              name={name}
+              category={category}
+              description={description}
+              price={price}
+              pricingType={pricingType}
+              duration={duration}
+              durationUnit={durationUnit}
+              maxCapacity={maxCapacity}
+              schedules={schedules}
+              imageUri={images.length > 0 ? mediaUrl(images[0]) : null}
+            />
           </ScrollView>
 
           {/* Sticky footer — Cancel / Update Attraction (matches Packages edit). */}
@@ -844,6 +863,7 @@ const EditAttractionScreen = () => {
           <View className="flex-row items-center gap-2">
             <View className="flex-1">
               <InputField
+                pill={false}
                 label=""
                 value={newCategory}
                 onChangeText={setNewCategory}
@@ -853,7 +873,7 @@ const EditAttractionScreen = () => {
             </View>
             <Pressable
               onPress={addCategory}
-              className="h-14 px-4 items-center justify-center rounded-full bg-[#0644C7]"
+              className="h-14 px-4 items-center justify-center rounded-lg bg-[#0644C7]"
             >
               <Feather name="plus" size={20} color="#FFFFFF" />
             </Pressable>

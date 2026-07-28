@@ -151,7 +151,7 @@ const AddOns = () => {
   const [exporting, setExporting] = useState(false);
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
 
   // Locations (for the filter + create/edit picker).
   const [locations, setLocations] = useState<LocationOption[]>([]);
