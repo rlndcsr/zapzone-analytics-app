@@ -755,7 +755,7 @@ const Attractions = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="zap"
-                  tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Active"
                   value={String(kpis.active)}
                   change={`${kpis.inactive} inactive`}
@@ -764,7 +764,7 @@ const Attractions = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="dollar-sign"
-                  tone={{ bg: "#10B98120", tint: "#10B981" }}
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Avg. Price"
                   value={formatMoney(kpis.avgPrice)}
                   change="Per attraction"
@@ -773,7 +773,7 @@ const Attractions = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="users"
-                  tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Capacity"
                   value={String(kpis.capacity)}
                   change="Across all attractions"

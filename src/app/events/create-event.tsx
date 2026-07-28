@@ -24,7 +24,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { InputField } from "../../components/ui/InputField";
+import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markEventsStale } from "../../lib/hooks/useEvents";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -43,25 +45,7 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
 const INTERVAL_OPTIONS = [15, 30, 45, 60, 90, 120];
-
-// 30-minute increments, the native stand-in for the web's <input type="time">.
-const TIME_OPTIONS: string[] = (() => {
-  const out: string[] = [];
-  for (let h = 0; h < 24; h++) {
-    for (const m of [0, 30]) {
-      out.push(`${pad(h)}:${pad(m)}`);
-    }
-  }
-  return out;
-})();
 
 function formatTime(value: string): string {
   if (!value) return "";
@@ -242,25 +226,6 @@ const CreateEventScreen = () => {
       (user?.location?.name ?? null),
     [locationOptions, selectedLocationId, user],
   );
-
-  // Date options for the pickers — the next 365 days.
-  const dateOptions = useMemo(() => {
-    const out: { value: string; label: string }[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (let i = 0; i < 365; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      out.push({
-        value: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-        label:
-          i === 0
-            ? "Today"
-            : `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`,
-      });
-    }
-    return out;
-  }, []);
 
   // --- features ---
   const addFeature = () => setFeatures((prev) => [...prev, ""]);
@@ -863,94 +828,65 @@ const CreateEventScreen = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Time picker */}
-      <BottomSheet
+      {/* Time picker — hour / minute / AM-PM wheels, 1-minute granularity. */}
+      <TimePickerSheet
         visible={sheet?.kind === "time"}
+        value={
+          sheet?.kind === "time"
+            ? sheet.field === "start"
+              ? timeStart
+              : timeEnd
+            : "09:00"
+        }
+        title={
+          sheet?.kind === "time" && sheet.field === "start"
+            ? "Start Time"
+            : "End Time"
+        }
         onClose={() => setSheet(null)}
-        title={sheet?.kind === "time" && sheet.field === "start" ? "Start Time" : "End Time"}
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {TIME_OPTIONS.map((t) => {
-            const current =
-              sheet?.kind === "time" ? (sheet.field === "start" ? timeStart : timeEnd) : undefined;
-            const isSelected = current === t;
-            return (
-              <Pressable
-                key={t}
-                onPress={() => {
-                  if (sheet?.kind === "time") {
-                    if (sheet.field === "start") setTimeStart(t);
-                    else setTimeEnd(t);
-                  }
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {formatTime(t)}
-                </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+        onSelect={(time) => {
+          if (sheet?.kind === "time") {
+            if (sheet.field === "start") setTimeStart(time);
+            else setTimeEnd(time);
+          }
+          setSheet(null);
+        }}
+      />
 
-      {/* Date picker */}
-      <BottomSheet
+      {/* Date picker — shared month calendar, same as every other module. */}
+      <DatePickerSheet
         visible={sheet?.kind === "date"}
+        value={
+          sheet?.kind === "date"
+            ? sheet.field === "start"
+              ? startDate
+              : endDate
+            : null
+        }
+        minDate={
+          sheet?.kind === "date" && sheet.field === "end" && startDate
+            ? startDate
+            : undefined
+        }
+        title={
+          sheet?.kind === "date" && sheet.field === "start"
+            ? "Start Date"
+            : "End Date"
+        }
         onClose={() => setSheet(null)}
-        title={sheet?.kind === "date" && sheet.field === "start" ? "Start Date" : "End Date"}
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {dateOptions
-            .filter((d) =>
-              sheet?.kind === "date" && sheet.field === "end" && startDate
-                ? d.value >= startDate
-                : true,
-            )
-            .map((d) => {
-              const current =
-                sheet?.kind === "date" ? (sheet.field === "start" ? startDate : endDate) : undefined;
-              const isSelected = current === d.value;
-              return (
-                <Pressable
-                  key={d.value}
-                  onPress={() => {
-                    if (sheet?.kind === "date") {
-                      if (sheet.field === "start") {
-                        setStartDate(d.value);
-                        // Keep the range valid if the end date is now before start.
-                        if (endDate && endDate < d.value) setEndDate("");
-                      } else {
-                        setEndDate(d.value);
-                      }
-                    }
-                    setSheet(null);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-base font-medium ${
-                      isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    {d.label}
-                  </Text>
-                  {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
-                </Pressable>
-              );
-            })}
-        </ScrollView>
-      </BottomSheet>
+        onSelect={(date) => {
+          if (sheet?.kind === "date") {
+            if (sheet.field === "start") {
+              setStartDate(date);
+              // Keep the range valid if the end date is now before start.
+              if (endDate && endDate < date) setEndDate("");
+            } else {
+              setEndDate(date);
+            }
+          }
+          setSheet(null);
+        }}
+      />
     </View>
   );
 };

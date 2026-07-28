@@ -875,7 +875,7 @@ const ManagePurchases = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="check-circle"
-                  tone={{ bg: "#10B98120", tint: "#10B981" }}
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Revenue"
                   value={formatMoney(kpis.revenue)}
                   change="All time revenue"
@@ -883,8 +883,8 @@ const ManagePurchases = () => {
               </View>
               <View className="w-1/2">
                 <KpiCard
-                  icon="trending-up"
-                  tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
+                  icon="download"
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Avg. Purchase"
                   value={formatMoney(kpis.avg)}
                   change="Per transaction"
@@ -892,8 +892,8 @@ const ManagePurchases = () => {
               </View>
               <View className="w-1/2">
                 <KpiCard
-                  icon="users"
-                  tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
+                  icon="user"
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Unique Customers"
                   value={String(kpis.customers)}
                   change="Total customers"
@@ -930,7 +930,7 @@ const ManagePurchases = () => {
               }`}
               className="flex-1 flex-row items-center gap-2.5 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 active:opacity-70"
             >
-              <Feather name="filter" size={16} color="#6B7280" />
+              <Feather name="sliders" size={16} color="#6B7280" />
               <Text className="flex-1 text-sm font-semibold text-gray-700 dark:text-gray-200">
                 Filters
               </Text>

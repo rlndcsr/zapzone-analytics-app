@@ -1,5 +1,7 @@
 import { Feather } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import { router, useFocusEffect } from "expo-router";
+import * as Sharing from "expo-sharing";
 import { useColorScheme } from "nativewind";
 import {
   useCallback,
@@ -744,11 +746,6 @@ const EventPurchases = () => {
     }
     setExporting(true);
     try {
-      // Loaded lazily so these native modules never run at app startup (Expo
-      // Router evaluates route modules eagerly on boot).
-      const FileSystem = await import("expo-file-system/legacy");
-      const Sharing = await import("expo-sharing");
-
       const header = [
         "ID",
         "Reference",
@@ -964,7 +961,7 @@ const EventPurchases = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="check-circle"
-                  tone={{ bg: "#10B98120", tint: "#10B981" }}
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Revenue"
                   value={formatMoney(kpis.revenue)}
                   change="All time revenue"
@@ -973,7 +970,7 @@ const EventPurchases = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="dollar-sign"
-                  tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Avg. Purchase"
                   value={formatMoney(kpis.avg)}
                   change="Per transaction"
@@ -981,8 +978,8 @@ const EventPurchases = () => {
               </View>
               <View className="w-1/2">
                 <KpiCard
-                  icon="users"
-                  tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
+                  icon="user"
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Unique Customers"
                   value={String(kpis.customers)}
                   change="Total customers"
@@ -1019,7 +1016,7 @@ const EventPurchases = () => {
               }`}
               className="flex-1 flex-row items-center gap-2.5 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 active:opacity-70"
             >
-              <Feather name="filter" size={16} color="#6B7280" />
+              <Feather name="sliders" size={16} color="#6B7280" />
               <Text className="flex-1 text-sm font-semibold text-gray-700 dark:text-gray-200">
                 Filters
               </Text>

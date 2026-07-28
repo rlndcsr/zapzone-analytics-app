@@ -1,13 +1,16 @@
 import { router } from "expo-router";
 import {
+  AlertTriangle,
   BarChart3,
   Calendar,
+  CalendarDays,
   Check,
   CheckCircle,
   ChevronDown,
   ChevronRight,
   Clock,
   CreditCard,
+  DollarSign,
   Eye,
   Info,
   LayoutGrid,
@@ -17,6 +20,7 @@ import {
   PartyPopper,
   Scan,
   ShoppingCart,
+  Sparkles,
   Ticket,
   TrendingUp,
   UserPlus,
@@ -110,6 +114,11 @@ const ICON_MAP: { [key: string]: any } = {
   "pin.png": MapPin,
   "arrow-down.png": ChevronDown,
   "scanner.png": Scan,
+  "calendar-days.png": CalendarDays,
+  "dollar-sign.png": DollarSign,
+  "sparkles.png": Sparkles,
+  "alert-triangle.png": AlertTriangle,
+  "trending-up.png": TrendingUp,
 };
 
 const getIcon = (iconName: string) => ICON_MAP[iconName] || null;

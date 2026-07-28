@@ -29,9 +29,9 @@ import {
   type EventFilterValues,
 } from "../../components/ui/EventFiltersSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
-import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import type { EventRow, EventStatus } from "../../services/eventsService";
@@ -266,7 +266,8 @@ const Events = () => {
   });
 
   const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState<EventFilterValues>(EMPTY_EVENT_FILTERS);
+  const [filters, setFilters] =
+    useState<EventFilterValues>(EMPTY_EVENT_FILTERS);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showDateSheet, setShowDateSheet] = useState(false);
   const [dateTarget, setDateTarget] = useState<EventDateTarget>("start");
@@ -303,15 +304,13 @@ const Events = () => {
     const inactive = total - active;
     const avgPrice =
       total > 0 ? locationScoped.reduce((s, e) => s + e.price, 0) / total : 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const upcoming = locationScoped.filter((e) => {
-      const end =
-        e.dateType === "date_range" && e.endDate ? e.endDate : e.startDate;
-      const d = new Date(`${(end || "").substring(0, 10)}T00:00:00`);
-      return !Number.isNaN(d.getTime()) && d >= today;
-    }).length;
-    return { total, active, inactive, avgPrice, upcoming };
+    const dateRange = locationScoped.filter(
+      (e) => e.dateType === "date_range",
+    ).length;
+    const oneTime = locationScoped.filter(
+      (e) => e.dateType === "one_time",
+    ).length;
+    return { total, active, inactive, avgPrice, dateRange, oneTime };
   }, [locationScoped]);
 
   // Search + the full web-admin filter set over the location-scoped data.
@@ -320,8 +319,10 @@ const Events = () => {
   // add-ons presence, time-of-day by start hour). All client-side, like the web.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const priceMin = filters.priceMin === "" ? null : parseFloat(filters.priceMin);
-    const priceMax = filters.priceMax === "" ? null : parseFloat(filters.priceMax);
+    const priceMin =
+      filters.priceMin === "" ? null : parseFloat(filters.priceMin);
+    const priceMax =
+      filters.priceMax === "" ? null : parseFloat(filters.priceMax);
     const { startFrom, startTo, createdFrom, createdTo } = filters;
 
     return locationScoped.filter((e) => {
@@ -631,7 +632,7 @@ const Events = () => {
             <View className="flex-row flex-wrap -mx-1.5 mb-3">
               <View className="w-1/2">
                 <KpiCard
-                  icon="calendar"
+                  icon="star"
                   tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Events"
                   value={String(kpis.total)}
@@ -641,8 +642,8 @@ const Events = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="zap"
-                  tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
-                  title="Active"
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+                  title="Active Events"
                   value={String(kpis.active)}
                   change={`${kpis.inactive} inactive`}
                 />
@@ -650,7 +651,7 @@ const Events = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="dollar-sign"
-                  tone={{ bg: "#10B98120", tint: "#10B981" }}
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Avg. Price"
                   value={formatMoney(kpis.avgPrice)}
                   change="Per ticket"
@@ -658,11 +659,11 @@ const Events = () => {
               </View>
               <View className="w-1/2">
                 <KpiCard
-                  icon="clock"
-                  tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
-                  title="Upcoming"
-                  value={String(kpis.upcoming)}
-                  change="Not yet ended"
+                  icon="calendar"
+                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+                  title="Date Range Events"
+                  value={String(kpis.dateRange)}
+                  change={`${kpis.oneTime} one-time`}
                 />
               </View>
             </View>
@@ -853,7 +854,6 @@ const Events = () => {
         onClose={closeDateRange}
         onApply={applyDateRange}
       />
-
     </View>
   );
 };
