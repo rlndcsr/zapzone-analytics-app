@@ -881,8 +881,21 @@ const CreateEventPurchaseScreen = () => {
                 </Text>
               </Section>
 
-              {/* Order summary */}
-              <Section icon="file-text" title="Order Summary">
+            </>
+          )}
+
+          {/* Order summary — always mounted so the empty state reads like the
+              web's "Select an event to begin" placeholder card. */}
+          <Section icon="file-text" title="Order Summary">
+            {!selected ? (
+              <View className="items-center py-8">
+                <Feather name="shopping-cart" size={44} color="#D1D5DB" />
+                <Text className="text-sm text-gray-500 dark:text-gray-400 mt-4">
+                  Select an event to begin
+                </Text>
+              </View>
+            ) : (
+              <>
                 <View className="flex-row justify-between mb-2">
                   <Text className="text-sm text-gray-500 dark:text-gray-400">
                     {quantity} × {money(selected.price)}
@@ -951,34 +964,36 @@ const CreateEventPurchaseScreen = () => {
                     thumbColor="#FFFFFF"
                   />
                 </View>
-              </Section>
+              </>
+            )}
+          </Section>
 
-              {/* Actions */}
-              <View className="flex-row gap-3 mt-1">
-                <Pressable
-                  onPress={() => router.back()}
-                  disabled={submitting}
-                  className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
-                >
-                  <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
-                    Cancel
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleSubmit}
-                  disabled={submitting}
-                  className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] ${
-                    submitting ? "opacity-70" : "active:opacity-90"
-                  }`}
-                >
-                  {submitting ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text className="text-base font-semibold text-white">Complete Purchase</Text>
-                  )}
-                </Pressable>
-              </View>
-            </>
+          {/* Actions */}
+          {selected && (
+            <View className="flex-row gap-3 mt-1">
+              <Pressable
+                onPress={() => router.back()}
+                disabled={submitting}
+                className="flex-1 h-14 items-center justify-center rounded-lg border border-gray-300 dark:border-neutral-700"
+              >
+                <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSubmit}
+                disabled={submitting}
+                className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] ${
+                  submitting ? "opacity-70" : "active:opacity-90"
+                }`}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text className="text-base font-semibold text-white">Complete Purchase</Text>
+                )}
+              </Pressable>
+            </View>
           )}
         </ScrollView>
       </KeyboardAvoidingView>

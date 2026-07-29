@@ -369,110 +369,6 @@ const CreateEventScreen = () => {
             </Text>
           </View>
 
-          {/* Live Preview — shown up top so it updates as the form is filled
-              (mirrors the web's sticky Live Preview panel). */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 border border-[#0644C7]/20"
-            style={CARD_SHADOW}
-          >
-            <View className="flex-row items-center gap-2 mb-4">
-              <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-                <Feather name="eye" size={16} color={PRIMARY} />
-              </View>
-              <Text className="text-base font-bold text-gray-900 dark:text-white">
-                Live Preview
-              </Text>
-            </View>
-
-            {!!image && (
-              <View className="w-full rounded-xl overflow-hidden bg-gray-100 dark:bg-neutral-800 mb-4" style={{ aspectRatio: 16 / 9 }}>
-                <Image source={{ uri: image }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
-              </View>
-            )}
-
-            <View className="flex-row items-center justify-between mb-3">
-              <Text className="text-xl font-bold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>
-                {name || <Text className="text-gray-300 dark:text-gray-600">Event Name</Text>}
-              </Text>
-              <Text className="text-lg font-semibold text-gray-500 dark:text-gray-400">
-                ${price || "--"}
-              </Text>
-            </View>
-
-            <PreviewLine
-              icon="calendar"
-              label="Date"
-              value={
-                startDate
-                  ? dateType === "one_time"
-                    ? formatDateDisplay(startDate)
-                    : `${formatDateDisplay(startDate)} – ${endDate ? formatDateDisplay(endDate) : "…"}`
-                  : "Not set"
-              }
-              muted={!startDate}
-            />
-            <PreviewLine
-              icon="clock"
-              label="Time"
-              value={`${formatTime(timeStart)} – ${formatTime(timeEnd)}`}
-            />
-            <PreviewLine
-              icon="map-pin"
-              label="Location"
-              value={locationName ?? "Not set"}
-              muted={!locationName}
-            />
-            <PreviewLine icon="repeat" label="Interval" value={`${intervalMinutes} min`} />
-            {!!maxBookingsPerSlot && (
-              <PreviewLine icon="users" label="Capacity" value={`${maxBookingsPerSlot} per slot`} />
-            )}
-
-            <Text
-              className={`text-sm mt-1 mb-3 min-h-[36px] ${description ? "text-gray-700 dark:text-gray-200" : "text-gray-300 dark:text-gray-600"}`}
-            >
-              {description || "Description"}
-            </Text>
-
-            <View className="flex-row flex-wrap items-start gap-1.5 mb-3">
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Features:</Text>
-              {activeFeatures.length > 0 ? (
-                activeFeatures.map((f, i) => (
-                  <View key={i} className="flex-row items-center gap-1 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-0.5 rounded-full">
-                    <Feather name="star" size={10} color="#EAB308" />
-                    <Text className="text-xs text-gray-700 dark:text-gray-200">{f}</Text>
-                  </View>
-                ))
-              ) : (
-                <Text className="text-sm text-gray-300 dark:text-gray-600">None</Text>
-              )}
-            </View>
-
-            <View className="flex-row flex-wrap items-start gap-1.5 mb-3">
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Add-ons:</Text>
-              {selectedAddOnIds.length > 0 ? (
-                selectedAddOnIds.map((id) => {
-                  const a = addOns.find((x) => x.id === id);
-                  if (!a) return null;
-                  return (
-                    <View key={id} className="bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full">
-                      <Text className="text-xs text-green-700 dark:text-green-300">
-                        {a.name} (${a.price.toFixed(2)})
-                      </Text>
-                    </View>
-                  );
-                })
-              ) : (
-                <Text className="text-sm text-gray-300 dark:text-gray-600">None</Text>
-              )}
-            </View>
-
-            <View className="flex-row items-center gap-2">
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Status:</Text>
-              <Text className={`text-sm font-medium ${isActive ? "text-green-600" : "text-gray-400"}`}>
-                {isActive ? "Active" : "Inactive"}
-              </Text>
-            </View>
-          </View>
 
           {/* Location (company admins only) */}
           {isCompanyAdmin && (
@@ -543,7 +439,7 @@ const CreateEventScreen = () => {
           {/* Date & Time */}
           <Section icon="calendar" title="Date & Time">
             <FieldLabel>Date Type</FieldLabel>
-            <View className="h-14 flex-row items-center rounded-full bg-gray-100 dark:bg-neutral-800 p-1 mb-4">
+            <View className="h-14 flex-row items-center rounded-lg bg-gray-100 dark:bg-neutral-800 p-1 mb-4">
               {(
                 [
                   { key: "one_time", label: "One Time" },
@@ -555,7 +451,7 @@ const CreateEventScreen = () => {
                   <Pressable
                     key={opt.key}
                     onPress={() => setDateType(opt.key)}
-                    className={`flex-1 h-full items-center justify-center rounded-full ${active ? "bg-[#0644C7]" : ""}`}
+                    className={`flex-1 h-full items-center justify-center rounded-md ${active ? "bg-[#0644C7]" : ""}`}
                   >
                     <Text
                       className={`text-sm font-semibold ${active ? "text-white" : "text-gray-500 dark:text-gray-300"}`}
@@ -708,7 +604,7 @@ const CreateEventScreen = () => {
                     <Pressable
                       key={addOn.id}
                       onPress={() => toggleAddOn(addOn.id)}
-                      className={`flex-row items-center gap-1.5 px-3 py-2 rounded-full border ${
+                      className={`flex-row items-center gap-1.5 px-3 py-2 rounded-md border ${
                         on
                           ? "bg-[#0644C7] border-[#0644C7]"
                           : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
@@ -728,12 +624,117 @@ const CreateEventScreen = () => {
             )}
           </Section>
 
+          {/* Live Preview — bottom of the form, same placement as the
+              attraction forms (the web keeps it in a sticky side rail). */}
+          <View
+            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 border border-[#0644C7]/20"
+            style={CARD_SHADOW}
+          >
+            <View className="flex-row items-center gap-2 mb-4">
+              <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
+                <Feather name="eye" size={16} color={PRIMARY} />
+              </View>
+              <Text className="text-base font-bold text-gray-900 dark:text-white">
+                Live Preview
+              </Text>
+            </View>
+
+            {!!image && (
+              <View className="w-full rounded-xl overflow-hidden bg-gray-100 dark:bg-neutral-800 mb-4" style={{ aspectRatio: 16 / 9 }}>
+                <Image source={{ uri: image }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+              </View>
+            )}
+
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="text-xl font-bold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>
+                {name || <Text className="text-gray-300 dark:text-gray-600">Event Name</Text>}
+              </Text>
+              <Text className="text-lg font-semibold text-gray-500 dark:text-gray-400">
+                ${price || "--"}
+              </Text>
+            </View>
+
+            <PreviewLine
+              icon="calendar"
+              label="Date"
+              value={
+                startDate
+                  ? dateType === "one_time"
+                    ? formatDateDisplay(startDate)
+                    : `${formatDateDisplay(startDate)} – ${endDate ? formatDateDisplay(endDate) : "…"}`
+                  : "Not set"
+              }
+              muted={!startDate}
+            />
+            <PreviewLine
+              icon="clock"
+              label="Time"
+              value={`${formatTime(timeStart)} – ${formatTime(timeEnd)}`}
+            />
+            <PreviewLine
+              icon="map-pin"
+              label="Location"
+              value={locationName ?? "Not set"}
+              muted={!locationName}
+            />
+            <PreviewLine icon="repeat" label="Interval" value={`${intervalMinutes} min`} />
+            {!!maxBookingsPerSlot && (
+              <PreviewLine icon="users" label="Capacity" value={`${maxBookingsPerSlot} per slot`} />
+            )}
+
+            <Text
+              className={`text-sm mt-1 mb-3 min-h-[36px] ${description ? "text-gray-700 dark:text-gray-200" : "text-gray-300 dark:text-gray-600"}`}
+            >
+              {description || "Description"}
+            </Text>
+
+            <View className="flex-row flex-wrap items-start gap-1.5 mb-3">
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Features:</Text>
+              {activeFeatures.length > 0 ? (
+                activeFeatures.map((f, i) => (
+                  <View key={i} className="flex-row items-center gap-1 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-0.5 rounded-full">
+                    <Feather name="star" size={10} color="#EAB308" />
+                    <Text className="text-xs text-gray-700 dark:text-gray-200">{f}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text className="text-sm text-gray-300 dark:text-gray-600">None</Text>
+              )}
+            </View>
+
+            <View className="flex-row flex-wrap items-start gap-1.5 mb-3">
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Add-ons:</Text>
+              {selectedAddOnIds.length > 0 ? (
+                selectedAddOnIds.map((id) => {
+                  const a = addOns.find((x) => x.id === id);
+                  if (!a) return null;
+                  return (
+                    <View key={id} className="bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full">
+                      <Text className="text-xs text-green-700 dark:text-green-300">
+                        {a.name} (${a.price.toFixed(2)})
+                      </Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <Text className="text-sm text-gray-300 dark:text-gray-600">None</Text>
+              )}
+            </View>
+
+            <View className="flex-row items-center gap-2">
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Status:</Text>
+              <Text className={`text-sm font-medium ${isActive ? "text-green-600" : "text-gray-400"}`}>
+                {isActive ? "Active" : "Inactive"}
+              </Text>
+            </View>
+          </View>
+
           {/* Actions */}
           <View className="flex-row gap-3 mt-2">
             <Pressable
               onPress={() => router.back()}
               disabled={submitting}
-              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
+              className="flex-1 h-14 items-center justify-center rounded-lg border border-gray-300 dark:border-neutral-700"
             >
               <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                 Cancel
@@ -742,7 +743,7 @@ const CreateEventScreen = () => {
             <Pressable
               onPress={handleSubmit}
               disabled={submitting}
-              className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] ${
+              className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] ${
                 submitting ? "opacity-70" : "active:opacity-90"
               }`}
             >

@@ -1133,7 +1133,7 @@ const EventPurchases = () => {
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
-                    onRowPress={(purchase) =>
+                    onView={(purchase) =>
                       router.push({
                         pathname: "/events/purchase-details",
                         params: { id: String(purchase.id) },

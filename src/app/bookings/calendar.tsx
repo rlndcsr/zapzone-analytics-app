@@ -21,6 +21,7 @@ import {
 } from "../../components/ui/skeleton/CalendarSkeleton";
 import { packageColor } from "../../lib/calendar/packageColors";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
+import { useScheduledExtras } from "../../lib/hooks/useScheduledExtras";
 import { getCurrentUser } from "../../lib/session";
 import type { CalendarBooking } from "../../services/bookingsService";
 
@@ -28,7 +29,8 @@ const PRIMARY = "#0644C7";
 
 type ViewMode = "month" | "week" | "day";
 
-const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+// Three-letter headers, matching the web month grid ("Sun Mon Tue …").
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -190,6 +192,36 @@ const EmptyDay = ({ label }: { label: string }) => (
   </View>
 );
 
+/**
+ * One activity chip inside a month-grid day cell — icon + count, tinted per
+ * activity type (bookings blue, attraction tickets purple, events amber), the
+ * same breakdown the web calendar draws.
+ */
+const DayChip = ({
+  icon,
+  tint,
+  className,
+  label,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  tint: string;
+  className: string;
+  label: string;
+}) => (
+  <View
+    className={`flex-row items-center gap-1 rounded px-1 py-0.5 mb-0.5 ${className}`}
+  >
+    <Feather name={icon} size={8} color={tint} />
+    <Text
+      numberOfLines={1}
+      className="flex-1 text-[9px] font-medium"
+      style={{ color: tint }}
+    >
+      {label}
+    </Text>
+  </View>
+);
+
 const BookingCalendar = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -233,6 +265,10 @@ const BookingCalendar = () => {
   const { bookings, allBookings, loading, error, refetch } = useCalendarBookings(
     { startDate, endDate },
   );
+
+  // Attraction tickets + event registrations per day, overlaid on the grid
+  // alongside bookings (web parity).
+  const extrasByDate = useScheduledExtras();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -385,9 +421,9 @@ const BookingCalendar = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+      {/* Header — title + subtitle, with the web's refresh action on the right. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3 relative z-10">
           <Pressable
             onPress={() => router.back()}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
@@ -396,17 +432,21 @@ const BookingCalendar = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Booking Calendar
-          </Text>
-          {/* Packages shortcut (mirrors the web calendar's "Packages" link). */}
+          <View className="flex-1">
+            <Text className="text-gray-900 dark:text-white text-lg font-bold">
+              Booking Calendar
+            </Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
+              View and manage bookings
+            </Text>
+          </View>
           <Pressable
-            onPress={() => router.push("/packages/packages" as never)}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            onPress={onRefresh}
+            className="w-9 h-9 items-center justify-center rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-70"
             accessibilityRole="button"
-            accessibilityLabel="Open packages"
+            accessibilityLabel="Refresh"
           >
-            <Feather name="package" size={20} color={headerIcon} />
+            <Feather name="refresh-cw" size={16} color={headerIcon} />
           </Pressable>
         </View>
       </View>
@@ -425,97 +465,119 @@ const BookingCalendar = () => {
           />
         }
       >
-        <View className="px-5 pt-6">
-          {/* Intro + count */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Booking Calendar
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {filtered.length} booking{filtered.length === 1 ? "" : "s"} in view
-            </Text>
-          </View>
-
-          {/* View-mode segmented control + Today */}
-          <View className="flex-row bg-white dark:bg-neutral-900 rounded-xl p-1.5 mb-4 shadow-sm border border-gray-100 dark:border-neutral-800">
-            {(["month", "week", "day"] as ViewMode[]).map((mode) => {
-              const active = viewMode === mode;
-              return (
-                <Pressable
-                  key={mode}
-                  onPress={() => setViewMode(mode)}
-                  className={`flex-1 py-2.5 rounded-lg items-center ${
-                    active ? "bg-[#0644C7]" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-sm font-semibold capitalize ${
-                      active ? "text-white" : "text-gray-500 dark:text-gray-400"
-                    }`}
-                  >
-                    {mode}
-                  </Text>
-                </Pressable>
-              );
-            })}
+        <View className="px-5 pt-5">
+          {/* Count badge + List View / Packages, as on the web page header. */}
+          <View className="flex-row items-center gap-2 mb-4">
+            <View className="rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1">
+              <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+                {filtered.length} booking{filtered.length === 1 ? "" : "s"} found
+              </Text>
+            </View>
+            <View className="flex-1" />
             <Pressable
-              onPress={goToToday}
-              className="flex-1 py-2.5 rounded-lg items-center bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
+              onPress={() => router.push("/bookings/bookings" as never)}
+              className="flex-row items-center gap-1.5 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 active:opacity-70"
+              accessibilityRole="button"
             >
-              <Text className="text-sm font-semibold text-[#0644C7]">Today</Text>
+              <Feather name="list" size={14} color="#374151" />
+              <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                List View
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/packages/packages" as never)}
+              className="flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90"
+              accessibilityRole="button"
+            >
+              <Feather name="package" size={14} color="#FFFFFF" />
+              <Text className="text-xs font-semibold text-white">Packages</Text>
             </Pressable>
           </View>
 
-          {/* Filters + legend row */}
-          <View className="flex-row gap-3 mb-4">
-            <Pressable
-              onPress={() => setShowFilters(true)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="filter" size={16} color={PRIMARY} />
+          {/* Toolbar band — period nav + Today on top, view mode / legend /
+              filters below, mirroring the web calendar's control strip. */}
+          <View className="bg-white dark:bg-neutral-900 rounded-xl border border-gray-100 dark:border-neutral-800 p-3 mb-4 shadow-sm">
+            <View className="flex-row items-center gap-2">
+              <Pressable
+                onPress={() => step(-1)}
+                className="w-9 h-9 rounded-lg border border-gray-200 dark:border-neutral-700 items-center justify-center active:opacity-70"
+                accessibilityLabel="Previous period"
+              >
+                <Feather name="chevron-left" size={18} color={PRIMARY} />
+              </Pressable>
+              <Feather name="calendar" size={16} color={PRIMARY} />
               <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+                className="flex-1 text-base font-bold text-gray-900 dark:text-white"
                 numberOfLines={1}
               >
-                Filters
+                {headerLabel}
               </Text>
-              {activeFilterCount > 0 && (
-                <View className="bg-[#0644C7] rounded-full min-w-5 h-5 px-1.5 items-center justify-center">
-                  <Text className="text-[11px] font-bold text-white">
-                    {activeFilterCount}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-            <Pressable
-              onPress={() => setShowLegend(true)}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800"
-              accessibilityLabel="Package color legend"
-            >
-              <Feather name="info" size={16} color={PRIMARY} />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                Legend
-              </Text>
-            </Pressable>
-          </View>
+              <Pressable
+                onPress={() => step(1)}
+                className="w-9 h-9 rounded-lg border border-gray-200 dark:border-neutral-700 items-center justify-center active:opacity-70"
+                accessibilityLabel="Next period"
+              >
+                <Feather name="chevron-right" size={18} color={PRIMARY} />
+              </Pressable>
+              <Pressable
+                onPress={goToToday}
+                className="rounded-lg border border-gray-200 dark:border-neutral-700 px-3 py-2 active:opacity-70"
+              >
+                <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  Today
+                </Text>
+              </Pressable>
+            </View>
 
-          {/* Period navigation */}
-          <View className="flex-row items-center justify-between mb-5">
-            <Pressable
-              onPress={() => step(-1)}
-              className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
-            >
-              <Feather name="chevron-left" size={20} color="#6b7280" />
-            </Pressable>
-            <Text className="text-base font-bold text-gray-900 dark:text-white flex-1 text-center mx-2">
-              {headerLabel}
-            </Text>
-            <Pressable
-              onPress={() => step(1)}
-              className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
-            >
-              <Feather name="chevron-right" size={20} color="#6b7280" />
-            </Pressable>
+            <View className="flex-row items-center gap-2 mt-3">
+              <View className="flex-1 flex-row rounded-lg bg-gray-100 dark:bg-neutral-800 p-1">
+                {(["month", "week", "day"] as ViewMode[]).map((mode) => {
+                  const active = viewMode === mode;
+                  return (
+                    <Pressable
+                      key={mode}
+                      onPress={() => setViewMode(mode)}
+                      className={`flex-1 py-1.5 rounded-md items-center ${
+                        active ? "bg-[#0644C7]" : ""
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-semibold capitalize ${
+                          active
+                            ? "text-white"
+                            : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {mode}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Pressable
+                onPress={() => setShowLegend(true)}
+                className="w-9 h-9 rounded-lg border border-gray-200 dark:border-neutral-700 items-center justify-center active:opacity-70"
+                accessibilityLabel="Package color legend"
+              >
+                <Feather name="info" size={16} color="#374151" />
+              </Pressable>
+              <Pressable
+                onPress={() => setShowFilters(true)}
+                className="flex-row items-center gap-1.5 rounded-lg border border-gray-200 dark:border-neutral-700 px-3 py-2 active:opacity-70"
+              >
+                <Feather name="filter" size={14} color="#374151" />
+                <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  Filters
+                </Text>
+                {activeFilterCount > 0 && (
+                  <View className="bg-[#0644C7] rounded-full min-w-4 h-4 px-1 items-center justify-center">
+                    <Text className="text-[10px] font-bold text-white">
+                      {activeFilterCount}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            </View>
           </View>
 
           {/* Error */}
@@ -549,7 +611,11 @@ const BookingCalendar = () => {
                     {cells.slice(row * 7, row * 7 + 7).map((cell, col) => {
                       const group = cell.key ? byDate[cell.key] : undefined;
                       const dayBookings = group?.bookings ?? [];
+                      const extra = cell.key ? extrasByDate[cell.key] : undefined;
+                      const tickets = extra?.attractionTickets ?? 0;
+                      const registrations = extra?.eventRegistrations ?? 0;
                       const hasBookings = dayBookings.length > 0;
+                      const hasAny = hasBookings || tickets > 0 || registrations > 0;
                       const isToday = cell.key === todayKey;
 
                       return (
@@ -559,13 +625,15 @@ const BookingCalendar = () => {
                           onPress={() =>
                             hasBookings && cell.key && openDay(cell.key)
                           }
-                          style={{ minHeight: 80 }}
+                          style={{ minHeight: 92 }}
                           className={`flex-1 p-1.5 ${
                             cell.key === null
                               ? "bg-gray-50/50 dark:bg-neutral-900/50"
-                              : hasBookings
-                                ? "active:bg-blue-50 dark:active:bg-blue-900/20"
-                                : ""
+                              : isToday
+                                ? "bg-blue-50/60 dark:bg-blue-900/20"
+                                : hasBookings
+                                  ? "active:bg-blue-50 dark:active:bg-blue-900/20"
+                                  : ""
                           } ${col < 6 ? "border-r border-gray-100 dark:border-neutral-800" : ""} ${
                             row < cells.length / 7 - 1
                               ? "border-b border-gray-100 dark:border-neutral-800"
@@ -574,41 +642,42 @@ const BookingCalendar = () => {
                         >
                           {cell.key !== null && (
                             <>
-                              <View
-                                className={`w-8 h-8 rounded-full items-center justify-center mb-1 ${
-                                  isToday ? "bg-[#0644C7]" : ""
+                              <Text
+                                className={`text-xs mb-1 ${
+                                  isToday
+                                    ? "font-bold text-[#0644C7] dark:text-blue-300"
+                                    : hasAny
+                                      ? "font-semibold text-gray-900 dark:text-white"
+                                      : "text-gray-300 dark:text-neutral-600"
                                 }`}
                               >
-                                <Text
-                                  className={`text-sm font-semibold ${
-                                    isToday
-                                      ? "text-white"
-                                      : hasBookings
-                                        ? "text-gray-900 dark:text-white"
-                                        : "text-gray-300 dark:text-neutral-600"
-                                  }`}
-                                >
-                                  {cell.day}
-                                </Text>
-                              </View>
+                                {cell.day}
+                              </Text>
 
-                              {/* Up to 3 package-colored dots + overflow */}
-                              <View className="flex-row flex-wrap gap-1">
-                                {dayBookings.slice(0, 3).map((b) => (
-                                  <View
-                                    key={b.id}
-                                    style={{
-                                      backgroundColor: packageColor(b.packageName)
-                                        .bg,
-                                    }}
-                                    className="w-2 h-2 rounded-full"
-                                  />
-                                ))}
-                              </View>
-                              {dayBookings.length > 3 && (
-                                <Text className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
-                                  +{dayBookings.length - 3} more
-                                </Text>
+                              {/* Activity chips, in the web's order and colours. */}
+                              {hasBookings && (
+                                <DayChip
+                                  icon="package"
+                                  tint="#1E40AF"
+                                  className="bg-blue-100 dark:bg-blue-900/40"
+                                  label={`${dayBookings.length} Booking${dayBookings.length === 1 ? "" : "s"}`}
+                                />
+                              )}
+                              {tickets > 0 && (
+                                <DayChip
+                                  icon="tag"
+                                  tint="#6B21A8"
+                                  className="bg-purple-100 dark:bg-purple-900/40"
+                                  label={`${tickets} Attraction Ticket${tickets === 1 ? "" : "s"}`}
+                                />
+                              )}
+                              {registrations > 0 && (
+                                <DayChip
+                                  icon="star"
+                                  tint="#92400E"
+                                  className="bg-amber-100 dark:bg-amber-900/40"
+                                  label={`${registrations} Event Registration${registrations === 1 ? "" : "s"}`}
+                                />
                               )}
                             </>
                           )}

@@ -631,8 +631,11 @@ const Attractions = () => {
         }
       >
         <View className="px-5 mt-5">
+        
           {/* Global workspace location selector (company-admin only). */}
-          
+          <View className="mb-5">
+            <LocationWorkspaceSelector />
+          </View>
           
 
           {/* Overview intro */}

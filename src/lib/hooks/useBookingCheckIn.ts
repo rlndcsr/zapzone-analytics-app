@@ -108,6 +108,10 @@ export type UseBookingCheckIn = {
   deny: () => void;
   cancelReview: () => void;
   reset: () => void;
+  /** Turn the camera on (web "Start Camera"). */
+  startScanning: () => void;
+  /** Turn the camera off, back to the landing state (web "Stop Camera"). */
+  stopScanning: () => void;
 };
 
 /**
@@ -116,7 +120,8 @@ export type UseBookingCheckIn = {
  * services (same endpoints as the web) and reads auth from the session module.
  */
 export function useBookingCheckIn(): UseBookingCheckIn {
-  const [phase, setPhase] = useState<CheckInPhase>("scanning");
+  // Starts idle (camera off) behind the web's "Start Camera" button.
+  const [phase, setPhase] = useState<CheckInPhase>("idle");
   const [review, setReview] = useState<ScanBooking | null>(null);
   const [reviewDetail, setReviewDetail] = useState<BookingDetail | null>(null);
   const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
@@ -415,8 +420,22 @@ export function useBookingCheckIn(): UseBookingCheckIn {
   const cancelReview = useCallback(() => clearReview(), [clearReview]);
   const reset = useCallback(() => clearReview(), [clearReview]);
 
+  /** Turn the camera on (web "Start Camera"). */
+  const startScanning = useCallback(() => clearReview(), [clearReview]);
+
+  /** Turn the camera off, back to the landing state (web "Stop Camera"). */
+  const stopScanning = useCallback(() => {
+    setReview(null);
+    setReviewDetail(null);
+    setWaivers(null);
+    setResult(null);
+    setPhase("idle");
+  }, []);
+
   return {
     phase,
+    startScanning,
+    stopScanning,
     review,
     reviewDetail,
     waivers,

@@ -1,4 +1,6 @@
 import { Feather } from "@expo/vector-icons";
+import { scanFromURLAsync } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useState } from "react";
@@ -198,6 +200,20 @@ function PaymentBreakdown({ booking }: { booking: ScanBooking }) {
   );
 }
 
+/** The web's numbered "How to Use" steps, adapted for touch. */
+const HOW_TO_USE: { lead?: string; text: string }[] = [
+  { text: 'Tap "Start Camera" to begin scanning or upload a QR code image from your device' },
+  {
+    lead: "Mobile recommended:",
+    text: "Point your phone/tablet camera at the customer's QR code",
+  },
+  { text: "Review the booking details and verify customer information" },
+  { text: 'Tap "Approve" to check the booking in, or "Deny" to scan again' },
+  {
+    text: "Alternatively, search Manage Bookings to check a customer in manually",
+  },
+];
+
 export default function BookingCheckInScreen() {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -219,7 +235,42 @@ export default function BookingCheckInScreen() {
     deny,
     cancelReview,
     reset,
+    startScanning,
+    stopScanning,
   } = useBookingCheckIn();
+
+  // "Upload Image" — pick a photo of a booking QR and decode it, the mobile
+  // equivalent of the web's file input.
+  const [decoding, setDecoding] = useState(false);
+  const uploadImage = async () => {
+    if (decoding) return;
+    try {
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: false,
+        quality: 1,
+      });
+      if (picked.canceled) return;
+      const uri = picked.assets[0]?.uri;
+      if (!uri) return;
+
+      setDecoding(true);
+      const codes = await scanFromURLAsync(uri, ["qr"]);
+      const data = codes[0]?.data;
+      if (!data) {
+        Alert.alert(
+          "No QR code found",
+          "That image doesn't contain a readable QR code. Try a clearer photo of the booking.",
+        );
+        return;
+      }
+      handleScan(data);
+    } catch {
+      Alert.alert("Couldn't read the image", "Please try again.");
+    } finally {
+      setDecoding(false);
+    }
+  };
 
   // Add Payment sheet (opened from the verify footer).
   const [showPayment, setShowPayment] = useState(false);
@@ -250,8 +301,8 @@ export default function BookingCheckInScreen() {
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
-      <View className="w-full border-b border-gray-100 bg-white px-5 pb-5 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
-        <View className="flex-row items-center justify-between">
+      <View className="w-full border-b border-gray-100 bg-white px-5 pb-4 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
             className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
@@ -260,10 +311,18 @@ export default function BookingCheckInScreen() {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            Check-in Scanner
-          </Text>
-          <View style={{ width: 36 }} />
+          <View className="flex-1">
+            <View className="flex-row items-center gap-2">
+              <Feather name="camera" size={16} color={headerIcon} />
+              <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                Package Booking Check-In
+              </Text>
+            </View>
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
+              Scan QR codes or manually check in customers for their package
+              bookings
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -273,23 +332,76 @@ export default function BookingCheckInScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
         <View className="px-5">
-          {/* Intro */}
-          <View
-            className="mb-5 mt-6 rounded-2xl bg-white p-5 shadow-sm dark:bg-neutral-900"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Package Booking Check-In
-            </Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Scan QR codes or manually check in customers for their package
-              bookings
-            </Text>
-          </View>
+          {/* Tip banner — hidden once a booking is on screen (the web covers
+              the page with its verify modal there). */}
+          {(phase === "idle" || phase === "scanning") && (
+            <View className="mt-6 flex-row items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
+              <Feather name="smartphone" size={18} color="#2563EB" />
+              <Text className="flex-1 text-sm text-blue-800 dark:text-blue-300">
+                <Text className="font-bold">Tip:</Text> For best scanning
+                experience, hold the device steady with the QR code fully in
+                frame
+              </Text>
+            </View>
+          )}
+
+          {/* Landing state — camera off, matching the web's dashed panel */}
+          {phase === "idle" && (
+            <View
+              className="mb-5 mt-5 rounded-xl bg-white p-4 shadow-sm dark:bg-neutral-900"
+              style={CARD_SHADOW}
+            >
+              <View className="items-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-5 py-12 dark:border-neutral-700 dark:bg-neutral-800/40">
+                <Feather name="camera" size={56} color="#9CA3AF" />
+                <Text className="mt-4 text-base text-gray-600 dark:text-gray-300">
+                  Ready to scan QR codes
+                </Text>
+                <View className="mt-2 flex-row items-center gap-1.5">
+                  <Feather name="smartphone" size={14} color="#9CA3AF" />
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
+                    Works best on mobile devices
+                  </Text>
+                </View>
+
+                <View className="mt-6 flex-row gap-3 self-stretch">
+                  <Pressable
+                    onPress={startScanning}
+                    disabled={decoding}
+                    className={`flex-1 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] py-3.5 active:opacity-90 ${
+                      decoding ? "opacity-60" : ""
+                    }`}
+                    accessibilityRole="button"
+                  >
+                    <Feather name="camera" size={16} color="#FFFFFF" />
+                    <Text className="text-sm font-semibold text-white">
+                      Start Camera
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={uploadImage}
+                    disabled={decoding}
+                    className={`flex-1 flex-row items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-3.5 active:opacity-80 dark:border-neutral-700 dark:bg-neutral-900 ${
+                      decoding ? "opacity-60" : ""
+                    }`}
+                    accessibilityRole="button"
+                  >
+                    {decoding ? (
+                      <ActivityIndicator size="small" color={PRIMARY} />
+                    ) : (
+                      <Feather name="upload" size={16} color="#374151" />
+                    )}
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      Upload Image
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          )}
 
           {/* Scanner / processing */}
           {(phase === "scanning" || phase === "processing") && (
-            <View>
+            <View className="mt-5">
               <View className="relative">
                 <QrScannerView
                   active={phase === "scanning"}
@@ -307,6 +419,18 @@ export default function BookingCheckInScreen() {
               <Text className="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">
                 Point the camera at the booking’s QR code.
               </Text>
+
+              {phase === "scanning" && (
+                <Pressable
+                  onPress={stopScanning}
+                  className="mt-4 items-center justify-center self-center rounded-lg border border-red-200 bg-red-50 px-6 py-3 active:opacity-80 dark:border-red-900/40 dark:bg-red-900/20"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
+                    Stop Camera
+                  </Text>
+                </Pressable>
+              )}
             </View>
           )}
 
@@ -423,23 +547,27 @@ export default function BookingCheckInScreen() {
             </View>
           )}
 
-          {/* How to use — only while scanning */}
-          {phase === "scanning" && (
-            <View className="mt-5 rounded-2xl bg-[#0644C7]/5 p-4">
-              <Text className="mb-2 text-sm font-bold text-gray-900 dark:text-white">
-                How to use
-              </Text>
-              {[
-                "Ask the customer to open their booking QR code.",
-                "Hold the code steady inside the frame.",
-                "Review the booking details, then tap Check In.",
-              ].map((tip, i) => (
+          {/* How to Use — shown on the calm surfaces, as on the web page */}
+          {(phase === "idle" || phase === "scanning") && (
+            <View className="mt-1 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-900/20">
+              <View className="mb-3 flex-row items-center gap-2">
+                <Feather name="alert-circle" size={16} color="#1E3A8A" />
+                <Text className="text-base font-bold text-gray-900 dark:text-white">
+                  How to Use
+                </Text>
+              </View>
+              {HOW_TO_USE.map((step, i) => (
                 <View key={i} className="mb-1.5 flex-row">
-                  <Text className="mr-2 text-sm font-bold text-[#0644C7]">
+                  <Text className="mr-2 text-sm font-medium text-blue-800 dark:text-blue-300">
                     {i + 1}.
                   </Text>
-                  <Text className="flex-1 text-sm text-gray-600 dark:text-gray-300">
-                    {tip}
+                  <Text className="flex-1 text-sm text-blue-800 dark:text-blue-300">
+                    {step.lead ? (
+                      <Text className="font-bold text-gray-900 dark:text-white">
+                        {step.lead}{" "}
+                      </Text>
+                    ) : null}
+                    {step.text}
                   </Text>
                 </View>
               ))}

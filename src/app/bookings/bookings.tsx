@@ -9,6 +9,7 @@ import {
   type ComponentProps,
 } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   RefreshControl,
@@ -28,9 +29,20 @@ import {
 import { BookingsImportSheet } from "../../components/ui/BookingsImportSheet";
 import { BookingsMoreSheet } from "../../components/ui/BookingsMoreSheet";
 import { BookingsReportSheet } from "../../components/ui/BookingsReportSheet";
-import { BookingsTable } from "../../components/ui/BookingsTable";
+import {
+  BookingsTable,
+  allBookingColumnKeys,
+  bookingColumns,
+  defaultBookingColumnKeys,
+  type BookingRowHandlers,
+} from "../../components/ui/BookingsTable";
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
+import {
+  FilterPill,
+  PillDivider,
+  PillSegment,
+} from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { StatusBadge } from "../../components/ui/StatusBadge";
@@ -43,8 +55,12 @@ import { getCurrentUser, getToken } from "../../lib/session";
 import {
   bulkDeleteBookings,
   bulkSetBookingStatus,
+  deleteBooking,
   exportBookings,
+  fetchBookingDetail,
   fetchTrashedBookings,
+  updateBookingInternalNotes,
+  updateBookingStatus,
   type BookingStatus,
   type CalendarBooking,
   type TrashedBooking,
@@ -72,6 +88,15 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "Checked In", value: "checked-in" },
   { label: "Completed", value: "completed" },
   { label: "Cancelled", value: "cancelled" },
+];
+
+/** Statuses the row's status pill can switch between (web select options). */
+const ROW_STATUS_OPTIONS: BookingStatus[] = [
+  "pending",
+  "confirmed",
+  "checked-in",
+  "completed",
+  "cancelled",
 ];
 
 const DATE_OPTIONS: { label: string; value: DateFilter }[] = [
@@ -435,6 +460,22 @@ const Bookings = () => {
   // Edit / Payment). Mirrors the Packages / Attractions card-tap pattern.
   const [detailMode, setDetailMode] = useState<"hub" | "details">("details");
 
+  // Table column visibility (table layout only), starting at the web defaults.
+  const [showColumnsSheet, setShowColumnsSheet] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
+    defaultBookingColumnKeys(true),
+  );
+
+  // Row whose "Set Status" picker is open, and the Internal Notes editor.
+  const [statusBooking, setStatusBooking] = useState<CalendarBooking | null>(
+    null,
+  );
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [notesBooking, setNotesBooking] = useState<CalendarBooking | null>(null);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesSaving, setNotesSaving] = useState(false);
+
   // Auto-open a booking's detail sheet when navigated here from a
   // notification (e.g. /bookings/bookings?openId=123).
   const { openId } = useLocalSearchParams<{ openId?: string }>();
@@ -728,6 +769,70 @@ const Bookings = () => {
     DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
   const hasResults = filtered.length > 0;
 
+  /**
+   * Inline table row actions, mirroring the web's per-row buttons. `$` and the
+   * eye both open the detail sheet — the hub exposes Record Payment, "details"
+   * jumps straight to the full record. Edit routes to the edit screen; Delete
+   * confirms then soft-deletes to trash, like the actions sheet.
+   */
+  const rowHandlers: BookingRowHandlers = useMemo(
+    () => ({
+      onPayment: (booking) => {
+        setDetailMode("hub");
+        setSelectedBookingId(booking.id);
+      },
+      onNotes: (booking) => {
+        setNotesBooking(booking);
+        setNotesDraft("");
+        setNotesLoading(true);
+        const token = getToken();
+        if (!token) return;
+        // Internal notes aren't on the list row, so read the full record first.
+        fetchBookingDetail(token, booking.id)
+          .then((d) => setNotesDraft(d?.internalNotes ?? ""))
+          .catch(() => setNotesDraft(""))
+          .finally(() => setNotesLoading(false));
+      },
+      onStatusPress: (booking) => setStatusBooking(booking),
+      onView: (booking) => {
+        setDetailMode("details");
+        setSelectedBookingId(booking.id);
+      },
+      onEdit: (booking) => {
+        router.push(`/bookings/edit-booking?id=${booking.id}` as never);
+      },
+      onDelete: (booking) => {
+        Alert.alert(
+          "Delete booking",
+          `Delete booking #${booking.id} for ${booking.customerName}? It moves to trash and can be restored.`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: async () => {
+                const token = getToken();
+                if (!token) return;
+                try {
+                  await deleteBooking(token, booking.id);
+                  refetch();
+                } catch (err) {
+                  Alert.alert(
+                    "Delete failed",
+                    err instanceof Error
+                      ? err.message
+                      : "Could not delete the booking.",
+                  );
+                }
+              },
+            },
+          ],
+        );
+      },
+    }),
+    [refetch],
+  );
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
@@ -979,6 +1084,20 @@ const Bookings = () => {
                 <Feather name="calendar" size={15} color={c} />
               )}
             />
+            {/* Columns — table layout only (cards have no columns). */}
+            {viewMode === "table" && (
+              <>
+                <PillDivider />
+                <PillSegment
+                  label="Columns"
+                  active={showColumnsSheet}
+                  onPress={() => setShowColumnsSheet(true)}
+                  renderIcon={(c) => (
+                    <Feather name="columns" size={15} color={c} />
+                  )}
+                />
+              </>
+            )}
           </FilterPill>
 
           {/* List header + top pagination (same state as the bottom control) */}
@@ -1063,10 +1182,8 @@ const Bookings = () => {
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
-                    onRowPress={(booking) => {
-                      setDetailMode("details");
-                      setSelectedBookingId(booking.id);
-                    }}
+                    handlers={rowHandlers}
+                    visibleColumns={visibleColumns}
                   />
                 ) : (
                   paged.map((booking) => (
@@ -1176,6 +1293,164 @@ const Bookings = () => {
             );
           })}
         </ScrollView>
+      </BottomSheet>
+
+      {/* Toggle Columns — mirrors the web table toolbar's Columns dropdown. */}
+      <ColumnsSheet
+        visible={showColumnsSheet}
+        columns={bookingColumns(isCompanyAdmin)}
+        visibleKeys={visibleColumns}
+        onToggle={(key) =>
+          setVisibleColumns((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          })
+        }
+        onShowAll={() => setVisibleColumns(allBookingColumnKeys(true))}
+        onReset={() => setVisibleColumns(defaultBookingColumnKeys(true))}
+        onClose={() => setShowColumnsSheet(false)}
+      />
+
+      {/* Set Status — the mobile stand-in for the table cell's inline select. */}
+      <BottomSheet
+        visible={statusBooking !== null}
+        onClose={() => !statusSaving && setStatusBooking(null)}
+        title="Set Status"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {ROW_STATUS_OPTIONS.map((option) => {
+            const isCurrent = statusBooking?.status === option;
+            return (
+              <Pressable
+                key={option}
+                disabled={statusSaving}
+                onPress={async () => {
+                  if (!statusBooking || isCurrent) {
+                    setStatusBooking(null);
+                    return;
+                  }
+                  const token = getToken();
+                  if (!token) return;
+                  setStatusSaving(true);
+                  try {
+                    await updateBookingStatus(token, statusBooking.id, option);
+                    setStatusBooking(null);
+                    refetch();
+                  } catch (err) {
+                    Alert.alert(
+                      "Couldn't update status",
+                      err instanceof Error ? err.message : "Please try again.",
+                    );
+                  } finally {
+                    setStatusSaving(false);
+                  }
+                }}
+                className={`flex-row items-center justify-between px-4 py-3.5 rounded-lg mb-1 ${
+                  isCurrent ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium capitalize ${
+                    isCurrent
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
+                  }`}
+                >
+                  {option === "checked-in" ? "Checked In" : option}
+                </Text>
+                {isCurrent && <Feather name="check" size={16} color="#3B82F6" />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Internal Notes — staff-only, saved to the booking. */}
+      <BottomSheet
+        visible={notesBooking !== null}
+        onClose={() => !notesSaving && setNotesBooking(null)}
+        title="Internal Notes"
+      >
+        <View className="px-5 pb-6">
+          <View className="flex-row items-start justify-between gap-2 rounded-lg bg-amber-50 p-3 mb-4 dark:bg-amber-900/20">
+            <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300">
+              Booking: {notesBooking?.referenceNumber ?? `#${notesBooking?.id}`}
+              {notesBooking?.customerName ? ` — ${notesBooking.customerName}` : ""}
+            </Text>
+            <View className="rounded bg-amber-200 px-2 py-0.5 dark:bg-amber-900/50">
+              <Text className="text-[10px] font-semibold text-amber-800 dark:text-amber-300">
+                Staff Only
+              </Text>
+            </View>
+          </View>
+
+          <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+            Notes
+          </Text>
+          <View className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-3">
+            <TextInput
+              value={notesDraft}
+              onChangeText={setNotesDraft}
+              editable={!notesLoading && !notesSaving}
+              placeholder={
+                "Add internal notes about this booking...\n\nExamples:\n- Customer requested quiet area\n- VIP - provide extra attention\n- Follow up required after service"
+              }
+              placeholderTextColor="#9CA3AF"
+              multiline
+              textAlignVertical="top"
+              className="min-h-[132px] text-sm text-gray-900 dark:text-white"
+            />
+          </View>
+
+          <View className="flex-row justify-end gap-3 mt-4">
+            <Pressable
+              onPress={() => setNotesBooking(null)}
+              disabled={notesSaving}
+              className="h-11 items-center justify-center rounded-lg border border-gray-300 px-5 dark:border-neutral-700"
+            >
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Cancel
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                if (!notesBooking) return;
+                const token = getToken();
+                if (!token) return;
+                setNotesSaving(true);
+                try {
+                  await updateBookingInternalNotes(
+                    token,
+                    notesBooking.id,
+                    notesDraft.trim(),
+                  );
+                  setNotesBooking(null);
+                } catch (err) {
+                  Alert.alert(
+                    "Couldn't save notes",
+                    err instanceof Error ? err.message : "Please try again.",
+                  );
+                } finally {
+                  setNotesSaving(false);
+                }
+              }}
+              disabled={notesSaving || notesLoading}
+              className={`h-11 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] px-5 ${
+                notesSaving || notesLoading ? "opacity-60" : "active:opacity-90"
+              }`}
+            >
+              {notesSaving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text className="text-sm font-semibold text-white">
+                  Save Notes
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
       </BottomSheet>
 
       {/* Full booking detail (view / edit / status / payment) */}

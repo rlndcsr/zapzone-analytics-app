@@ -32,6 +32,12 @@ export type CalendarBooking = {
   paymentMethod: string | null;
   locationName: string;
   createdAt: string | null;
+  updatedAt: string | null;
+  /** Fields behind the table's optional columns (hidden by default). */
+  address: string | null;
+  guestOfHonorName: string | null;
+  customerNotes: string | null;
+  specialRequests: string | null;
 };
 
 export type BookingAddOn = {
@@ -101,6 +107,13 @@ type RawBooking = {
   guest_name?: string | null;
   guest_email?: string | null;
   guest_phone?: string | null;
+  updated_at?: string | null;
+  address?: string | null;
+  guest_address?: string | null;
+  guest_of_honor_name?: string | null;
+  customer_notes?: string | null;
+  notes?: string | null;
+  special_requests?: string | null;
   package?: { name?: string | null } | null;
   room?: { name?: string | null } | null;
   location?: { name?: string | null } | null;
@@ -233,6 +246,11 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     paymentMethod: raw.payment_method ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
+    updatedAt: raw.updated_at ?? null,
+    address: raw.address?.trim() || raw.guest_address?.trim() || null,
+    guestOfHonorName: raw.guest_of_honor_name?.trim() || null,
+    customerNotes: raw.customer_notes?.trim() || raw.notes?.trim() || null,
+    specialRequests: raw.special_requests?.trim() || null,
   };
 }
 
