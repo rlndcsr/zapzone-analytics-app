@@ -1353,7 +1353,14 @@ export function buildBookingsReportUrl(params: {
   return apiUrl(`/api/bookings/details-report?${qs.toString()}`);
 }
 
-/** POST /api/payments — record a manual in-store payment (no card tokenization). */
+/** Payment methods the Process Payment form offers (mirrors the web modal). */
+export type BookingPaymentMethod = "in-store" | "authorize.net";
+
+/**
+ * POST /api/payments — record a payment against a booking. `method` defaults to
+ * in-store; "authorize.net" marks the payment as taken on the terminal (no card
+ * tokenization happens here, same as the web modal's manual path).
+ */
 export async function recordBookingPayment(
   token: string,
   params: {
@@ -1361,6 +1368,8 @@ export async function recordBookingPayment(
     amount: number;
     locationId: number | null;
     customerId: number | null;
+    method?: BookingPaymentMethod;
+    notes?: string | null;
   },
 ): Promise<void> {
   await apiRequest(`/api/payments`, {
@@ -1372,9 +1381,9 @@ export async function recordBookingPayment(
       customer_id: params.customerId ?? undefined,
       location_id: params.locationId ?? undefined,
       amount: params.amount,
-      method: "in-store",
+      method: params.method ?? "in-store",
       status: "completed",
-      notes: "Recorded from analytics app",
+      notes: params.notes?.trim() || "Recorded from analytics app",
     },
   });
 }
@@ -1398,6 +1407,7 @@ export type BookablePackage = {
   id: number;
   name: string;
   category: string;
+  description: string;
   price: number;
   pricePerAdditional: number;
   minParticipants: number;
@@ -1453,6 +1463,7 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
     id: raw.id,
     name: raw.name?.trim() || `Package #${raw.id}`,
     category: raw.category?.trim() || "",
+    description: raw.description?.trim() || "",
     price: Number(raw.price ?? 0),
     pricePerAdditional: Number(raw.price_per_additional ?? 0),
     minParticipants: Number(raw.min_participants ?? 1) || 1,

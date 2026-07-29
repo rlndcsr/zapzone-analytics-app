@@ -48,12 +48,24 @@ export type FieldErrors = Record<string, string[]>;
 export class ApiError extends Error {
   readonly status: number;
   readonly fieldErrors?: FieldErrors;
+  /**
+   * The parsed error body, for endpoints that return structured detail beyond
+   * `message` / `errors` (e.g. the `conflicts` array a 409 location-change
+   * approval answers with).
+   */
+  readonly body?: unknown;
 
-  constructor(message: string, status: number, fieldErrors?: FieldErrors) {
+  constructor(
+    message: string,
+    status: number,
+    fieldErrors?: FieldErrors,
+    body?: unknown,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.fieldErrors = fieldErrors;
+    this.body = body;
   }
 }
 
@@ -141,7 +153,7 @@ export async function apiRequest<T>(
       typeof data?.message === "string"
         ? data.message
         : "Something went wrong. Please try again.";
-    throw new ApiError(message, response.status, data?.errors);
+    throw new ApiError(message, response.status, data?.errors, data);
   }
 
   // Successful requests extend the session (except before login).

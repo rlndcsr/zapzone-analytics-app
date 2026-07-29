@@ -638,42 +638,8 @@ const Attractions = () => {
           </View>
           
 
-          {/* Overview intro */}
-          <View className="flex-row items-stretch gap-3 mb-5">
-            {/* Space Schedule Card */}
-            <Pressable
-              onPress={() => router.push("/attractions/purchases")}
-              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-              style={{
-                shadowColor: "#424242",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.04,
-                shadowRadius: 6,
-                elevation: 1,
-              }}
-            >
-              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                <Feather name="shopping-bag" size={20} color="#0644C7" />
-              </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
-                Manage Purchases
-              </Text>
-              <Text
-                numberOfLines={2}
-                style={{ minHeight: 28 }}
-                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-              >
-                View customers attraction
-              </Text>
-              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                  View All
-                </Text>
-                <Feather name="chevron-right" size={16} color="#0644C7" />
-              </View>
-            </Pressable>
-
-            {/* Onsite Purchase Card */}
+          {/* Check-in card — the module's headline action, kept as a card. */}
+          <View className="flex-row items-stretch gap-3 mb-3">
             <Pressable
               onPress={() => router.push("/attractions/check-in")}
               className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
@@ -707,26 +673,40 @@ const Attractions = () => {
             </Pressable>
           </View>
 
-          {/* Secondary "More" + primary "New Attraction" on one row. "More"
-              stays subordinate (outlined, ~38% width); "New Attraction" is the
-              primary filled CTA taking the remaining width. */}
+          {/* New Attraction — the primary filled CTA, full width. */}
+          <Pressable
+            onPress={() => router.push("/attractions/create-attraction")}
+            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-3"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              New Attraction
+            </Text>
+          </Pressable>
+
+          {/* Manage Purchases + More — plain outlined buttons, matching the
+              Bookings module's secondary row. */}
           <View className="flex-row items-center gap-3 mb-5">
             <Pressable
+              onPress={() => router.push("/attractions/purchases")}
+              className="flex-1 flex-row items-center justify-center gap-1.5 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              <Feather name="shopping-bag" size={16} color="#6B7280" />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Manage Purchases
+              </Text>
+              <Feather name="chevron-right" size={16} color="#9CA3AF" />
+            </Pressable>
+            <Pressable
               onPress={() => setShowMoreSheet(true)}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+              className="flex-1 flex-row items-center justify-center gap-1.5 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
             >
               <Feather name="more-horizontal" size={16} color="#6B7280" />
               <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                 More
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/attractions/create-attraction")}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text className="text-sm font-semibold text-white">
-                New Attraction
               </Text>
             </Pressable>
           </View>

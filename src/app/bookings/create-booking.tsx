@@ -22,8 +22,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
-import { BottomSheet } from "../../components/ui/BottomSheet";
 import { InputField } from "../../components/ui/InputField";
+import {
+  MONTHS as CALENDAR_MONTHS,
+  addMonths,
+  buildMonthCells,
+  parseKey,
+  toKey,
+} from "../../lib/date/calendar";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -46,6 +52,11 @@ import {
   type PackageListItem,
 } from "../../services/bookingsService";
 import { searchCustomers, type CustomerHit } from "../../services/customersService";
+import {
+  validateGiftCardCode,
+  validatePromoCode,
+  type DiscountCodeResult,
+} from "../../services/discountCodesService";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -64,6 +75,8 @@ const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
+/** Unabbreviated month names for the inline calendar header ("July 2026"). */
+const FULL_MONTHS = CALENDAR_MONTHS;
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 
@@ -80,8 +93,39 @@ type PaymentMethod = "in-store" | "paylater";
 type PaymentType = "full" | "partial" | "custom";
 
 // Wizard steps (mirrors the web /bookings/create flow order).
-const STEP_LABELS = ["Package", "Date", "Add-ons", "Customer", "Payment"] as const;
+const STEP_LABELS = [
+  "Package",
+  "Date & Time",
+  "Add-ons",
+  "Customer",
+  "Payment",
+] as const;
+
+/** Heading shown at the top of each step's content (web wizard headings). */
+const STEP_HEADINGS = [
+  "Select a Package",
+  "Select Space, Date & Time",
+  "Add Attractions & Add-ons",
+  "Customer Information",
+  "Review & Payment",
+] as const;
 const TOTAL_STEPS = STEP_LABELS.length;
+
+/** Footer button copy per step, matching the web wizard's wording. */
+const NEXT_LABELS = [
+  "Continue to Date & Time",
+  "Continue to Attractions & Add-ons",
+  "Continue to Customer Details",
+  "Continue to Payment",
+  "",
+] as const;
+const BACK_LABELS = [
+  "",
+  "Back to Packages",
+  "Back to Date & Time",
+  "Back",
+  "Back",
+] as const;
 
 const Section = ({
   icon,
@@ -107,37 +151,6 @@ const FieldLabel = ({ children }: { children: React.ReactNode }) => (
   <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">{children}</Text>
 );
 
-const SelectRow = ({
-  icon,
-  value,
-  placeholder,
-  onPress,
-  error,
-  disabled,
-}: {
-  icon: IconName;
-  value: string | null;
-  placeholder: string;
-  onPress: () => void;
-  error?: boolean;
-  disabled?: boolean;
-}) => (
-  <Pressable
-    onPress={disabled ? undefined : onPress}
-    className={`h-14 flex-row items-center gap-3 rounded-lg border bg-white dark:bg-neutral-900 px-5 ${
-      error ? "border-red-400" : "border-gray-200 dark:border-neutral-700"
-    } ${disabled ? "opacity-50" : ""}`}
-  >
-    <Feather name={icon} size={18} color="#9CA3AF" />
-    <Text
-      className={`flex-1 text-base ${value ? "text-gray-900 dark:text-white" : "text-gray-400"}`}
-      numberOfLines={1}
-    >
-      {value ?? placeholder}
-    </Text>
-    <Feather name="chevron-down" size={18} color="#9CA3AF" />
-  </Pressable>
-);
 
 const Stepper = ({
   value,
@@ -175,51 +188,246 @@ const Stepper = ({
   </View>
 );
 
-/** Compact 5-dot progress indicator with the active step's label. */
-const StepIndicator = ({ step }: { step: number }) => (
-  <View className="px-5 py-3 bg-white dark:bg-neutral-900 border-b border-gray-100 dark:border-neutral-800">
-    <View className="flex-row items-center">
-      {STEP_LABELS.map((label, i) => {
-        const n = i + 1;
-        const done = n < step;
-        const active = n === step;
-        return (
-          <View key={label} className="flex-1 flex-row items-center">
-            <View
-              className={`w-7 h-7 rounded-full items-center justify-center ${
-                active
-                  ? "bg-[#0644C7]"
-                  : done
-                    ? "bg-[#0644C7]/20"
-                    : "bg-gray-100 dark:bg-neutral-800"
-              }`}
-            >
-              {done ? (
-                <Feather name="check" size={14} color={PRIMARY} />
-              ) : (
-                <Text
-                  className={`text-xs font-bold ${
-                    active ? "text-white" : "text-gray-400 dark:text-gray-500"
+/** Label / value line in the step-5 review blocks (web's definition rows). */
+const ReviewRow = ({ label, value }: { label: string; value: string }) => (
+  <View className="flex-row items-start justify-between py-1.5">
+    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">{label}</Text>
+    <Text
+      numberOfLines={2}
+      className="flex-1 text-right text-sm font-medium text-gray-900 dark:text-white"
+    >
+      {value}
+    </Text>
+  </View>
+);
+
+const LEGEND_SWATCH = "w-3 h-3 rounded-sm";
+
+/**
+ * One add-on / attraction row — thumbnail placeholder, name, price, then an
+ * "Add" button that becomes a ± stepper once any are added (the web shows Add
+ * and moves the item into the summary; a stepper is the touch equivalent).
+ */
+const AddOnRow = ({
+  name,
+  price,
+  qty,
+  onAdd,
+  onChange,
+}: {
+  name: string;
+  price: string;
+  qty: number;
+  onAdd: () => void;
+  onChange: (n: number) => void;
+}) => (
+  <View className="mb-2 flex-row items-center gap-3 rounded-lg border border-gray-200 p-3 dark:border-neutral-700">
+    <View className="h-12 w-12 items-center justify-center rounded-md bg-gray-100 dark:bg-neutral-800">
+      <Text className="text-[9px] text-gray-400">No Image</Text>
+    </View>
+    <View className="flex-1">
+      <Text
+        numberOfLines={2}
+        className="text-sm font-medium text-gray-900 dark:text-white"
+      >
+        {name}
+      </Text>
+      <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-400">
+        {price}
+      </Text>
+    </View>
+    {qty > 0 ? (
+      <Stepper value={qty} onChange={onChange} />
+    ) : (
+      <Pressable
+        onPress={onAdd}
+        className="rounded-md bg-[#0644C7] px-4 py-2 active:opacity-90"
+        accessibilityRole="button"
+        accessibilityLabel={`Add ${name}`}
+      >
+        <Text className="text-xs font-semibold text-white">Add</Text>
+      </Pressable>
+    )}
+  </View>
+);
+
+/**
+ * Inline month grid for picking the visit date — the web's "Select Date" card.
+ * Today onward is selectable; earlier days render as unavailable. Rows are built
+ * a week at a time with `flex-1` cells so the seven columns always align.
+ */
+const MonthCalendar = ({
+  value,
+  onSelect,
+}: {
+  value: string;
+  onSelect: (dateKey: string) => void;
+}) => {
+  const todayKey = useMemo(() => toKey(new Date()), []);
+  const [viewMonth, setViewMonth] = useState<Date>(() => {
+    const base = parseKey(value) ?? new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
+  });
+
+  const weeks = useMemo(() => {
+    const cells = buildMonthCells(viewMonth);
+    while (cells.length % 7 !== 0) cells.push(null);
+    const rows: (string | null)[][] = [];
+    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+    return rows;
+  }, [viewMonth]);
+
+  const minMonth = useMemo(() => {
+    const d = parseKey(todayKey) ?? new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }, [todayKey]);
+  const canGoPrev =
+    viewMonth.getFullYear() > minMonth.getFullYear() ||
+    (viewMonth.getFullYear() === minMonth.getFullYear() &&
+      viewMonth.getMonth() > minMonth.getMonth());
+
+  return (
+    <View className="rounded-lg border border-gray-200 dark:border-neutral-700 p-3">
+      {/* Month navigation */}
+      <View className="mb-2.5 flex-row items-center justify-between">
+        <Pressable
+          onPress={() => canGoPrev && setViewMonth((m) => addMonths(m, -1))}
+          disabled={!canGoPrev}
+          hitSlop={8}
+          accessibilityLabel="Previous month"
+          className="w-8 h-8 items-center justify-center rounded-lg active:bg-gray-100 dark:active:bg-neutral-800"
+        >
+          <Feather
+            name="chevron-left"
+            size={18}
+            color={canGoPrev ? "#4B5563" : "#D1D5DB"}
+          />
+        </Pressable>
+        <Text className="text-sm font-bold text-gray-900 dark:text-white">
+          {`${FULL_MONTHS[viewMonth.getMonth()]} ${viewMonth.getFullYear()}`}
+        </Text>
+        <Pressable
+          onPress={() => setViewMonth((m) => addMonths(m, 1))}
+          hitSlop={8}
+          accessibilityLabel="Next month"
+          className="w-8 h-8 items-center justify-center rounded-lg active:bg-gray-100 dark:active:bg-neutral-800"
+        >
+          <Feather name="chevron-right" size={18} color="#4B5563" />
+        </Pressable>
+      </View>
+
+      {/* Weekday header */}
+      <View className="flex-row mb-1">
+        {WEEKDAYS.map((w) => (
+          <View key={w} className="flex-1 items-center py-1">
+            <Text className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+              {w}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Day grid */}
+      {weeks.map((week, wi) => (
+        <View key={`w${wi}`} className="flex-row">
+          {week.map((key, di) => {
+            if (!key) {
+              return <View key={`b${wi}-${di}`} className="flex-1 h-12" />;
+            }
+            const selected = key === value;
+            const unavailable = key < todayKey;
+            return (
+              <View key={key} className="flex-1 h-12 p-0.5">
+                <Pressable
+                  onPress={() => !unavailable && onSelect(key)}
+                  disabled={unavailable}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected, disabled: unavailable }}
+                  accessibilityLabel={key}
+                  className={`flex-1 items-center justify-center rounded-lg ${
+                    selected
+                      ? "bg-[#0644C7]"
+                      : unavailable
+                        ? ""
+                        : "bg-blue-50 dark:bg-blue-900/20"
                   }`}
                 >
-                  {n}
-                </Text>
-              )}
-            </View>
-            {n < TOTAL_STEPS && (
-              <View
-                className={`flex-1 h-0.5 mx-1 ${
-                  done ? "bg-[#0644C7]/30" : "bg-gray-100 dark:bg-neutral-800"
-                }`}
-              />
-            )}
-          </View>
-        );
-      })}
+                  <Text
+                    className={`text-xs ${
+                      selected
+                        ? "font-bold text-white"
+                        : unavailable
+                          ? "text-gray-300 dark:text-neutral-700"
+                          : "font-medium text-[#0644C7] dark:text-blue-300"
+                    }`}
+                  >
+                    {Number(key.substring(8, 10))}
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+      ))}
+
+      {/* Legend */}
+      <View className="mt-2.5 flex-row items-center justify-center gap-4 border-t border-gray-100 pt-2 dark:border-neutral-800">
+        <View className="flex-row items-center gap-1.5">
+          <View className={`${LEGEND_SWATCH} bg-blue-50 dark:bg-blue-900/20`} />
+          <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+            Available
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-1.5">
+          <View className={`${LEGEND_SWATCH} bg-[#0644C7]`} />
+          <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+            Selected
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-1.5">
+          <View className={`${LEGEND_SWATCH} bg-gray-100 dark:bg-neutral-800`} />
+          <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+            Unavailable
+          </Text>
+        </View>
+      </View>
     </View>
-    <Text className="mt-2 text-xs font-semibold text-[#0644C7]">
-      Step {step} of {TOTAL_STEPS} · {STEP_LABELS[step - 1]}
-    </Text>
+  );
+};
+
+/**
+ * Segmented progress bar with a label under each segment — the web wizard's
+ * header. Completed and current steps fill blue; the label of the current step
+ * is highlighted.
+ */
+const StepIndicator = ({ step }: { step: number }) => (
+  <View className="px-3 pt-3 pb-2 bg-white dark:bg-neutral-900 border-b border-gray-100 dark:border-neutral-800">
+    <View className="flex-row gap-1.5">
+      {STEP_LABELS.map((label, i) => (
+        <View
+          key={label}
+          className={`flex-1 h-1.5 rounded-full ${
+            i + 1 <= step ? "bg-[#0644C7]" : "bg-gray-200 dark:bg-neutral-700"
+          }`}
+        />
+      ))}
+    </View>
+    <View className="mt-1.5 flex-row gap-1.5">
+      {STEP_LABELS.map((label, i) => (
+        <View key={label} className="flex-1 items-center">
+          <Text
+            numberOfLines={1}
+            className={`text-[10px] ${
+              i + 1 === step
+                ? "font-bold text-[#0644C7] dark:text-blue-300"
+                : "text-gray-400 dark:text-gray-500"
+            }`}
+          >
+            {label}
+          </Text>
+        </View>
+      ))}
+    </View>
   </View>
 );
 
@@ -332,16 +540,36 @@ const CreateBookingScreen = () => {
   const [paymentType, setPaymentType] = useState<PaymentType>("full");
   const [customAmount, setCustomAmount] = useState("");
   const [sendEmail, setSendEmail] = useState(true);
+  /** Staff notification — the web's second checkbox on the payment step. */
+  const [sendStaffEmail, setSendStaffEmail] = useState(true);
 
   // Customer (email search-as-you-type).
   const [customerEmail, setCustomerEmail] = useState("");
-  const [customerName, setCustomerName] = useState("");
+  // First/last are the entry fields (matching the web); `customerName` stays the
+  // single value the create payload and summary use.
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const customerName = `${firstName.trim()} ${lastName.trim()}`.trim();
   const [customerPhone, setCustomerPhone] = useState("");
+
+  // Guest address (all optional) — posted as the guest_* fields on create.
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [stateField, setStateField] = useState("");
+  const [zip, setZip] = useState("");
+  const [country, setCountry] = useState("");
+
+  // Discount codes — validated against the running subtotal, redeemed by the
+  // backend when the booking is created.
+  const [giftCode, setGiftCode] = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [giftResult, setGiftResult] = useState<DiscountCodeResult | null>(null);
+  const [promoResult, setPromoResult] = useState<DiscountCodeResult | null>(null);
+  const [codeBusy, setCodeBusy] = useState<"gift" | "promo" | null>(null);
   const [foundCustomers, setFoundCustomers] = useState<CustomerHit[]>([]);
   const [showCustomerList, setShowCustomerList] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
-  const [sheet, setSheet] = useState<null | "date" | "time">(null);
   const submitLockRef = useRef(false);
 
   // Pricing (fees + special pricing), fetched only on the Payment step.
@@ -367,7 +595,8 @@ const CreateBookingScreen = () => {
         setShowCustomerList(hits.length > 0);
         const exact = hits.find((c) => c.email.toLowerCase() === email.toLowerCase());
         if (exact) {
-          setCustomerName(`${exact.firstName} ${exact.lastName}`.trim());
+          setFirstName(exact.firstName);
+          setLastName(exact.lastName);
           if (exact.phone) setCustomerPhone(exact.phone);
         }
       } catch {
@@ -382,9 +611,47 @@ const CreateBookingScreen = () => {
 
   const selectCustomer = (c: CustomerHit) => {
     setCustomerEmail(c.email);
-    setCustomerName(`${c.firstName} ${c.lastName}`.trim());
+    setFirstName(c.firstName);
+    setLastName(c.lastName);
     setCustomerPhone(c.phone ?? "");
     setShowCustomerList(false);
+  };
+
+  /**
+   * Quote a gift-card or promo code against the current subtotal. The endpoints
+   * only validate — the backend redeems on booking creation — so a success here
+   * just shows what the code is worth.
+   */
+  const applyCode = async (kind: "gift" | "promo") => {
+    const code = (kind === "gift" ? giftCode : promoCode).trim();
+    if (!code) return;
+    const token = getToken();
+    if (!token) return;
+    setCodeBusy(kind);
+    try {
+      const validate =
+        kind === "gift" ? validateGiftCardCode : validatePromoCode;
+      const result = await validate({
+        token,
+        code,
+        subtotal,
+        locationId: effectiveLocationId,
+      });
+      if (kind === "gift") setGiftResult(result);
+      else setPromoResult(result);
+    } catch (err) {
+      const failed: DiscountCodeResult = {
+        valid: false,
+        discountAmount: 0,
+        message:
+          err instanceof Error ? err.message : "Could not check that code.",
+        balance: null,
+      };
+      if (kind === "gift") setGiftResult(failed);
+      else setPromoResult(failed);
+    } finally {
+      setCodeBusy(null);
+    }
   };
 
   // Hydrate the full package on selection (relations needed for Steps 3 & 5).
@@ -404,7 +671,6 @@ const CreateBookingScreen = () => {
       setGohName("");
       setGohAge("");
       setGohGender("");
-      setSheet(null);
     } catch {
       Alert.alert("Couldn't load package", "Please try selecting it again.");
     } finally {
@@ -526,7 +792,12 @@ const CreateBookingScreen = () => {
 
   // Submitted total = base+fees (web); discount is sent separately.
   const submitTotal = feeBreakdown ? feeBreakdown.total : subtotal;
-  const discount = special?.has_special_pricing ? special.total_discount : 0;
+  // Special pricing plus whatever a validated gift card / promo code takes off.
+  const codeDiscount =
+    (giftResult?.valid ? giftResult.discountAmount : 0) +
+    (promoResult?.valid ? promoResult.discountAmount : 0);
+  const discount =
+    (special?.has_special_pricing ? special.total_discount : 0) + codeDiscount;
   const displayTotal = Math.max(0, submitTotal - discount);
 
   const partialDeposit = useMemo(() => {
@@ -566,9 +837,6 @@ const CreateBookingScreen = () => {
   }, []);
   const dateLabel = dateOptions.find((d) => d.value === scheduledDate)?.label ?? null;
 
-  const slotLabel = slot
-    ? `${formatTime(slot.startTime)}${slot.roomName ? ` · ${slot.roomName}` : ""}`
-    : null;
 
   const genderOptions: { label: string; value: "male" | "female" | "other" }[] = [
     { label: "Male", value: "male" },
@@ -582,15 +850,17 @@ const CreateBookingScreen = () => {
       case 1:
         return !!pkg;
       case 2:
-        return !!scheduledDate && !!slot;
+        // Date + participants are required; a slot only when the package has
+        // any (otherwise the backend auto-assigns the space, as on the web).
+        return !!scheduledDate && participants >= 1 && (slots.length === 0 || !!slot);
       case 3:
-        return participants >= 1;
+        return true;
       case 4:
         return customerName.trim().length > 0;
       default:
         return true;
     }
-  }, [step, pkg, scheduledDate, slot, participants, customerName]);
+  }, [step, pkg, scheduledDate, slot, slots.length, participants, customerName]);
 
   const goNext = () => {
     if (!stepValid) return;
@@ -645,6 +915,11 @@ const CreateBookingScreen = () => {
         guest_name: customerName.trim(),
         guest_email: customerEmail.trim() || undefined,
         guest_phone: customerPhone.trim() || undefined,
+        guest_address: address.trim() || undefined,
+        guest_city: city.trim() || undefined,
+        guest_state: stateField.trim() || undefined,
+        guest_zip: zip.trim() || undefined,
+        guest_country: country.trim() || undefined,
         location_id: effectiveLocationId,
         package_id: pkg.id,
         room_id: slot.roomId ?? undefined,
@@ -671,7 +946,7 @@ const CreateBookingScreen = () => {
           pkg.hasGuestOfHonor && gohAge.trim() ? Number(gohAge) : undefined,
         guest_of_honor_gender:
           pkg.hasGuestOfHonor && gohGender ? gohGender : undefined,
-        sent_email_to_staff: sendEmail,
+        sent_email_to_staff: sendStaffEmail,
         applied_fees: buildAppliedFees(feeBreakdown).length
           ? buildAppliedFees(feeBreakdown)
           : null,
@@ -742,6 +1017,11 @@ const CreateBookingScreen = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 24 }}
         >
+          {/* Step heading, matching the web wizard's per-step <h2>. */}
+          <Text className="mb-4 text-xl font-bold text-gray-900 dark:text-white">
+            {STEP_HEADINGS[step - 1]}
+          </Text>
+
           {/* ============================ STEP 1 — PACKAGE ==================== */}
           {step === 1 && (
             <>
@@ -788,13 +1068,13 @@ const CreateBookingScreen = () => {
 
               {/* Package list — rendered IN-PAGE (like the web renderStep1), not
                   in a Modal/BottomSheet, with an inline search box. */}
-              <Section icon="package" title="Select Package">
-                <View className="flex-row items-center gap-2 bg-gray-50 dark:bg-neutral-800 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-700 mb-3">
+              <Section icon="package" title="Packages">
+                <View className="h-12 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 rounded-lg border border-gray-300 dark:border-neutral-700 mb-4">
                   <Feather name="search" size={16} color="#9CA3AF" />
                   <TextInput
                     value={packageSearch}
                     onChangeText={setPackageSearch}
-                    placeholder="Search packages..."
+                    placeholder="Search packages by name, category, or description..."
                     placeholderTextColor="#9CA3AF"
                     className="flex-1 text-sm text-gray-900 dark:text-white"
                   />
@@ -818,37 +1098,73 @@ const CreateBookingScreen = () => {
                           key={p.id}
                           onPress={() => pickPackage(p)}
                           disabled={pickingId != null}
-                          className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-2 border ${
+                          className={`rounded-lg border p-4 mb-3 ${
                             active
                               ? "border-[#0644C7] bg-[#0644C7]/5"
-                              : "border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900"
+                              : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
                           }`}
                         >
-                          <View className="flex-1 mr-2">
+                          {/* Name + price, price right-aligned with its unit */}
+                          <View className="flex-row items-start justify-between gap-3">
                             <Text
-                              className="text-base font-medium text-gray-900 dark:text-white"
-                              numberOfLines={1}
+                              className="flex-1 text-base font-bold text-gray-900 dark:text-white"
+                              numberOfLines={2}
                             >
                               {p.name}
                             </Text>
-                            <Text
-                              className="text-xs text-gray-500 dark:text-gray-400"
-                              numberOfLines={1}
-                            >
-                              {p.category ? `${p.category} · ` : ""}
-                              {p.duration} {p.durationUnit}
-                            </Text>
+                            <View className="items-end">
+                              <View className="flex-row items-start">
+                                <Text className="text-[10px] text-gray-400 mt-1">$</Text>
+                                <Text className="text-2xl font-bold text-[#0644C7] dark:text-blue-400">
+                                  {p.price % 1 === 0 ? p.price : p.price.toFixed(2)}
+                                </Text>
+                              </View>
+                              <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+                                per booking
+                              </Text>
+                            </View>
                           </View>
-                          <View className="flex-row items-center gap-2">
-                            <Text className="text-sm font-bold text-[#0644C7]">
-                              {money(p.price)}
+
+                          {!!p.description && (
+                            <Text
+                              numberOfLines={3}
+                              className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300"
+                            >
+                              {p.description}
                             </Text>
-                            {picking ? (
+                          )}
+
+                          {/* Chips: category · duration · capacity */}
+                          <View className="mt-3 flex-row flex-wrap items-center gap-2">
+                            {!!p.category && (
+                              <View className="flex-row items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
+                                <Feather name="tag" size={10} color="#6B7280" />
+                                <Text className="text-[11px] text-gray-700 dark:text-gray-200">
+                                  {p.category}
+                                </Text>
+                              </View>
+                            )}
+                            {p.duration > 0 && (
+                              <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
+                                <Feather name="clock" size={10} color="#9333EA" />
+                                <Text className="text-[11px] text-purple-700 dark:text-purple-300">
+                                  {p.duration} {p.durationUnit}
+                                </Text>
+                              </View>
+                            )}
+                            {p.maxParticipants > 0 && (
+                              <View className="flex-row items-center gap-1 rounded border border-green-200 px-2 py-1 dark:border-green-900/50">
+                                <Feather name="users" size={10} color="#16A34A" />
+                                <Text className="text-[11px] text-green-700 dark:text-green-300">
+                                  Up to {p.maxParticipants}
+                                </Text>
+                              </View>
+                            )}
+                            {picking && (
                               <ActivityIndicator size="small" color={PRIMARY} />
-                            ) : (
-                              active && (
-                                <Feather name="check-circle" size={18} color={PRIMARY} />
-                              )
+                            )}
+                            {active && !picking && (
+                              <Feather name="check-circle" size={16} color={PRIMARY} />
                             )}
                           </View>
                         </Pressable>
@@ -878,104 +1194,182 @@ const CreateBookingScreen = () => {
 
           {/* ============================ STEP 2 — DATE & TIME =============== */}
           {step === 2 && pkg && (
-            <Section icon="calendar" title="Date & Time">
-              <FieldLabel>Date *</FieldLabel>
-              <SelectRow
-                icon="calendar"
-                value={dateLabel}
-                placeholder="Select a date"
-                onPress={() => setSheet("date")}
+            <Section icon="calendar" title="Select Date">
+              {/* Inline month grid — past days are unavailable, today onward
+                  selectable, matching the web's Select Date card. */}
+              <MonthCalendar
+                value={scheduledDate}
+                onSelect={(key) => {
+                  setScheduledDate(key);
+                  setSlot(null);
+                }}
               />
-              <View className="h-3" />
-              <FieldLabel>Time &amp; Space *</FieldLabel>
-              <SelectRow
-                icon="clock"
-                value={slotLabel}
-                placeholder={
-                  !scheduledDate
-                    ? "Pick a date first"
-                    : loadingSlots
-                      ? "Loading availability…"
-                      : slots.length === 0
-                        ? "No availability"
-                        : "Select a time slot"
-                }
-                onPress={() => setSheet("time")}
-                disabled={!scheduledDate || loadingSlots || slots.length === 0}
-              />
-              {!!scheduledDate && !loadingSlots && slots.length === 0 && (
-                <Text className="mt-2 text-xs text-amber-600">
-                  No available time slots for this date. Try another date.
-                </Text>
-              )}
-            </Section>
-          )}
 
-          {/* ============================ STEP 3 — ADD-ONS & DETAILS ======== */}
-          {step === 3 && pkg && (
-            <>
-              <Section icon="users" title="Participants">
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-1 mr-3">
-                    <Text className="text-sm font-medium text-gray-900 dark:text-white">Guests</Text>
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {pkg.minParticipants > 0 ? `Included: ${pkg.minParticipants}` : ""}
-                      {pkg.maxParticipants > 0 ? ` · Max ${pkg.maxParticipants}` : ""}
-                    </Text>
-                  </View>
+              {/* Participants — moved here from the add-ons step so the web's
+                  "Number of Participants" sits with date + time. */}
+              <View className="mt-5 border-t border-gray-100 pt-4 dark:border-neutral-800">
+                <View className="mb-2 flex-row items-center gap-1.5">
+                  <Feather name="users" size={14} color="#6B7280" />
+                  <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                    Number of Participants
+                  </Text>
+                </View>
+                <View className="flex-row items-center gap-3">
                   <Stepper
                     value={participants}
                     onChange={setParticipants}
                     min={1}
                     max={pkg.maxParticipants > 0 ? pkg.maxParticipants : 99}
                   />
+                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    {pkg.minParticipants > 0
+                      ? `${pkg.minParticipants} included`
+                      : ""}
+                    {pkg.minParticipants > 0 && pkg.maxParticipants > 0 ? " • " : ""}
+                    {pkg.maxParticipants > 0 ? `Max: ${pkg.maxParticipants}` : ""}
+                  </Text>
                 </View>
-              </Section>
+              </View>
 
+              {/* Time slots — radio cards showing start and end, as on the web. */}
+              <View className="mt-5 border-t border-gray-100 pt-4 dark:border-neutral-800">
+                <View className="mb-2 flex-row items-center gap-1.5">
+                  <Feather name="clock" size={14} color="#6B7280" />
+                  <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                    Select Time Slot
+                  </Text>
+                </View>
+
+                {!scheduledDate ? (
+                  <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
+                    <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
+                      Pick a date to see available times.
+                    </Text>
+                  </View>
+                ) : loadingSlots ? (
+                  <View className="py-6 items-center">
+                    <ActivityIndicator color={PRIMARY} />
+                  </View>
+                ) : slots.length === 0 ? (
+                  <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
+                    <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
+                      No available time slots for the selected date. Space will be
+                      auto-assigned.
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="flex-row flex-wrap -m-1">
+                    {slots.map((s) => {
+                      const active =
+                        slot?.startTime === s.startTime &&
+                        slot?.roomId === s.roomId;
+                      return (
+                        <View
+                          key={`${s.startTime}-${s.roomId ?? "auto"}`}
+                          style={{ width: "50%" }}
+                          className="p-1"
+                        >
+                          <Pressable
+                            onPress={() => setSlot(s)}
+                            accessibilityRole="radio"
+                            accessibilityState={{ selected: active }}
+                            className={`flex-row items-start gap-2 rounded-lg border p-3 ${
+                              active
+                                ? "border-[#0644C7] bg-[#0644C7]/5"
+                                : "border-gray-200 dark:border-neutral-700"
+                            }`}
+                          >
+                            <Feather
+                              name={active ? "check-circle" : "circle"}
+                              size={14}
+                              color={active ? PRIMARY : "#9CA3AF"}
+                            />
+                            <View className="flex-1">
+                              <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                                {formatTime(s.startTime)}
+                              </Text>
+                              <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+                                to {formatTime(s.endTime)}
+                              </Text>
+                              {!!s.roomName && (
+                                <Text
+                                  numberOfLines={1}
+                                  className="text-[11px] text-[#0644C7] dark:text-blue-300"
+                                >
+                                  {s.roomName}
+                                </Text>
+                              )}
+                            </View>
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+
+              {/* Session duration — the web's footer row on this card. */}
+              <View className="mt-4 flex-row items-center justify-between rounded-lg bg-gray-50 px-4 py-3 dark:bg-neutral-800/50">
+                <View className="flex-row items-center gap-1.5">
+                  <Feather name="clock" size={14} color="#6B7280" />
+                  <Text className="text-sm text-gray-600 dark:text-gray-300">
+                    Session Duration
+                  </Text>
+                </View>
+                <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {pkg.duration} {pkg.durationUnit}
+                </Text>
+              </View>
+            </Section>
+          )}
+
+          {/* ============================ STEP 3 — ADD-ONS & DETAILS ======== */}
+          {step === 3 && pkg && (
+            <>
               {pkg.addOns.length > 0 && (
-                <Section icon="plus-circle" title="Add-ons">
+                <Section icon="plus-circle" title="Package Add-ons">
                   {pkg.addOns.map((a) => (
-                    <View
+                    <AddOnRow
                       key={a.id}
-                      className="flex-row items-center justify-between py-2 border-b border-gray-100 dark:border-neutral-800 last:border-0"
-                    >
-                      <View className="flex-1 mr-3">
-                        <Text className="text-sm font-medium text-gray-900 dark:text-white" numberOfLines={1}>
-                          {a.name}
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">{money(a.price)}</Text>
-                      </View>
-                      <Stepper
-                        value={addonQty[a.id] ?? 0}
-                        onChange={(n) => setAddonQty((p) => ({ ...p, [a.id]: n }))}
-                      />
-                    </View>
+                      name={a.name}
+                      price={money(a.price)}
+                      qty={addonQty[a.id] ?? 0}
+                      onAdd={() =>
+                        setAddonQty((p) => ({ ...p, [a.id]: (p[a.id] ?? 0) + 1 }))
+                      }
+                      onChange={(n) => setAddonQty((p) => ({ ...p, [a.id]: n }))}
+                    />
                   ))}
                 </Section>
               )}
 
               {pkg.attractions.length > 0 && (
-                <Section icon="zap" title="Additional Attractions">
+                <Section icon="zap" title="Attractions">
                   {pkg.attractions.map((a) => (
-                    <View
+                    <AddOnRow
                       key={a.id}
-                      className="flex-row items-center justify-between py-2 border-b border-gray-100 dark:border-neutral-800 last:border-0"
-                    >
-                      <View className="flex-1 mr-3">
-                        <Text className="text-sm font-medium text-gray-900 dark:text-white" numberOfLines={1}>
-                          {a.name}
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {money(a.price)}
-                          {a.pricingType === "per_person" ? " /person" : ""}
-                        </Text>
-                      </View>
-                      <Stepper
-                        value={attractionQty[a.id] ?? 0}
-                        onChange={(n) => setAttractionQty((p) => ({ ...p, [a.id]: n }))}
-                      />
-                    </View>
+                      name={a.name}
+                      price={`${money(a.price)}${a.pricingType === "per_person" ? " /person" : ""}`}
+                      qty={attractionQty[a.id] ?? 0}
+                      onAdd={() =>
+                        setAttractionQty((p) => ({
+                          ...p,
+                          [a.id]: (p[a.id] ?? 0) + 1,
+                        }))
+                      }
+                      onChange={(n) =>
+                        setAttractionQty((p) => ({ ...p, [a.id]: n }))
+                      }
+                    />
                   ))}
+                </Section>
+              )}
+
+              {pkg.addOns.length === 0 && pkg.attractions.length === 0 && (
+                <Section icon="plus-circle" title="Package Add-ons">
+                  <Text className="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+                    No add-ons or attractions available for this package.
+                  </Text>
                 </Section>
               )}
 
@@ -1041,17 +1435,20 @@ const CreateBookingScreen = () => {
           {/* ============================ STEP 4 — CUSTOMER ================= */}
           {step === 4 && (
             <>
-              <Section icon="user" title="Customer">
+              <Section icon="user" title="Contact Details">
                 <InputField
-                  label="Email"
+                  label="Email Address *"
                   value={customerEmail}
                   onChangeText={setCustomerEmail}
-                  placeholder="customer@email.com"
+                  placeholder="john.doe@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
+                <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  We&apos;ll auto-fill info if this customer exists
+                </Text>
                 {showCustomerList && (
-                  <View className="mt-2 rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
+                  <View className="mt-2 rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
                     {foundCustomers.slice(0, 5).map((c) => (
                       <Pressable
                         key={c.id}
@@ -1061,37 +1458,145 @@ const CreateBookingScreen = () => {
                         <Text className="text-sm font-medium text-gray-900 dark:text-white">
                           {`${c.firstName} ${c.lastName}`.trim()}
                         </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">{c.email}</Text>
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          {c.email}
+                        </Text>
                       </Pressable>
                     ))}
                   </View>
                 )}
-                <View className="h-3" />
-                <InputField
-                  label="Name *"
-                  value={customerName}
-                  onChangeText={setCustomerName}
-                  placeholder="Full name"
-                />
-                <View className="h-3" />
-                <InputField
-                  label="Phone"
-                  value={customerPhone}
-                  onChangeText={setCustomerPhone}
-                  placeholder="Phone number"
-                  keyboardType="phone-pad"
-                />
+
+                <View className="mt-4 flex-row gap-3">
+                  <View className="flex-1">
+                    <InputField
+                      label="First Name *"
+                      value={firstName}
+                      onChangeText={setFirstName}
+                      placeholder="John"
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <InputField
+                      label="Last Name *"
+                      value={lastName}
+                      onChangeText={setLastName}
+                      placeholder="Doe"
+                    />
+                  </View>
+                </View>
+
+                <View className="mt-4">
+                  <InputField
+                    label="Phone Number *"
+                    value={customerPhone}
+                    onChangeText={setCustomerPhone}
+                    placeholder="+1 (555) 123-4567"
+                    keyboardType="phone-pad"
+                  />
+                </View>
               </Section>
 
-              <Section icon="file-text" title="Notes">
+              {/* Discounts & Promotions — validated against the current subtotal;
+                  the codes are redeemed server-side when the booking is created. */}
+              <Section icon="gift" title="Discounts &amp; Promotions">
+                <FieldLabel>Gift Card Code</FieldLabel>
+                <View className="flex-row items-center gap-2">
+                  <View className="flex-1">
+                    <InputField
+                      label=""
+                      value={giftCode}
+                      onChangeText={setGiftCode}
+                      placeholder="GIFT-XXXX"
+                      autoCapitalize="characters"
+                    />
+                  </View>
+                  <Pressable
+                    onPress={() => applyCode("gift")}
+                    disabled={codeBusy !== null || !giftCode.trim()}
+                    className={`h-14 items-center justify-center rounded-lg bg-[#0644C7] px-5 ${
+                      codeBusy !== null || !giftCode.trim()
+                        ? "opacity-50"
+                        : "active:opacity-90"
+                    }`}
+                  >
+                    {codeBusy === "gift" ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text className="text-sm font-semibold text-white">Apply</Text>
+                    )}
+                  </Pressable>
+                </View>
+                {!!giftResult && (
+                  <Text
+                    className={`mt-1 text-xs ${
+                      giftResult.valid
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-red-500"
+                    }`}
+                  >
+                    {giftResult.valid
+                      ? `Applied — ${money(giftResult.discountAmount)} off${
+                          giftResult.balance != null
+                            ? ` (balance ${money(giftResult.balance)})`
+                            : ""
+                        }`
+                      : giftResult.message}
+                  </Text>
+                )}
+
+                <View className="mt-4">
+                  <FieldLabel>Promo Code</FieldLabel>
+                  <View className="flex-row items-center gap-2">
+                    <View className="flex-1">
+                      <InputField
+                        label=""
+                        value={promoCode}
+                        onChangeText={setPromoCode}
+                        placeholder="PROMO-XXXX"
+                        autoCapitalize="characters"
+                      />
+                    </View>
+                    <Pressable
+                      onPress={() => applyCode("promo")}
+                      disabled={codeBusy !== null || !promoCode.trim()}
+                      className={`h-14 items-center justify-center rounded-lg bg-[#0644C7] px-5 ${
+                        codeBusy !== null || !promoCode.trim()
+                          ? "opacity-50"
+                          : "active:opacity-90"
+                      }`}
+                    >
+                      {codeBusy === "promo" ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text className="text-sm font-semibold text-white">Apply</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                  {!!promoResult && (
+                    <Text
+                      className={`mt-1 text-xs ${
+                        promoResult.valid
+                          ? "text-green-600 dark:text-green-400"
+                          : "text-red-500"
+                      }`}
+                    >
+                      {promoResult.valid
+                        ? `Applied — ${money(promoResult.discountAmount)} off`
+                        : promoResult.message}
+                    </Text>
+                  )}
+                </View>
+              </Section>
+
+              <Section icon="file-text" title="Additional Notes">
                 <InputField
-                  label="Customer notes"
+                  label="Additional Notes (Optional)"
                   value={notes}
                   onChangeText={setNotes}
-                  placeholder="Optional"
+                  placeholder="Any special requests, dietary restrictions, or important information..."
                   multiline
                 />
-                <View className="h-3" />
+                <View className="h-4" />
                 <InputField
                   label="Internal notes (staff only)"
                   value={internalNotes}
@@ -1100,18 +1605,118 @@ const CreateBookingScreen = () => {
                   multiline
                 />
               </Section>
+
+              {/* Guest Address — all optional, posted as guest_* on create. */}
+              <Section icon="map-pin" title="Guest Address (Optional)">
+                <InputField
+                  label="Street Address (Optional)"
+                  value={address}
+                  onChangeText={setAddress}
+                  placeholder="Enter street address"
+                />
+                <View className="mt-4 flex-row gap-3">
+                  <View className="flex-1">
+                    <InputField
+                      label="City (Optional)"
+                      value={city}
+                      onChangeText={setCity}
+                      placeholder="City"
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <InputField
+                      label="State/Province (Optional)"
+                      value={stateField}
+                      onChangeText={setStateField}
+                      placeholder="State/Province"
+                    />
+                  </View>
+                </View>
+                <View className="mt-4 flex-row gap-3">
+                  <View className="flex-1">
+                    <InputField
+                      label="ZIP/Postal Code (Optional)"
+                      value={zip}
+                      onChangeText={setZip}
+                      placeholder="ZIP/Postal Code"
+                      keyboardType="number-pad"
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <InputField
+                      label="Country (Optional)"
+                      value={country}
+                      onChangeText={setCountry}
+                      placeholder="Country"
+                    />
+                  </View>
+                </View>
+              </Section>
             </>
           )}
 
-          {/* ============================ STEP 5 — PAYMENT ================== */}
+          {/* ============================ STEP 5 — REVIEW & PAYMENT ========== */}
           {step === 5 && pkg && (
             <>
-              <Section icon="credit-card" title="Payment">
-                <FieldLabel>Method</FieldLabel>
-                <View className="flex-row gap-2 mb-2">
+              {/* Review — package, booking details, customer (web's left column) */}
+              <Section icon="package" title={pkg.name}>
+                {!!pkg.description && (
+                  <Text className="text-xs leading-5 text-gray-600 dark:text-gray-300">
+                    {pkg.description}
+                  </Text>
+                )}
+                <View className="mt-3 flex-row flex-wrap items-center gap-2">
+                  {!!pkg.category && (
+                    <View className="rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
+                      <Text className="text-[11px] text-gray-700 dark:text-gray-200">
+                        {pkg.category}
+                      </Text>
+                    </View>
+                  )}
+                  <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
+                    <Feather name="clock" size={10} color="#9333EA" />
+                    <Text className="text-[11px] text-purple-700 dark:text-purple-300">
+                      {pkg.duration} {pkg.durationUnit}
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-1 rounded border border-green-200 px-2 py-1 dark:border-green-900/50">
+                    <Feather name="users" size={10} color="#16A34A" />
+                    <Text className="text-[11px] text-green-700 dark:text-green-300">
+                      {participants} Participant{participants === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+                </View>
+              </Section>
+
+              <Section icon="calendar" title="Booking Details">
+                <ReviewRow label="Date:" value={dateLabel ?? "—"} />
+                <ReviewRow
+                  label="Time:"
+                  value={slot ? formatTime(slot.startTime) : "—"}
+                />
+                <ReviewRow
+                  label="Space:"
+                  value={slot?.roomName || "Auto-assigned"}
+                />
+                <ReviewRow
+                  label="Duration:"
+                  value={`${pkg.duration} ${pkg.durationUnit}`}
+                />
+              </Section>
+
+              <Section icon="user" title="Customer Information">
+                <ReviewRow label="Name:" value={customerName || "—"} />
+                <ReviewRow label="Email:" value={customerEmail.trim() || "—"} />
+                <ReviewRow label="Phone:" value={customerPhone.trim() || "—"} />
+              </Section>
+
+              {/* Payment Details — the web's right column */}
+              <Section icon="credit-card" title="Payment Details">
+                <FieldLabel>Payment Method</FieldLabel>
+                <View className="flex-row gap-2 mb-4">
                   {(
                     [
-                      { v: "in-store", label: "In-store", icon: "shopping-bag" as IconName },
+                      { v: "in-store", label: "In-Store", icon: "dollar-sign" as IconName },
                       { v: "paylater", label: "Pay Later", icon: "clock" as IconName },
                     ] as const
                   ).map((m) => {
@@ -1120,16 +1725,22 @@ const CreateBookingScreen = () => {
                       <Pressable
                         key={m.v}
                         onPress={() => setPaymentMethod(m.v)}
-                        className={`flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl border ${
+                        className={`flex-1 flex-row items-center justify-center gap-2 py-3 rounded-lg border ${
                           active
-                            ? "bg-[#0644C7] border-[#0644C7]"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                            ? "border-[#0644C7] bg-[#0644C7]/5"
+                            : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
                         }`}
                       >
-                        <Feather name={m.icon} size={15} color={active ? "#FFFFFF" : "#6b7280"} />
+                        <Feather
+                          name={m.icon}
+                          size={15}
+                          color={active ? PRIMARY : "#6b7280"}
+                        />
                         <Text
                           className={`text-sm font-semibold ${
-                            active ? "text-white" : "text-gray-700 dark:text-gray-200"
+                            active
+                              ? "text-[#0644C7] dark:text-blue-300"
+                              : "text-gray-700 dark:text-gray-200"
                           }`}
                         >
                           {m.label}
@@ -1138,133 +1749,283 @@ const CreateBookingScreen = () => {
                     );
                   })}
                 </View>
-                <Text className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-                  Card payments are handled on the web admin.
+                <Text className="-mt-2 mb-4 text-xs text-gray-400 dark:text-gray-500">
+                  Online card payments are available on the web admin.
                 </Text>
 
                 {paymentMethod === "in-store" && (
                   <>
-                    <FieldLabel>Amount</FieldLabel>
-                    <View className="flex-row gap-2 mb-3">
-                      {(
-                        [
-                          { v: "full", label: "Full" },
-                          { v: "partial", label: "Deposit" },
-                          { v: "custom", label: "Custom" },
-                        ] as const
-                      ).map((t) => {
-                        const active = paymentType === t.v;
-                        const disabled = t.v === "partial" && partialDeposit <= 0;
-                        return (
-                          <Pressable
-                            key={t.v}
-                            onPress={() => !disabled && setPaymentType(t.v)}
-                            className={`flex-1 items-center py-2.5 rounded-xl border ${
-                              active
-                                ? "bg-[#0644C7] border-[#0644C7]"
-                                : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                            } ${disabled ? "opacity-40" : ""}`}
-                          >
-                            <Text
-                              className={`text-sm font-medium ${
-                                active ? "text-white" : "text-gray-700 dark:text-gray-200"
-                              }`}
-                            >
+                    <FieldLabel>Payment Type</FieldLabel>
+                    {(
+                      [
+                        {
+                          v: "full",
+                          label: "Full Payment",
+                          hint: "Pay the complete amount now",
+                        },
+                        {
+                          v: "partial",
+                          label: "Partial Payment",
+                          hint: `Pay ${money(partialDeposit)} now, remaining ${money(
+                            Math.max(0, submitTotal - partialDeposit),
+                          )} later`,
+                        },
+                        {
+                          v: "custom",
+                          label: "Custom Amount",
+                          hint: "Enter a specific deposit amount",
+                        },
+                      ] as const
+                    ).map((t) => {
+                      const active = paymentType === t.v;
+                      const disabled = t.v === "partial" && partialDeposit <= 0;
+                      return (
+                        <Pressable
+                          key={t.v}
+                          onPress={() => !disabled && setPaymentType(t.v)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: active, disabled }}
+                          className={`mb-2 flex-row items-start gap-2.5 rounded-lg border p-3 ${
+                            active
+                              ? "border-[#0644C7] bg-[#0644C7]/5"
+                              : "border-gray-200 dark:border-neutral-700"
+                          } ${disabled ? "opacity-40" : ""}`}
+                        >
+                          <Feather
+                            name={active ? "check-circle" : "circle"}
+                            size={15}
+                            color={active ? PRIMARY : "#9CA3AF"}
+                          />
+                          <View className="flex-1">
+                            <Text className="text-sm font-medium text-gray-900 dark:text-white">
                               {t.label}
                             </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              {t.hint}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+
                     {paymentType === "custom" && (
-                      <InputField
-                        label="Custom amount"
-                        value={customAmount}
-                        onChangeText={setCustomAmount}
-                        placeholder="0.00"
-                        keyboardType="decimal-pad"
-                      />
+                      <View className="mt-2">
+                        <InputField
+                          label="Deposit amount"
+                          value={customAmount}
+                          onChangeText={setCustomAmount}
+                          placeholder="0.00"
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
                     )}
                   </>
                 )}
 
-                <View className="flex-row items-center justify-between mt-2">
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">Email confirmation</Text>
-                  <Switch value={sendEmail} onValueChange={setSendEmail} trackColor={{ true: PRIMARY }} />
-                </View>
-              </Section>
-
-              <Section icon="clipboard" title="Booking Summary">
-                <View className="flex-row items-center justify-between py-1">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">Package</Text>
-                  <Text className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-right" numberOfLines={1}>
-                    {pkg.name}
-                  </Text>
-                </View>
-                <View className="flex-row items-center justify-between py-1">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">Schedule</Text>
-                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                    {dateLabel}
-                    {slot ? ` · ${formatTime(slot.startTime)}` : ""}
-                  </Text>
-                </View>
-                {!!slot?.roomName && (
-                  <View className="flex-row items-center justify-between py-1">
-                    <Text className="text-sm text-gray-500 dark:text-gray-400">Space</Text>
-                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                      {slot.roomName}
+                {/* Amounts */}
+                <View className="mt-4 border-t border-gray-100 pt-3 dark:border-neutral-800">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-base font-bold text-gray-900 dark:text-white">
+                      Total
+                    </Text>
+                    <Text className="text-base font-bold text-gray-900 dark:text-white">
+                      {money(displayTotal)}
                     </Text>
                   </View>
-                )}
-                <View className="flex-row items-center justify-between py-1">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">Customer</Text>
-                  <Text className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-right" numberOfLines={1}>
-                    {customerName || "—"}
-                  </Text>
+                  <View className="mt-1 flex-row items-center justify-between border-t border-dashed border-gray-200 pt-2 dark:border-neutral-700">
+                    <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                      Amount Due Now
+                    </Text>
+                    <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                      {money(amountPaid)}
+                    </Text>
+                  </View>
                 </View>
 
-                <View className="mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800">
-                  <View className="flex-row items-center justify-between py-1">
-                    <Text className="text-sm text-gray-500 dark:text-gray-400">Subtotal</Text>
-                    <Text className="text-sm text-gray-900 dark:text-white">{money(subtotal)}</Text>
+                {/* Email toggles — the web's two checkboxes */}
+                <View className="mt-4 gap-3">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="flex-1 mr-3 text-sm text-gray-700 dark:text-gray-200">
+                      Send confirmation email to customer
+                    </Text>
+                    <Switch
+                      value={sendEmail}
+                      onValueChange={setSendEmail}
+                      trackColor={{ false: "#D1D5DB", true: PRIMARY }}
+                      thumbColor="#FFFFFF"
+                    />
                   </View>
+                  <View className="flex-row items-center justify-between">
+                    <Text className="flex-1 mr-3 text-sm text-gray-700 dark:text-gray-200">
+                      Send notification email to staff
+                    </Text>
+                    <Switch
+                      value={sendStaffEmail}
+                      onValueChange={setSendStaffEmail}
+                      trackColor={{ false: "#D1D5DB", true: PRIMARY }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
+                </View>
+              </Section>
+            </>
+          )}
+
+          {/* Booking Summary — the web's sticky side rail, stacked at the
+              bottom on mobile so it stays visible on every step. */}
+          <View
+            className="rounded-2xl bg-white dark:bg-neutral-900 p-5 mb-1 shadow-sm border border-gray-100 dark:border-neutral-800"
+            style={CARD_SHADOW}
+          >
+            <View className="flex-row items-center gap-2 mb-3">
+              <Feather name="clipboard" size={16} color={PRIMARY} />
+              <Text className="text-base font-bold text-gray-900 dark:text-white">
+                Booking Summary
+              </Text>
+            </View>
+
+            {!pkg ? (
+              <Text className="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+                No package selected yet
+              </Text>
+            ) : (
+              <>
+                {/* Package */}
+                <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                  {pkg.name}
+                </Text>
+                {!!pkg.category && (
+                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    {pkg.category}
+                  </Text>
+                )}
+                <Text className="mt-0.5 text-lg font-bold text-gray-900 dark:text-white">
+                  {money(pkg.price)}
+                </Text>
+
+                {/* Details */}
+                <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
+                  <Text className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    Details
+                  </Text>
+                  {!!scheduledDate && (
+                    <View className="flex-row items-center gap-1.5 py-0.5">
+                      <Feather name="calendar" size={12} color="#9CA3AF" />
+                      <Text className="text-sm text-gray-700 dark:text-gray-200">
+                        {dateLabel}
+                      </Text>
+                    </View>
+                  )}
+                  {!!slot && (
+                    <View className="flex-row items-center gap-1.5 py-0.5">
+                      <Feather name="clock" size={12} color="#9CA3AF" />
+                      <Text className="text-sm text-gray-700 dark:text-gray-200">
+                        {formatTime(slot.startTime)}
+                      </Text>
+                    </View>
+                  )}
+                  <View className="flex-row items-center gap-1.5 py-0.5">
+                    <Feather name="users" size={12} color="#9CA3AF" />
+                    <Text className="text-sm text-gray-700 dark:text-gray-200">
+                      {participants} Participant{participants === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Price breakdown */}
+                <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
+                  <Text className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    Price Breakdown
+                  </Text>
+                  <View className="rounded-lg bg-gray-50 p-3 dark:bg-neutral-800/50">
+                    <View className="flex-row items-start justify-between">
+                      <View className="flex-1 mr-2">
+                        <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                          Base Package
+                        </Text>
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          {pkg.name}
+                        </Text>
+                        {pkg.minParticipants > 0 && (
+                          <Text className="text-xs text-gray-500 dark:text-gray-400">
+                            Covers up to {pkg.minParticipants} participants
+                          </Text>
+                        )}
+                      </View>
+                      <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                        {money(pkg.price)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View className="mt-2 flex-row items-center justify-between">
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      Total Participants
+                    </Text>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      {participants} people
+                    </Text>
+                  </View>
+
                   {!!feeBreakdown?.fees.length &&
                     feeBreakdown.fees.map((f) => (
-                      <View key={f.fee_support_id} className="flex-row items-center justify-between py-1">
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {f.fee_label} ({f.fee_application_type})
+                      <View
+                        key={f.fee_support_id}
+                        className="mt-1 flex-row items-center justify-between"
+                      >
+                        <Text
+                          numberOfLines={1}
+                          className="flex-1 mr-2 text-xs text-gray-500 dark:text-gray-400"
+                        >
+                          {f.fee_label || f.fee_name} ({f.fee_application_type})
                         </Text>
                         <Text className="text-xs text-gray-700 dark:text-gray-300">
+                          {f.fee_application_type === "additive" ? "+" : ""}
                           {money(f.fee_amount)}
                         </Text>
                       </View>
                     ))}
                   {discount > 0 && (
-                    <View className="flex-row items-center justify-between py-1">
-                      <Text className="text-sm text-green-600">Discount</Text>
-                      <Text className="text-sm text-green-600">−{money(discount)}</Text>
+                    <View className="mt-1 flex-row items-center justify-between">
+                      <Text className="text-xs text-green-600 dark:text-green-400">
+                        Discount
+                      </Text>
+                      <Text className="text-xs text-green-600 dark:text-green-400">
+                        −{money(discount)}
+                      </Text>
                     </View>
                   )}
-                  <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800">
-                    <Text className="text-base font-bold text-gray-900 dark:text-white">Total</Text>
+
+                  <View className="mt-2 flex-row items-center justify-between border-t border-gray-100 pt-2 dark:border-neutral-800">
                     <Text className="text-base font-bold text-gray-900 dark:text-white">
+                      Total
+                    </Text>
+                    <Text className="text-base font-bold text-[#0644C7] dark:text-blue-400">
                       {money(displayTotal)}
                     </Text>
                   </View>
-                  <View className="flex-row items-center justify-between py-1">
-                    <Text className="text-sm text-gray-500 dark:text-gray-400">Amount paid</Text>
-                    <Text className="text-sm text-gray-900 dark:text-white">{money(amountPaid)}</Text>
+                  <View className="mt-1 flex-row items-center justify-between rounded-lg bg-blue-50 px-3 py-2 dark:bg-blue-900/20">
+                    <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                      Due Now
+                    </Text>
+                    <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                      {money(amountPaid)}
+                    </Text>
                   </View>
                   {balance > 0 && (
-                    <View className="flex-row items-center justify-between py-1">
-                      <Text className="text-sm text-amber-600">Balance due</Text>
-                      <Text className="text-sm font-semibold text-amber-600">{money(balance)}</Text>
+                    <View className="mt-1 flex-row items-center justify-between px-3">
+                      <Text className="text-xs text-amber-600 dark:text-amber-400">
+                        Balance due later
+                      </Text>
+                      <Text className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                        {money(balance)}
+                      </Text>
                     </View>
                   )}
                 </View>
-              </Section>
-            </>
-          )}
+              </>
+            )}
+          </View>
         </ScrollView>
 
         {/* Sticky footer: Back / Next / Create */}
@@ -1276,10 +2037,14 @@ const CreateBookingScreen = () => {
             <Pressable
               onPress={goBack}
               disabled={submitting}
-              className="flex-1 h-14 flex-row items-center justify-center gap-2 rounded-full border border-gray-200 dark:border-neutral-700 active:opacity-80"
+              className="flex-1 h-14 items-center justify-center rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-80"
             >
-              <Feather name="chevron-left" size={18} color="#6b7280" />
-              <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">Back</Text>
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                {BACK_LABELS[step - 1]}
+              </Text>
             </Pressable>
           )}
 
@@ -1287,12 +2052,13 @@ const CreateBookingScreen = () => {
             <Pressable
               onPress={goNext}
               disabled={!stepValid}
-              className={`flex-[1.4] h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] active:opacity-90 ${
+              className={`flex-[1.6] h-14 items-center justify-center rounded-lg bg-[#0644C7] active:opacity-90 ${
                 stepValid ? "" : "opacity-40"
               }`}
             >
-              <Text className="text-base font-semibold text-white">Next</Text>
-              <Feather name="chevron-right" size={18} color="#FFFFFF" />
+              <Text numberOfLines={1} className="text-sm font-semibold text-white">
+                {NEXT_LABELS[step - 1]}
+              </Text>
             </Pressable>
           ) : (
             <Pressable
@@ -1317,77 +2083,6 @@ const CreateBookingScreen = () => {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Date sheet */}
-      <BottomSheet visible={sheet === "date"} onClose={() => setSheet(null)} title="Select Date">
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {dateOptions.map((d) => {
-            const isSel = d.value === scheduledDate;
-            return (
-              <Pressable
-                key={d.value}
-                onPress={() => {
-                  setScheduledDate(d.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSel ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSel ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {d.label}
-                </Text>
-                {isSel && <Feather name="check" size={18} color={PRIMARY} />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Time / space sheet */}
-      <BottomSheet visible={sheet === "time"} onClose={() => setSheet(null)} title="Select Time & Space">
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {slots.length === 0 ? (
-            <Text className="text-sm text-gray-400 dark:text-gray-500 text-center py-6">
-              No available time slots for this date.
-            </Text>
-          ) : (
-            slots.map((s, i) => {
-              const isSel = slot?.startTime === s.startTime && slot?.roomId === s.roomId;
-              return (
-                <Pressable
-                  key={`${s.startTime}-${s.roomId ?? i}`}
-                  onPress={() => {
-                    setSlot(s);
-                    setSheet(null);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSel ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <View>
-                    <Text
-                      className={`text-base font-medium ${
-                        isSel ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                      }`}
-                    >
-                      {formatTime(s.startTime)}
-                      {s.endTime ? ` – ${formatTime(s.endTime)}` : ""}
-                    </Text>
-                    {!!s.roomName && (
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">{s.roomName}</Text>
-                    )}
-                  </View>
-                  {isSel && <Feather name="check" size={18} color={PRIMARY} />}
-                </Pressable>
-              );
-            })
-          )}
-        </ScrollView>
-      </BottomSheet>
     </View>
   );
 };
