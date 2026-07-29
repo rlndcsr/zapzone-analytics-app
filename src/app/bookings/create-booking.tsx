@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import {
   useEffect,
@@ -89,7 +90,42 @@ function formatTime(value: string): string {
   return `${hour}:${m[2]} ${meridian}`;
 }
 
-type PaymentMethod = "in-store" | "paylater";
+type PaymentMethod = "authorize.net" | "in-store" | "paylater";
+
+/** Groups digits in 4s, capped at 16 — the web's formatCardNumber. */
+const formatCardNumber = (value: string) =>
+  value
+    .replace(/\D/g, "")
+    .substring(0, 16)
+    .replace(/(.{4})/g, "$1 ")
+    .trim();
+
+/** Luhn check, the same gate the web's validateCardNumber applies. */
+function validateCardNumber(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = Number(digits[i]);
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+
+function getCardType(value: string): string {
+  const d = value.replace(/\D/g, "");
+  if (/^4/.test(d)) return "Visa";
+  if (/^5[1-5]/.test(d) || /^2[2-7]/.test(d)) return "Mastercard";
+  if (/^3[47]/.test(d)) return "American Express";
+  if (/^6(?:011|5)/.test(d)) return "Discover";
+  return "Card";
+}
 type PaymentType = "full" | "partial" | "custom";
 
 // Wizard steps (mirrors the web /bookings/create flow order).
@@ -111,21 +147,6 @@ const STEP_HEADINGS = [
 ] as const;
 const TOTAL_STEPS = STEP_LABELS.length;
 
-/** Footer button copy per step, matching the web wizard's wording. */
-const NEXT_LABELS = [
-  "Continue to Date & Time",
-  "Continue to Attractions & Add-ons",
-  "Continue to Customer Details",
-  "Continue to Payment",
-  "",
-] as const;
-const BACK_LABELS = [
-  "",
-  "Back to Packages",
-  "Back to Date & Time",
-  "Back",
-  "Back",
-] as const;
 
 const Section = ({
   icon,
@@ -212,18 +233,29 @@ const AddOnRow = ({
   name,
   price,
   qty,
+  image,
   onAdd,
   onChange,
 }: {
   name: string;
   price: string;
   qty: number;
+  /** Thumbnail URL; falls back to the "No Image" tile when absent. */
+  image?: string | null;
   onAdd: () => void;
   onChange: (n: number) => void;
 }) => (
   <View className="mb-2 flex-row items-center gap-3 rounded-lg border border-gray-200 p-3 dark:border-neutral-700">
-    <View className="h-12 w-12 items-center justify-center rounded-md bg-gray-100 dark:bg-neutral-800">
-      <Text className="text-[9px] text-gray-400">No Image</Text>
+    <View className="h-12 w-12 items-center justify-center overflow-hidden rounded-md bg-gray-100 dark:bg-neutral-800">
+      {image ? (
+        <Image
+          source={{ uri: image }}
+          style={{ width: "100%", height: "100%" }}
+          contentFit="cover"
+        />
+      ) : (
+        <Text className="text-[9px] text-gray-400">No Image</Text>
+      )}
     </View>
     <View className="flex-1">
       <Text
@@ -248,6 +280,41 @@ const AddOnRow = ({
         <Text className="text-xs font-semibold text-white">Add</Text>
       </Pressable>
     )}
+  </View>
+);
+
+/** Thumbnail + name + qty line used by the Booking Summary item lists. */
+const SummaryItemRow = ({
+  image,
+  name,
+  meta,
+  amount,
+}: {
+  image?: string | null;
+  name: string;
+  meta: string;
+  amount: string;
+}) => (
+  <View className="mb-2 flex-row items-start gap-2">
+    {!!image && (
+      <Image
+        source={{ uri: image }}
+        style={{ width: 48, height: 48, borderRadius: 6 }}
+        contentFit="cover"
+      />
+    )}
+    <View className="flex-1">
+      <Text
+        numberOfLines={1}
+        className="text-sm font-medium text-gray-900 dark:text-white"
+      >
+        {name}
+      </Text>
+      <Text className="text-xs text-gray-500 dark:text-gray-400">{meta}</Text>
+    </View>
+    <Text className="ml-2 text-sm font-medium text-gray-900 dark:text-white">
+      {amount}
+    </Text>
   </View>
 );
 
@@ -533,15 +600,21 @@ const CreateBookingScreen = () => {
   const [gohAge, setGohAge] = useState("");
   const [gohGender, setGohGender] = useState<"male" | "female" | "other" | "">("");
   const [notes, setNotes] = useState("");
-  const [internalNotes, setInternalNotes] = useState("");
 
   // Payment.
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("in-store");
-  const [paymentType, setPaymentType] = useState<PaymentType>("full");
+  // Deposit-first, matching the web's `paymentType: 'partial'` default.
+  const [paymentType, setPaymentType] = useState<PaymentType>("partial");
   const [customAmount, setCustomAmount] = useState("");
+  const [inStoreAmount, setInStoreAmount] = useState("");
   const [sendEmail, setSendEmail] = useState(true);
   /** Staff notification — the web's second checkbox on the payment step. */
   const [sendStaffEmail, setSendStaffEmail] = useState(true);
+  // Card fields for the Online method (see the note in the Card Details panel).
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardMonth, setCardMonth] = useState("");
+  const [cardYear, setCardYear] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
 
   // Customer (email search-as-you-type).
   const [customerEmail, setCustomerEmail] = useState("");
@@ -571,6 +644,12 @@ const CreateBookingScreen = () => {
 
   const [submitting, setSubmitting] = useState(false);
   const submitLockRef = useRef(false);
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Land at the top of each step instead of keeping the previous scroll offset.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [step]);
 
   // Pricing (fees + special pricing), fetched only on the Payment step.
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
@@ -725,13 +804,40 @@ const CreateBookingScreen = () => {
     return Math.max(0, total);
   }, [pkg, participants, attractionQty, addonQty]);
 
+  const extraParticipants = Math.max(0, participants - (pkg?.minParticipants || 1));
+
+  /** Selected add-ons / attractions with line totals, for the summary lists. */
+  const chosenAddOns = useMemo(
+    () =>
+      (pkg?.addOns ?? [])
+        .map((item) => ({ item, qty: addonQty[item.id] ?? 0 }))
+        .filter(({ qty }) => qty > 0)
+        .map(({ item, qty }) => ({ item, qty, lineTotal: item.price * qty })),
+    [pkg, addonQty],
+  );
+
+  const chosenAttractions = useMemo(
+    () =>
+      (pkg?.attractions ?? [])
+        .map((item) => ({ item, qty: attractionQty[item.id] ?? 0 }))
+        .filter(({ qty }) => qty > 0)
+        .map(({ item, qty }) => ({
+          item,
+          qty,
+          lineTotal:
+            item.pricingType === "per_person"
+              ? item.price * qty * participants
+              : item.price * qty,
+        })),
+    [pkg, attractionQty, participants],
+  );
+
   const effectiveLocationId = pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
 
-  // Fees + special pricing are fetched only once the user reaches the Payment
-  // step (mirrors the web surfacing them at confirmation). Nothing is fetched
-  // earlier, so the earlier steps stay lightweight.
+  // Fees load as soon as a package is picked so the Booking Summary shows the
+  // venue fee on every step, as the web's live summary does.
   useEffect(() => {
-    if (step !== TOTAL_STEPS || !pkg || subtotal <= 0) {
+    if (!pkg || subtotal <= 0) {
       setFeeBreakdown(null);
       return;
     }
@@ -757,10 +863,11 @@ const CreateBookingScreen = () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [step, pkg, subtotal, effectiveLocationId]);
+  }, [pkg, subtotal, effectiveLocationId]);
 
+  // Special pricing needs a date, matching the web's gate.
   useEffect(() => {
-    if (step !== TOTAL_STEPS || !pkg) {
+    if (!pkg || !scheduledDate) {
       setSpecial(null);
       return;
     }
@@ -788,7 +895,7 @@ const CreateBookingScreen = () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [step, pkg, scheduledDate, slot, effectiveLocationId]);
+  }, [pkg, scheduledDate, slot, effectiveLocationId]);
 
   // Submitted total = base+fees (web); discount is sent separately.
   const submitTotal = feeBreakdown ? feeBreakdown.total : subtotal;
@@ -800,26 +907,55 @@ const CreateBookingScreen = () => {
     (special?.has_special_pricing ? special.total_discount : 0) + codeDiscount;
   const displayTotal = Math.max(0, submitTotal - discount);
 
+  // Quoted off the pre-fee subtotal, as the web's calculatePartialAmount does.
   const partialDeposit = useMemo(() => {
     if (!pkg) return 0;
     if (pkg.partialPaymentPercentage && pkg.partialPaymentPercentage > 0) {
-      return Math.round(submitTotal * (pkg.partialPaymentPercentage / 100) * 100) / 100;
+      return Math.round(subtotal * (pkg.partialPaymentPercentage / 100) * 100) / 100;
     }
     if (pkg.partialPaymentFixed && pkg.partialPaymentFixed > 0) {
-      return Math.min(pkg.partialPaymentFixed, submitTotal);
+      return Math.min(pkg.partialPaymentFixed, subtotal);
     }
     return 0;
-  }, [pkg, submitTotal]);
+  }, [pkg, subtotal]);
 
-  const amountPaid = useMemo(() => {
+  // The partial option is unselectable without a configured deposit.
+  useEffect(() => {
+    if (pkg && paymentType === "partial" && partialDeposit <= 0) {
+      setPaymentType("full");
+    }
+  }, [pkg, paymentType, partialDeposit]);
+
+  const cardValid = validateCardNumber(cardNumber);
+  const inStoreTyped = Math.max(0, Number(inStoreAmount) || 0);
+
+  /** What is owed right now — web order: pay-later 0 → in-store field → custom → partial → full. */
+  const dueNow = useMemo(() => {
     if (paymentMethod === "paylater") return 0;
-    if (paymentType === "full") return submitTotal;
-    if (paymentType === "partial") return Math.min(partialDeposit, submitTotal);
-    const custom = Math.max(0, Number(customAmount) || 0);
-    return Math.min(custom, submitTotal);
-  }, [paymentMethod, paymentType, submitTotal, partialDeposit, customAmount]);
+    if (paymentMethod === "in-store" && inStoreTyped > 0) {
+      return Math.min(inStoreTyped, submitTotal);
+    }
+    if (paymentType === "custom") {
+      return Math.min(Math.max(0, Number(customAmount) || 0), submitTotal);
+    }
+    // Packages with no deposit configured fall back to the full amount.
+    if (paymentType === "partial" && partialDeposit > 0) {
+      return Math.min(partialDeposit, submitTotal);
+    }
+    return submitTotal;
+  }, [
+    paymentMethod,
+    paymentType,
+    submitTotal,
+    partialDeposit,
+    customAmount,
+    inStoreTyped,
+  ]);
 
-  const balance = Math.max(0, submitTotal - amountPaid);
+  // Cards can't be tokenized on mobile, so Online records nothing as collected.
+  const amountPaid = paymentMethod === "authorize.net" ? 0 : dueNow;
+
+  const balance = Math.max(0, submitTotal - dueNow);
 
   const dateOptions = useMemo(() => {
     const out: { value: string; label: string }[] = [];
@@ -880,7 +1016,7 @@ const CreateBookingScreen = () => {
       Alert.alert("Incomplete booking", "Please complete every step before submitting.");
       return;
     }
-    if (paymentMethod === "in-store" && paymentType === "custom" && !(Number(customAmount) > 0)) {
+    if (paymentMethod !== "paylater" && paymentType === "custom" && !(Number(customAmount) > 0)) {
       Alert.alert("Invalid amount", "Enter a valid custom payment amount.");
       return;
     }
@@ -903,7 +1039,7 @@ const CreateBookingScreen = () => {
       const { duration, unit } = durationForPayload();
 
       const paymentStatus: "paid" | "partial" | "pending" =
-        paymentMethod === "paylater"
+        paymentMethod === "paylater" || paymentMethod === "authorize.net"
           ? "pending"
           : amountPaid >= submitTotal
             ? "paid"
@@ -936,7 +1072,6 @@ const CreateBookingScreen = () => {
           ? { status: "confirmed" as const, payment_status: paymentStatus }
           : { payment_status: "pending" as const }),
         notes: notes.trim() || undefined,
-        internal_notes: internalNotes.trim() || undefined,
         additional_addons: additionalAddons.length ? additionalAddons : undefined,
         additional_attractions: additionalAttractions.length ? additionalAttractions : undefined,
         created_by: user?.id,
@@ -1012,6 +1147,7 @@ const CreateBookingScreen = () => {
         keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
       >
         <ScrollView
+          ref={scrollRef}
           className="flex-1"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -1291,14 +1427,6 @@ const CreateBookingScreen = () => {
                               <Text className="text-[11px] text-gray-500 dark:text-gray-400">
                                 to {formatTime(s.endTime)}
                               </Text>
-                              {!!s.roomName && (
-                                <Text
-                                  numberOfLines={1}
-                                  className="text-[11px] text-[#0644C7] dark:text-blue-300"
-                                >
-                                  {s.roomName}
-                                </Text>
-                              )}
                             </View>
                           </Pressable>
                         </View>
@@ -1334,6 +1462,7 @@ const CreateBookingScreen = () => {
                       name={a.name}
                       price={money(a.price)}
                       qty={addonQty[a.id] ?? 0}
+                      image={a.image}
                       onAdd={() =>
                         setAddonQty((p) => ({ ...p, [a.id]: (p[a.id] ?? 0) + 1 }))
                       }
@@ -1373,62 +1502,6 @@ const CreateBookingScreen = () => {
                 </Section>
               )}
 
-              {pkg.hasGuestOfHonor && (
-                <Section icon="star" title="Guest of Honor">
-                  <InputField
-                    label="Name"
-                    value={gohName}
-                    onChangeText={setGohName}
-                    placeholder="Guest of honor"
-                  />
-                  <View className="h-3" />
-                  <InputField
-                    label="Age"
-                    value={gohAge}
-                    onChangeText={setGohAge}
-                    placeholder="Age"
-                    keyboardType="number-pad"
-                  />
-                  <View className="h-3" />
-                  <FieldLabel>Gender</FieldLabel>
-                  <View className="flex-row gap-2">
-                    {genderOptions.map((g) => {
-                      const active = gohGender === g.value;
-                      return (
-                        <Pressable
-                          key={g.value}
-                          onPress={() => setGohGender(active ? "" : g.value)}
-                          className={`flex-1 items-center py-2.5 rounded-xl border ${
-                            active
-                              ? "bg-[#0644C7] border-[#0644C7]"
-                              : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                          }`}
-                        >
-                          <Text
-                            className={`text-sm font-medium ${
-                              active ? "text-white" : "text-gray-700 dark:text-gray-200"
-                            }`}
-                          >
-                            {g.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </Section>
-              )}
-
-              {/* Live subtotal (client-side; fees/discounts come at Payment). */}
-              <Section icon="dollar-sign" title="Subtotal">
-                <View className="flex-row items-center justify-between">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">
-                    {participants} guest{participants === 1 ? "" : "s"}
-                  </Text>
-                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                    {money(subtotal)}
-                  </Text>
-                </View>
-              </Section>
             </>
           )}
 
@@ -1586,70 +1659,126 @@ const CreateBookingScreen = () => {
                     </Text>
                   )}
                 </View>
+
+                {/* Raw TextInput so the multi-line placeholder wraps instead of
+                    being clipped by InputField's fixed-height row. */}
+                <View className="mt-4 border-t border-gray-100 pt-4 dark:border-neutral-800">
+                  <FieldLabel>Additional Notes (Optional)</FieldLabel>
+                  <View className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-neutral-700 dark:bg-neutral-900">
+                    <TextInput
+                      value={notes}
+                      onChangeText={setNotes}
+                      placeholder="Any special requests, dietary restrictions, or important information..."
+                      placeholderTextColor="#9CA3AF"
+                      multiline
+                      textAlignVertical="top"
+                      className="min-h-[88px] text-base text-gray-900 dark:text-white"
+                    />
+                  </View>
+                </View>
               </Section>
 
-              <Section icon="file-text" title="Additional Notes">
-                <InputField
-                  label="Additional Notes (Optional)"
-                  value={notes}
-                  onChangeText={setNotes}
-                  placeholder="Any special requests, dietary restrictions, or important information..."
-                  multiline
-                />
-                <View className="h-4" />
-                <InputField
-                  label="Internal notes (staff only)"
-                  value={internalNotes}
-                  onChangeText={setInternalNotes}
-                  placeholder="Optional"
-                  multiline
-                />
-              </Section>
+              {/* Guest of Honor — only for packages that track one. */}
+              {pkg?.hasGuestOfHonor && (
+                <Section icon="star" title="Guest of Honor Information">
+                  <InputField
+                    label="Guest of Honor Name"
+                    value={gohName}
+                    onChangeText={setGohName}
+                    placeholder="Enter guest of honor name"
+                  />
+                  <View className="mt-4">
+                    <InputField
+                      label="Age"
+                      value={gohAge}
+                      onChangeText={setGohAge}
+                      placeholder="Age"
+                      keyboardType="number-pad"
+                    />
+                  </View>
+                  <View className="mt-4">
+                    <FieldLabel>Gender</FieldLabel>
+                    <View className="flex-row gap-2">
+                      {genderOptions.map((g) => {
+                        const active = gohGender === g.value;
+                        return (
+                          <Pressable
+                            key={g.value}
+                            onPress={() => setGohGender(active ? "" : g.value)}
+                            className={`flex-1 items-center py-2.5 rounded-lg border ${
+                              active
+                                ? "bg-[#0644C7] border-[#0644C7]"
+                                : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                            }`}
+                          >
+                            <Text
+                              className={`text-sm font-medium ${
+                                active
+                                  ? "text-white"
+                                  : "text-gray-700 dark:text-gray-200"
+                              }`}
+                            >
+                              {g.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    {!gohGender && (
+                      <Text className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
+                        Select Gender
+                      </Text>
+                    )}
+                  </View>
+                </Section>
+              )}
 
               {/* Guest Address — all optional, posted as guest_* on create. */}
               <Section icon="map-pin" title="Guest Address (Optional)">
+                {/* Stacked full-width — the web's grid is single-column at this size,
+                    and the long labels wrap when squeezed into half a row. */}
                 <InputField
                   label="Street Address (Optional)"
                   value={address}
                   onChangeText={setAddress}
                   placeholder="Enter street address"
+                  autoCapitalize="words"
                 />
-                <View className="mt-4 flex-row gap-3">
-                  <View className="flex-1">
-                    <InputField
-                      label="City (Optional)"
-                      value={city}
-                      onChangeText={setCity}
-                      placeholder="City"
-                    />
-                  </View>
-                  <View className="flex-1">
-                    <InputField
-                      label="State/Province (Optional)"
-                      value={stateField}
-                      onChangeText={setStateField}
-                      placeholder="State/Province"
-                    />
-                  </View>
+                <View className="mt-4">
+                  <InputField
+                    label="City (Optional)"
+                    value={city}
+                    onChangeText={setCity}
+                    placeholder="City"
+                    autoCapitalize="words"
+                  />
                 </View>
-                <View className="mt-4 flex-row gap-3">
-                  <View className="flex-1">
-                    <InputField
-                      label="ZIP/Postal Code (Optional)"
-                      value={zip}
-                      onChangeText={setZip}
-                      placeholder="ZIP/Postal Code"
-                      keyboardType="number-pad"
-                    />
-                  </View>
-                  <View className="flex-1">
-                    <InputField
-                      label="Country (Optional)"
-                      value={country}
-                      onChangeText={setCountry}
-                      placeholder="Country"
-                    />
-                  </View>
+                <View className="mt-4">
+                  <InputField
+                    label="State/Province (Optional)"
+                    value={stateField}
+                    onChangeText={setStateField}
+                    placeholder="State/Province"
+                    autoCapitalize="words"
+                  />
+                </View>
+                <View className="mt-4">
+                  <InputField
+                    label="ZIP/Postal Code (Optional)"
+                    value={zip}
+                    onChangeText={setZip}
+                    placeholder="ZIP/Postal Code"
+                    autoCapitalize="characters"
+                  />
+                </View>
+                <View className="mt-4">
+                  <InputField
+                    label="Country (Optional)"
+                    value={country}
+                    onChangeText={setCountry}
+                    placeholder="Country"
+                    autoCapitalize="words"
+                  />
                 </View>
               </Section>
             </>
@@ -1660,6 +1789,18 @@ const CreateBookingScreen = () => {
             <>
               {/* Review — package, booking details, customer (web's left column) */}
               <Section icon="package" title={pkg.name}>
+                {!!pkg.image && (
+                  <Image
+                    source={{ uri: pkg.image }}
+                    style={{
+                      width: "100%",
+                      height: 140,
+                      borderRadius: 8,
+                      marginBottom: 12,
+                    }}
+                    contentFit="cover"
+                  />
+                )}
                 {!!pkg.description && (
                   <Text className="text-xs leading-5 text-gray-600 dark:text-gray-300">
                     {pkg.description}
@@ -1704,6 +1845,37 @@ const CreateBookingScreen = () => {
                 />
               </Section>
 
+              {chosenAttractions.length > 0 && (
+                <Section icon="zap" title="Additional Attractions">
+                  {chosenAttractions.map(({ item, qty, lineTotal }) => (
+                    <SummaryItemRow
+                      key={item.id}
+                      name={item.name}
+                      meta={`Quantity: ${qty} × ${money(item.price)}${
+                        item.pricingType === "per_person"
+                          ? ` × ${participants} participants`
+                          : ""
+                      }`}
+                      amount={money(lineTotal)}
+                    />
+                  ))}
+                </Section>
+              )}
+
+              {chosenAddOns.length > 0 && (
+                <Section icon="plus-circle" title="Add-ons">
+                  {chosenAddOns.map(({ item, qty, lineTotal }) => (
+                    <SummaryItemRow
+                      key={item.id}
+                      image={item.image}
+                      name={item.name}
+                      meta={`Quantity: ${qty} × ${money(item.price)}`}
+                      amount={money(lineTotal)}
+                    />
+                  ))}
+                </Section>
+              )}
+
               <Section icon="user" title="Customer Information">
                 <ReviewRow label="Name:" value={customerName || "—"} />
                 <ReviewRow label="Email:" value={customerEmail.trim() || "—"} />
@@ -1716,6 +1888,7 @@ const CreateBookingScreen = () => {
                 <View className="flex-row gap-2 mb-4">
                   {(
                     [
+                      { v: "authorize.net", label: "Online", icon: "credit-card" as IconName },
                       { v: "in-store", label: "In-Store", icon: "dollar-sign" as IconName },
                       { v: "paylater", label: "Pay Later", icon: "clock" as IconName },
                     ] as const
@@ -1725,7 +1898,7 @@ const CreateBookingScreen = () => {
                       <Pressable
                         key={m.v}
                         onPress={() => setPaymentMethod(m.v)}
-                        className={`flex-1 flex-row items-center justify-center gap-2 py-3 rounded-lg border ${
+                        className={`flex-1 items-center gap-1 py-3 rounded-lg border ${
                           active
                             ? "border-[#0644C7] bg-[#0644C7]/5"
                             : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
@@ -1733,11 +1906,11 @@ const CreateBookingScreen = () => {
                       >
                         <Feather
                           name={m.icon}
-                          size={15}
+                          size={18}
                           color={active ? PRIMARY : "#6b7280"}
                         />
                         <Text
-                          className={`text-sm font-semibold ${
+                          className={`text-xs font-semibold ${
                             active
                               ? "text-[#0644C7] dark:text-blue-300"
                               : "text-gray-700 dark:text-gray-200"
@@ -1749,11 +1922,134 @@ const CreateBookingScreen = () => {
                     );
                   })}
                 </View>
-                <Text className="-mt-2 mb-4 text-xs text-gray-400 dark:text-gray-500">
-                  Online card payments are available on the web admin.
-                </Text>
+
+                {paymentMethod === "paylater" && (
+                  <View className="mb-4 flex-row items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 p-3 dark:border-orange-900/40 dark:bg-orange-900/20">
+                    <Feather name="info" size={16} color="#EA580C" />
+                    <View className="flex-1">
+                      <Text className="text-sm font-medium text-orange-800 dark:text-orange-300">
+                        Payment will be collected later
+                      </Text>
+                      <Text className="mt-1 text-xs text-orange-700 dark:text-orange-400">
+                        No payment is being processed now. Customer will pay at a
+                        later time.
+                      </Text>
+                    </View>
+                  </View>
+                )}
 
                 {paymentMethod === "in-store" && (
+                  <View className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900/40 dark:bg-green-900/20">
+                    <View className="mb-3 flex-row items-start gap-2">
+                      <Feather name="dollar-sign" size={16} color="#16A34A" />
+                      <View className="flex-1">
+                        <Text className="text-sm font-medium text-green-800 dark:text-green-300">
+                          In-Store Payment
+                        </Text>
+                        <Text className="mt-1 text-xs text-green-700 dark:text-green-400">
+                          Enter the amount paid in-store to track this payment.
+                        </Text>
+                      </View>
+                    </View>
+                    <FieldLabel>How much was paid in-store?</FieldLabel>
+                    <View className="h-12 flex-row items-center rounded-lg border border-gray-300 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
+                      <Text className="mr-1 font-medium text-gray-500">$</Text>
+                      <TextInput
+                        value={inStoreAmount}
+                        onChangeText={setInStoreAmount}
+                        placeholder="0.00"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="decimal-pad"
+                        className="flex-1 py-0 text-base text-gray-900 dark:text-white"
+                      />
+                    </View>
+                    <Text className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      Total: {money(submitTotal)} | Remaining: {money(balance)}
+                    </Text>
+                  </View>
+                )}
+
+                {paymentMethod === "authorize.net" && (
+                  <View className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-neutral-700 dark:bg-neutral-800/50">
+                    <FieldLabel>Card Details</FieldLabel>
+                    {/* Accept.js is browser-only, so nothing is charged from here. */}
+                    <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-900/40 dark:bg-amber-900/20">
+                      <Feather name="alert-triangle" size={13} color="#B45309" />
+                      <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                        Cards can&apos;t be charged from the app — the booking is
+                        created unpaid; finish the charge in web admin.
+                      </Text>
+                    </View>
+
+                    <Text className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                      Card Number
+                    </Text>
+                    <View
+                      className={`h-11 flex-row items-center rounded-lg border px-3 ${
+                        cardNumber && cardValid
+                          ? "border-green-400 bg-green-50 dark:bg-green-900/20"
+                          : cardNumber
+                            ? "border-red-400"
+                            : "border-gray-300 dark:border-neutral-700"
+                      }`}
+                    >
+                      <TextInput
+                        value={cardNumber}
+                        onChangeText={(v) => setCardNumber(formatCardNumber(v))}
+                        placeholder="1234 5678 9012 3456"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="number-pad"
+                        maxLength={19}
+                        className="flex-1 py-0 text-sm text-gray-900 dark:text-white"
+                      />
+                      {!!cardNumber && cardValid && (
+                        <Feather name="check-circle" size={15} color="#16A34A" />
+                      )}
+                    </View>
+                    {!!cardNumber && (
+                      <Text className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                        {getCardType(cardNumber)}
+                      </Text>
+                    )}
+
+                    <View className="mt-3 flex-row gap-2">
+                      {(
+                        [
+                          { label: "Month", value: cardMonth, set: setCardMonth, ph: "MM", max: 2 },
+                          { label: "Year", value: cardYear, set: setCardYear, ph: "YYYY", max: 4 },
+                          { label: "CVV", value: cardCvv, set: setCardCvv, ph: "123", max: 4 },
+                        ] as const
+                      ).map((f) => (
+                        <View key={f.label} className="flex-1">
+                          <Text className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                            {f.label}
+                          </Text>
+                          <View className="h-11 justify-center rounded-lg border border-gray-300 px-3 dark:border-neutral-700">
+                            <TextInput
+                              value={f.value}
+                              onChangeText={(v) =>
+                                f.set(v.replace(/\D/g, "").substring(0, f.max))
+                              }
+                              placeholder={f.ph}
+                              placeholderTextColor="#9CA3AF"
+                              keyboardType="number-pad"
+                              className="py-0 text-sm text-gray-900 dark:text-white"
+                            />
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+
+                    <View className="mt-3 flex-row items-center gap-1.5">
+                      <Feather name="lock" size={12} color="#9CA3AF" />
+                      <Text className="text-xs text-gray-600 dark:text-gray-400">
+                        Secure payment powered by Authorize.Net
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {paymentMethod !== "paylater" && (
                   <>
                     <FieldLabel>Payment Type</FieldLabel>
                     {(
@@ -1809,22 +2105,171 @@ const CreateBookingScreen = () => {
                     })}
 
                     {paymentType === "custom" && (
-                      <View className="mt-2">
-                        <InputField
-                          label="Deposit amount"
-                          value={customAmount}
-                          onChangeText={setCustomAmount}
-                          placeholder="0.00"
-                          keyboardType="decimal-pad"
-                        />
+                      <View className="mt-1 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900/40 dark:bg-green-900/20">
+                        <FieldLabel>Enter Custom Amount</FieldLabel>
+                        <View className="h-12 flex-row items-center rounded-lg border border-green-300 bg-white px-3 dark:border-green-900/50 dark:bg-neutral-900">
+                          <Text className="mr-1 font-medium text-gray-500">$</Text>
+                          <TextInput
+                            value={customAmount}
+                            onChangeText={setCustomAmount}
+                            placeholder="0.00"
+                            placeholderTextColor="#9CA3AF"
+                            keyboardType="decimal-pad"
+                            className="flex-1 py-0 text-base text-gray-900 dark:text-white"
+                          />
+                        </View>
+                        <View className="mt-2 flex-row justify-between">
+                          <Text className="text-xs text-gray-600 dark:text-gray-400">
+                            Remaining: {money(balance)}
+                          </Text>
+                          <Text className="text-xs text-gray-600 dark:text-gray-400">
+                            Total: {money(submitTotal)}
+                          </Text>
+                        </View>
+                        {dueNow > 0 && dueNow >= submitTotal && (
+                          <Text className="mt-2 text-xs font-medium text-green-600 dark:text-green-400">
+                            ✓ This covers the full amount
+                          </Text>
+                        )}
                       </View>
                     )}
                   </>
                 )}
 
-                {/* Amounts */}
+                {/* Price Breakdown — the web's summary block on this card. */}
                 <View className="mt-4 border-t border-gray-100 pt-3 dark:border-neutral-800">
-                  <View className="flex-row items-center justify-between">
+                  <FieldLabel>Price Breakdown</FieldLabel>
+                  <View className="rounded-lg bg-gray-50 p-3 dark:bg-neutral-800/50">
+                    <View className="flex-row items-start justify-between">
+                      <View className="flex-1 mr-2">
+                        <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                          Package: {pkg.name}
+                        </Text>
+                        <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                          Includes {pkg.minParticipants || 1}{" "}
+                          {(pkg.minParticipants || 1) > 1
+                            ? "participants"
+                            : "participant"}
+                        </Text>
+                      </View>
+                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {money(pkg.price)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
+                    <View className="mt-2 flex-row items-start justify-between">
+                      <View className="flex-1 mr-2">
+                        <Text className="text-sm text-gray-700 dark:text-gray-200">
+                          Additional Participants
+                        </Text>
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          {extraParticipants} extra × {money(pkg.pricePerAdditional)} each
+                        </Text>
+                      </View>
+                      <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                        {money(extraParticipants * pkg.pricePerAdditional)}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View className="mt-2 flex-row items-center justify-between border-t border-gray-200 py-2 dark:border-neutral-700">
+                    <Text className="text-sm text-gray-600 dark:text-gray-400">
+                      Total Participants
+                    </Text>
+                    <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                      {participants}
+                    </Text>
+                  </View>
+
+                  {chosenAttractions.length > 0 && (
+                    <View className="border-t border-gray-200 pt-2 dark:border-neutral-700">
+                      <Text className="mb-1 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+                        Attractions
+                      </Text>
+                      {chosenAttractions.map(({ item, qty, lineTotal }) => (
+                        <View
+                          key={item.id}
+                          className="mb-1 flex-row items-start justify-between"
+                        >
+                          <Text className="flex-1 mr-2 text-sm text-gray-700 dark:text-gray-200">
+                            {item.name}{" "}
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              ({qty} × {money(item.price)}
+                              {item.pricingType === "per_person"
+                                ? ` × ${participants} people`
+                                : ""}
+                              )
+                            </Text>
+                          </Text>
+                          <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                            {money(lineTotal)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {chosenAddOns.length > 0 && (
+                    <View className="border-t border-gray-200 pt-2 dark:border-neutral-700">
+                      <Text className="mb-1 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+                        Add-ons
+                      </Text>
+                      {chosenAddOns.map(({ item, qty, lineTotal }) => (
+                        <View
+                          key={item.id}
+                          className="mb-1 flex-row items-start justify-between"
+                        >
+                          <Text className="flex-1 mr-2 text-sm text-gray-700 dark:text-gray-200">
+                            {item.name}{" "}
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              ({qty} × {money(item.price)})
+                            </Text>
+                          </Text>
+                          <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                            {money(lineTotal)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {!!feeBreakdown?.fees.length && (
+                    <View className="mt-2 border-t border-gray-200 pt-2 dark:border-neutral-700">
+                      {feeBreakdown.fees.map((f) => (
+                        <View
+                          key={f.fee_support_id}
+                          className="mb-1 flex-row items-center justify-between"
+                        >
+                          <Text
+                            numberOfLines={1}
+                            className="flex-1 mr-2 text-sm text-gray-700 dark:text-gray-200"
+                          >
+                            {f.fee_name}
+                            {f.fee_label ? ` (${f.fee_label})` : ""}
+                          </Text>
+                          <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                            {f.fee_application_type === "additive" ? "+" : ""}
+                            {money(f.fee_amount)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {discount > 0 && (
+                    <View className="mt-1 flex-row items-center justify-between">
+                      <Text className="text-sm text-green-600 dark:text-green-400">
+                        Discounts
+                      </Text>
+                      <Text className="text-sm font-medium text-green-600 dark:text-green-400">
+                        −{money(discount)}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View className="mt-3 flex-row items-center justify-between border-t border-gray-200 pt-3 dark:border-neutral-700">
                     <Text className="text-base font-bold text-gray-900 dark:text-white">
                       Total
                     </Text>
@@ -1833,13 +2278,41 @@ const CreateBookingScreen = () => {
                     </Text>
                   </View>
                   <View className="mt-1 flex-row items-center justify-between border-t border-dashed border-gray-200 pt-2 dark:border-neutral-700">
-                    <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
-                      Amount Due Now
+                    <Text
+                      className={`text-sm font-semibold ${
+                        paymentMethod === "paylater"
+                          ? "text-orange-700 dark:text-orange-400"
+                          : paymentMethod === "in-store" && inStoreTyped > 0
+                            ? "text-green-700 dark:text-green-400"
+                            : "text-[#0644C7] dark:text-blue-300"
+                      }`}
+                    >
+                      {paymentMethod === "in-store" && inStoreTyped > 0
+                        ? "In-Store Amount Paid"
+                        : "Amount Due Now"}
                     </Text>
-                    <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
-                      {money(amountPaid)}
+                    <Text
+                      className={`text-sm font-semibold ${
+                        paymentMethod === "paylater"
+                          ? "text-orange-700 dark:text-orange-400"
+                          : paymentMethod === "in-store" && inStoreTyped > 0
+                            ? "text-green-700 dark:text-green-400"
+                            : "text-[#0644C7] dark:text-blue-300"
+                      }`}
+                    >
+                      {money(dueNow)}
                     </Text>
                   </View>
+                  {balance > 0 && (
+                    <View className="mt-1 flex-row items-center justify-between">
+                      <Text className="text-xs text-amber-600 dark:text-amber-400">
+                        Balance due later
+                      </Text>
+                      <Text className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                        {money(balance)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 {/* Email toggles — the web's two checkboxes */}
@@ -1891,17 +2364,31 @@ const CreateBookingScreen = () => {
             ) : (
               <>
                 {/* Package */}
-                <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                  {pkg.name}
-                </Text>
-                {!!pkg.category && (
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {pkg.category}
-                  </Text>
-                )}
-                <Text className="mt-0.5 text-lg font-bold text-gray-900 dark:text-white">
-                  {money(pkg.price)}
-                </Text>
+                <View className="flex-row items-start gap-3">
+                  {!!pkg.image && (
+                    <Image
+                      source={{ uri: pkg.image }}
+                      style={{ width: 64, height: 64, borderRadius: 8 }}
+                      contentFit="cover"
+                    />
+                  )}
+                  <View className="flex-1">
+                    <Text
+                      numberOfLines={2}
+                      className="text-sm font-bold text-[#0644C7] dark:text-blue-400"
+                    >
+                      {pkg.name}
+                    </Text>
+                    {!!pkg.category && (
+                      <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                        {pkg.category}
+                      </Text>
+                    )}
+                    <Text className="mt-1 text-lg font-bold text-gray-900 dark:text-white">
+                      {money(pkg.price)}
+                    </Text>
+                  </View>
+                </View>
 
                 {/* Details */}
                 <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
@@ -1932,6 +2419,70 @@ const CreateBookingScreen = () => {
                   </View>
                 </View>
 
+                {/* Chosen attractions / add-ons, with their thumbnails. */}
+                {chosenAttractions.length > 0 && (
+                  <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
+                    <Text className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                      Attractions
+                    </Text>
+                    {chosenAttractions.map(({ item, qty, lineTotal }) => (
+                      <SummaryItemRow
+                        key={item.id}
+                        name={item.name}
+                        meta={`Qty: ${qty} × ${money(item.price)}${
+                          item.pricingType === "per_person"
+                            ? ` × ${participants}`
+                            : ""
+                        }`}
+                        amount={money(lineTotal)}
+                      />
+                    ))}
+                  </View>
+                )}
+
+                {chosenAddOns.length > 0 && (
+                  <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
+                    <Text className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                      Add-ons
+                    </Text>
+                    {chosenAddOns.map(({ item, qty, lineTotal }) => (
+                      <SummaryItemRow
+                        key={item.id}
+                        image={item.image}
+                        name={item.name}
+                        meta={`Qty: ${qty} × ${money(item.price)}`}
+                        amount={money(lineTotal)}
+                      />
+                    ))}
+                  </View>
+                )}
+
+                {(!!firstName || !!customerEmail) && (
+                  <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
+                    <Text className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                      Customer
+                    </Text>
+                    {!!`${firstName} ${lastName}`.trim() && (
+                      <Text className="text-sm text-gray-900 dark:text-white">
+                        {`${firstName} ${lastName}`.trim()}
+                      </Text>
+                    )}
+                    {!!customerEmail && (
+                      <Text
+                        numberOfLines={1}
+                        className="text-xs text-gray-500 dark:text-gray-400"
+                      >
+                        {customerEmail}
+                      </Text>
+                    )}
+                    {!!customerPhone && (
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        {customerPhone}
+                      </Text>
+                    )}
+                  </View>
+                )}
+
                 {/* Price breakdown */}
                 <View className="mt-3 border-t border-gray-100 pt-3 dark:border-neutral-800">
                   <Text className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
@@ -1958,14 +2509,86 @@ const CreateBookingScreen = () => {
                     </View>
                   </View>
 
-                  <View className="mt-2 flex-row items-center justify-between">
+                  {extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
+                    <View className="mt-2 flex-row items-start justify-between">
+                      <View className="flex-1 mr-2">
+                        <Text className="text-sm text-gray-700 dark:text-gray-200">
+                          Additional Participants
+                        </Text>
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          {extraParticipants} extra × {money(pkg.pricePerAdditional)}
+                          /person
+                        </Text>
+                      </View>
+                      <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                        +{money(extraParticipants * pkg.pricePerAdditional)}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View className="mt-2 flex-row items-center justify-between border-t border-gray-100 pt-2 dark:border-neutral-800">
                     <Text className="text-xs text-gray-500 dark:text-gray-400">
                       Total Participants
                     </Text>
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    <Text className="text-xs font-medium text-gray-700 dark:text-gray-300">
                       {participants} people
                     </Text>
                   </View>
+
+                  {chosenAttractions.length > 0 && (
+                    <View className="mt-2 border-t border-gray-100 pt-2 dark:border-neutral-800">
+                      <Text className="mb-1 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500">
+                        Attractions
+                      </Text>
+                      {chosenAttractions.map(({ item, qty, lineTotal }) => (
+                        <View
+                          key={item.id}
+                          className="mb-1 flex-row items-start justify-between"
+                        >
+                          <View className="flex-1 mr-2">
+                            <Text className="text-xs text-gray-700 dark:text-gray-200">
+                              {item.name}
+                            </Text>
+                            <Text className="text-xs text-gray-400 dark:text-gray-500">
+                              {qty}× {money(item.price)}
+                              {item.pricingType === "per_person"
+                                ? ` × ${participants} people`
+                                : "/unit"}
+                            </Text>
+                          </View>
+                          <Text className="text-xs font-medium text-gray-800 dark:text-gray-100">
+                            +{money(lineTotal)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {chosenAddOns.length > 0 && (
+                    <View className="mt-2 border-t border-gray-100 pt-2 dark:border-neutral-800">
+                      <Text className="mb-1 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500">
+                        Add-ons
+                      </Text>
+                      {chosenAddOns.map(({ item, qty, lineTotal }) => (
+                        <View
+                          key={item.id}
+                          className="mb-1 flex-row items-start justify-between"
+                        >
+                          <View className="flex-1 mr-2">
+                            <Text className="text-xs text-gray-700 dark:text-gray-200">
+                              {item.name}
+                            </Text>
+                            <Text className="text-xs text-gray-400 dark:text-gray-500">
+                              {qty}× {money(item.price)}
+                            </Text>
+                          </View>
+                          <Text className="text-xs font-medium text-gray-800 dark:text-gray-100">
+                            +{money(lineTotal)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
 
                   {!!feeBreakdown?.fees.length &&
                     feeBreakdown.fees.map((f) => (
@@ -1977,7 +2600,8 @@ const CreateBookingScreen = () => {
                           numberOfLines={1}
                           className="flex-1 mr-2 text-xs text-gray-500 dark:text-gray-400"
                         >
-                          {f.fee_label || f.fee_name} ({f.fee_application_type})
+                          {f.fee_name}
+                          {f.fee_label ? ` (${f.fee_label})` : ""}
                         </Text>
                         <Text className="text-xs text-gray-700 dark:text-gray-300">
                           {f.fee_application_type === "additive" ? "+" : ""}
@@ -2037,13 +2661,11 @@ const CreateBookingScreen = () => {
             <Pressable
               onPress={goBack}
               disabled={submitting}
-              className="flex-1 h-14 items-center justify-center rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-80"
+              className="flex-1 h-14 flex-row items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-80"
             >
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                {BACK_LABELS[step - 1]}
+              <Feather name="chevron-left" size={18} color="#6B7280" />
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Back
               </Text>
             </Pressable>
           )}
@@ -2052,19 +2674,18 @@ const CreateBookingScreen = () => {
             <Pressable
               onPress={goNext}
               disabled={!stepValid}
-              className={`flex-[1.6] h-14 items-center justify-center rounded-lg bg-[#0644C7] active:opacity-90 ${
+              className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] active:opacity-90 ${
                 stepValid ? "" : "opacity-40"
               }`}
             >
-              <Text numberOfLines={1} className="text-sm font-semibold text-white">
-                {NEXT_LABELS[step - 1]}
-              </Text>
+              <Text className="text-sm font-semibold text-white">Continue</Text>
+              <Feather name="chevron-right" size={18} color="#FFFFFF" />
             </Pressable>
           ) : (
             <Pressable
               onPress={handleSubmit}
               disabled={submitting}
-              className={`flex-[1.4] h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] active:opacity-90 ${
+              className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] active:opacity-90 ${
                 submitting ? "opacity-60" : ""
               }`}
             >
@@ -2073,8 +2694,8 @@ const CreateBookingScreen = () => {
               ) : (
                 <>
                   <Feather name="check" size={18} color="#FFFFFF" />
-                  <Text className="text-base font-semibold text-white">
-                    Create · {money(displayTotal)}
+                  <Text className="text-sm font-semibold text-white">
+                    Confirm Booking
                   </Text>
                 </>
               )}

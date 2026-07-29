@@ -1,4 +1,4 @@
-import { apiRequest, apiUrl } from "../lib/api";
+import { apiRequest, apiUrl, mediaUrl } from "../lib/api";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
   AppliedFee as PricingAppliedFee,
@@ -1393,7 +1393,13 @@ export async function recordBookingPayment(
 // rich package catalog + POST /api/bookings.
 // ---------------------------------------------------------------------------
 
-export type PackageAddOn = { id: number; name: string; price: number };
+export type PackageAddOn = {
+  id: number;
+  name: string;
+  price: number;
+  /** Resolved thumbnail URL, or null when the add-on has no image. */
+  image: string | null;
+};
 export type PackageAttraction = {
   id: number;
   name: string;
@@ -1408,6 +1414,8 @@ export type BookablePackage = {
   name: string;
   category: string;
   description: string;
+  /** Resolved hero image URL, or null when the package has none. */
+  image: string | null;
   price: number;
   pricePerAdditional: number;
   minParticipants: number;
@@ -1430,6 +1438,7 @@ type RawPackage = {
   name?: string | null;
   description?: string | null;
   category?: string | null;
+  image?: string | null;
   is_active?: boolean | number | null;
   price?: number | string | null;
   price_per_additional?: number | string | null;
@@ -1443,7 +1452,12 @@ type RawPackage = {
   partial_payment_fixed?: number | string | null;
   location_id?: number | null;
   add_ons?:
-    | { id: number; name?: string | null; price?: number | string | null }[]
+    | {
+        id: number;
+        name?: string | null;
+        price?: number | string | null;
+        image?: string | null;
+      }[]
     | null;
   attractions?:
     | {
@@ -1464,6 +1478,7 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
     name: raw.name?.trim() || `Package #${raw.id}`,
     category: raw.category?.trim() || "",
     description: raw.description?.trim() || "",
+    image: mediaUrl(raw.image),
     price: Number(raw.price ?? 0),
     pricePerAdditional: Number(raw.price_per_additional ?? 0),
     minParticipants: Number(raw.min_participants ?? 1) || 1,
@@ -1489,6 +1504,7 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
       id: Number(a.id),
       name: a.name?.trim() || `Add-on #${a.id}`,
       price: Number(a.price ?? 0),
+      image: mediaUrl(a.image),
     })),
     attractions: (raw.attractions ?? []).map((a) => ({
       id: Number(a.id),
@@ -1622,7 +1638,7 @@ export type CreateBookingInput = {
   duration_unit: string;
   total_amount: number;
   amount_paid: number;
-  payment_method: "in-store" | "paylater";
+  payment_method: "authorize.net" | "in-store" | "paylater";
   status?: BookingStatus;
   payment_status?: "paid" | "partial" | "pending";
   /** Manual-booking flags (mirrors the web ManualBooking payload). The backend

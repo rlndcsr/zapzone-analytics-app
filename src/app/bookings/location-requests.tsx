@@ -212,16 +212,13 @@ export default function LocationRequestsScreen() {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <View className="flex-1">
-            <View className="flex-row items-center gap-2">
-              <Feather name="map-pin" size={16} color={PRIMARY} />
-              <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                Location Change Requests
-              </Text>
-            </View>
-            <Text className="text-xs text-gray-500 dark:text-gray-400">
-              Review requests to move bookings between locations. Approving
-              validates scheduling conflicts at the destination.
+          <View className="flex-1 flex-row items-center gap-2">
+            <Feather name="map-pin" size={16} color={PRIMARY} />
+            <Text
+              numberOfLines={1}
+              className="flex-1 text-lg font-bold text-gray-900 dark:text-white"
+            >
+              Location Change Requests
             </Text>
           </View>
         </View>
@@ -268,6 +265,12 @@ export default function LocationRequestsScreen() {
           />
         }
       >
+        {/* Page description — lives on the screen, not in the header bar. */}
+        <Text className="mb-4 text-sm leading-5 text-gray-500 dark:text-gray-400">
+          Review requests to move bookings between locations. Approving validates
+          scheduling conflicts at the destination.
+        </Text>
+
         {loading ? (
           <View className="py-16 items-center">
             <ActivityIndicator color={PRIMARY} />

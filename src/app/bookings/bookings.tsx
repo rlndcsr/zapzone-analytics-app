@@ -379,7 +379,87 @@ const BookingCard = ({
   );
 };
 
+/** Sub-page shortcuts, rendered two per row in this order. */
+const NAV_CARDS: {
+  icon: ComponentIconName;
+  title: string;
+  desc: string;
+  cta: string;
+  route: string;
+}[] = [
+  {
+    icon: "grid",
+    title: "Space Schedule",
+    desc: "View all customer bookings",
+    cta: "View All",
+    route: "/bookings/space-schedule",
+  },
+  {
+    icon: "camera",
+    title: "Check-in",
+    desc: "Checking in customers",
+    cta: "Scan QR Code",
+    route: "/bookings/check-in",
+  },
+  {
+    icon: "map-pin",
+    title: "Location Requests",
+    desc: "Review location change requests",
+    cta: "Review",
+    route: "/bookings/location-requests",
+  },
+];
+
+const NAV_CARD_HEIGHT = 176;
+
+const NAV_CARD_SHADOW = {
+  shadowColor: "#424242",
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.04,
+  shadowRadius: 6,
+  elevation: 1,
+} as const;
+
+const NavCard = ({ card }: { card: (typeof NAV_CARDS)[number] }) => (
+  <View className="w-1/2 px-1.5 mb-3" style={{ height: NAV_CARD_HEIGHT }}>
+    <Pressable
+      onPress={() => router.push(card.route as never)}
+      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+      style={NAV_CARD_SHADOW}
+      accessibilityRole="button"
+      accessibilityLabel={card.title}
+    >
+      <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+        <Feather name={card.icon} size={20} color={PRIMARY} />
+      </View>
+      <Text
+        className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+        numberOfLines={1}
+      >
+        {card.title}
+      </Text>
+      <Text
+        numberOfLines={2}
+        className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+      >
+        {card.desc}
+      </Text>
+      {/* Spacer pins the footer to the bottom so all cards align. */}
+      <View className="flex-1" />
+      <View className="flex-row items-center pt-3 border-t border-gray-100 dark:border-neutral-800">
+        <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+          {card.cta}
+        </Text>
+        <Feather name="chevron-right" size={16} color={PRIMARY} />
+      </View>
+    </Pressable>
+  </View>
+);
+
 type KpiTone = { bg: string; tint: string };
+
+/** All metric cards share one blue accent, as every web card does. */
+const KPI_TONE: KpiTone = { bg: "#0644C720", tint: PRIMARY };
 
 const KpiCard = ({
   icon,
@@ -919,67 +999,11 @@ const Bookings = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          <View className="flex-row items-stretch gap-3 mb-3">
-            {/* Check-in card — the module's headline action, kept as a card. */}
-            <Pressable
-              onPress={() => router.push("/bookings/check-in")}
-              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-              style={{
-                shadowColor: "#424242",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.04,
-                shadowRadius: 6,
-                elevation: 1,
-              }}
-            >
-              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                <Feather name="camera" size={20} color="#0644C7" />
-              </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
-                Check-in
-              </Text>
-              <Text
-                numberOfLines={2}
-                style={{ minHeight: 28 }}
-                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-              >
-                Checking in customers
-              </Text>
-              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                  Scan QR Code
-                </Text>
-                <Feather name="chevron-right" size={16} color="#0644C7" />
-              </View>
-            </Pressable>
-          </View>
-
-          {/* Space Schedule + Location Requests — plain outlined buttons, the
-              same treatment as Create Booking below. */}
-          <View className="flex-row items-center gap-3 mb-3">
-            <Pressable
-              onPress={() => router.push("/bookings/space-schedule")}
-              className="flex-1 flex-row items-center justify-center gap-1.5 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              <Feather name="grid" size={16} color="#6B7280" />
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Space Schedule
-              </Text>
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/bookings/location-requests" as never)}
-              className="flex-1 flex-row items-center justify-center gap-1.5 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              <Feather name="map-pin" size={16} color="#6B7280" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                Location Requests
-              </Text>
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            </Pressable>
+          {/* Sub-page shortcuts — two cards per row. */}
+          <View className="flex-row flex-wrap -mx-1.5 mb-2">
+            {NAV_CARDS.map((card) => (
+              <NavCard key={card.route} card={card} />
+            ))}
           </View>
 
           {/* Manual Booking — a single-page manual entry flow (mirrors the web
@@ -1037,7 +1061,7 @@ const Bookings = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="calendar"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+                  tone={KPI_TONE}
                   title="Total Bookings"
                   value={String(kpis.total)}
                   change={`${kpis.total} total bookings`}
@@ -1046,7 +1070,7 @@ const Bookings = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="package"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+                  tone={KPI_TONE}
                   title="Package Bookings"
                   value={String(kpis.total)}
                   change={`${kpis.confirmed} confirmed`}
@@ -1055,7 +1079,7 @@ const Bookings = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="users"
-                  tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
+                  tone={KPI_TONE}
                   title="Participants"
                   value={String(kpis.participants)}
                   change={`${kpis.total} bookings`}
@@ -1064,7 +1088,7 @@ const Bookings = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="dollar-sign"
-                  tone={{ bg: "#10B98120", tint: "#10B981" }}
+                  tone={KPI_TONE}
                   title="Revenue"
                   value={formatMoney(kpis.revenue)}
                   change={`Excludes ${kpis.cancelled} cancelled`}
@@ -1073,7 +1097,7 @@ const Bookings = () => {
               <View className="w-1/2">
                 <KpiCard
                   icon="dollar-sign"
-                  tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
+                  tone={KPI_TONE}
                   title="Possible Revenue"
                   value={formatMoney(kpis.possibleRevenue)}
                   change="Total if all bookings fully paid"
@@ -1215,6 +1239,7 @@ const Bookings = () => {
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
+                    onRowPress={rowHandlers.onView}
                     handlers={rowHandlers}
                     visibleColumns={visibleColumns}
                   />
