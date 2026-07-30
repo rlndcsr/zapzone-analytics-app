@@ -381,6 +381,223 @@ export async function fetchAttractionPurchaseDetail(
   return res?.data ? mapDetail(res.data) : null;
 }
 
+/* ------------------------------------------------------- purchase edit --- */
+
+/** Payment methods the web Edit Purchase form offers (backend `Rule::in`). */
+export type AttractionPaymentMethod =
+  | "card"
+  | "in-store"
+  | "paylater"
+  | "authorize.net";
+
+/** Statuses the backend accepts on a purchase (`AttractionPurchase::STATUSES`). */
+export type EditablePurchaseStatus =
+  | "pending"
+  | "confirmed"
+  | "checked-in"
+  | "cancelled"
+  | "refunded";
+
+/** One add-on already on the purchase, with its frozen `price_at_purchase`. */
+export type PurchaseAddOnPivot = {
+  id: number;
+  name: string;
+  /** The add-on's own current price (may differ from the frozen one). */
+  price: number;
+  quantity: number;
+  priceAtPurchase: number;
+};
+
+/**
+ * The purchase as the Edit Purchase form needs it — every field the web
+ * EditPurchase seeds its state from, flattened out of
+ * GET /api/attraction-purchases/{id}.
+ */
+export type AttractionPurchaseEditRecord = {
+  id: number;
+  attractionId: number | null;
+  customerId: number | null;
+  /** "First Last" of the linked customer account, when there is one. */
+  customerName: string | null;
+  locationId: number | null;
+  guestName: string;
+  guestEmail: string;
+  guestPhone: string;
+  quantity: number;
+  status: EditablePurchaseStatus;
+  paymentMethod: AttractionPaymentMethod;
+  amountPaid: number;
+  discountAmount: number;
+  notes: string;
+  /** YYYY-MM-DD, or "" when unscheduled. */
+  scheduledDate: string;
+  /** HH:MM, or "" when unscheduled. */
+  scheduledTime: string;
+  addOns: PurchaseAddOnPivot[];
+  appliedFees: PayloadAppliedFee[];
+  appliedDiscounts: PayloadAppliedDiscount[];
+  /** The purchase's attraction, used to backfill the picker + location label. */
+  attraction: {
+    id: number;
+    name: string;
+    price: number;
+    pricingType: string;
+    category: string;
+    locationId: number | null;
+    locationName: string | null;
+  } | null;
+};
+
+type RawEditPurchase = Omit<RawPurchaseDetail, "attraction"> & {
+  attraction_id?: number | null;
+  customer_id?: number | null;
+  discount_amount?: number | string | null;
+  attraction?: {
+    id?: number;
+    name?: string | null;
+    price?: number | string | null;
+    pricing_type?: string | null;
+    category?: string | null;
+    location_id?: number | null;
+    location?: { id?: number; name?: string | null } | null;
+  } | null;
+  applied_discounts?:
+    | {
+        discount_name?: string | null;
+        discount_amount?: number | string | null;
+        discount_type?: "fixed" | "percentage" | null;
+        original_price?: number | string | null;
+        special_pricing_id?: number | null;
+      }[]
+    | null;
+};
+
+function mapEditRecord(raw: RawEditPurchase): AttractionPurchaseEditRecord {
+  const status = (raw.status === "completed" ? "confirmed" : raw.status) ?? "pending";
+  const customer = raw.customer;
+  return {
+    id: raw.id,
+    attractionId: raw.attraction_id ?? raw.attraction?.id ?? null,
+    customerId: raw.customer_id ?? null,
+    customerName: customer
+      ? `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() || null
+      : null,
+    locationId: raw.location_id ?? raw.attraction?.location_id ?? null,
+    guestName: raw.guest_name ?? "",
+    guestEmail: raw.guest_email ?? "",
+    guestPhone: raw.guest_phone ?? "",
+    quantity: Number(raw.quantity ?? 1) || 1,
+    status: status as EditablePurchaseStatus,
+    paymentMethod: (raw.payment_method || "in-store") as AttractionPaymentMethod,
+    amountPaid: Number(raw.amount_paid ?? 0),
+    discountAmount: Number(raw.discount_amount ?? 0),
+    notes: raw.notes ?? "",
+    scheduledDate: raw.scheduled_date ? raw.scheduled_date.split("T")[0] : "",
+    scheduledTime: raw.scheduled_time ?? "",
+    addOns: (raw.add_ons ?? []).map((a, i) => ({
+      id: a.id ?? i,
+      name: a.name?.trim() || a.add_on?.name?.trim() || "Add-on",
+      price: Number(a.price ?? a.pivot?.price_at_purchase ?? 0),
+      quantity: Number(a.pivot?.quantity ?? 0),
+      priceAtPurchase: Number(a.pivot?.price_at_purchase ?? a.price ?? 0),
+    })),
+    appliedFees: (raw.applied_fees ?? []).map((f) => ({
+      fee_name: f.fee_name?.trim() || "",
+      fee_amount: Number(f.fee_amount ?? 0),
+      fee_application_type: f.fee_application_type ?? "additive",
+    })),
+    appliedDiscounts: (raw.applied_discounts ?? []).map((d) => ({
+      discount_name: d.discount_name?.trim() || "",
+      discount_amount: Number(d.discount_amount ?? 0),
+      discount_type: d.discount_type ?? "fixed",
+      original_price: Number(d.original_price ?? 0),
+      special_pricing_id: d.special_pricing_id ?? null,
+    })),
+    attraction: raw.attraction?.id
+      ? {
+          id: raw.attraction.id,
+          name: raw.attraction.name?.trim() || "Untitled Attraction",
+          price: Number(raw.attraction.price ?? 0),
+          pricingType: raw.attraction.pricing_type ?? "flat",
+          category: raw.attraction.category?.trim() || "",
+          locationId: raw.attraction.location_id ?? null,
+          locationName: raw.attraction.location?.name?.trim() || null,
+        }
+      : null,
+  };
+}
+
+/**
+ * GET /api/attraction-purchases/{id} — the same endpoint the web EditPurchase
+ * loads, mapped to everything its form seeds from. Returns `null` when the
+ * purchase can't be resolved (the web's "Purchase Not Found" state).
+ */
+export async function fetchAttractionPurchaseForEdit(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<AttractionPurchaseEditRecord | null> {
+  const res = await apiRequest<{ success: boolean; data: RawEditPurchase | null }>(
+    `/api/attraction-purchases/${id}`,
+    { token, signal },
+  );
+  return res?.data ? mapEditRecord(res.data) : null;
+}
+
+/**
+ * Body for PUT /api/attraction-purchases/{id} — field-for-field the web
+ * `UpdatePurchaseData` the EditPurchase form submits.
+ */
+export type UpdateAttractionPurchaseInput = {
+  attraction_id?: number;
+  guest_name?: string;
+  guest_email?: string;
+  guest_phone?: string;
+  quantity: number;
+  scheduled_date: string;
+  scheduled_time: string;
+  status: EditablePurchaseStatus;
+  payment_method: AttractionPaymentMethod;
+  amount_paid: number;
+  notes?: string;
+  applied_fees: PayloadAppliedFee[] | null;
+  applied_discounts: PayloadAppliedDiscount[] | null;
+  discount_amount: number;
+  total_amount: number;
+  /** Only sent when the add-on lines actually changed, like the web. */
+  additional_addons?: PurchaseAddonInput[];
+};
+
+/** PUT /api/attraction-purchases/{id} — save an edited purchase. */
+export async function updateAttractionPurchase(
+  token: string,
+  id: number,
+  input: UpdateAttractionPurchaseInput,
+): Promise<boolean> {
+  const res = await apiRequest<{ success: boolean; message?: string }>(
+    `/api/attraction-purchases/${id}`,
+    { method: "PUT", token, body: input },
+  );
+  return !!res?.success;
+}
+
+/**
+ * POST /api/attraction-purchases/{id}/qrcode — re-send the receipt email with
+ * the ticket QR attached. Same endpoint + payload as the web `sendReceipt`.
+ */
+export async function sendAttractionPurchaseReceipt(
+  token: string,
+  id: number,
+  qrCode: string,
+  sendEmail = true,
+): Promise<void> {
+  await apiRequest(`/api/attraction-purchases/${id}/qrcode`, {
+    method: "POST",
+    token,
+    body: { qr_code: qrCode, send_email: sendEmail },
+  });
+}
+
 /**
  * DELETE /api/attraction-purchases/{id} — soft-delete a purchase. Same endpoint
  * the web Manage Purchases uses (`deletePurchase`); no dedicated mobile route.

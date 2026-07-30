@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
   useCallback,
   useEffect,
@@ -224,6 +224,19 @@ const PurchaseDetailsScreen = () => {
     loadDetail();
   }, [loadDetail]);
 
+  // Re-read the purchase when we come back from Edit Purchase (the web lands on
+  // a freshly mounted details route there, so it refetches too).
+  const firstFocusRef = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocusRef.current) {
+        firstFocusRef.current = false;
+        return;
+      }
+      loadDetail();
+    }, [loadDetail]),
+  );
+
   // Connected waivers (mirrors the web WaiverConnectionPanel), loaded on demand.
   useEffect(() => {
     if (purchaseId == null || Number.isNaN(purchaseId)) {
@@ -354,14 +367,32 @@ const PurchaseDetailsScreen = () => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
       >
-        {/* Primary action: View QR Code */}
-        <Pressable
-          onPress={() => setShowQR(true)}
-          className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 mb-4"
-        >
-          <Feather name="maximize" size={16} color="#FFFFFF" />
-          <Text className="text-sm font-semibold text-white">View QR Code</Text>
-        </Pressable>
+        {/* Header actions — Edit + View QR Code, as on the web details page. */}
+        <View className="flex-row items-center gap-3 mb-4">
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: "/attractions/edit-purchase",
+                params: { id: String(detail.id), from: "details" },
+              })
+            }
+            className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+          >
+            <Feather name="edit-2" size={16} color="#6B7280" />
+            <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Edit
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setShowQR(true)}
+            className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+          >
+            <Feather name="maximize" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              View QR Code
+            </Text>
+          </Pressable>
+        </View>
 
         {/* Purchase Information */}
         <SectionCard title="Purchase Information">

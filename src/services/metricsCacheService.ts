@@ -1,4 +1,4 @@
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import type { DashboardData } from "./metricsService";
 
 // Port of the web admin's MetricsCacheService (zappoint
@@ -99,6 +99,25 @@ class MetricsCacheService {
       file.write(JSON.stringify(cached));
     } catch {
       // Disk unavailable/full — the memory tier still serves this run.
+    }
+  }
+
+  /**
+   * Drop every cached dashboard snapshot (the web's `clearAllCaches`), so the
+   * next dashboard render refetches. Called after a mutation that moves the
+   * metrics, e.g. saving an edited purchase.
+   */
+  async clearAllCaches(): Promise<void> {
+    this.memoryCache.clear();
+
+    try {
+      for (const entry of new Directory(Paths.cache).list()) {
+        if (entry instanceof File && entry.name.startsWith(CACHE_PREFIX)) {
+          entry.delete();
+        }
+      }
+    } catch {
+      // Unreadable cache dir — memory is already cleared, disk entries expire.
     }
   }
 }

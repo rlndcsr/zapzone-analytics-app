@@ -1053,6 +1053,12 @@ const ManagePurchases = () => {
                         params: { id: String(purchase.id) },
                       })
                     }
+                    onEdit={(purchase) =>
+                      router.push({
+                        pathname: "/attractions/edit-purchase",
+                        params: { id: String(purchase.id), from: "purchases" },
+                      })
+                    }
                     onStatusPress={setStatusPurchase}
                     onDelete={handleRowDelete}
                   />

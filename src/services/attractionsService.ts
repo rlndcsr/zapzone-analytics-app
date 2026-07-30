@@ -385,6 +385,8 @@ type FetchParams = {
   userId: number;
   /** Restrict to one location; omit for all the user can access. */
   locationId?: number;
+  /** Server-side `is_active` filter (the Edit Purchase picker passes `true`). */
+  isActive?: boolean;
   signal?: AbortSignal;
 };
 
@@ -396,6 +398,7 @@ export async function fetchAttractions({
   token,
   userId,
   locationId,
+  isActive,
   signal,
 }: FetchParams): Promise<AttractionRow[]> {
   const params = new URLSearchParams({
@@ -403,6 +406,7 @@ export async function fetchAttractions({
     user_id: String(userId),
   });
   if (locationId != null) params.append("location_id", String(locationId));
+  if (isActive != null) params.append("is_active", isActive ? "true" : "false");
 
   const res = await apiRequest<AttractionsListResponse>(
     `/api/attractions?${params.toString()}`,

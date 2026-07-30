@@ -128,6 +128,8 @@ const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 type Handlers = {
   /** Eye icon + row tap — open Purchase Details. */
   onView: (purchase: PurchaseRow) => void;
+  /** Pencil icon — open Edit Purchase. */
+  onEdit: (purchase: PurchaseRow) => void;
   /** Status pill — open the parent-hosted "Set Status" picker sheet. */
   onStatusPress: (purchase: PurchaseRow) => void;
   onDelete: (purchase: PurchaseRow) => void;
@@ -140,7 +142,8 @@ type Handlers = {
  * Duration are `defaultVisible: false` on the web, so they're omitted here too.)
  * Paid is green when fully paid, amber otherwise — the same rule the web uses.
  * The Status cell is a tap-to-change pill and the trailing Actions cell carries
- * the inline View (eye → Details) / Delete controls, matching the web table.
+ * the inline View (eye → Details) / Edit (pencil → Edit Purchase) / Delete
+ * controls, in the same order as the web table.
  */
 function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
   return [
@@ -263,7 +266,7 @@ function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
   {
     key: "actions",
     label: "Actions",
-    width: 110,
+    width: 140,
     render: (p) => (
       <View className="flex-row items-center gap-0.5">
         <IconAction
@@ -271,6 +274,12 @@ function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
           tint={PRIMARY}
           label={`View details for ${p.customerName}`}
           onPress={() => h.onView(p)}
+        />
+        <IconAction
+          icon="edit-2"
+          tint="#D97706"
+          label={`Edit purchase for ${p.customerName}`}
+          onPress={() => h.onEdit(p)}
         />
         <IconAction
           icon="trash-2"
@@ -297,6 +306,7 @@ export function PurchasesTable({
   onToggleRow,
   onToggleAll,
   onView,
+  onEdit,
   onStatusPress,
   onDelete,
 }: {
@@ -306,13 +316,15 @@ export function PurchasesTable({
   onToggleAll: () => void;
   /** Eye action — open Purchase Details. */
   onView: (purchase: PurchaseRow) => void;
+  /** Pencil action — open Edit Purchase. */
+  onEdit: (purchase: PurchaseRow) => void;
   /** Status pill — open the parent-hosted "Set Status" picker sheet. */
   onStatusPress: (purchase: PurchaseRow) => void;
   onDelete: (purchase: PurchaseRow) => void;
 }) {
   const columns = useMemo(
-    () => buildColumns({ onView, onStatusPress, onDelete }),
-    [onView, onStatusPress, onDelete],
+    () => buildColumns({ onView, onEdit, onStatusPress, onDelete }),
+    [onView, onEdit, onStatusPress, onDelete],
   );
   return (
     <SelectableTable

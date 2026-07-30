@@ -126,6 +126,57 @@ export const availableTimeSlotsForDate = (
 };
 
 /**
+ * Full-day blocks only, using the same scope + recurrence rules as
+ * {@link computeDayOffAvailability}. This is the web EditPurchase rule: a
+ * time-restricted day-off is skipped outright there (no limited-hours state and
+ * no slot trimming), so an edited purchase keeps every hour the web offers.
+ */
+export function fullDayOffDatesFor({
+  dayOffs,
+  attractionId,
+  today,
+}: {
+  dayOffs: DayOff[];
+  attractionId: number;
+  today: Date;
+}): Set<string> {
+  const blocked = new Set<string>();
+
+  for (const off of dayOffs) {
+    const isLocationWide =
+      off.packageIds.length === 0 &&
+      off.roomIds.length === 0 &&
+      off.attractionIds.length === 0 &&
+      off.eventIds.length === 0;
+    if (!isLocationWide && !off.attractionIds.includes(attractionId)) continue;
+    if (off.timeStart || off.timeEnd) continue;
+
+    const normalized = off.date.substring(0, 10);
+    const offDate = new Date(`${normalized}T00:00:00`);
+    if (Number.isNaN(offDate.getTime())) continue;
+
+    if (off.isRecurring) {
+      const curr = new Date(
+        today.getFullYear(),
+        offDate.getMonth(),
+        offDate.getDate(),
+      );
+      const next = new Date(
+        today.getFullYear() + 1,
+        offDate.getMonth(),
+        offDate.getDate(),
+      );
+      if (curr >= today) blocked.add(toKey(curr));
+      blocked.add(toKey(next));
+    } else if (offDate >= today) {
+      blocked.add(normalized);
+    }
+  }
+
+  return blocked;
+}
+
+/**
  * Compute the calendar availability for an attraction. A day-off applies when
  * it is location-wide (no package / room / attraction / event scoping) OR its
  * attraction_ids include this attraction — exactly the web filter. Recurring
