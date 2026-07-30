@@ -30,9 +30,14 @@ export type CalendarBooking = {
   duration: number | null;
   durationUnit: string;
   paymentMethod: string | null;
+  /** Settlement state ("paid" / "partial" / …), drives the amount colour. */
+  paymentStatus: string | null;
   locationName: string;
   createdAt: string | null;
   updatedAt: string | null;
+  /** Counts behind the day card's "N attractions / N add-ons" chips. */
+  attractionCount: number;
+  addOnCount: number;
   /** Fields behind the table's optional columns (hidden by default). */
   address: string | null;
   guestOfHonorName: string | null;
@@ -114,6 +119,7 @@ type RawBooking = {
   customer_notes?: string | null;
   notes?: string | null;
   special_requests?: string | null;
+  payment_status?: string | null;
   package?: { name?: string | null } | null;
   room?: { name?: string | null } | null;
   location?: { name?: string | null } | null;
@@ -123,6 +129,9 @@ type RawBooking = {
     email?: string | null;
     phone?: string | null;
   } | null;
+  // Eager-loaded by the index as `attractions:id,name` / `addOns:id,name`.
+  attractions?: { id?: number }[] | null;
+  add_ons?: RawAddOn[] | null;
 };
 
 /** Raw shape of the full booking model returned by GET /api/bookings/{id}. */
@@ -244,9 +253,12 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
       durationRaw != null && !Number.isNaN(durationRaw) ? durationRaw : null,
     durationUnit: raw.duration_unit ?? "minutes",
     paymentMethod: raw.payment_method ?? null,
+    paymentStatus: raw.payment_status ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
     updatedAt: raw.updated_at ?? null,
+    attractionCount: raw.attractions?.length ?? 0,
+    addOnCount: raw.add_ons?.length ?? 0,
     address: raw.address?.trim() || raw.guest_address?.trim() || null,
     guestOfHonorName: raw.guest_of_honor_name?.trim() || null,
     customerNotes: raw.customer_notes?.trim() || raw.notes?.trim() || null,

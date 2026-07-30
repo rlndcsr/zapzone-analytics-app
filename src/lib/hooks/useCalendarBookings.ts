@@ -13,39 +13,43 @@ type UseCalendarBookingsParams = {
   locationId?: number;
 };
 
-// Session cache of the full booking list; views filter it client-side.
-type BookingsCache = { key: string; fetchedAt: number; data: CalendarBooking[] };
-let cache: BookingsCache | null = null;
+// Session cache of the full booking list; views filter it client-side. One entry
+// PER LOCATION SCOPE: a single shared slot made the location-scoped Booking
+// Calendar and the unscoped Calendar tab evict each other, so every navigation
+// re-paged the whole list (~100 requests) and flooded the API into timeouts.
+type CacheEntry = { fetchedAt: number; data: CalendarBooking[] };
+const cache = new Map<string, CacheEntry>();
+// In-flight fetch per scope, so two mounted calendars share one network trip.
+const inFlight = new Map<string, Promise<CalendarBooking[]>>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cacheKey = (locationId?: number) => String(locationId ?? "all");
+const isFresh = (entry?: CacheEntry) =>
+  !!entry && Date.now() - entry.fetchedAt < CACHE_TTL_MS;
 
 export function useCalendarBookings({
   startDate,
   endDate,
   locationId,
 }: UseCalendarBookingsParams) {
-  const key = cacheKey(locationId);
-  const cacheFresh =
-    !!cache && cache.key === key && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+  const cached = cache.get(cacheKey(locationId));
 
   const [allBookings, setAllBookings] = useState<CalendarBooking[]>(
-    cache && cache.key === key ? cache.data : [],
+    cached?.data ?? [],
   );
-  const [loading, setLoading] = useState(!cacheFresh);
+  const [loading, setLoading] = useState(!isFresh(cached));
   const [error, setError] = useState<string | null>(null);
 
   // Only the latest sync may write state (guards against stale responses).
   const requestIdRef = useRef(0);
 
-  // Fetch + cache the full list; `force` (pull-to-refresh) ignores the TTL.
+  // Fetch + cache this scope's list; `force` (pull-to-refresh) ignores the TTL.
   const sync = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       const k = cacheKey(locationId);
-      const fresh =
-        !!cache && cache.key === k && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+      const entry = cache.get(k);
 
-      if (fresh && !force) {
-        setAllBookings(cache!.data);
+      if (isFresh(entry) && !force) {
+        setAllBookings(entry!.data);
         setError(null);
         setLoading(false);
         return;
@@ -64,16 +68,24 @@ export function useCalendarBookings({
       }
 
       // Show stale cache instantly and refresh quietly; else show the spinner.
-      if (cache && cache.key === k && !force) {
-        setAllBookings(cache.data);
+      if (entry && !force) {
+        setAllBookings(entry.data);
         setLoading(false);
       } else {
         setLoading(true);
       }
 
       try {
-        const data = await fetchAllBookings({ token, locationId });
-        cache = { key: k, fetchedAt: Date.now(), data };
+        // Join an in-flight sync for this scope rather than starting a second.
+        let pending = force ? undefined : inFlight.get(k);
+        if (!pending) {
+          pending = fetchAllBookings({ token, locationId }).finally(() => {
+            inFlight.delete(k);
+          });
+          inFlight.set(k, pending);
+        }
+        const data = await pending;
+        cache.set(k, { fetchedAt: Date.now(), data });
         if (isCurrent()) {
           setAllBookings(data);
           setError(null);
@@ -84,7 +96,7 @@ export function useCalendarBookings({
           setError(
             err instanceof Error ? err.message : "Failed to load bookings",
           );
-          if (!cache) setAllBookings([]);
+          if (!cache.has(k)) setAllBookings([]);
         }
       } finally {
         if (isCurrent()) setLoading(false);

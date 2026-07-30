@@ -37,6 +37,8 @@ export type EventPurchaseRow = {
   purchaseDate: string | null;
   purchaseTime: string | null;
   locationId: number | null;
+  /** Eager-loaded `location:id,name`; "" when absent. */
+  locationName: string;
   /** True when there's no linked customer (guest / walk-in) — drives the web
    *  "Customer Type" filter. */
   isGuest: boolean;
@@ -61,6 +63,7 @@ type RawEventPurchase = {
   guest_name?: string | null;
   guest_email?: string | null;
   guest_phone?: string | null;
+  location?: { name?: string | null } | null;
   event?: { name?: string | null } | null;
   customer?: {
     first_name?: string | null;
@@ -95,6 +98,7 @@ function mapPurchase(raw: RawEventPurchase): EventPurchaseRow {
     purchaseDate: raw.purchase_date ?? null,
     purchaseTime: raw.purchase_time ?? null,
     locationId: raw.location_id ?? null,
+    locationName: raw.location?.name?.trim() || "",
     isGuest: !raw.customer,
     deletedAt: raw.deleted_at ?? null,
   };
@@ -119,6 +123,10 @@ type FetchParams = {
   token: string;
   userId: number;
   locationId?: number;
+  /** Inclusive `purchase_date` window — the web calendar's `start_date`. */
+  startDate?: string;
+  /** Inclusive end of that window (web `end_date`). */
+  endDate?: string;
   signal?: AbortSignal;
 };
 
@@ -130,6 +138,8 @@ export async function fetchEventPurchases({
   token,
   userId,
   locationId,
+  startDate,
+  endDate,
   signal,
 }: FetchParams): Promise<EventPurchaseRow[]> {
   const params = new URLSearchParams({
@@ -137,6 +147,8 @@ export async function fetchEventPurchases({
     user_id: String(userId),
   });
   if (locationId != null) params.append("location_id", String(locationId));
+  if (startDate) params.append("start_date", startDate);
+  if (endDate) params.append("end_date", endDate);
 
   const res = await apiRequest<unknown>(
     `/api/event-purchases?${params.toString()}`,
@@ -306,7 +318,7 @@ function mapDetail(raw: RawEventPurchaseDetail): EventPurchaseDetail {
     phone: base.phone,
     isGuest: base.isGuest,
     eventName: base.eventName,
-    locationName: raw.location?.name?.trim() || "",
+    locationName: base.locationName,
     quantity: base.quantity,
     createdAt: base.createdAt,
     purchaseDate: base.purchaseDate,

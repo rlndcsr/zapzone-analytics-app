@@ -14,6 +14,10 @@ const API_BASE_URL = (() => {
   return url.replace(/\/+$/, "");
 })();
 
+// EXPO_PUBLIC_* values are inlined at bundle time, so surface the one actually
+// baked into this bundle — it can lag a .env edit until the cache is cleared.
+if (__DEV__) console.log(`[api] base URL = ${API_BASE_URL}`);
+
 /** Absolute URL for an API path — for native flows (file download / multipart
  *  upload) that bypass {@link apiRequest}'s JSON handling. */
 export function apiUrl(path: string): string {
@@ -51,7 +55,8 @@ export class ApiError extends Error {
   /**
    * The parsed error body, for endpoints that return structured detail beyond
    * `message` / `errors` (e.g. the `conflicts` array a 409 location-change
-   * approval answers with).
+   * approval answers with). On a transport failure (`status === 0`) this holds
+   * the original exception instead, since there is no response to parse.
    */
   readonly body?: unknown;
 
@@ -115,9 +120,19 @@ export async function apiRequest<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
+  // An already-aborted caller signal never fires "abort", so bail out before
+  // starting a request that nothing could then cancel.
+  if (signal?.aborted) {
+    return neverSettles<T>();
+  }
+
   // Fail fast after `timeoutMs` instead of hanging indefinitely.
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort();
+  }, timeoutMs);
   const onCallerAbort = () => timeoutController.abort();
   signal?.addEventListener("abort", onCallerAbort);
 
@@ -130,10 +145,28 @@ export async function apiRequest<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: timeoutController.signal,
     });
-  } catch {
+  } catch (err) {
+    // Caller aborted (unmount / superseded request): settle never, like a 401,
+    // so cancelling a request never surfaces as a failure to the consumer.
+    if (signal?.aborted && !timedOut) {
+      return neverSettles<T>();
+    }
+    // Keep the original exception: it is the only thing that distinguishes a
+    // dead radio from a DNS or TLS failure, and it has no other witness.
+    if (__DEV__) {
+      // Log the RESOLVED url — a stale inlined EXPO_PUBLIC_API_URL looks
+      // identical to a dead connection unless the host is visible.
+      console.warn(`[api] ${method} ${API_BASE_URL}${path} failed:`, err);
+    }
+    // Say WHICH failure happened — a slow server and a dead connection need
+    // different fixes, so don't collapse them into one message.
     throw new ApiError(
-      "Network error or request timed out. Please try again.",
+      timedOut
+        ? `Request timed out after ${Math.round(timeoutMs / 1000)}s. Please try again.`
+        : "Network error. Please check your connection and try again.",
       0,
+      undefined,
+      err,
     );
   } finally {
     clearTimeout(timeoutId);

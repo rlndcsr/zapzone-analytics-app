@@ -5,19 +5,22 @@ import {
 } from "../../services/attractionPurchasesService";
 import { getCurrentUser, getToken } from "../session";
 
-// Session cache of the purchase list, keyed by location; views filter it
-// client-side. Mirrors the caching approach used by useAttractions.
-type Cache = { key: string; fetchedAt: number; data: PurchaseRow[] };
-let cache: Cache | null = null;
+// Session cache of the purchase list; views filter it client-side. One entry per
+// location scope, so a scoped screen and an unscoped one don't evict each other
+// and re-page the whole purchase history on every navigation.
+type CacheEntry = { fetchedAt: number; data: PurchaseRow[] };
+const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cacheKey = (locationId?: number) => String(locationId ?? "all");
+const isFresh = (entry?: CacheEntry) =>
+  !!entry && Date.now() - entry.fetchedAt < CACHE_TTL_MS;
 
 // Set after creating a purchase so the list screen force-refetches on focus.
 let stale = false;
 
 /** Mark the cached purchases stale so they refetch on next focus. */
 export function markAttractionPurchasesStale(): void {
-  cache = null;
+  cache.clear();
   stale = true;
 }
 
@@ -34,14 +37,10 @@ type UseAttractionPurchasesParams = { locationId?: number };
 export function useAttractionPurchases({
   locationId,
 }: UseAttractionPurchasesParams = {}) {
-  const key = cacheKey(locationId);
-  const cacheFresh =
-    !!cache && cache.key === key && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+  const cached = cache.get(cacheKey(locationId));
 
-  const [purchases, setPurchases] = useState<PurchaseRow[]>(
-    cache && cache.key === key ? cache.data : [],
-  );
-  const [loading, setLoading] = useState(!cacheFresh);
+  const [purchases, setPurchases] = useState<PurchaseRow[]>(cached?.data ?? []);
+  const [loading, setLoading] = useState(!isFresh(cached));
   const [error, setError] = useState<string | null>(null);
 
   // Only the latest sync may write state (guards against stale responses).
@@ -50,11 +49,10 @@ export function useAttractionPurchases({
   const sync = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       const k = cacheKey(locationId);
-      const fresh =
-        !!cache && cache.key === k && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+      const entry = cache.get(k);
 
-      if (fresh && !force) {
-        setPurchases(cache!.data);
+      if (isFresh(entry) && !force) {
+        setPurchases(entry!.data);
         setError(null);
         setLoading(false);
         return;
@@ -74,8 +72,8 @@ export function useAttractionPurchases({
       }
 
       // Show stale cache instantly and refresh quietly; else show the spinner.
-      if (cache && cache.key === k && !force) {
-        setPurchases(cache.data);
+      if (entry && !force) {
+        setPurchases(entry.data);
         setLoading(false);
       } else {
         setLoading(true);
@@ -87,7 +85,7 @@ export function useAttractionPurchases({
           userId: user.id,
           locationId,
         });
-        cache = { key: k, fetchedAt: Date.now(), data };
+        cache.set(k, { fetchedAt: Date.now(), data });
         if (isCurrent()) {
           setPurchases(data);
           setError(null);
@@ -98,7 +96,7 @@ export function useAttractionPurchases({
           setError(
             err instanceof Error ? err.message : "Failed to load purchases",
           );
-          if (!cache) setPurchases([]);
+          if (!cache.has(k)) setPurchases([]);
         }
       } finally {
         if (isCurrent()) setLoading(false);

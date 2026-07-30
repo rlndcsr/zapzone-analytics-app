@@ -123,6 +123,10 @@ type FetchParams = {
   token: string;
   userId: number;
   locationId?: number;
+  /** Window on COALESCE(scheduled_date, purchase_date) — the web calendar's `scheduled_from`. */
+  scheduledFrom?: string;
+  /** Inclusive end of that window (web `scheduled_to`). */
+  scheduledTo?: string;
   signal?: AbortSignal;
 };
 
@@ -134,9 +138,14 @@ export async function fetchAttractionPurchases({
   token,
   userId,
   locationId,
+  scheduledFrom,
+  scheduledTo,
   signal,
 }: FetchParams): Promise<PurchaseRow[]> {
   const all: RawPurchase[] = [];
+  // The index sorts by non-unique `purchase_date`, so LIMIT/OFFSET paging can
+  // repeat a row across pages and double-count tickets — key by id.
+  const seen = new Set<number>();
   let page = 1;
   let lastPage = 1;
 
@@ -149,12 +158,18 @@ export async function fetchAttractionPurchases({
       user_id: String(userId),
     });
     if (locationId != null) params.append("location_id", String(locationId));
+    if (scheduledFrom) params.append("scheduled_from", scheduledFrom);
+    if (scheduledTo) params.append("scheduled_to", scheduledTo);
 
     const res = await apiRequest<PurchasesListResponse>(
       `/api/attraction-purchases?${params.toString()}`,
       { token, signal },
     );
-    all.push(...(res?.data?.purchases ?? []));
+    for (const raw of res?.data?.purchases ?? []) {
+      if (seen.has(raw.id)) continue;
+      seen.add(raw.id);
+      all.push(raw);
+    }
     lastPage = res?.data?.pagination?.last_page ?? page;
     page += 1;
   } while (page <= lastPage);

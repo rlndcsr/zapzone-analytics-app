@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CalendarDaySections } from "../../components/ui/CalendarDaySections";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import {
   CalendarDaySkeleton,
   CalendarSkeleton,
@@ -23,7 +24,8 @@ import {
 import { packageColor } from "../../lib/calendar/packageColors";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import { useScheduledExtras } from "../../lib/hooks/useScheduledExtras";
-import { getCurrentUser } from "../../lib/session";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { timeToMinutes } from "../../lib/time";
 import type { CalendarBooking } from "../../services/bookingsService";
 
 const PRIMARY = "#0644C7";
@@ -228,8 +230,11 @@ const BookingCalendar = () => {
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
-  const currentUser = getCurrentUser();
-  const isCompanyAdmin = currentUser?.role === "company_admin";
+  // Global workspace location — the selector rendered below writes to it, so
+  // bookings and the day extras are scoped exactly like the web calendar.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
 
   const today = useMemo(() => new Date(), []);
   const todayKey = dateKey(today);
@@ -244,7 +249,6 @@ const BookingCalendar = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [search, setSearch] = useState("");
-  const [locationFilter, setLocationFilter] = useState<string>("all");
   const [selectedPackages, setSelectedPackages] = useState<string[]>([]);
 
   // Visible window depends on the active view mode.
@@ -263,13 +267,19 @@ const BookingCalendar = () => {
     return { startDate: dateKey(anchor), endDate: dateKey(anchor) };
   }, [viewMode, anchor]);
 
-  const { bookings, allBookings, loading, error, refetch } = useCalendarBookings(
-    { startDate, endDate },
-  );
+  const { bookings, loading, error, refetch } = useCalendarBookings({
+    startDate,
+    endDate,
+    locationId: activeLocationId,
+  });
 
   // Attraction tickets + event registrations per day, overlaid on the grid
-  // alongside bookings (web parity).
-  const extrasByDate = useScheduledExtras();
+  // alongside bookings — same window + location scope as the web calendar.
+  const visibleRange = useMemo(
+    () => ({ from: startDate, to: endDate }),
+    [startDate, endDate],
+  );
+  const extrasByDate = useScheduledExtras(visibleRange, activeLocationId);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -280,25 +290,11 @@ const BookingCalendar = () => {
     }
   }, [refetch]);
 
-  // Location options — company admin only. Derived from the full cached list
-  // (not just the visible window) so the option set is stable across months,
-  // matching the Manage Bookings screen's client-side location filter.
-  const locationOptions = useMemo(() => {
-    if (!isCompanyAdmin) return [];
-    const names = new Set(
-      allBookings.map((b) => b.locationName).filter(Boolean),
-    );
-    return [...names].sort((a, b) => a.localeCompare(b));
-  }, [allBookings, isCompanyAdmin]);
-
-  // Apply the same filter pipeline as the web (location → search → packages),
-  // over the window's bookings. Location filtering is client-side by name, like
-  // Manage Bookings.
+  // Apply the same filter pipeline as the web (search → packages) over the
+  // window's bookings; the location scope is already applied by the fetch.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return bookings.filter((b) => {
-      if (isCompanyAdmin && locationFilter !== "all" && b.locationName !== locationFilter)
-        return false;
       if (
         selectedPackages.length > 0 &&
         !selectedPackages.includes(b.packageName)
@@ -311,7 +307,7 @@ const BookingCalendar = () => {
       }
       return true;
     });
-  }, [bookings, search, selectedPackages, locationFilter, isCompanyAdmin]);
+  }, [bookings, search, selectedPackages]);
 
   // Unique packages present in the current view — powers the package filter and
   // the color legend (matches the web, which derives these from the view set).
@@ -326,8 +322,11 @@ const BookingCalendar = () => {
     for (const b of filtered) {
       (map[b.date] ?? (map[b.date] = { bookings: [] })).bookings.push(b);
     }
+    // Time ascending, untimed last — the web's getBookingsForDate ordering.
     for (const key of Object.keys(map)) {
-      map[key].bookings.sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
+      map[key].bookings.sort(
+        (a, b) => timeToMinutes(a.time) - timeToMinutes(b.time),
+      );
     }
     return map;
   }, [filtered]);
@@ -395,10 +394,7 @@ const BookingCalendar = () => {
 
   const openDay = (key: string) => setSelectedDayKey(key);
 
-  const activeFilterCount =
-    (search.trim() ? 1 : 0) +
-    (locationFilter !== "all" ? 1 : 0) +
-    selectedPackages.length;
+  const activeFilterCount = (search.trim() ? 1 : 0) + selectedPackages.length;
 
   const dayLabel = (key: string) => {
     const d = new Date(`${key}T00:00:00`);
@@ -407,7 +403,6 @@ const BookingCalendar = () => {
 
   const clearFilters = () => {
     setSearch("");
-    setLocationFilter("all");
     setSelectedPackages([]);
   };
 
@@ -422,13 +417,24 @@ const BookingCalendar = () => {
   const selectedDayPurchases = selectedDayKey
     ? (extrasByDate[selectedDayKey]?.attractionPurchases ?? [])
     : [];
+  const selectedDayEvents = selectedDayKey
+    ? (extrasByDate[selectedDayKey]?.eventPurchases ?? [])
+    : [];
 
-  // An attraction purchase opens its own screen, so close the day sheet first
-  // (navigating away with it open would leave it stacked behind).
+  // A purchase opens its own screen, so close the day sheet first (navigating
+  // away with it open would leave it stacked behind).
   const openPurchase = (id: number) => {
     setSelectedDayKey(null);
     router.push({
       pathname: "/attractions/purchase-details",
+      params: { id: String(id) },
+    });
+  };
+
+  const openEventPurchase = (id: number) => {
+    setSelectedDayKey(null);
+    router.push({
+      pathname: "/events/purchase-details",
       params: { id: String(id) },
     });
   };
@@ -480,6 +486,11 @@ const BookingCalendar = () => {
         }
       >
         <View className="px-5 pt-5">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
+          </View>
+
           {/* Count badge + List View / Packages, as on the web page header. */}
           <View className="flex-row items-center gap-2 mb-4">
             <View className="rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1">
@@ -635,17 +646,15 @@ const BookingCalendar = () => {
                       return (
                         <Pressable
                           key={cell.key ?? `pad-${row}-${col}`}
-                          disabled={!hasBookings}
-                          onPress={() =>
-                            hasBookings && cell.key && openDay(cell.key)
-                          }
+                          disabled={!hasAny}
+                          onPress={() => hasAny && cell.key && openDay(cell.key)}
                           style={{ minHeight: 92 }}
                           className={`flex-1 p-1.5 ${
                             cell.key === null
                               ? "bg-gray-50/50 dark:bg-neutral-900/50"
                               : isToday
                                 ? "bg-blue-50/60 dark:bg-blue-900/20"
-                                : hasBookings
+                                : hasAny
                                   ? "active:bg-blue-50 dark:active:bg-blue-900/20"
                                   : ""
                           } ${col < 6 ? "border-r border-gray-100 dark:border-neutral-800" : ""} ${
@@ -862,40 +871,6 @@ const BookingCalendar = () => {
             )}
           </View>
 
-          {/* Location (company admin only) */}
-          {isCompanyAdmin && locationOptions.length > 0 && (
-            <>
-              <Text className="text-xs font-bold tracking-wide text-gray-500 dark:text-gray-400 uppercase mt-5 mb-2">
-                Location
-              </Text>
-              <View className="flex-row flex-wrap gap-2">
-                {["all", ...locationOptions].map((name) => {
-                  const active =
-                    locationFilter === name || (name === "all" && locationFilter === "all");
-                  return (
-                    <Pressable
-                      key={name}
-                      onPress={() => setLocationFilter(name)}
-                      className={`px-3 py-2 rounded-full border ${
-                        active
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-medium ${
-                          active ? "text-white" : "text-gray-700 dark:text-gray-200"
-                        }`}
-                      >
-                        {name === "all" ? "All Locations" : name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </>
-          )}
-
           {/* Packages */}
           <Text className="text-xs font-bold tracking-wide text-gray-500 dark:text-gray-400 uppercase mt-5 mb-2">
             Packages
@@ -997,8 +972,10 @@ const BookingCalendar = () => {
           <CalendarDaySections
             bookings={selectedDayBookings}
             purchases={selectedDayPurchases}
+            events={selectedDayEvents}
             onBooking={openBooking}
             onPurchase={openPurchase}
+            onEvent={openEventPurchase}
           />
           <View style={{ height: 12 }} />
         </ScrollView>

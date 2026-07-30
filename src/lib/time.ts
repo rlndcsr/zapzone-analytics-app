@@ -14,6 +14,19 @@ export function convertTo12Hour(time24: string | null): string {
   return `${hour}:${minute} ${period}`;
 }
 
+/**
+ * Sort key for a "HH:mm" time — the web admin's calendar `timeToMinutes`.
+ * Missing / unparseable times sort LAST, so "Any time" rows land at the end.
+ */
+export function timeToMinutes(time?: string | null): number {
+  if (!time) return Number.MAX_SAFE_INTEGER;
+  const [h, m] = time.split(":");
+  const hours = parseInt(h, 10);
+  if (Number.isNaN(hours)) return Number.MAX_SAFE_INTEGER;
+  const mins = parseInt(m ?? "0", 10);
+  return hours * 60 + (Number.isNaN(mins) ? 0 : mins);
+}
+
 /** "4:30 PM - 9:00 PM" (mirrors the web admin's formatTimeRange). */
 export function formatTimeRange(
   start: string | null,
