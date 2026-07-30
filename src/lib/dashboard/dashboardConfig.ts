@@ -17,7 +17,6 @@ export type SubtitleFn = (metrics: DashboardTotals) => string;
 
 export type MetricCardDef = {
   key: string;
-  label: string;
   title: string;
   valueField: keyof DashboardTotals;
   /** Field used when `valueField` is absent/NaN in the response (mirrors the
@@ -25,6 +24,12 @@ export type MetricCardDef = {
   fallbackField?: keyof DashboardTotals;
   format: MetricFormat;
   breakdownKey?: BreakdownKey;
+  /** Secondary breakdown rendered above the main one (the web's "By status"
+   *  block on Packages). */
+  statusBreakdownKey?: BreakdownKey;
+  /** Section headings, shown only when a card has two breakdown sections. */
+  statusSectionLabel?: string;
+  breakdownSectionLabel?: string;
   subtitle?: SubtitleFn;
   icon: string;
   color: string;
@@ -44,8 +49,9 @@ const amount = (metrics: DashboardTotals, key: string): number =>
 
 const participantsPart: SubtitleFn = (m) =>
   `${m.totalParticipants} participants`;
-const confirmedCountPart: SubtitleFn = (m) =>
-  `${m.confirmedBookings} confirmed`;
+// Company-admin Packages sub-line: "N confirmed · M pending" (web wording).
+const confirmedPendingPart: SubtitleFn = (m) =>
+  `${m.confirmedBookings} confirmed · ${m.pendingBookings} pending`;
 const completedPart: SubtitleFn = (m) => `Completed: ${m.completedBookings}`;
 const newCustomersPart: SubtitleFn = (m) => `${m.newCustomers ?? 0} new`;
 const eventTicketsPart: SubtitleFn = (m) => `${m.totalEventTickets} tickets`;
@@ -92,20 +98,21 @@ const ticketSalesPart: SubtitleFn = (m) => {
 export const METRIC_CARDS = {
   packages: {
     key: "packages",
-    label: "Packages Brakedown",
     title: "Packages",
     valueField: "totalBookings",
     format: "number",
     breakdownKey: "packageBreakdown",
+    statusBreakdownKey: "packageStatusBreakdown",
+    statusSectionLabel: "By status",
+    breakdownSectionLabel: "By package",
     subtitle: participantsPart,
     icon: "box.png",
     color: "#1E40AF",
     gradient: ["#1E40AF", "#3B82F6"],
-    info: "Package bookings placed in the selected period (counted by the date the booking was made, not the party date). Cancelled bookings are excluded. \"Confirmed\" counts bookings that were confirmed, including those already checked in or completed.",
+    info: "All package bookings placed in the selected period, counted by the date the booking was made (not the party date). Excludes cancelled bookings but still includes pending ones, so this total is higher than the confirmed count. Open the card for the split by status and by package.",
   },
   participants: {
     key: "participants",
-    label: "Participants",
     title: "Party Participants",
     valueField: "totalParticipants",
     format: "number",
@@ -118,7 +125,6 @@ export const METRIC_CARDS = {
   },
   attractions: {
     key: "attractions",
-    label: "Attractions",
     title: "Attractions Sold",
     valueField: "totalAttractionTickets",
     fallbackField: "totalPurchases",
@@ -132,7 +138,6 @@ export const METRIC_CARDS = {
   },
   events: {
     key: "events",
-    label: "Events",
     title: "Events Sold",
     valueField: "totalEventPurchases",
     format: "number",
@@ -141,11 +146,10 @@ export const METRIC_CARDS = {
     icon: "calendar-days.png",
     color: "#7E22CE",
     gradient: ["#7E22CE", "#A855F7"],
-    info: "Event ticket purchases placed in the selected period, counted by purchase date. Cancelled and refunded purchases are excluded from ticket and revenue totals. The breakdown shows ticket quantities grouped by event.",
+    info: "Event orders placed in the period (counted by purchase date). Cancelled and refunded orders are excluded. The subtitle shows the total tickets across those orders.",
   },
   memberships: {
     key: "memberships",
-    label: "Memberships",
     title: "Memberships",
     valueField: "newMemberships",
     format: "number",
@@ -158,7 +162,6 @@ export const METRIC_CARDS = {
   },
   customers: {
     key: "customers",
-    label: "Customers",
     title: "Unique Customers",
     valueField: "totalCustomers",
     format: "number",
@@ -171,7 +174,6 @@ export const METRIC_CARDS = {
   },
   confirmed: {
     key: "confirmed",
-    label: "Confirmed",
     title: "Confirmed Bookings",
     valueField: "confirmedBookings",
     format: "number",
@@ -187,7 +189,6 @@ export const METRIC_CARDS = {
   // "Confirmed Sales" card. Managers/attendants keep the `confirmed` card above.
   confirmedSales: {
     key: "confirmedSales",
-    label: "Confirmed",
     title: "Confirmed Sales",
     valueField: "confirmedTotal",
     fallbackField: "confirmedBookings",
@@ -201,7 +202,6 @@ export const METRIC_CARDS = {
   },
   revenue: {
     key: "revenue",
-    label: "Revenue",
     title: "Total Revenue",
     valueField: "totalRevenue",
     format: "currency",
@@ -214,7 +214,6 @@ export const METRIC_CARDS = {
 
   newBookings: {
     key: "newBookings",
-    label: "New",
     title: "New Bookings",
     valueField: "newBookings",
     format: "number",
@@ -226,7 +225,6 @@ export const METRIC_CARDS = {
   },
   pending: {
     key: "pending",
-    label: "Pending",
     title: "Pending Approvals",
     valueField: "pendingBookings",
     format: "number",
@@ -238,7 +236,6 @@ export const METRIC_CARDS = {
   },
   avgBooking: {
     key: "avgBooking",
-    label: "Average",
     title: "Avg Booking",
     valueField: "avgBooking",
     format: "currency",
@@ -250,7 +247,6 @@ export const METRIC_CARDS = {
   },
   ticketSales: {
     key: "ticketSales",
-    label: "Tickets",
     title: "Ticket Sales",
     valueField: "totalPurchases",
     format: "number",
@@ -298,7 +294,7 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
     showBreakdowns: true,
     metricsSource: "dashboard",
     subtitleOverrides: {
-      packages: confirmedCountPart,
+      packages: confirmedPendingPart,
     },
   },
   location_manager: {
@@ -366,6 +362,27 @@ export function getCardSubtitleFn(
 export function composeSubtitle(metricPart: string, timeframe: string): string {
   const part = metricPart.trim();
   return part ? `${part} • ${timeframe}` : timeframe;
+}
+
+/**
+ * A card's numeric value with the web's `metrics.a ?? metrics.b` fallback
+ * applied (e.g. `totalAttractionTickets ?? totalPurchases`). `null` when the
+ * response has no usable number — the card then renders "—".
+ *
+ * Both the card face and its breakdown Total row go through this, so they can
+ * never disagree.
+ */
+export function resolveMetricValue(
+  metrics: DashboardTotals | undefined | null,
+  card: MetricCardDef,
+): number | null {
+  if (!metrics) return null;
+  const primary = metrics[card.valueField];
+  const raw =
+    (primary == null || Number.isNaN(primary)) && card.fallbackField
+      ? metrics[card.fallbackField]
+      : primary;
+  return raw == null || Number.isNaN(raw) ? null : raw;
 }
 
 /** Format a metric value for display (currency vs plain count). */

@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthGuard } from "../components/AuthGuard";
 import { STACK_SCREEN_TRANSITION } from "../components/navigation/tabTransition";
 import "../global.css";
+import { restoreTimeframeSelection } from "../lib/dashboard/timeframeStore";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
 import { restoreActiveLocation } from "../lib/location/activeLocationStore";
 import { restoreSession } from "../lib/session";
@@ -29,12 +30,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (__DEV__) console.log("[RootLayout] restore effect run");
-    // Restore theme + location + session, and validate a restored token against
-    // the backend before lifting the gate so a dead token never flashes a screen.
     Promise.all([
-      restoreSession().then((restored) =>
-        restored ? validateStoredSession() : undefined,
-      ),
+      restoreSession().then(async (restored) => {
+        await restoreTimeframeSelection();
+        return restored ? validateStoredSession() : undefined;
+      }),
       applyStoredTheme(),
       restoreActiveLocation(),
     ]).finally(() => setSessionRestored(true));

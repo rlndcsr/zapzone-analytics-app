@@ -33,7 +33,9 @@ const listeners = new Set<() => void>();
 function notify(): void {
   if (__DEV__)
     console.log(
-      "[SESSION] notify() -> " + listeners.size + " listeners; authed=" +
+      "[SESSION] notify() -> " +
+        listeners.size +
+        " listeners; authed=" +
         isAuthenticated(),
     );
   listeners.forEach((l) => l());
@@ -149,13 +151,11 @@ export function isAuthenticated(): boolean {
   return authToken !== null && expiresAt != null && Date.now() < expiresAt;
 }
 
-/** Clear the session from memory and secure storage (shared cleanup). */
 export async function clearSession(): Promise<void> {
   authToken = null;
   authUser = null;
   expiresAt = null;
   lastExpiryPersistAt = 0;
-  // Drop the active workspace location so it can't leak into the next account.
   resetActiveLocation();
   try {
     await Promise.all([
@@ -169,8 +169,6 @@ export async function clearSession(): Promise<void> {
   notify();
 }
 
-/** The one teardown path for an INVOLUNTARY logout (401 or inactivity), latched
- *  so it runs exactly once even if many requests fail at the same instant. */
 function invalidateSession(reason: Exclude<SessionEndReason, null>): void {
   if (sessionInvalidated) return; // one logout flow, regardless of the count
   sessionInvalidated = true;
@@ -183,18 +181,14 @@ export function expireSession(): void {
   invalidateSession("expired");
 }
 
-/** End the session because the backend returned 401 (called from the API layer). */
 export function handleUnauthorized(): void {
   invalidateSession("unauthorized");
 }
 
-/** True once an involuntary logout has begun. The API layer reads this to drop
- *  any still-pending authenticated request silently instead of failing loudly. */
 export function isSessionInvalidated(): boolean {
   return sessionInvalidated;
 }
 
-// Returns true if the session expired, then clears the flag
 export function consumeSessionExpiredNotice(): boolean {
   const notice = endReason === "expired" || endReason === "unauthorized";
   endReason = null;

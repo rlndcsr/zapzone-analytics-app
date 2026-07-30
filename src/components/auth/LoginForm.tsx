@@ -10,6 +10,7 @@ import {
 } from "react-native";
 
 import { ApiError } from "../../lib/api";
+import { restoreTimeframeSelection } from "../../lib/dashboard/timeframeStore";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { setSession } from "../../lib/session";
 import { login } from "../../services/auth";
@@ -75,6 +76,11 @@ export function LoginForm() {
       // its storage writes and notifies before this runs, so the replace happens
       // after the auth state has settled — not during a render.
       await setSession(result.token, result.user);
+      // Load this account's stored dashboard timeframe before the dashboard
+      // mounts — the web re-reads `dashboard_timeframe_<userId>` when its
+      // dashboard initialises, so a fresh sign-in must not inherit whatever
+      // window the previous account had in memory.
+      await restoreTimeframeSelection();
       if (__DEV__) console.log('[LoginForm] router.replace("/home")');
       router.replace("/home");
       if (__DEV__) console.log("[LoginForm] router.replace returned");

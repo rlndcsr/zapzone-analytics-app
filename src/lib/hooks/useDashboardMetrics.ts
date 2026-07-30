@@ -4,6 +4,10 @@ import {
   type CalendarBooking,
 } from "../../services/bookingsService";
 import {
+  type DashboardType,
+  metricsCacheService,
+} from "../../services/metricsCacheService";
+import {
   fetchAttendantMetrics,
   fetchDashboardMetrics,
   type DashboardData,
@@ -52,6 +56,13 @@ type UseDashboardMetricsParams = {
   dateTo?: string;
 };
 
+/** The web has one dashboard component — and one cache namespace — per role. */
+function getDashboardType(role?: string | null): DashboardType {
+  if (role === "company_admin") return "company";
+  if (role === "location_manager") return "manager";
+  return "attendant";
+}
+
 export function useDashboardMetrics({
   timeframe,
   locationId = "all",
@@ -63,6 +74,13 @@ export function useDashboardMetrics({
   const [error, setError] = useState<string | null>(null);
 
   const requestIdRef = useRef(0);
+  // Mirrors `data` so the catch block can tell "nothing on screen" from "a
+  // cached or last-good response is showing" without re-running the effect.
+  const dataRef = useRef<DashboardData | null>(null);
+  const applyData = useCallback((next: DashboardData | null) => {
+    dataRef.current = next;
+    setData(next);
+  }, []);
 
   const loadMetrics = useCallback(
     async (force = false) => {
@@ -92,6 +110,25 @@ export function useDashboardMetrics({
         setLoading(true);
 
         const config = getDashboardConfig(user.role);
+
+        // Cache-then-network, exactly as CompanyDashboard's metrics effect does:
+        // paint the cached snapshot and drop the skeleton first, then overwrite
+        // with the fresh response. Pull-to-refresh (`force`) skips the read, the
+        // way a hard reload bypasses the browser's cached entry.
+        const cacheScope = {
+          dashboardType: getDashboardType(user.role),
+          userId: user.id,
+          locationId,
+          timeframe,
+        };
+        if (!force) {
+          const cached = await metricsCacheService.getCachedMetrics(cacheScope);
+          if (cached && isCurrent()) {
+            applyData(cached.data);
+            setError(null);
+            setLoading(false);
+          }
+        }
 
         let result: DashboardData;
         if (config.metricsSource === "attendant") {
@@ -140,22 +177,31 @@ export function useDashboardMetrics({
         result = withDerivedMetrics(result, derived);
 
         if (isCurrent()) {
-          setData(result);
+          applyData(result);
           setError(null);
         }
+
+        // Write-through after a successful fetch, like the web's cacheMetrics
+        // call at the end of its effect.
+        await metricsCacheService.cacheMetrics(cacheScope, result);
       } catch (err) {
         console.error("Metrics error:", err);
         if (isCurrent()) {
-          setError(
-            err instanceof Error ? err.message : "Failed to load metrics",
-          );
-          setData(null);
+          // The web only logs a failed fetch and leaves whatever is on screen
+          // (its cache seed, or the last good response) in place. Match that, and
+          // surface the error only when there is nothing to show.
+          if (!dataRef.current) {
+            setError(
+              err instanceof Error ? err.message : "Failed to load metrics",
+            );
+            applyData(null);
+          }
         }
       } finally {
         if (isCurrent()) setLoading(false);
       }
     },
-    [timeframe, locationId, dateFrom, dateTo],
+    [timeframe, locationId, dateFrom, dateTo, applyData],
   );
 
   useEffect(() => {

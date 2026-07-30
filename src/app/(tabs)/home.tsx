@@ -77,6 +77,7 @@ import {
   getDashboardConfig,
   METRIC_CARDS,
   type MetricCardDef,
+  resolveMetricValue,
 } from "../../lib/dashboard/dashboardConfig";
 import {
   setTimeframeSelection,
@@ -87,6 +88,7 @@ import { useNotifications } from "../../lib/hooks/useNotifications";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser } from "../../lib/session";
 import type {
+  BreakdownItem,
   DashboardData,
   RecentEventPurchase,
 } from "../../services/metricsService";
@@ -129,17 +131,13 @@ const MetricIconBadge = ({
   index,
 }: {
   metric: MetricCardDef;
-  // Bumps whenever the grid re-lays out (column toggle) — drives the animation.
   layoutKey: number;
-  // Position in the grid, used to stagger the pop into a cascade.
   index: number;
 }) => {
   const IconComponent = getIcon(metric.icon);
   const scale = useSharedValue(0.6);
   const rotate = useSharedValue(-8);
 
-  // Pop + settle the icon on first mount and every time the layout changes,
-  // staggered by position so the whole grid animates as a cascade.
   useEffect(() => {
     const delay = Math.min(index * 45, 270);
     const spring = { damping: 10, stiffness: 170 };
@@ -147,7 +145,6 @@ const MetricIconBadge = ({
     rotate.value = -8;
     scale.value = withDelay(delay, withSpring(1, spring));
     rotate.value = withDelay(delay, withSpring(0, spring));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutKey]);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -166,12 +163,8 @@ const MetricIconBadge = ({
   );
 };
 
-// The grid/list layout toggle glyph. Spins a fast, smooth half-turn each time
-// the layout switches, swapping the icon in the same motion.
 const LayoutToggleIcon = ({ gridColumns }: { gridColumns: 1 | 2 }) => {
   const spin = useSharedValue(0);
-  // Accumulated target angle; +180° per toggle so the spin is deterministic
-  // even if toggled rapidly mid-animation.
   const target = useRef(0);
   const firstRender = useRef(true);
 
@@ -186,7 +179,6 @@ const LayoutToggleIcon = ({ gridColumns }: { gridColumns: 1 | 2 }) => {
       stiffness: 260,
       mass: 0.5,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridColumns]);
 
   const style = useAnimatedStyle(() => ({
@@ -225,21 +217,15 @@ const MetricCard = ({
   layoutKey: number;
   index: number;
 }) => {
-  const primary = data ? data.metrics[metric.valueField] : undefined;
-  // Fall back to a secondary field when the primary is absent/NaN (mirrors the
-  // web's `metrics.a ?? metrics.b`, e.g. attraction tickets → orders count).
-  const raw =
-    (primary == null || Number.isNaN(primary)) && data && metric.fallbackField
-      ? data.metrics[metric.fallbackField]
-      : primary;
-  const hasValue = raw != null && !Number.isNaN(raw);
-  const value = hasValue ? formatMetricValue(raw, metric.format) : "—";
-  const subtitle = hasValue
-    ? composeSubtitle(
-        subtitleFn ? subtitleFn(data!.metrics) : "",
-        timeframeLabel,
-      )
-    : null;
+  const raw = resolveMetricValue(data?.metrics, metric);
+  const value = raw != null ? formatMetricValue(raw, metric.format) : "—";
+  const subtitle =
+    raw != null
+      ? composeSubtitle(
+          subtitleFn ? subtitleFn(data!.metrics) : "",
+          timeframeLabel,
+        )
+      : null;
 
   return (
     <Pressable
@@ -254,7 +240,6 @@ const MetricCard = ({
         elevation: 1,
       }}
     >
-      {/* Icons on their own row so the title below spans the full card width. */}
       <View className="flex-row items-center justify-between mb-3">
         <MetricIconBadge metric={metric} layoutKey={layoutKey} index={index} />
         <Pressable
@@ -267,7 +252,6 @@ const MetricCard = ({
         </Pressable>
       </View>
 
-      {/* Full-width title: wraps between words, capped at 2 lines with ellipsis. */}
       <Text
         numberOfLines={2}
         ellipsizeMode="tail"
@@ -287,6 +271,81 @@ const MetricCard = ({
     </Pressable>
   );
 };
+
+const BreakdownSectionLabel = ({ label }: { label: string }) => (
+  <Text className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1 px-2">
+    {label}
+  </Text>
+);
+
+const BreakdownRow = ({
+  item,
+  nested = false,
+}: {
+  item: BreakdownItem;
+  nested?: boolean;
+}) => (
+  <View
+    className={`flex-row items-center justify-between px-2 ${
+      nested ? "py-1.5" : "py-2.5"
+    }`}
+  >
+    <Text
+      numberOfLines={1}
+      className={
+        nested
+          ? "flex-1 mr-3 text-xs text-gray-500 dark:text-gray-400"
+          : "flex-1 mr-3 text-sm text-gray-700 dark:text-gray-200"
+      }
+    >
+      {item.label}
+    </Text>
+    <Text
+      className={
+        nested
+          ? "text-xs text-gray-600 dark:text-gray-300"
+          : "text-sm font-semibold text-gray-900 dark:text-white"
+      }
+    >
+      {item.count}{" "}
+      <Text
+        className={`font-normal text-gray-400 dark:text-gray-500 ${
+          nested ? "text-xs" : "text-sm"
+        }`}
+      >
+        ({item.percentage}%)
+      </Text>
+    </Text>
+  </View>
+);
+
+const BreakdownSection = ({
+  label,
+  items,
+}: {
+  label?: string;
+  items: BreakdownItem[];
+}) => (
+  <View>
+    {label ? <BreakdownSectionLabel label={label} /> : null}
+    {items.map((item, index) => (
+      <View key={`${item.label}-${index}`}>
+        <BreakdownRow item={item} />
+        {!!item.items?.length && (
+          <View className="ml-4 pl-3 mb-1 border-l border-gray-100 dark:border-neutral-800">
+            {item.items.map((sub, subIndex) => (
+              <BreakdownRow
+                key={`${sub.label}-${subIndex}`}
+                item={sub}
+                nested
+              />
+            ))}
+          </View>
+        )}
+      </View>
+    ))}
+  </View>
+);
 
 const formatMoney = (value: number | string | null | undefined) => {
   const n = Number(value ?? 0);
@@ -469,15 +528,11 @@ const Home = () => {
   } = useTimeframeSelection();
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [showCustomRange, setShowCustomRange] = useState(false);
-  // Location comes from the global workspace store (selected via the header
-  // selector), so the dashboard scopes to the active location automatically.
   const { id: selectedLocation } = useActiveLocation();
 
   const slideAnim = useRef(
     new Animated.Value(Dimensions.get("window").height),
   ).current;
-  // Backdrop opacity animates in lockstep with the sheet so open/close reads as
-  // one smooth motion (no double Modal fade + spring bounce = no perceived lag).
   const backdrop = useRef(new Animated.Value(0)).current;
 
   const openModal = (key: string) => {
@@ -601,11 +656,18 @@ const Home = () => {
     currentMetric?.breakdownKey && dashboardConfig.showBreakdowns
       ? (data?.breakdowns?.[currentMetric.breakdownKey] ?? [])
       : [];
+  const currentStatusBreakdown =
+    currentMetric?.statusBreakdownKey && dashboardConfig.showBreakdowns
+      ? (data?.breakdowns?.[currentMetric.statusBreakdownKey] ?? [])
+      : [];
   const isBreakdownEmpty = currentBreakdown.length === 0;
+  const currentTotal = currentMetric
+    ? resolveMetricValue(data?.metrics, currentMetric)
+    : null;
+  const breakdownMaxHeight = Dimensions.get("window").height * 0.5;
 
   return (
     <View className="flex-1 bg-white dark:bg-black">
-      {/* Soft gray→white gradient backdrop (light mode). */}
       {!isDark && (
         <Svg
           width="100%"
@@ -645,7 +707,6 @@ const Home = () => {
         }
       >
         <View className="px-5 pt-0">
-          {/* Title */}
           <View className="mt-1 mb-5">
             <Text className="text-[35px] leading-[48px] font-medium text-gray-900 dark:text-white tracking-tight">
               Company
@@ -661,13 +722,10 @@ const Home = () => {
             </Text>
           </View>
 
-          {/* Global active-location workspace selector (company-admin only;
-              renders nothing for managers/attendants). Sits above the filters. */}
           <View className="mb-3">
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Filters Row — segmented pill + card-layout toggle */}
           <View className="flex-row items-start gap-2">
             <View className="flex-1">
               <FilterPill>
@@ -687,8 +745,6 @@ const Home = () => {
               </FilterPill>
             </View>
 
-            {/* Layout toggle — 2-column grid vs single-column cards */}
-            {/* Layout toggle — 2-column grid vs single-column cards */}
             <Pressable
               onPress={() => setGridColumns((c) => (c === 2 ? 1 : 2))}
               className="h-[46px] w-[52px] rounded-2xl items-center justify-center active:opacity-90"
@@ -807,7 +863,7 @@ const Home = () => {
             {currentMetric && (
               <>
                 {/* Modal Header */}
-                <View className="flex-row items-center justify-between mb-6">
+                <View className="flex-row items-center justify-between mb-4">
                   <View className="flex-row items-center gap-3">
                     <View
                       className="w-12 h-12 rounded-2xl items-center justify-center"
@@ -827,7 +883,7 @@ const Home = () => {
                     </View>
                     <View>
                       <Text className="text-sm text-gray-500 dark:text-gray-400">
-                        {currentMetric.label}
+                        Breakdown
                       </Text>
                       <Text className="text-lg font-bold text-gray-900 dark:text-white">
                         {currentMetric.title}
@@ -842,48 +898,54 @@ const Home = () => {
                   </Pressable>
                 </View>
 
-                {isBreakdownEmpty ? (
-                  <View className="justify-center items-center py-16">
-                    <BarChart3 size={32} color="#9ca3af" />
-                    <Text className="text-gray-400 dark:text-gray-500 text-base font-medium mt-3">
-                      No data available
+                {/* What the metric counts — the web shows this at the top of
+                    the breakdown popover, above the rows. */}
+                <View className="pb-4 mb-3 border-b border-gray-100 dark:border-neutral-800">
+                  <Text className="text-xs leading-5 text-gray-500 dark:text-gray-400 px-2">
+                    {currentMetric.info}
+                  </Text>
+                </View>
+
+                <ScrollView
+                  style={{ maxHeight: breakdownMaxHeight }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {currentStatusBreakdown.length > 0 && (
+                    <View className="pb-3 mb-3 border-b border-gray-100 dark:border-neutral-800">
+                      <BreakdownSection
+                        label={currentMetric.statusSectionLabel}
+                        items={currentStatusBreakdown}
+                      />
+                    </View>
+                  )}
+
+                  {isBreakdownEmpty ? (
+                    <View className="justify-center items-center py-12">
+                      <BarChart3 size={32} color="#9ca3af" />
+                      <Text className="text-gray-400 dark:text-gray-500 text-base font-medium mt-3">
+                        No breakdown available
+                      </Text>
+                    </View>
+                  ) : (
+                    <BreakdownSection
+                      label={currentMetric.breakdownSectionLabel}
+                      items={currentBreakdown}
+                    />
+                  )}
+                </ScrollView>
+
+                {!isBreakdownEmpty && (
+                  <View className="flex-row items-center justify-between mt-3 pt-4 border-t border-gray-100 dark:border-neutral-800">
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      Total
+                    </Text>
+                    <Text className="text-xl font-bold text-gray-900 dark:text-white">
+                      {formatMetricValue(
+                        currentTotal ?? 0,
+                        currentMetric.format,
+                      )}
                     </Text>
                   </View>
-                ) : (
-                  <>
-                    <View className="space-y-1 mb-6">
-                      {currentBreakdown.map((item, index) => (
-                        <View
-                          key={index}
-                          className="flex-row items-center justify-between py-3 px-2 rounded-xl hover:bg-gray-50 dark:hover:bg-neutral-800"
-                        >
-                          <Text className="text-sm text-gray-700 dark:text-gray-200">
-                            {item.label}
-                          </Text>
-                          <View className="flex-row items-center gap-3">
-                            <Text className="text-xs text-gray-400 dark:text-gray-500">
-                              {item.percentage}%
-                            </Text>
-                            <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                              {item.count}
-                            </Text>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-
-                    <View className="flex-row items-center justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
-                      <Text className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                        Total
-                      </Text>
-                      <Text className="text-xl font-bold text-gray-900 dark:text-white">
-                        {formatMetricValue(
-                          data?.metrics[currentMetric.valueField] ?? 0,
-                          currentMetric.format,
-                        )}
-                      </Text>
-                    </View>
-                  </>
                 )}
               </>
             )}

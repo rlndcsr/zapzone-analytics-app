@@ -17,11 +17,16 @@ export type BreakdownItem = {
   label: string;
   count: number;
   percentage: number;
+  /** Raw status slug on status rows (`packageStatusBreakdown`). */
+  status?: string;
+  /** Nested rows — e.g. `attractionBreakdown` groups attractions by category. */
+  items?: BreakdownItem[];
 };
 
 /** Keys of the `breakdowns` object returned by the dashboard endpoint. */
 export type BreakdownKey =
   | "packageBreakdown"
+  | "packageStatusBreakdown"
   | "participantBreakdown"
   | "attractionBreakdown"
   | "eventBreakdown"
@@ -158,6 +163,13 @@ export async function fetchDashboardMetrics({
 
   if (timeframe === "today") {
     params.append("timezone", timezone ?? getDeviceTimeZone());
+  }
+
+  // The breakdown numbers are whatever this query returns, so when mobile and
+  // the web admin disagree the query string is the thing to compare — the web
+  // logs its own "🌐 Metrics API Request" line with the full URL.
+  if (__DEV__) {
+    console.log(`[metrics] GET /api/metrics/dashboard/${userId}?${params}`);
   }
 
   return apiRequest<DashboardData>(
