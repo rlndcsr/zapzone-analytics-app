@@ -43,6 +43,7 @@ import {
   PillSegment,
 } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
@@ -611,8 +612,15 @@ const Attractions = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Attractions
           </Text>
-          
-          <View style={{ width: 36 }} />
+          {/* Page-level "More" menu (mirrors the web header ActionMenu). */}
+          <Pressable
+            onPress={() => setShowMoreSheet(true)}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            accessibilityRole="button"
+            accessibilityLabel="More actions"
+          >
+            <Feather name="more-horizontal" size={20} color={headerIcon} />
+          </Pressable>
         </View>
       </View>
 
@@ -673,43 +681,27 @@ const Attractions = () => {
             </Pressable>
           </View>
 
+          {/* Manage Purchases — the module's sub-page shortcut, in the same
+              full-width row design the Packages module uses. */}
+          <View className="mb-3">
+            <NavRowCard
+              icon="shopping-bag"
+              title="Manage Purchases"
+              desc="Attraction ticket purchases"
+              onPress={() => router.push("/attractions/purchases")}
+            />
+          </View>
+
           {/* New Attraction — the primary filled CTA, full width. */}
           <Pressable
             onPress={() => router.push("/attractions/create-attraction")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-3"
+            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
             <Text className="text-sm font-semibold text-white">
               New Attraction
             </Text>
           </Pressable>
-
-          {/* Manage Purchases + More — plain outlined buttons, matching the
-              Bookings module's secondary row. */}
-          <View className="flex-row items-center gap-3 mb-5">
-            <Pressable
-              onPress={() => router.push("/attractions/purchases")}
-              className="flex-1 flex-row items-center justify-center gap-1.5 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              <Feather name="shopping-bag" size={16} color="#6B7280" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                Manage Purchases
-              </Text>
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            </Pressable>
-            <Pressable
-              onPress={() => setShowMoreSheet(true)}
-              className="flex-1 flex-row items-center justify-center gap-1.5 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              <Feather name="more-horizontal" size={16} color="#6B7280" />
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                More
-              </Text>
-            </Pressable>
-          </View>
 
           {/* Error state */}
           {!loading && error && (

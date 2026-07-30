@@ -1270,8 +1270,16 @@ const CreateBookingScreen = () => {
                             </Text>
                           )}
 
-                          {/* Chips: category · duration · capacity */}
+                          {/* Chips: location · category · duration · capacity */}
                           <View className="mt-3 flex-row flex-wrap items-center gap-2">
+                            {!!p.locationName && (
+                              <View className="flex-row items-center gap-1 rounded border border-blue-200 px-2 py-1 dark:border-blue-900/50">
+                                <Feather name="map-pin" size={10} color={PRIMARY} />
+                                <Text className="text-[11px] text-[#0644C7] dark:text-blue-300">
+                                  {p.locationName}
+                                </Text>
+                              </View>
+                            )}
                             {!!p.category && (
                               <View className="flex-row items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
                                 <Feather name="tag" size={10} color="#6B7280" />

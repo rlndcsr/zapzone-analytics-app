@@ -16,19 +16,29 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { SelectField, type SelectOption } from "../../components/ui/FormControls";
 import { Pagination } from "../../components/ui/Pagination";
+import {
+  EMPTY_TARGETING,
+  TargetingSelector,
+  targetingPayload,
+  targetingSummary,
+  type TargetingValue,
+} from "../../components/ui/TargetingSelector";
 import {
   createPromo,
   deletePromo,
   fetchPromoBatches,
   fetchPromoList,
   generateBulkPromos,
+  updatePromo,
   type BulkPromoInput,
   type PromoInput,
   type PromoRow,
+  type PromoUpdateInput,
 } from "../../services/promosService";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
 
@@ -48,6 +58,18 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "Active", value: "active" },
   { label: "Inactive", value: "inactive" },
 ];
+
+/** Statuses the edit sheet can set (the API's own enum). */
+const STATUS_EDIT_OPTIONS: SelectOption[] = [
+  { label: "Active", value: "active" },
+  { label: "Inactive", value: "inactive" },
+  { label: "Expired", value: "expired" },
+  { label: "Exhausted", value: "exhausted" },
+];
+
+/** `YYYY-MM-DD`, `days` from today — the promo window's fallback bounds. */
+const isoDaysFromNow = (days: number) =>
+  new Date(Date.now() + days * 86_400_000).toISOString().split("T")[0];
 
 const formatDiscount = (type: string, value: number) =>
   type === "percentage" || type === "percent"
@@ -78,14 +100,22 @@ function randomCode(length = 8, prefix = ""): string {
 
 const PromoCard = ({
   promo,
+  onEdit,
   onDelete,
 }: {
   promo: PromoRow;
+  onEdit: () => void;
   onDelete: () => void;
 }) => {
   const range = [formatDate(promo.startDate), formatDate(promo.endDate)]
     .filter(Boolean)
     .join(" – ");
+  const scope = targetingSummary({
+    locationIds: promo.locationIds,
+    packageIds: promo.packageIds,
+    attractionIds: promo.attractionIds,
+    eventIds: promo.eventIds,
+  });
   return (
     <View
       className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
@@ -135,6 +165,14 @@ const PromoCard = ({
             {promo.usageLimit != null ? `/${promo.usageLimit}` : ""} used
           </Text>
           <Pressable
+            onPress={onEdit}
+            hitSlop={6}
+            className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 items-center justify-center"
+            accessibilityLabel={`Edit ${promo.name}`}
+          >
+            <Feather name="edit-2" size={14} color={PRIMARY} />
+          </Pressable>
+          <Pressable
             onPress={onDelete}
             hitSlop={6}
             className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-900/20 items-center justify-center"
@@ -153,6 +191,17 @@ const PromoCard = ({
           </Text>
         </View>
       )}
+
+      {/* Where the promo applies (empty targeting reads as "all"). */}
+      <View className="flex-row items-start gap-1.5 mt-1.5">
+        <Feather name="crosshair" size={11} color="#9CA3AF" />
+        <Text
+          className="text-[11px] text-gray-400 dark:text-gray-500 flex-1"
+          numberOfLines={2}
+        >
+          Applies to: {scope}
+        </Text>
+      </View>
     </View>
   );
 };
@@ -309,6 +358,8 @@ const Promos = () => {
   const [cLimit, setCLimit] = useState("");
   const [cPerUser, setCPerUser] = useState("");
   const [cDesc, setCDesc] = useState("");
+  // Where the new promo applies (empty lists = everywhere).
+  const [cTargeting, setCTargeting] = useState<TargetingValue>(EMPTY_TARGETING);
   const [creating, setCreating] = useState(false);
 
   const openCreate = () => {
@@ -321,26 +372,32 @@ const Promos = () => {
     setCLimit("");
     setCPerUser("");
     setCDesc("");
+    setCTargeting(EMPTY_TARGETING);
     setShowCreate(true);
   };
 
   const submitCreate = async () => {
     const token = getToken();
-    if (!token) return;
+    const user = getCurrentUser();
+    if (!token || !user) return;
     if (!cName.trim()) {
       Alert.alert("Name required", "Please enter a promo name.");
       return;
     }
+    // The API requires a window with end after start; blank fields fall back to
+    // today → +30 days, the same defaults the web admin applies.
     const input: PromoInput = {
       name: cName.trim(),
       code: cCode.trim() || undefined,
-      discount_type: cType,
-      discount_value: Number(cValue) || 0,
-      start_date: cStart.trim() || null,
-      end_date: cEnd.trim() || null,
-      usage_limit: cLimit.trim() ? Number(cLimit) : null,
-      usage_limit_per_user: cPerUser.trim() ? Number(cPerUser) : null,
+      type: cType,
+      value: Number(cValue) || 0,
+      start_date: cStart.trim() || isoDaysFromNow(0),
+      end_date: cEnd.trim() || isoDaysFromNow(30),
       description: cDesc.trim() || null,
+      created_by: user.id,
+      ...(cLimit.trim() ? { usage_limit_total: Number(cLimit) } : null),
+      ...(cPerUser.trim() ? { usage_limit_per_user: Number(cPerUser) } : null),
+      ...targetingPayload(cTargeting),
     };
     setCreating(true);
     try {
@@ -354,6 +411,82 @@ const Promos = () => {
       );
     } finally {
       setCreating(false);
+    }
+  };
+
+  // --- Edit single ---
+  const [editing, setEditing] = useState<PromoRow | null>(null);
+  const [eType, setEType] = useState<DiscountType>("fixed");
+  const [eValue, setEValue] = useState("");
+  const [eStart, setEStart] = useState("");
+  const [eEnd, setEEnd] = useState("");
+  const [eLimit, setELimit] = useState("");
+  const [ePerUser, setEPerUser] = useState("");
+  const [eStatus, setEStatus] = useState("active");
+  const [eDesc, setEDesc] = useState("");
+  const [eTargeting, setETargeting] = useState<TargetingValue>(EMPTY_TARGETING);
+  const [saving, setSaving] = useState(false);
+
+  const openEdit = (promo: PromoRow) => {
+    setEType(promo.discountType === "percentage" ? "percentage" : "fixed");
+    setEValue(String(promo.discountValue));
+    setEStart(promo.startDate ? promo.startDate.substring(0, 10) : "");
+    setEEnd(promo.endDate ? promo.endDate.substring(0, 10) : "");
+    setELimit(promo.usageLimit != null ? String(promo.usageLimit) : "");
+    setEPerUser(
+      promo.usageLimitPerUser != null ? String(promo.usageLimitPerUser) : "",
+    );
+    setEStatus(promo.status || (promo.isActive ? "active" : "inactive"));
+    setEDesc(promo.description);
+    setETargeting({
+      locationIds: promo.locationIds,
+      packageIds: promo.packageIds,
+      attractionIds: promo.attractionIds,
+      eventIds: promo.eventIds,
+    });
+    setEditing(promo);
+  };
+
+  const submitEdit = async () => {
+    const token = getToken();
+    if (!token || !editing) return;
+    // Fall back to the promo's own window for a cleared field: the API validates
+    // `end_date` as "after:start_date" within the same request, so the pair has
+    // to travel together.
+    const start = eStart.trim() || (editing.startDate?.substring(0, 10) ?? "");
+    const end = eEnd.trim() || (editing.endDate?.substring(0, 10) ?? "");
+    if (start && end && end <= start) {
+      Alert.alert("Invalid dates", "The end date must be after the start date.");
+      return;
+    }
+    // Targeting always goes up (an empty list clears the restriction), while the
+    // other fields are only sent when filled — the API validates `sometimes`.
+    const input: PromoUpdateInput = {
+      type: eType,
+      value: Number(eValue) || 0,
+      status: eStatus,
+      description: eDesc.trim() || null,
+      usage_limit_total: eLimit.trim() ? Number(eLimit) : null,
+      location_ids: eTargeting.locationIds,
+      package_ids: eTargeting.packageIds,
+      attraction_ids: eTargeting.attractionIds,
+      event_ids: eTargeting.eventIds,
+      ...(start ? { start_date: start } : null),
+      ...(end ? { end_date: end } : null),
+      ...(ePerUser.trim() ? { usage_limit_per_user: Number(ePerUser) } : null),
+    };
+    setSaving(true);
+    try {
+      await updatePromo(token, editing.id, input);
+      setEditing(null);
+      await refetch();
+    } catch (err) {
+      Alert.alert(
+        "Save failed",
+        err instanceof Error ? err.message : "Could not update the promo code.",
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -611,6 +744,7 @@ const Promos = () => {
                     <PromoCard
                       key={promo.id}
                       promo={promo}
+                      onEdit={() => openEdit(promo)}
                       onDelete={() => confirmDelete(promo)}
                     />
                   ))}
@@ -859,6 +993,13 @@ const Promos = () => {
             multiline
           />
 
+          <TargetingSelector
+            label="Where this promo applies"
+            value={cTargeting}
+            onChange={setCTargeting}
+            disabled={creating}
+          />
+
           <Pressable
             onPress={submitCreate}
             disabled={creating}
@@ -872,6 +1013,135 @@ const Promos = () => {
               </Text>
             )}
           </Pressable>
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Edit Promo Code — name and code stay fixed; everything else is editable. */}
+      <BottomSheet
+        visible={editing !== null}
+        onClose={() => !saving && setEditing(null)}
+        title="Edit Promo Code"
+      >
+        <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
+          <View className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-2.5 mb-4">
+            <Text
+              className="text-sm font-semibold text-gray-900 dark:text-white"
+              numberOfLines={1}
+            >
+              {editing?.name}
+            </Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              {editing?.code}
+            </Text>
+          </View>
+
+          <View className="flex-row gap-3">
+            <View className="flex-1">
+              <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+                Type
+              </Text>
+              <TypeToggle value={eType} onChange={setEType} />
+            </View>
+            <View className="w-32">
+              <Field
+                label={`Value (${eType === "percentage" ? "%" : "$"})`}
+                value={eValue}
+                onChangeText={setEValue}
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+              />
+            </View>
+          </View>
+
+          <View className="flex-row gap-3">
+            <View className="flex-1">
+              <Field
+                label="Start Date"
+                value={eStart}
+                onChangeText={setEStart}
+                placeholder="YYYY-MM-DD"
+              />
+            </View>
+            <View className="flex-1">
+              <Field
+                label="End Date"
+                value={eEnd}
+                onChangeText={setEEnd}
+                placeholder="YYYY-MM-DD"
+              />
+            </View>
+          </View>
+
+          <View className="flex-row gap-3">
+            <View className="flex-1">
+              <Field
+                label="Total Usage Limit"
+                value={eLimit}
+                onChangeText={setELimit}
+                placeholder="Unlimited"
+                keyboardType="number-pad"
+              />
+            </View>
+            <View className="flex-1">
+              <Field
+                label="Usage Limit Per User"
+                value={ePerUser}
+                onChangeText={setEPerUser}
+                placeholder="Unchanged"
+                keyboardType="number-pad"
+              />
+            </View>
+          </View>
+
+          <View className="mb-4">
+            <SelectField
+              label="Status"
+              value={eStatus}
+              options={STATUS_EDIT_OPTIONS}
+              onSelect={(v) => setEStatus(String(v))}
+              disabled={saving}
+            />
+          </View>
+
+          <Field
+            label="Description"
+            value={eDesc}
+            onChangeText={setEDesc}
+            placeholder="Optional description"
+            multiline
+          />
+
+          <TargetingSelector
+            label="Where this promo applies"
+            value={eTargeting}
+            onChange={setETargeting}
+            disabled={saving}
+          />
+
+          <View className="flex-row gap-3">
+            <Pressable
+              onPress={submitEdit}
+              disabled={saving}
+              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text className="text-sm font-semibold text-white">
+                  Save Changes
+                </Text>
+              )}
+            </Pressable>
+            <Pressable
+              onPress={() => setEditing(null)}
+              disabled={saving}
+              className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+            >
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </BottomSheet>
 

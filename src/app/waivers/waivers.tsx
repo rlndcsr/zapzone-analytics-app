@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -63,17 +64,7 @@ const CARD_SHADOW = {
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
-// Quick-nav cards all derive their sizing from this single source so every card
-// is identical in height, padding, radius, icon box, and footer alignment.
-const NAV_CARD_HEIGHT = 176;
-const NAV_CARD_SHADOW = {
-  shadowColor: "#424242",
-  shadowOffset: { width: 0, height: 1 },
-  shadowOpacity: 0.04,
-  shadowRadius: 6,
-  elevation: 1,
-} as const;
-
+/** Sub-page shortcuts, one full-width row each (see {@link NavRowCard}). */
 const NAV_ITEMS: {
   label: string;
   desc: string;
@@ -105,44 +96,6 @@ const NAV_ITEMS: {
     route: "/waivers/deletion-log",
   },
 ];
-
-/** Fixed-size quick-navigation card. Every card shares NAV_CARD_HEIGHT and the
- *  same internal layout; a flex spacer pins the "View" footer to the bottom so
- *  cards stay identical regardless of description length. */
-const NavCard = ({ item }: { item: (typeof NAV_ITEMS)[number] }) => (
-  <View className="w-1/2 px-1.5 mb-3" style={{ height: NAV_CARD_HEIGHT }}>
-    <Pressable
-      onPress={() => router.push(item.route as never)}
-      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-      style={NAV_CARD_SHADOW}
-      accessibilityRole="button"
-      accessibilityLabel={item.label}
-    >
-      <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-        <Feather name={item.icon} size={20} color="#0644C7" />
-      </View>
-      <Text
-        className="text-sm font-bold text-gray-900 dark:text-white mb-0.5"
-        numberOfLines={1}
-      >
-        {item.label}
-      </Text>
-      <Text
-        className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-        numberOfLines={2}
-      >
-        {item.desc}
-      </Text>
-      <View className="flex-1" />
-      <View className="flex-row items-center pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-          View
-        </Text>
-        <Feather name="chevron-right" size={16} color="#0644C7" />
-      </View>
-    </Pressable>
-  </View>
-);
 
 // Statuses the backend supports on the Records filter (mirrors the web select;
 // there is no "all statuses" fetch, so one status is always active).
@@ -825,18 +778,26 @@ const Waivers = () => {
         }
       >
         <View className="px-5 mt-5">
-          <View className="flex-row flex-wrap -mx-1.5 mb-2">
+          {/* Sub-page shortcuts — one full-width row per item, the same design
+              the Packages / Attractions / Events modules use. */}
+          <View className="gap-3 mb-3">
             {NAV_ITEMS.map((item) => (
-              <NavCard key={item.route} item={item} />
+              <NavRowCard
+                key={item.route}
+                icon={item.icon}
+                title={item.label}
+                desc={item.desc}
+                onPress={() => router.push(item.route as never)}
+              />
             ))}
             {isCompanyAdmin && (
-              <NavCard
-                item={{
-                  label: "Settings",
-                  desc: "Company-wide waiver defaults",
-                  icon: "settings",
-                  route: "/waivers/waiver-settings",
-                }}
+              <NavRowCard
+                icon="settings"
+                title="Settings"
+                desc="Company-wide waiver defaults"
+                onPress={() =>
+                  router.push("/waivers/waiver-settings" as never)
+                }
               />
             )}
           </View>

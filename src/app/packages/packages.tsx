@@ -25,6 +25,7 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { NavRowCard } from "../../components/ui/NavRowCard";
 import { Pagination } from "../../components/ui/Pagination";
 import {
   consumePackagesStale,
@@ -75,6 +76,45 @@ function formatDate(iso: string | null): string | null {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
+/** Sub-page shortcuts, one full-width row each (see {@link NavRowCard}). */
+const NAV_ROWS: {
+  icon: ComponentIconName;
+  title: string;
+  desc: string;
+  route: string;
+}[] = [
+  {
+    icon: "package",
+    title: "Custom Packages",
+    desc: "Custom packages & their details",
+    route: "/packages/custom-packages",
+  },
+  {
+    icon: "gift",
+    title: "Gift Cards",
+    desc: "Manage and view all gift cards",
+    route: "/packages/gift-cards",
+  },
+  {
+    icon: "home",
+    title: "Space",
+    desc: "Rooms & availability",
+    route: "/packages/space",
+  },
+  {
+    icon: "coffee",
+    title: "Add-ons",
+    desc: "Food, beverage & extras",
+    route: "/packages/add-ons",
+  },
+  {
+    icon: "tag",
+    title: "Promos",
+    desc: "Promotional codes",
+    route: "/packages/promos",
+  },
+];
+
 // Sort options mirror the web /packages dropdown exactly (Name / Price /
 // Category / Display Order). "Date" is not a web option and was removed.
 type SortKey = "Name" | "Price" | "Category" | "Display Order";
@@ -119,8 +159,12 @@ const Packages = () => {
 
   const [showSortSheet, setShowSortSheet] = useState(false);
 
-  // Package whose per-card actions sheet (View / Edit / Duplicate / Delete) is open.
+  // Package whose sheet is open, and which content it opens on: the eye action
+  // shows the details, the copy action goes straight to the duplicate form.
   const [actionsPkg, setActionsPkg] = useState<PackageRow | null>(null);
+  const [actionsMode, setActionsMode] = useState<"view" | "duplicate">("view");
+  // Card whose delete is in flight (spinner on that card's trash button).
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // In-flight "More" management action (spinner + lock in the sheet).
   const [busyAction, setBusyAction] = useState<
@@ -237,6 +281,60 @@ const Packages = () => {
     } finally {
       setTogglingId(null);
     }
+  };
+
+  /* --- Per-card actions (eye / pencil / copy / trash) --------------------- */
+
+  const openDetails = (pkg: PackageRow) => {
+    setActionsMode("view");
+    setActionsPkg(pkg);
+  };
+
+  const openDuplicate = (pkg: PackageRow) => {
+    setActionsMode("duplicate");
+    setActionsPkg(pkg);
+  };
+
+  const goEditPackage = (pkg: PackageRow) => {
+    router.push(`/packages/edit-packages?id=${pkg.id}`);
+  };
+
+  // DELETE /api/packages/{id} — same endpoint as the sheet's Delete, confirmed
+  // first because it can't be undone.
+  const confirmDeletePackage = (pkg: PackageRow) => {
+    Alert.alert(
+      "Delete package",
+      `Delete "${pkg.name}"? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) {
+              Alert.alert("Not signed in", "Please sign in again.");
+              return;
+            }
+            setDeletingId(pkg.id);
+            try {
+              await deletePackage(token, pkg.id);
+              markPackagesStale();
+              await refetch();
+            } catch (err) {
+              Alert.alert(
+                "Delete failed",
+                err instanceof Error
+                  ? err.message
+                  : "Could not delete package.",
+              );
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const onRefresh = async () => {
@@ -498,125 +596,16 @@ const Packages = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          <View className="flex-row items-stretch gap-3 mb-5">
-            {/* Space Schedule Card */}
-            <Pressable
-              onPress={() => router.push("/packages/custom-packages")}
-              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-              style={{
-                shadowColor: "#424242",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.04,
-                shadowRadius: 6,
-                elevation: 1,
-              }}
-            >
-              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                <Feather name="package" size={20} color="#0644C7" />
-              </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
-                Custom Packages
-              </Text>
-              <Text
-                numberOfLines={2}
-                style={{ minHeight: 28 }}
-                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-              >
-                View all custom packages and their details
-              </Text>
-              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                  View
-                </Text>
-                <Feather name="chevron-right" size={16} color="#0644C7" />
-              </View>
-            </Pressable>
-
-            {/* Onsite Purchase Card */}
-            <Pressable
-              onPress={() => router.push("/packages/gift-cards")}
-              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-              style={{
-                shadowColor: "#424242",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.04,
-                shadowRadius: 6,
-                elevation: 1,
-              }}
-            >
-              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                <Feather name="gift" size={20} color="#0644C7" />
-              </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
-                Gift Cards
-              </Text>
-              <Text
-                numberOfLines={2}
-                style={{ minHeight: 28 }}
-                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-              >
-                Manage and view all your gift cards
-              </Text>
-              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                  View all
-                </Text>
-                <Feather name="chevron-right" size={16} color="#0644C7" />
-              </View>
-            </Pressable>
-          </View>
-
-          {/* Catalog sub-features (Space · Add-ons · Promos) — compact list rows
-              so the section stays balanced regardless of item count. */}
+          {/* Sub-page shortcuts — one full-width row per item, all the same. */}
           <View className="gap-3 mb-2">
-            {[
-              {
-                label: "Space",
-                desc: "Rooms & availability",
-                icon: "home" as const,
-                route: "/packages/space",
-              },
-              {
-                label: "Add-ons",
-                desc: "Food, beverage & extras",
-                icon: "coffee" as const,
-                route: "/packages/add-ons",
-              },
-              {
-                label: "Promos",
-                desc: "Promotional codes",
-                icon: "tag" as const,
-                route: "/packages/promos",
-              },
-            ].map((item) => (
-              <Pressable
+            {NAV_ROWS.map((item) => (
+              <NavRowCard
                 key={item.route}
+                icon={item.icon}
+                title={item.title}
+                desc={item.desc}
                 onPress={() => router.push(item.route as never)}
-                className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-                style={{
-                  shadowColor: "#424242",
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.04,
-                  shadowRadius: 6,
-                  elevation: 1,
-                }}
-              >
-                <View className="w-11 h-11 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-                  <Feather name={item.icon} size={20} color="#0644C7" />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                    {item.label}
-                  </Text>
-                  <Text
-                    numberOfLines={1}
-                    className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-                  >
-                    {item.desc}
-                  </Text>
-                </View>
-                <Feather name="chevron-right" size={18} color="#0644C7" />
-              </Pressable>
+              />
             ))}
           </View>
 
@@ -771,13 +760,12 @@ const Packages = () => {
                 const isActive = pkg.status === "active";
                 const dateLabel = formatDate(pkg.createdAt);
                 return (
-                  <Pressable
+                  // The card is static: every action lives in the row below, so
+                  // nothing happens on a stray tap.
+                  <View
                     key={pkg.id}
-                    onPress={() => setActionsPkg(pkg)}
-                    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-90"
+                    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
                     style={CARD_SHADOW}
-                    accessibilityRole="button"
-                    accessibilityLabel={`View details for ${pkg.name}`}
                   >
                     {/* Top row */}
                     <View className="flex-row items-start justify-between">
@@ -786,6 +774,9 @@ const Packages = () => {
                           onPress={() => toggleSelected(pkg.id)}
                           hitSlop={6}
                           style={{ marginTop: 1 }}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: isSelected }}
+                          accessibilityLabel={`Select ${pkg.name}`}
                         >
                           <View
                             className={`w-5 h-5 rounded border items-center justify-center ${
@@ -804,50 +795,33 @@ const Packages = () => {
                         </Text>
                       </View>
 
-                      <View className="flex-row items-center gap-2">
-                        {/* Activate / deactivate */}
-                        <Pressable
-                          onPress={() => handleToggleActive(pkg)}
-                          disabled={togglingId === pkg.id}
-                          className={`w-8 h-8 rounded-lg items-center justify-center ${
-                            isActive
-                              ? "bg-green-100 dark:bg-green-900/40"
-                              : "bg-gray-100 dark:bg-neutral-800"
-                          }`}
-                          accessibilityRole="button"
-                          accessibilityLabel={
-                            isActive ? "Deactivate package" : "Activate package"
-                          }
-                        >
-                          {togglingId === pkg.id ? (
-                            <ActivityIndicator
-                              size="small"
-                              color={isActive ? "#16A34A" : "#9CA3AF"}
-                            />
-                          ) : (
-                            <Feather
-                              name="power"
-                              size={16}
-                              color={isActive ? "#16A34A" : "#9CA3AF"}
-                            />
-                          )}
-                        </Pressable>
-
-                        {/* Per-card actions: View / Edit / Duplicate / Delete */}
-                        <Pressable
-                          onPress={() => setActionsPkg(pkg)}
-                          hitSlop={6}
-                          className="w-8 h-8 rounded-lg items-center justify-center bg-gray-100 dark:bg-neutral-800"
-                          accessibilityRole="button"
-                          accessibilityLabel="Package actions"
-                        >
-                          <Feather
-                            name="more-vertical"
-                            size={16}
-                            color="#6B7280"
+                      {/* Activate / deactivate */}
+                      <Pressable
+                        onPress={() => handleToggleActive(pkg)}
+                        disabled={togglingId === pkg.id}
+                        className={`w-8 h-8 rounded-lg items-center justify-center ${
+                          isActive
+                            ? "bg-green-100 dark:bg-green-900/40"
+                            : "bg-gray-100 dark:bg-neutral-800"
+                        }`}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isActive ? "Deactivate package" : "Activate package"
+                        }
+                      >
+                        {togglingId === pkg.id ? (
+                          <ActivityIndicator
+                            size="small"
+                            color={isActive ? "#16A34A" : "#9CA3AF"}
                           />
-                        </Pressable>
-                      </View>
+                        ) : (
+                          <Feather
+                            name="power"
+                            size={16}
+                            color={isActive ? "#16A34A" : "#9CA3AF"}
+                          />
+                        )}
+                      </Pressable>
                     </View>
 
                     {/* Location */}
@@ -911,7 +885,52 @@ const Packages = () => {
                         </View>
                       )}
                     </View>
-                  </Pressable>
+
+                    {/* Actions: See details / Edit / Duplicate / Delete */}
+                    <View className="flex-row items-center gap-2 mt-4 pt-3 border-t border-gray-100 dark:border-neutral-800">
+                      <Pressable
+                        onPress={() => openDetails(pkg)}
+                        className="flex-1 items-center py-2.5 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+                        accessibilityRole="button"
+                        accessibilityLabel={`See details for ${pkg.name}`}
+                      >
+                        <Feather name="eye" size={18} color={PRIMARY} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => goEditPackage(pkg)}
+                        className="flex-1 items-center py-2.5 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${pkg.name}`}
+                      >
+                        <Feather name="edit-2" size={18} color={PRIMARY} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => openDuplicate(pkg)}
+                        className="flex-1 items-center py-2.5 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+                        accessibilityRole="button"
+                        accessibilityLabel={`Duplicate ${pkg.name}`}
+                      >
+                        <Feather name="copy" size={18} color={PRIMARY} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmDeletePackage(pkg)}
+                        disabled={deletingId === pkg.id}
+                        className={`flex-1 items-center py-2.5 rounded-xl bg-red-600 ${
+                          deletingId === pkg.id
+                            ? "opacity-60"
+                            : "active:opacity-90"
+                        }`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete ${pkg.name}`}
+                      >
+                        {deletingId === pkg.id ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Feather name="trash-2" size={18} color="#FFFFFF" />
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
                 );
               })}
               <Pagination
@@ -1035,10 +1054,11 @@ const Packages = () => {
         </View>
       </BottomSheet>
 
-      {/* Per-card actions: View / Edit / Duplicate / Delete */}
+      {/* Details (eye) / Duplicate (copy) — Edit and Delete run from the card. */}
       <PackageActionsSheet
         visible={actionsPkg !== null}
         pkg={actionsPkg}
+        initialMode={actionsMode}
         isCompanyAdmin={isCompanyAdmin}
         locationOptions={locationObjOptions}
         onClose={() => setActionsPkg(null)}

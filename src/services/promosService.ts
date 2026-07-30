@@ -12,6 +12,11 @@ type RawPromo = {
   code?: string | null;
   name?: string | null;
   description?: string | null;
+  /** The API's own names; the `discount_*` / `usage_limit` keys are legacy aliases. */
+  type?: string | null;
+  value?: number | string | null;
+  usage_limit_total?: number | string | null;
+  current_usage?: number | string | null;
   discount_type?: string | null;
   discount_value?: number | string | null;
   usage_limit?: number | string | null;
@@ -26,7 +31,19 @@ type RawPromo = {
   end_date?: string | null;
   expiry_date?: string | null;
   expires_at?: string | null;
+  location_ids?: unknown;
+  package_ids?: unknown;
+  attraction_ids?: unknown;
+  event_ids?: unknown;
 };
+
+/** Reads a targeting column into ids; null / absent / malformed → [] ("all"). */
+function idList(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
 
 /** Flattened promo row backing the Promo Codes management list. */
 export type PromoRow = {
@@ -40,21 +57,34 @@ export type PromoRow = {
   usageLimitPerUser: number | null;
   usedCount: number;
   isActive: boolean;
+  /** Raw API status (`active` / `inactive` / `expired` / `exhausted`). */
+  status: string;
   startDate: string | null;
   endDate: string | null;
+  /** Targeting — an empty list means that dimension is unrestricted ("all"). */
+  locationIds: number[];
+  packageIds: number[];
+  attractionIds: number[];
+  eventIds: number[];
 };
 
 /** Fields for POST /api/promos (single code) — mirrors the web create form. */
 export type PromoInput = {
   name: string;
   code?: string;
-  discount_type: string;
-  discount_value: number;
-  start_date?: string | null;
-  end_date?: string | null;
-  usage_limit?: number | null;
-  usage_limit_per_user?: number | null;
+  type: string;
+  value: number;
+  start_date: string;
+  end_date: string;
+  usage_limit_total?: number;
+  usage_limit_per_user?: number;
   description?: string | null;
+  created_by: number;
+  /** Targeting — omit a list to leave that dimension unrestricted ("all"). */
+  location_ids?: number[];
+  package_ids?: number[];
+  attraction_ids?: number[];
+  event_ids?: number[];
 };
 
 /** Fields for POST /api/promos/generate-bulk (batch). */
@@ -91,19 +121,29 @@ function mapPromoRow(p: RawPromo): PromoRow {
     code: p.code?.trim() || `#${p.id}`,
     name: p.name?.trim() || p.code?.trim() || `Promo #${p.id}`,
     description: p.description?.trim() || "",
-    discountType: (p.discount_type ?? "fixed").toLowerCase(),
-    discountValue: Number(p.discount_value ?? 0),
-    usageLimit: p.usage_limit != null ? Number(p.usage_limit) : null,
+    discountType: (p.type ?? p.discount_type ?? "fixed").toLowerCase(),
+    discountValue: Number(p.value ?? p.discount_value ?? 0),
+    usageLimit:
+      p.usage_limit_total != null
+        ? Number(p.usage_limit_total)
+        : p.usage_limit != null
+          ? Number(p.usage_limit)
+          : null,
     usageLimitPerUser:
       p.usage_limit_per_user != null
         ? Number(p.usage_limit_per_user)
         : p.per_user_limit != null
           ? Number(p.per_user_limit)
           : null,
-    usedCount: Number(p.used_count ?? p.times_used ?? 0),
+    usedCount: Number(p.current_usage ?? p.used_count ?? p.times_used ?? 0),
     isActive: active,
+    status: (p.status ?? (active ? "active" : "inactive")).toLowerCase(),
     startDate: p.start_date ?? null,
     endDate: p.end_date ?? p.expiry_date ?? p.expires_at ?? null,
+    locationIds: idList(p.location_ids),
+    packageIds: idList(p.package_ids),
+    attractionIds: idList(p.attraction_ids),
+    eventIds: idList(p.event_ids),
   };
 }
 
@@ -133,6 +173,40 @@ export async function createPromo(
   input: PromoInput,
 ): Promise<void> {
   await apiRequest("/api/promos", { method: "POST", token, body: input });
+}
+
+/**
+ * Fields for PATCH /api/promos/{id}. Every key is optional (the API validates
+ * `sometimes`); a targeting list sent as `[]` clears the restriction back to
+ * "all", which is why these are `number[]` rather than optional.
+ */
+export type PromoUpdateInput = {
+  name?: string;
+  type?: string;
+  value?: number;
+  start_date?: string;
+  end_date?: string;
+  usage_limit_total?: number | null;
+  usage_limit_per_user?: number;
+  status?: string;
+  description?: string | null;
+  location_ids?: number[];
+  package_ids?: number[];
+  attraction_ids?: number[];
+  event_ids?: number[];
+};
+
+/** PATCH /api/promos/{id} — update a promo code. */
+export async function updatePromo(
+  token: string,
+  id: number,
+  input: PromoUpdateInput,
+): Promise<void> {
+  await apiRequest(`/api/promos/${id}`, {
+    method: "PATCH",
+    token,
+    body: input,
+  });
 }
 
 /** DELETE /api/promos/{id} — remove a promo code. */

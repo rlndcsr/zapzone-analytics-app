@@ -45,11 +45,20 @@ export type GiftCardRow = {
 /** Fields for POST /api/gift-cards — mirrors the web create form. */
 export type GiftCardInput = {
   type: string;
-  value: number;
+  /** Face value. The API names this `initial_value` and sets `balance` to match. */
+  initial_value: number;
   balance: number;
   max_usage: number;
   expiry_date?: string | null;
   description?: string | null;
+  created_by: number;
+  /** The creator's own location, for managers (company admins have none). */
+  location_id?: number;
+  /** Targeting — omit a list to leave that dimension unrestricted ("all"). */
+  location_ids?: number[];
+  package_ids?: number[];
+  attraction_ids?: number[];
+  event_ids?: number[];
 };
 
 function mapGiftCardRow(g: RawGiftCard): GiftCardRow {

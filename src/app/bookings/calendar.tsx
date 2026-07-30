@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CalendarDaySections } from "../../components/ui/CalendarDaySections";
 import {
   CalendarDaySkeleton,
   CalendarSkeleton,
@@ -418,6 +419,19 @@ const BookingCalendar = () => {
   const selectedDayBookings = selectedDayKey
     ? (byDate[selectedDayKey]?.bookings ?? [])
     : [];
+  const selectedDayPurchases = selectedDayKey
+    ? (extrasByDate[selectedDayKey]?.attractionPurchases ?? [])
+    : [];
+
+  // An attraction purchase opens its own screen, so close the day sheet first
+  // (navigating away with it open would leave it stacked behind).
+  const openPurchase = (id: number) => {
+    setSelectedDayKey(null);
+    router.push({
+      pathname: "/attractions/purchase-details",
+      params: { id: String(id) },
+    });
+  };
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -972,29 +986,20 @@ const BookingCalendar = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Day bookings (month cell tap) */}
+      {/* Day detail (month cell tap) — package bookings + attraction purchases,
+          each tappable through to its own record. */}
       <BottomSheet
         visible={selectedDayKey !== null}
         onClose={() => setSelectedDayKey(null)}
         title={selectedDayKey ? dayLabel(selectedDayKey) : "Bookings"}
       >
         <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
-          {selectedDayBookings.length === 0 ? (
-            <View className="py-10 items-center">
-              <Feather name="calendar" size={28} color="#9ca3af" />
-              <Text className="text-sm text-gray-400 dark:text-gray-500 mt-2">
-                No bookings for this day
-              </Text>
-            </View>
-          ) : (
-            selectedDayBookings.map((b) => (
-              <BookingCard
-                key={b.id}
-                booking={b}
-                onPress={() => openBooking(b.id)}
-              />
-            ))
-          )}
+          <CalendarDaySections
+            bookings={selectedDayBookings}
+            purchases={selectedDayPurchases}
+            onBooking={openBooking}
+            onPurchase={openPurchase}
+          />
           <View style={{ height: 12 }} />
         </ScrollView>
       </BottomSheet>

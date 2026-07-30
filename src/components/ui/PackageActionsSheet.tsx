@@ -11,7 +11,7 @@ import {
 } from "react-native";
 
 import { getToken } from "../../lib/session";
-import { formatTimeRange } from "../../lib/time";
+import { formatDuration, formatTimeRange } from "../../lib/time";
 import {
   deletePackage,
   duplicatePackage,
@@ -31,41 +31,90 @@ export type LocationOption = { id: number; name: string };
 const money = (n: number | null): string =>
   n == null ? "—" : `$${n.toFixed(2)}`;
 
-/* --- Local presentational helpers (per-module convention) ----------------- */
+/* --- Local presentational helpers (mirrors the web PackageDetails page) ---- */
 
+/** Section heading, one per block ("Description", "Package Details", …). */
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
-  <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-5 mb-2">
+  <Text className="text-base font-bold text-gray-900 dark:text-white mt-6 mb-3">
     {children}
   </Text>
 );
 
-const Row = ({ label, value }: { label: string; value: string }) => (
-  <View className="flex-row items-start justify-between py-1.5">
-    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">
-      {label}
-    </Text>
-    <Text className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-right">
-      {value}
-    </Text>
+/** Half-width labelled fact with a tinted icon tile (the Package Details grid). */
+const DetailTile = ({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  label: string;
+  value: string;
+}) => (
+  <View className="w-1/2 flex-row items-start gap-2.5 mb-4 pr-2">
+    <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
+      <Feather name={icon} size={15} color={PRIMARY} />
+    </View>
+    <View className="flex-1">
+      <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+        {label}
+      </Text>
+      <Text className="text-[13px] font-medium text-gray-900 dark:text-white">
+        {value}
+      </Text>
+    </View>
   </View>
 );
 
-const ListLine = ({ left, right }: { left: string; right?: string }) => (
-  <View className="flex-row items-center justify-between py-1.5 border-b border-gray-100 dark:border-neutral-800">
-    <Text className="text-sm text-gray-700 dark:text-gray-200 flex-1 mr-2">
+/** Tinted list card: name on the left, an optional accessory on the right. */
+const InfoCard = ({
+  left,
+  right,
+  tone = "primary",
+}: {
+  left: string;
+  right?: React.ReactNode;
+  tone?: "primary" | "neutral";
+}) => (
+  <View
+    className={`flex-row items-start justify-between gap-3 rounded-xl border p-3.5 mb-2 ${
+      tone === "primary"
+        ? "bg-blue-50 border-blue-100 dark:bg-blue-900/20 dark:border-blue-900/40"
+        : "bg-gray-50 border-gray-200 dark:bg-neutral-800 dark:border-neutral-700"
+    }`}
+  >
+    <Text className="flex-1 text-sm font-medium text-gray-900 dark:text-white">
       {left}
     </Text>
-    {!!right && (
-      <Text className="text-sm font-medium text-gray-900 dark:text-white">
-        {right}
-      </Text>
-    )}
+    {right}
+  </View>
+);
+
+/** Green "Active" / grey "Inactive" pill, as used on each schedule card. */
+const ActivePill = ({ active }: { active: boolean }) => (
+  <View
+    className={`px-2.5 py-1 rounded-full ${
+      active
+        ? "bg-green-100 dark:bg-green-900/40"
+        : "bg-gray-100 dark:bg-neutral-800"
+    }`}
+  >
+    <Text
+      className={`text-[10px] font-semibold ${
+        active
+          ? "text-green-700 dark:text-green-300"
+          : "text-gray-500 dark:text-gray-400"
+      }`}
+    >
+      {active ? "Active" : "Inactive"}
+    </Text>
   </View>
 );
 
 type Props = {
   visible: boolean;
   pkg: PackageRow | null;
+  /** Content to open on: the details (default) or straight to the duplicate form. */
+  initialMode?: Mode;
   /** Company admins can duplicate to another location; others are locked to theirs. */
   isCompanyAdmin: boolean;
   /** {id,name} options for the duplicate destination (derived from the list). */
@@ -86,6 +135,7 @@ type Props = {
 export function PackageActionsSheet({
   visible,
   pkg,
+  initialMode = "view",
   isCompanyAdmin,
   locationOptions,
   onClose,
@@ -125,19 +175,22 @@ export function PackageActionsSheet({
     }
   }, []);
 
-  // Open straight into the details view and load the selected package's detail
-  // immediately. Keyed on the package id so switching packages reloads, but a
-  // same-package list refetch (onChanged) doesn't.
+  // Open on the requested content (details by default, or the duplicate form
+  // when the card's copy action opened us) and load the selected package's
+  // detail immediately. Keyed on the package id so switching packages reloads,
+  // but a same-package list refetch (onChanged) doesn't.
   const pkgId = pkg?.id;
+  const pkgLocationId = pkg?.locationId ?? null;
   useEffect(() => {
     if (visible && pkgId != null) {
-      setMode("view");
+      setMode(initialMode);
+      setDupLocationId(pkgLocationId);
       setDetail(null);
       setError(null);
       setBusy(false);
       loadDetail(pkgId);
     }
-  }, [visible, pkgId, loadDetail]);
+  }, [visible, pkgId, pkgLocationId, initialMode, loadDetail]);
 
   if (!pkg) {
     return (
@@ -242,30 +295,21 @@ export function PackageActionsSheet({
           )}
           {!loading && !error && detail && (
             <>
-              {/* Title header — package name as the primary heading with the
-                  category beneath it, mirroring the web admin's PackageDetails. */}
-              <Text className="text-xl font-bold text-gray-900 dark:text-white mt-2">
+              {/* Header — name, category, status (the web page's title block). */}
+              <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-2">
                 {detail.name}
               </Text>
-              <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                {detail.category || "No category"}
-              </Text>
-
-              <View className="flex-row items-center gap-2 mt-3">
+              <View className="flex-row items-center gap-2 mt-1.5">
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
+                  {detail.category || "No category"}
+                </Text>
                 <StatusBadge status={detail.isActive ? "active" : "inactive"} />
-                {!!detail.packageType && (
-                  <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
-                    <Text className="text-[10px] font-semibold text-[#0644C7] dark:text-blue-300 capitalize">
-                      {detail.packageType}
-                    </Text>
-                  </View>
-                )}
               </View>
 
               {!!detail.description && (
                 <>
                   <SectionTitle>Description</SectionTitle>
-                  <Text className="text-sm text-gray-700 dark:text-gray-200 leading-5">
+                  <Text className="text-sm text-gray-700 dark:text-gray-200 leading-6">
                     {detail.description}
                   </Text>
                 </>
@@ -275,14 +319,12 @@ export function PackageActionsSheet({
                 <>
                   <SectionTitle>Features</SectionTitle>
                   {detail.features.map((f, i) => (
-                    <View key={i} className="flex-row items-start gap-2 py-0.5">
-                      <Feather
-                        name="check"
-                        size={14}
-                        color="#16A34A"
-                        style={{ marginTop: 3 }}
+                    <View key={i} className="flex-row items-start gap-2.5 py-1">
+                      <View
+                        className="w-1.5 h-1.5 rounded-full bg-gray-400"
+                        style={{ marginTop: 7 }}
                       />
-                      <Text className="text-sm text-gray-700 dark:text-gray-200 flex-1">
+                      <Text className="text-sm text-gray-700 dark:text-gray-200 flex-1 leading-5">
                         {f}
                       </Text>
                     </View>
@@ -290,91 +332,217 @@ export function PackageActionsSheet({
                 </>
               )}
 
-              <SectionTitle>Details</SectionTitle>
-              <Row label="Category" value={detail.category} />
-              <Row label="Base price" value={money(detail.price)} />
-              {detail.pricePerAdditional != null && (
-                <Row
-                  label="Per additional"
-                  value={money(detail.pricePerAdditional)}
+              {/* Package Details — two-column grid of icon + label + value. */}
+              <SectionTitle>Package Details</SectionTitle>
+              <View className="flex-row flex-wrap">
+                <DetailTile
+                  icon="tag"
+                  label="Category"
+                  value={detail.category || "No category"}
                 />
-              )}
-              {(detail.minParticipants != null ||
-                detail.maxParticipants != null) && (
-                <Row
-                  label="Participants"
-                  value={`${detail.minParticipants ?? 1}–${detail.maxParticipants ?? "∞"}`}
-                />
-              )}
-              {detail.duration != null && (
-                <Row
-                  label="Duration"
-                  value={`${detail.duration} ${detail.durationUnit}`}
-                />
-              )}
-              {detail.partialPaymentPercentage != null &&
-                detail.partialPaymentPercentage > 0 && (
-                  <Row
-                    label="Deposit"
-                    value={`${detail.partialPaymentPercentage}%`}
+                {!!detail.packageType && (
+                  <DetailTile
+                    icon="tag"
+                    label="Package Type"
+                    value={detail.packageType}
                   />
                 )}
-              {detail.partialPaymentFixed != null &&
-                detail.partialPaymentFixed > 0 && (
-                  <Row
-                    label="Deposit (fixed)"
-                    value={money(detail.partialPaymentFixed)}
+                <DetailTile
+                  icon="dollar-sign"
+                  label="Base Price"
+                  value={money(detail.price)}
+                />
+                {detail.pricePerAdditional != null && (
+                  <DetailTile
+                    icon="dollar-sign"
+                    label="Price Per Additional"
+                    value={money(detail.pricePerAdditional)}
                   />
                 )}
-              {detail.bookingWindowDays != null && (
-                <Row
-                  label="Booking window"
-                  value={`${detail.bookingWindowDays} days`}
+                {detail.maxParticipants != null && (
+                  <DetailTile
+                    icon="users"
+                    label="Max Participants"
+                    value={`${detail.maxParticipants} people`}
+                  />
+                )}
+                {detail.duration != null && (
+                  <DetailTile
+                    icon="clock"
+                    label="Duration"
+                    value={formatDuration(detail.duration, detail.durationUnit)}
+                  />
+                )}
+                {!!detail.locationName && (
+                  <DetailTile
+                    icon="map-pin"
+                    label="Location"
+                    value={detail.locationName}
+                  />
+                )}
+                {!!detail.createdAt && (
+                  <DetailTile
+                    icon="calendar"
+                    label="Created"
+                    value={new Date(detail.createdAt).toLocaleDateString()}
+                  />
+                )}
+                {detail.partialPaymentPercentage != null &&
+                  detail.partialPaymentPercentage > 0 && (
+                    <DetailTile
+                      icon="percent"
+                      label="Deposit"
+                      value={`${detail.partialPaymentPercentage}%`}
+                    />
+                  )}
+                {detail.partialPaymentFixed != null &&
+                  detail.partialPaymentFixed > 0 && (
+                    <DetailTile
+                      icon="dollar-sign"
+                      label="Deposit (fixed)"
+                      value={money(detail.partialPaymentFixed)}
+                    />
+                  )}
+                {detail.minParticipants != null && (
+                  <DetailTile
+                    icon="user"
+                    label="Min Participants"
+                    value={`${detail.minParticipants} people`}
+                  />
+                )}
+                {detail.bookingWindowDays != null && (
+                  <DetailTile
+                    icon="calendar"
+                    label="Booking Window"
+                    value={`${detail.bookingWindowDays} days`}
+                  />
+                )}
+                {detail.minBookingNoticeHours != null && (
+                  <DetailTile
+                    icon="bell"
+                    label="Min. Notice"
+                    value={`${detail.minBookingNoticeHours} h`}
+                  />
+                )}
+                <DetailTile
+                  icon="gift"
+                  label="Guest of Honor"
+                  value={detail.hasGuestOfHonor ? "Yes" : "No"}
                 />
-              )}
-              {detail.minBookingNoticeHours != null && (
-                <Row
-                  label="Min. notice"
-                  value={`${detail.minBookingNoticeHours} h`}
+                <DetailTile
+                  icon="list"
+                  label="Display Order"
+                  value={String(detail.displayOrder)}
                 />
-              )}
-              <Row
-                label="Guest of honor"
-                value={detail.hasGuestOfHonor ? "Yes" : "No"}
-              />
-              {!!detail.locationName && (
-                <Row label="Location" value={detail.locationName} />
-              )}
-              <Row label="Display order" value={String(detail.displayOrder)} />
+              </View>
 
-              {detail.attractions.length > 0 && (
+              {detail.schedules.length > 0 && (
                 <>
-                  <SectionTitle>
-                    Attractions ({detail.attractions.length})
-                  </SectionTitle>
-                  {detail.attractions.map((a) => (
-                    <ListLine key={a.id} left={a.name} right={money(a.price)} />
-                  ))}
-                </>
-              )}
+                  <SectionTitle>Availability Schedules</SectionTitle>
+                  {detail.schedules.map((s, i) => (
+                    <View
+                      key={s.id}
+                      className="rounded-xl border border-blue-100 bg-blue-50 p-3.5 mb-2 dark:border-blue-900/40 dark:bg-blue-900/20"
+                    >
+                      <View className="flex-row items-start justify-between mb-2.5">
+                        <View className="flex-row items-center gap-2">
+                          <Feather name="calendar" size={15} color={PRIMARY} />
+                          <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                            Schedule {i + 1}
+                          </Text>
+                        </View>
+                        <ActivePill active={s.isActive} />
+                      </View>
 
-              {detail.addOns.length > 0 && (
-                <>
-                  <SectionTitle>Add-ons ({detail.addOns.length})</SectionTitle>
-                  {detail.addOns.map((a) => (
-                    <ListLine key={a.id} left={a.name} right={money(a.price)} />
+                      {s.dayConfiguration.length > 0 && (
+                        <View className="flex-row flex-wrap gap-1.5 mb-2">
+                          {s.dayConfiguration.map((day) => (
+                            <View
+                              key={day}
+                              className="bg-[#0644C7] rounded px-2 py-1"
+                            >
+                              <Text className="text-[10px] font-semibold text-white capitalize">
+                                {day}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      <View className="flex-row items-center gap-2">
+                        <Feather name="clock" size={13} color={PRIMARY} />
+                        <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                          {s.timeSlotStart && s.timeSlotEnd
+                            ? formatTimeRange(s.timeSlotStart, s.timeSlotEnd)
+                            : s.availabilityType}
+                        </Text>
+                        {s.timeSlotInterval != null && (
+                          <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+                            ({s.timeSlotInterval} min intervals)
+                          </Text>
+                        )}
+                      </View>
+                    </View>
                   ))}
                 </>
               )}
 
               {detail.rooms.length > 0 && (
                 <>
-                  <SectionTitle>Spaces ({detail.rooms.length})</SectionTitle>
+                  <SectionTitle>Available Spaces</SectionTitle>
                   {detail.rooms.map((r) => (
-                    <ListLine
+                    <InfoCard
                       key={r.id}
                       left={r.name}
-                      right={r.capacity != null ? `${r.capacity} cap` : undefined}
+                      right={
+                        r.capacity != null ? (
+                          <View className="flex-row items-center gap-1">
+                            <Feather name="users" size={13} color={PRIMARY} />
+                            <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                              {r.capacity}
+                            </Text>
+                          </View>
+                        ) : undefined
+                      }
+                    />
+                  ))}
+                </>
+              )}
+
+              {detail.attractions.length > 0 && (
+                <>
+                  <SectionTitle>Included Attractions</SectionTitle>
+                  {detail.attractions.map((a) => (
+                    <InfoCard
+                      key={a.id}
+                      tone="neutral"
+                      left={a.name}
+                      right={
+                        a.price != null ? (
+                          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                            {money(a.price)}
+                          </Text>
+                        ) : undefined
+                      }
+                    />
+                  ))}
+                </>
+              )}
+
+              {detail.addOns.length > 0 && (
+                <>
+                  <SectionTitle>Available Add-ons</SectionTitle>
+                  {detail.addOns.map((a) => (
+                    <InfoCard
+                      key={a.id}
+                      left={a.name}
+                      right={
+                        a.price != null ? (
+                          <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                            {money(a.price)}
+                          </Text>
+                        ) : undefined
+                      }
                     />
                   ))}
                 </>
@@ -382,59 +550,26 @@ export function PackageActionsSheet({
 
               {detail.promos.length > 0 && (
                 <>
-                  <SectionTitle>Promos ({detail.promos.length})</SectionTitle>
+                  <SectionTitle>Active Promotions</SectionTitle>
                   {detail.promos.map((p) => (
-                    <ListLine key={p.id} left={p.name || p.code} />
+                    <InfoCard key={p.id} left={p.name || p.code} />
                   ))}
                 </>
               )}
 
               {detail.giftCards.length > 0 && (
                 <>
-                  <SectionTitle>
-                    Gift cards ({detail.giftCards.length})
-                  </SectionTitle>
+                  <SectionTitle>Applicable Gift Cards</SectionTitle>
                   {detail.giftCards.map((g) => (
-                    <ListLine key={g.id} left={g.code} />
-                  ))}
-                </>
-              )}
-
-              {detail.schedules.length > 0 && (
-                <>
-                  <SectionTitle>Availability</SectionTitle>
-                  {detail.schedules.map((s) => (
-                    <View
-                      key={s.id}
-                      className="py-2 border-b border-gray-100 dark:border-neutral-800"
-                    >
-                      <View className="flex-row items-center justify-between">
-                        <Text className="text-sm font-medium text-gray-800 dark:text-gray-100 capitalize">
-                          {s.availabilityType}
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {s.timeSlotStart && s.timeSlotEnd
-                            ? formatTimeRange(s.timeSlotStart, s.timeSlotEnd)
-                            : ""}
-                          {s.timeSlotInterval
-                            ? ` (${s.timeSlotInterval} min intervals)`
-                            : ""}
-                        </Text>
-                      </View>
-                      {s.dayConfiguration.length > 0 && (
-                        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1 capitalize">
-                          {s.dayConfiguration.join(", ")}
-                        </Text>
-                      )}
-                    </View>
+                    <InfoCard key={g.id} left={g.code} />
                   ))}
                 </>
               )}
 
               {!!detail.customerNotes && (
                 <>
-                  <SectionTitle>Customer notes</SectionTitle>
-                  <Text className="text-sm text-gray-700 dark:text-gray-200 leading-5">
+                  <SectionTitle>Customer Notes</SectionTitle>
+                  <Text className="text-sm text-gray-700 dark:text-gray-200 leading-6">
                     {detail.customerNotes}
                   </Text>
                 </>
@@ -460,9 +595,15 @@ export function PackageActionsSheet({
                 </Pressable>
                 <Pressable
                   onPress={confirmDelete}
-                  className="w-12 items-center justify-center py-3.5 rounded-xl border border-red-200 dark:border-red-900/50"
+                  disabled={busy}
+                  className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-red-600 ${
+                    busy ? "opacity-60" : "active:opacity-90"
+                  }`}
                 >
-                  <Feather name="trash-2" size={16} color="#dc2626" />
+                  <Feather name="trash-2" size={16} color="#fff" />
+                  <Text className="text-sm font-semibold text-white">
+                    Delete
+                  </Text>
                 </Pressable>
               </View>
             </>
@@ -508,7 +649,9 @@ export function PackageActionsSheet({
 
           <View className="flex-row gap-3 mt-6">
             <Pressable
-              onPress={() => setMode("view")}
+              // Opened straight into Duplicate (the card's copy action) → Cancel
+              // dismisses; reached from the details → Cancel goes back to them.
+              onPress={() => (initialMode === "duplicate" ? onClose() : setMode("view"))}
               disabled={busy}
               className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
             >

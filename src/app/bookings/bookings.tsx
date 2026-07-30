@@ -44,6 +44,7 @@ import {
   PillSegment,
 } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -379,38 +380,27 @@ const BookingCard = ({
   );
 };
 
-/** Sub-page shortcuts, rendered two per row in this order. */
-const NAV_CARDS: {
+/** Sub-page shortcuts, one full-width row each (same design as Packages'
+ *  Space / Add-ons / Promos). Check-in keeps its own card above. */
+const NAV_ROWS: {
   icon: ComponentIconName;
   title: string;
   desc: string;
-  cta: string;
   route: string;
 }[] = [
   {
     icon: "grid",
     title: "Space Schedule",
     desc: "View all customer bookings",
-    cta: "View All",
     route: "/bookings/space-schedule",
-  },
-  {
-    icon: "camera",
-    title: "Check-in",
-    desc: "Checking in customers",
-    cta: "Scan QR Code",
-    route: "/bookings/check-in",
   },
   {
     icon: "map-pin",
     title: "Location Requests",
     desc: "Review location change requests",
-    cta: "Review",
     route: "/bookings/location-requests",
   },
 ];
-
-const NAV_CARD_HEIGHT = 176;
 
 const NAV_CARD_SHADOW = {
   shadowColor: "#424242",
@@ -419,42 +409,6 @@ const NAV_CARD_SHADOW = {
   shadowRadius: 6,
   elevation: 1,
 } as const;
-
-const NavCard = ({ card }: { card: (typeof NAV_CARDS)[number] }) => (
-  <View className="w-1/2 px-1.5 mb-3" style={{ height: NAV_CARD_HEIGHT }}>
-    <Pressable
-      onPress={() => router.push(card.route as never)}
-      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-      style={NAV_CARD_SHADOW}
-      accessibilityRole="button"
-      accessibilityLabel={card.title}
-    >
-      <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-        <Feather name={card.icon} size={20} color={PRIMARY} />
-      </View>
-      <Text
-        className="text-sm font-bold text-gray-900 dark:text-white mb-1"
-        numberOfLines={1}
-      >
-        {card.title}
-      </Text>
-      <Text
-        numberOfLines={2}
-        className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-      >
-        {card.desc}
-      </Text>
-      {/* Spacer pins the footer to the bottom so all cards align. */}
-      <View className="flex-1" />
-      <View className="flex-row items-center pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-          {card.cta}
-        </Text>
-        <Feather name="chevron-right" size={16} color={PRIMARY} />
-      </View>
-    </Pressable>
-  </View>
-);
 
 type KpiTone = { bg: string; tint: string };
 
@@ -967,14 +921,14 @@ const Bookings = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Bookings
           </Text>
-          {/* Calendar View cross-link (mirrors the web list↔calendar toggle). */}
+          {/* Page-level "More" menu (mirrors the web header ActionMenu). */}
           <Pressable
-            onPress={() => router.push("/bookings/calendar" as never)}
+            onPress={() => setMoreOpen(true)}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
             accessibilityRole="button"
-            accessibilityLabel="Open calendar view"
+            accessibilityLabel="More actions"
           >
-            <Feather name="calendar" size={20} color={headerIcon} />
+            <Feather name="more-horizontal" size={20} color={headerIcon} />
           </Pressable>
         </View>
       </View>
@@ -999,10 +953,46 @@ const Bookings = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Sub-page shortcuts — two cards per row. */}
-          <View className="flex-row flex-wrap -mx-1.5 mb-2">
-            {NAV_CARDS.map((card) => (
-              <NavCard key={card.route} card={card} />
+          {/* Check-in card — the module's headline action, kept as a card. */}
+          <View className="flex-row items-stretch gap-3 mb-3">
+            <Pressable
+              onPress={() => router.push("/bookings/check-in" as never)}
+              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={NAV_CARD_SHADOW}
+              accessibilityRole="button"
+              accessibilityLabel="Check-in"
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="camera" size={20} color={PRIMARY} />
+              </View>
+              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
+                Check-in
+              </Text>
+              <Text
+                numberOfLines={2}
+                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+              >
+                Checking in customers
+              </Text>
+              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                  Scan QR Code
+                </Text>
+                <Feather name="chevron-right" size={16} color={PRIMARY} />
+              </View>
+            </Pressable>
+          </View>
+
+          {/* Sub-page shortcuts — one full-width row per item, all the same. */}
+          <View className="gap-3 mb-3">
+            {NAV_ROWS.map((item) => (
+              <NavRowCard
+                key={item.route}
+                icon={item.icon}
+                title={item.title}
+                desc={item.desc}
+                onPress={() => router.push(item.route as never)}
+              />
             ))}
           </View>
 
@@ -1019,17 +1009,20 @@ const Bookings = () => {
             </Text>
           </Pressable>
 
-          {/* Secondary "More" + "New Booking" (the step-by-step wizard) on one
-              row, equal width. "More" stays outlined/secondary; "New Booking"
+          {/* Secondary "Calendar View" (the web's list↔calendar toggle) +
+              "Create Booking" (the step-by-step wizard) on one row, equal width.
+              The calendar cross-link stays outlined/secondary; "Create Booking"
               is an outlined-primary CTA so the filled Manual Booking above leads. */}
           <View className="flex-row items-center gap-3 mb-5">
             <Pressable
-              onPress={() => setMoreOpen(true)}
+              onPress={() => router.push("/bookings/calendar" as never)}
               className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+              accessibilityRole="button"
+              accessibilityLabel="Open calendar view"
             >
-              <Feather name="more-horizontal" size={16} color="#6B7280" />
+              <Feather name="calendar" size={16} color="#6B7280" />
               <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                More
+                Calendar View
               </Text>
             </Pressable>
             <Pressable

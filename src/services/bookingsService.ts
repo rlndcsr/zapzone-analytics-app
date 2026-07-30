@@ -1451,6 +1451,8 @@ type RawPackage = {
   partial_payment_percentage?: number | string | null;
   partial_payment_fixed?: number | string | null;
   location_id?: number | null;
+  /** Eager-loaded by GET /api/mobile/packages (`location:id,name`). */
+  location?: { id?: number | null; name?: string | null } | null;
   add_ons?:
     | {
         id: number;
@@ -1533,6 +1535,9 @@ export type PackageListItem = {
   minParticipants: number;
   maxParticipants: number;
   isActive: boolean;
+  /** The package's own location, so a card can name it (company admins see many). */
+  locationId: number | null;
+  locationName: string;
 };
 
 function mapPackageListItem(raw: RawPackage): PackageListItem {
@@ -1549,6 +1554,8 @@ function mapPackageListItem(raw: RawPackage): PackageListItem {
     minParticipants: Number(raw.min_participants ?? 1) || 1,
     maxParticipants: Number(raw.max_participants ?? 0) || 0,
     isActive: raw.is_active !== false && raw.is_active !== 0,
+    locationId: raw.location?.id ?? raw.location_id ?? null,
+    locationName: raw.location?.name?.trim() || "",
   };
 }
 

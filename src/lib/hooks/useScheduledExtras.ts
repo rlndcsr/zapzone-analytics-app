@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { getCurrentUser, getToken } from "../session";
-import { fetchAttractionPurchases } from "../../services/attractionPurchasesService";
+import {
+  fetchAttractionPurchases,
+  type PurchaseRow,
+} from "../../services/attractionPurchasesService";
 import { fetchEventPurchases } from "../../services/eventPurchasesService";
 
 /*
@@ -16,10 +19,12 @@ import { fetchEventPurchases } from "../../services/eventPurchasesService";
  * still renders its bookings.
  */
 
-/** Per-day counts for one date key (YYYY-MM-DD). */
+/** Per-day counts for one date key (YYYY-MM-DD), plus the rows behind them. */
 export type DayExtras = {
   attractionTickets: number;
   eventRegistrations: number;
+  /** The purchases scheduled that day, for the day-detail list. */
+  attractionPurchases: PurchaseRow[];
 };
 
 const dayKey = (raw: string | null | undefined): string | null =>
@@ -54,11 +59,18 @@ export function useScheduledExtras(locationId?: number | null) {
 
       const map: Record<string, DayExtras> = {};
       const bucket = (key: string) =>
-        (map[key] ??= { attractionTickets: 0, eventRegistrations: 0 });
+        (map[key] ??= {
+          attractionTickets: 0,
+          eventRegistrations: 0,
+          attractionPurchases: [],
+        });
 
       for (const p of attractions) {
         const key = dayKey(p.scheduledDate) ?? dayKey(p.purchaseDate);
-        if (key) bucket(key).attractionTickets += p.quantity || 0;
+        if (!key) continue;
+        const day = bucket(key);
+        day.attractionTickets += p.quantity || 0;
+        day.attractionPurchases.push(p);
       }
       for (const e of events) {
         const key = dayKey(e.purchaseDate);

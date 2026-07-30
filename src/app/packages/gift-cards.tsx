@@ -18,6 +18,12 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import {
+  EMPTY_TARGETING,
+  TargetingSelector,
+  targetingPayload,
+  type TargetingValue,
+} from "../../components/ui/TargetingSelector";
+import {
   createGiftCard,
   deleteGiftCard,
   fetchGiftCardList,
@@ -25,7 +31,7 @@ import {
   type GiftCardRow,
 } from "../../services/giftCardsService";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
 
@@ -259,6 +265,8 @@ const GiftCards = () => {
   const [cMaxUsage, setCMaxUsage] = useState("1");
   const [cExpiry, setCExpiry] = useState("");
   const [cDesc, setCDesc] = useState("");
+  // Where the new card applies (empty lists = everywhere).
+  const [cTargeting, setCTargeting] = useState<TargetingValue>(EMPTY_TARGETING);
   const [creating, setCreating] = useState(false);
 
   const openCreate = () => {
@@ -268,12 +276,14 @@ const GiftCards = () => {
     setCMaxUsage("1");
     setCExpiry("");
     setCDesc("");
+    setCTargeting(EMPTY_TARGETING);
     setShowCreate(true);
   };
 
   const submitCreate = async () => {
     const token = getToken();
-    if (!token) return;
+    const user = getCurrentUser();
+    if (!token || !user) return;
     const value = Number(cValue) || 0;
     if (value <= 0) {
       Alert.alert("Value required", "Please enter a gift card value.");
@@ -281,12 +291,18 @@ const GiftCards = () => {
     }
     const input: GiftCardInput = {
       type: cType,
-      value,
-      // Balance defaults to the value when left blank (a fresh card).
+      initial_value: value,
+      // Balance defaults to the value when left blank (a fresh card). The API
+      // starts every new card at its full value, so this is informational.
       balance: cBalance.trim() ? Number(cBalance) : value,
       max_usage: Number(cMaxUsage) || 1,
       expiry_date: cExpiry.trim() || null,
       description: cDesc.trim() || null,
+      created_by: user.id,
+      // Managers' cards stay scoped to their own location, as on the web; the
+      // API keeps the picked locations below when there are any.
+      location_id: user.location_id ?? undefined,
+      ...targetingPayload(cTargeting),
     };
     setCreating(true);
     try {
@@ -588,6 +604,13 @@ const GiftCards = () => {
             onChangeText={setCDesc}
             placeholder="Optional description"
             multiline
+          />
+
+          <TargetingSelector
+            label="Where this gift card applies"
+            value={cTargeting}
+            onChange={setCTargeting}
+            disabled={creating}
           />
 
           <Pressable
