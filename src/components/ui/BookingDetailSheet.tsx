@@ -12,20 +12,20 @@ import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   Text,
   View,
 } from "react-native";
+import { isBookingSyncInProgress } from "../../lib/bookings/bookingListCache";
 import { getToken } from "../../lib/session";
 import {
   fetchBookingDetail,
-  recordBookingPayment,
   type BookingDetail,
 } from "../../services/bookingsService";
 import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
+import { ProcessPaymentSheet } from "./ProcessPaymentSheet";
 
 const MONTH_NAMES = [
   "January",
@@ -162,7 +162,7 @@ export function BookingDetailSheet({
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
-  const [processing, setProcessing] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
   const [showFull, setShowFull] = useState(false);
 
   // Editing is a dedicated full-screen route (matches Packages / Attractions).
@@ -177,6 +177,13 @@ export function BookingDetailSheet({
 
   const load = useCallback(async () => {
     if (bookingId == null) return;
+    // TEMP: investigation logging for the detail-sheet timeout.
+    if (__DEV__) {
+      console.log(`[BookingDetail] Opening booking ${bookingId}`);
+      console.log(
+        `[BookingDetail] syncInProgress=${isBookingSyncInProgress()}`,
+      );
+    }
     const requestId = ++requestIdRef.current;
     const isCurrent = () => requestId === requestIdRef.current;
 
@@ -216,51 +223,8 @@ export function BookingDetailSheet({
 
   const processPayment = () => {
     if (!detail) return;
-    const remainingDue = Math.max(0, detail.totalAmount - detail.amountPaid);
-    if (remainingDue <= 0) return;
-
-    Alert.alert(
-      "Process Payment",
-      `Record an in-store payment of ${formatMoney(remainingDue)} for ${detail.referenceNumber ?? "this booking"}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Confirm",
-          style: "default",
-          onPress: async () => {
-            const token = getToken();
-            if (!token) {
-              Alert.alert("Not authenticated");
-              return;
-            }
-            setProcessing(true);
-            try {
-              await recordBookingPayment(token, {
-                bookingId: detail.id,
-                amount: remainingDue,
-                locationId: detail.locationId,
-                customerId: detail.customerId,
-              });
-              await load();
-              onChanged?.();
-              Alert.alert(
-                "Payment recorded",
-                `${formatMoney(remainingDue)} recorded.`,
-              );
-            } catch (err) {
-              Alert.alert(
-                "Payment failed",
-                err instanceof Error
-                  ? err.message
-                  : "Could not record payment.",
-              );
-            } finally {
-              setProcessing(false);
-            }
-          },
-        },
-      ],
-    );
+    if (Math.max(0, detail.totalAmount - detail.amountPaid) <= 0) return;
+    setShowPayment(true);
   };
 
   const typeLabel =
@@ -533,7 +497,7 @@ export function BookingDetailSheet({
                   </Pressable>
                   <Pressable
                     onPress={processPayment}
-                    disabled={remaining <= 0 || processing}
+                    disabled={remaining <= 0}
                     style={({ pressed }) =>
                       pressed && remaining > 0 ? { opacity: 0.7 } : null
                     }
@@ -543,23 +507,17 @@ export function BookingDetailSheet({
                         : "border-amber-400"
                     }`}
                   >
-                    {processing ? (
-                      <ActivityIndicator color="#d97706" size="small" />
-                    ) : (
-                      <>
-                        <CreditCard
-                          size={16}
-                          color={remaining <= 0 ? "#9ca3af" : "#d97706"}
-                        />
-                        <Text
-                          className={`text-sm font-semibold ${
-                            remaining <= 0 ? "text-gray-400" : "text-amber-600"
-                          }`}
-                        >
-                          {remaining <= 0 ? "Fully Paid" : "Payment"}
-                        </Text>
-                      </>
-                    )}
+                    <CreditCard
+                      size={16}
+                      color={remaining <= 0 ? "#9ca3af" : "#d97706"}
+                    />
+                    <Text
+                      className={`text-sm font-semibold ${
+                        remaining <= 0 ? "text-gray-400" : "text-amber-600"
+                      }`}
+                    >
+                      {remaining <= 0 ? "Fully Paid" : "Payment"}
+                    </Text>
                   </Pressable>
                 </View>
                 <Pressable
@@ -583,6 +541,22 @@ export function BookingDetailSheet({
           directly on a card tap (initialMode "details"). When it's the entry
           point, closing dismisses the whole sheet back to the list; when reached
           from the hub, closing returns to the hub. */}
+      {/* Process Payment — same sheet the Manage Bookings row action opens. */}
+      <ProcessPaymentSheet
+        visible={showPayment}
+        bookingId={detail?.id ?? null}
+        referenceNumber={detail?.referenceNumber ?? null}
+        totalAmount={detail?.totalAmount ?? 0}
+        amountPaid={detail?.amountPaid ?? 0}
+        locationId={detail?.locationId ?? null}
+        customerId={detail?.customerId ?? null}
+        onClose={() => setShowPayment(false)}
+        onProcessed={() => {
+          load();
+          onChanged?.();
+        }}
+      />
+
       <BookingFullView
         visible={showFull}
         detail={detail}

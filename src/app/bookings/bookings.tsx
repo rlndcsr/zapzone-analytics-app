@@ -46,6 +46,7 @@ import {
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import { ProcessPaymentSheet } from "../../components/ui/ProcessPaymentSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
@@ -60,11 +61,9 @@ import {
   exportBookings,
   fetchBookingDetail,
   fetchTrashedBookings,
-  recordBookingPayment,
   updateBookingInternalNotes,
   updateBookingStatus,
   type BookingDetail,
-  type BookingPaymentMethod,
   type BookingStatus,
   type CalendarBooking,
   type TrashedBooking,
@@ -518,16 +517,11 @@ const Bookings = () => {
   const [payBooking, setPayBooking] = useState<CalendarBooking | null>(null);
   const [payDetail, setPayDetail] = useState<BookingDetail | null>(null);
   const [payLoading, setPayLoading] = useState(false);
-  const [payAmount, setPayAmount] = useState("");
-  const [payMethod, setPayMethod] = useState<BookingPaymentMethod>("in-store");
-  const [payNotes, setPayNotes] = useState("");
-  const [paySaving, setPaySaving] = useState(false);
 
   // Amounts shown in the Process Payment summary — prefer the freshly fetched
   // detail, falling back to the list row while it loads.
   const payTotal = payDetail?.totalAmount ?? payBooking?.totalAmount ?? 0;
   const payPaid = payDetail?.amountPaid ?? payBooking?.amountPaid ?? 0;
-  const payOutstanding = Math.max(0, payTotal - payPaid);
 
   // Auto-open a booking's detail sheet when navigated here from a
   // notification (e.g. /bookings/bookings?openId=123).
@@ -833,23 +827,13 @@ const Bookings = () => {
       onPayment: (booking) => {
         setPayBooking(booking);
         setPayDetail(null);
-        setPayMethod("in-store");
-        setPayNotes("");
-        // Prefill with the row's outstanding balance, then refine once the
-        // detail lands (it carries the authoritative amounts + ids).
-        setPayAmount(
-          Math.max(0, booking.totalAmount - booking.amountPaid).toFixed(2),
-        );
+        // The sheet seeds from the row's amounts, then re-seeds once the detail
+        // lands (it carries the authoritative amounts + the location/customer ids).
         const token = getToken();
         if (!token) return;
         setPayLoading(true);
         fetchBookingDetail(token, booking.id)
-          .then((d) => {
-            setPayDetail(d);
-            setPayAmount(
-              Math.max(0, d.totalAmount - d.amountPaid).toFixed(2),
-            );
-          })
+          .then(setPayDetail)
           .catch(() => {})
           .finally(() => setPayLoading(false));
       },
@@ -1419,188 +1403,18 @@ const Bookings = () => {
       </BottomSheet>
 
       {/* Process Payment — the row's `$` action. */}
-      <BottomSheet
+      <ProcessPaymentSheet
         visible={payBooking !== null}
-        onClose={() => !paySaving && setPayBooking(null)}
-        title="Process Payment"
-      >
-        <View className="px-5 pb-6">
-          <Text className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-            Booking: {payBooking?.referenceNumber ?? `#${payBooking?.id}`}
-          </Text>
-
-          {/* Amount summary */}
-          <View className="rounded-lg bg-gray-50 dark:bg-neutral-800/50 p-4 mb-4">
-            <View className="flex-row items-center justify-between py-1">
-              <Text className="text-sm text-gray-600 dark:text-gray-300">
-                Total Amount:
-              </Text>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                {formatMoney(payTotal)}
-              </Text>
-            </View>
-            <View className="flex-row items-center justify-between py-1">
-              <Text className="text-sm text-gray-600 dark:text-gray-300">
-                Already Paid:
-              </Text>
-              <Text className="text-sm font-bold text-green-600 dark:text-green-400">
-                {formatMoney(payPaid)}
-              </Text>
-            </View>
-            <View className="mt-1 flex-row items-center justify-between border-t border-gray-200 pt-2 dark:border-neutral-700">
-              <Text className="text-sm text-gray-600 dark:text-gray-300">
-                Remaining Balance:
-              </Text>
-              <Text className="text-sm font-bold text-red-500">
-                {formatMoney(payOutstanding)}
-              </Text>
-            </View>
-          </View>
-
-          {/* Amount */}
-          <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-            Payment Amount <Text className="text-red-500">*</Text>
-          </Text>
-          <View className="h-12 flex-row items-center rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4">
-            <Text className="mr-2 text-sm text-gray-400">$</Text>
-            <TextInput
-              value={payAmount}
-              onChangeText={setPayAmount}
-              editable={!paySaving}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-base text-gray-900 dark:text-white"
-            />
-          </View>
-
-          {/* Method */}
-          <Text className="mt-4 mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-            Payment Method
-          </Text>
-          <View className="flex-row gap-3">
-            {(
-              [
-                { key: "in-store", label: "In-Store", icon: "dollar-sign" },
-                {
-                  key: "authorize.net",
-                  label: "Authorize.net",
-                  icon: "credit-card",
-                },
-              ] as const
-            ).map((opt) => {
-              const active = payMethod === opt.key;
-              return (
-                <Pressable
-                  key={opt.key}
-                  onPress={() => setPayMethod(opt.key)}
-                  disabled={paySaving}
-                  className={`flex-1 flex-row items-center justify-center gap-2 rounded-lg border py-3 ${
-                    active
-                      ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
-                      : "border-gray-300 bg-white dark:border-neutral-700 dark:bg-neutral-900"
-                  }`}
-                >
-                  <Feather
-                    name={opt.icon}
-                    size={15}
-                    color={active ? PRIMARY : "#6B7280"}
-                  />
-                  <Text
-                    className={`text-sm font-semibold ${
-                      active
-                        ? "text-[#0644C7] dark:text-blue-300"
-                        : "text-gray-600 dark:text-gray-300"
-                    }`}
-                  >
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Notes */}
-          <Text className="mt-4 mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-            Notes (Optional)
-          </Text>
-          <View className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-3">
-            <TextInput
-              value={payNotes}
-              onChangeText={setPayNotes}
-              editable={!paySaving}
-              placeholder="Add any notes about this payment..."
-              placeholderTextColor="#9CA3AF"
-              multiline
-              textAlignVertical="top"
-              className="min-h-[72px] text-sm text-gray-900 dark:text-white"
-            />
-          </View>
-
-          <View className="flex-row justify-end gap-3 mt-5">
-            <Pressable
-              onPress={() => setPayBooking(null)}
-              disabled={paySaving}
-              className="h-11 items-center justify-center rounded-lg border border-gray-300 px-5 dark:border-neutral-700"
-            >
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Cancel
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={async () => {
-                if (!payBooking) return;
-                const amount = Number(payAmount);
-                if (!(amount > 0)) {
-                  Alert.alert(
-                    "Invalid amount",
-                    "Enter a payment amount greater than 0.",
-                  );
-                  return;
-                }
-                const token = getToken();
-                if (!token) return;
-                setPaySaving(true);
-                try {
-                  await recordBookingPayment(token, {
-                    bookingId: payBooking.id,
-                    amount,
-                    locationId: payDetail?.locationId ?? null,
-                    customerId: payDetail?.customerId ?? null,
-                    method: payMethod,
-                    notes: payNotes,
-                  });
-                  setPayBooking(null);
-                  refetch();
-                  Alert.alert(
-                    "Payment recorded",
-                    `${formatMoney(amount)} was added to this booking.`,
-                  );
-                } catch (err) {
-                  Alert.alert(
-                    "Payment failed",
-                    err instanceof Error ? err.message : "Please try again.",
-                  );
-                } finally {
-                  setPaySaving(false);
-                }
-              }}
-              disabled={paySaving || payLoading}
-              className={`h-11 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] px-5 ${
-                paySaving || payLoading ? "opacity-60" : "active:opacity-90"
-              }`}
-            >
-              {paySaving ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text className="text-sm font-semibold text-white">
-                  Process Payment
-                </Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </BottomSheet>
+        bookingId={payBooking?.id ?? null}
+        referenceNumber={payBooking?.referenceNumber ?? null}
+        totalAmount={payTotal}
+        amountPaid={payPaid}
+        locationId={payDetail?.locationId ?? null}
+        customerId={payDetail?.customerId ?? null}
+        loading={payLoading}
+        onClose={() => setPayBooking(null)}
+        onProcessed={refetch}
+      />
 
       {/* Internal Notes — staff-only, saved to the booking. */}
       <BottomSheet

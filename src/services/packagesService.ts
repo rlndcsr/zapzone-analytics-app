@@ -188,6 +188,17 @@ export type PackageScheduleView = {
   isActive: boolean;
 };
 
+/** An add-on attached to a package — the fields the web's add-on picker reads. */
+export type PackageAddOn = {
+  id: number;
+  name: string;
+  price: number | null;
+  image: string | null;
+  pricingType: string | null;
+  minQuantity: number | null;
+  maxQuantity: number | null;
+};
+
 /** Full package hydrated from GET /api/packages/{id} for the detail view. Safe to
  *  load per-package (one record) even though it carries relations + image. */
 export type PackageDetail = {
@@ -218,7 +229,7 @@ export type PackageDetail = {
   locationName: string;
   createdAt: string | null;
   attractions: { id: number; name: string; price: number | null }[];
-  addOns: { id: number; name: string; price: number | null }[];
+  addOns: PackageAddOn[];
   rooms: { id: number; name: string; capacity: number | null }[];
   promos: { id: number; name: string; code: string }[];
   giftCards: { id: number; code: string }[];
@@ -231,6 +242,12 @@ type RawRelation = Record<string, unknown>;
 const rel = (v: unknown): RawRelation[] =>
   Array.isArray(v) ? (v as RawRelation[]) : [];
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+// The web's getImageUrl takes element 0 when the field is an array.
+const firstImage = (v: unknown): string | null => {
+  const raw = Array.isArray(v) ? v[0] : v;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+};
 
 /** GET /api/packages/{id} — the full package (relations + scalars) for the detail
  *  view and as the source for a duplicate. One record, so no OOM concern. */
@@ -284,6 +301,10 @@ export async function fetchPackageDetail(
       id: Number(a.id),
       name: str(a.name) || `Add-on #${a.id}`,
       price: numOrNull(a.price),
+      image: firstImage(a.image),
+      pricingType: str(a.pricing_type) || null,
+      minQuantity: numOrNull(a.min_quantity),
+      maxQuantity: numOrNull(a.max_quantity),
     })),
     rooms: rel(d.rooms).map((r) => ({
       id: Number(r.id),

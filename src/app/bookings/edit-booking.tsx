@@ -6,15 +6,19 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Gift,
   MapPin,
+  Minus,
   Package as PackageIcon,
+  Plus,
   Save,
   User,
 } from "lucide-react-native";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +28,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { mediaUrl } from "../../lib/api";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { getToken } from "../../lib/session";
@@ -43,6 +48,11 @@ import {
   type RoomOption,
   type ScheduleBooking,
 } from "../../services/bookingsService";
+import {
+  fetchPackageDetail,
+  type PackageAddOn,
+  type PackageDetail,
+} from "../../services/packagesService";
 
 const PRIMARY = "#0644C7";
 
@@ -139,6 +149,84 @@ const SectionHeader = ({
   </View>
 );
 
+/** One add-on card: image, name, unit price, [-] qty [+] — mirrors the web card. */
+const AddOnCard = ({
+  addOn,
+  quantity,
+  unitPrice,
+  onChange,
+}: {
+  addOn: PackageAddOn;
+  quantity: number;
+  unitPrice: number;
+  onChange: (addOnId: number, change: number) => void;
+}) => {
+  const isSelected = quantity > 0;
+  const maxQty = addOn.maxQuantity ?? 99;
+  const image = mediaUrl(addOn.image);
+
+  return (
+    <View
+      className={`rounded-xl overflow-hidden border ${
+        isSelected
+          ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
+          : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+      }`}
+    >
+      {!!image && (
+        <Image
+          source={{ uri: image }}
+          className="w-full h-20"
+          resizeMode="cover"
+        />
+      )}
+      <View className="p-3">
+        <Text
+          className="text-sm font-medium text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {addOn.name}
+        </Text>
+        <View className="flex-row items-baseline gap-1 mb-2">
+          <Text className="text-sm font-bold text-[#0644C7]">
+            ${unitPrice.toFixed(2)}
+          </Text>
+          <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+            {addOn.pricingType === "per_person" ? "/person" : "/unit"}
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-1">
+          <Pressable
+            onPress={() => onChange(addOn.id, -1)}
+            disabled={!isSelected}
+            className={`w-9 h-9 rounded-lg items-center justify-center border ${
+              isSelected
+                ? "border-gray-300 dark:border-neutral-600"
+                : "border-gray-200 dark:border-neutral-800 opacity-40"
+            }`}
+          >
+            <Minus size={16} color={isSelected ? "#374151" : "#9ca3af"} />
+          </Pressable>
+          <View className="w-14 h-9 rounded-lg border border-gray-300 dark:border-neutral-600 items-center justify-center">
+            <Text className="text-sm font-bold text-gray-900 dark:text-white">
+              {quantity}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => onChange(addOn.id, 1)}
+            disabled={quantity >= maxQty}
+            className={`w-9 h-9 rounded-lg items-center justify-center ${
+              quantity >= maxQty ? "bg-blue-200 opacity-50" : "bg-[#0644C7]"
+            }`}
+          >
+            <Plus size={16} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+};
+
 type Option = { label: string; value: string | number };
 
 type SelectConfig = {
@@ -220,6 +308,11 @@ const EditBookingScreen = () => {
   const [time, setTime] = useState("");
   const [participants, setParticipants] = useState("");
   const [status, setStatus] = useState("pending");
+  // Add-ons: quantity per catalog add-on id, seeded from the booking's pivots.
+  const [selectedAddOns, setSelectedAddOns] = useState<{
+    [id: number]: number;
+  }>({});
+  const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null);
   const [gohName, setGohName] = useState("");
   const [gohAge, setGohAge] = useState("");
   const [gohGender, setGohGender] = useState<string | null>(null);
@@ -267,6 +360,11 @@ const EditBookingScreen = () => {
         setTime(d.time ?? "");
         setParticipants(String(d.participants ?? ""));
         setStatus(d.status ?? "pending");
+        const initialAddOns: { [id: number]: number } = {};
+        d.addOns.forEach((a) => {
+          if (a.addOnId && a.quantity > 0) initialAddOns[a.addOnId] = a.quantity;
+        });
+        setSelectedAddOns(initialAddOns);
         setGohName(d.guestOfHonorName ?? "");
         setGohAge(d.guestOfHonorAge != null ? String(d.guestOfHonorAge) : "");
         setGohGender(d.guestOfHonorGender ?? null);
@@ -321,6 +419,21 @@ const EditBookingScreen = () => {
     return () => {
       alive = false;
     };
+  }, [packageId]);
+
+  // The selected package's add-on catalog (the web's packageService.getPackage).
+  useEffect(() => {
+    if (packageId == null) {
+      setPackageDetail(null);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchPackageDetail(token, packageId, controller.signal)
+      .then(setPackageDetail)
+      .catch(() => {});
+    return () => controller.abort();
   }, [packageId]);
 
   const originalDate = detail?.date ?? "";
@@ -442,10 +555,138 @@ const EditBookingScreen = () => {
     setAnchor(next);
   };
 
+  // Changing package clears the add-on selection, like the web's handlePackageChange.
+  const handlePackageChange = (value: string | number) => {
+    setPackageId(Number(value));
+    setSelectedAddOns({});
+  };
+
   const handleSelectDate = (key: string) => {
     setDate(key);
     setTime(key === originalDate ? (originalTime ?? "") : "");
   };
+
+  // Package catalog plus any add-on the booking already carries that the package
+  // no longer offers (kept selectable, flat-priced) — the web's availableAddOns.
+  const availableAddOns = useMemo<PackageAddOn[]>(() => {
+    const list: PackageAddOn[] = [...(packageDetail?.addOns ?? [])];
+    const ids = new Set(list.map((a) => a.id));
+    (detail?.addOns ?? []).forEach((a) => {
+      if (!ids.has(a.addOnId)) {
+        list.push({
+          id: a.addOnId,
+          name: a.name,
+          price: a.price ?? a.priceAtBooking ?? 0,
+          image: null,
+          pricingType: "flat",
+          minQuantity: null,
+          maxQuantity: null,
+        });
+        ids.add(a.addOnId);
+      }
+    });
+    return list;
+  }, [packageDetail, detail]);
+
+  // Prices frozen at booking time win over the current catalog price.
+  const frozenAddOnPrices = useMemo(() => {
+    const map: { [id: number]: number } = {};
+    (detail?.addOns ?? []).forEach((a) => {
+      if (a.addOnId != null) map[a.addOnId] = a.priceAtBooking;
+    });
+    return map;
+  }, [detail]);
+
+  const getAddOnUnitPrice = useCallback(
+    (addonId: number, addOn: PackageAddOn | undefined) => {
+      if (Object.prototype.hasOwnProperty.call(frozenAddOnPrices, addonId)) {
+        return frozenAddOnPrices[addonId];
+      }
+      return Number(addOn?.price) || 0;
+    },
+    [frozenAddOnPrices],
+  );
+
+  const handleAddOnChange = useCallback(
+    (addOnId: number, change: number) => {
+      const addOn = availableAddOns.find((a) => a.id === addOnId);
+      const minQty = addOn?.minQuantity ?? 0;
+      const maxQty = addOn?.maxQuantity ?? 99;
+
+      setSelectedAddOns((prev) => {
+        const currentValue = prev[addOnId] || 0;
+        let newValue = currentValue + change;
+
+        if (newValue > maxQty) newValue = maxQty;
+
+        if (newValue <= 0) {
+          const { [addOnId]: _removed, ...rest } = prev;
+          return rest;
+        }
+
+        if (currentValue === 0 && change > 0 && minQty > 1) newValue = minQty;
+
+        return { ...prev, [addOnId]: newValue };
+      });
+    },
+    [availableAddOns],
+  );
+
+  const computeAddonsTotal = useCallback(
+    (addons: { [id: number]: number }, participantCount: number) =>
+      Object.entries(addons).reduce((sum, [id, quantity]) => {
+        const addonId = parseInt(id);
+        const addOn = availableAddOns.find((a) => a.id === addonId);
+        if (!addOn) return sum;
+        const price = getAddOnUnitPrice(addonId, addOn);
+        const lineTotal =
+          addOn.pricingType === "per_person"
+            ? price * quantity * participantCount
+            : price * quantity;
+        return sum + lineTotal;
+      }, 0),
+    [availableAddOns, getAddOnUnitPrice],
+  );
+
+  const buildAdditionalAddons = useCallback(
+    () =>
+      Object.entries(selectedAddOns)
+        .filter(([, quantity]) => quantity > 0)
+        .map(([id, quantity]) => {
+          const addonId = parseInt(id);
+          const addOn = availableAddOns.find((a) => a.id === addonId);
+          if (isNaN(addonId) || !addOn) return null;
+          return {
+            addon_id: addonId,
+            quantity,
+            price_at_booking: getAddOnUnitPrice(addonId, addOn),
+          };
+        })
+        .filter(
+          (
+            item,
+          ): item is {
+            addon_id: number;
+            quantity: number;
+            price_at_booking: number;
+          } => item !== null,
+        ),
+    [selectedAddOns, availableAddOns, getAddOnUnitPrice],
+  );
+
+  const addOnsChanged = useMemo(() => {
+    const originalMap: { [id: number]: number } = {};
+    (detail?.addOns ?? []).forEach((a) => {
+      if (a.addOnId && a.quantity > 0) originalMap[a.addOnId] = a.quantity;
+    });
+    const norm = (m: { [id: number]: number }) =>
+      Object.entries(m)
+        .filter(([, q]) => q > 0)
+        .map(([id, q]) => `${id}:${q}`)
+        .sort()
+        .join(",");
+    return norm(originalMap) !== norm(selectedAddOns);
+  }, [detail, selectedAddOns]);
 
   const handleSave = async () => {
     if (!detail || saving) return;
@@ -456,6 +697,38 @@ const EditBookingScreen = () => {
     }
     setSaving(true);
     try {
+      const participantCount = Number(participants) || 0;
+      const isPackageChanged = packageId !== detail.packageId;
+      const isParticipantsChanged = participantCount !== detail.participants;
+
+      // Recompute the total only when something priced changed, exactly as the
+      // web does (fees are not editable here, so feesChanged is always false).
+      let updatedTotal: number | undefined;
+      if (isPackageChanged || isParticipantsChanged || addOnsChanged) {
+        const basePackagePrice = packageDetail ? Number(packageDetail.price) : 0;
+        const minParticipants = packageDetail?.minParticipants || 1;
+        const pricePerAdditional = Number(packageDetail?.pricePerAdditional || 0);
+        const additionalCount = Math.max(0, participantCount - minParticipants);
+        const packagePrice =
+          basePackagePrice + additionalCount * pricePerAdditional;
+
+        const attractionsTotal = isPackageChanged
+          ? 0
+          : detail.attractions.reduce(
+              (sum, attr) => sum + attr.priceAtBooking * attr.quantity,
+              0,
+            );
+
+        const addonsTotal = computeAddonsTotal(selectedAddOns, participantCount);
+
+        const additiveFeeTotal = detail.appliedFees
+          .filter((f) => f.applicationType === "additive")
+          .reduce((sum, f) => sum + f.amount, 0);
+
+        updatedTotal =
+          packagePrice + attractionsTotal + addonsTotal + additiveFeeTotal;
+      }
+
       await updateBooking(token, detail.id, {
         locationId,
         packageId,
@@ -465,7 +738,7 @@ const EditBookingScreen = () => {
         customerPhone: phone.trim(),
         date,
         time,
-        participants: Number(participants) || 0,
+        participants: participantCount,
         status,
         guestOfHonorName: gohName.trim() || null,
         guestOfHonorAge: gohAge ? Number(gohAge) : null,
@@ -473,6 +746,11 @@ const EditBookingScreen = () => {
         customerNotes: customerNotes.trim() || null,
         internalNotes: internalNotes.trim() || null,
         sendEmail,
+        ...(addOnsChanged && { additionalAddons: buildAdditionalAddons() }),
+        ...(updatedTotal !== undefined && {
+          totalAmount: updatedTotal,
+          amountPaid: detail.amountPaid,
+        }),
       });
       markBookingsStale();
       router.back();
@@ -618,7 +896,7 @@ const EditBookingScreen = () => {
               value={packageId}
               placeholder="Select a package"
               options={packageOptions}
-              onSelect={(v) => setPackageId(Number(v))}
+              onSelect={handlePackageChange}
               onOpen={setActiveSelect}
             />
 
@@ -827,6 +1105,29 @@ const EditBookingScreen = () => {
                 />
               </View>
             </View>
+
+            {/* Add-ons */}
+            {availableAddOns.length > 0 && (
+              <>
+                <SectionHeader icon={Gift} title="Add-ons" />
+                <Text className="text-sm text-gray-500 dark:text-gray-400 -mt-1 mb-3">
+                  Add or adjust extras for this booking. Changing add-ons updates
+                  the total.
+                </Text>
+                <View className="flex-row flex-wrap -mx-1.5">
+                  {availableAddOns.map((addOn) => (
+                    <View key={addOn.id} className="w-1/2 px-1.5 mb-3">
+                      <AddOnCard
+                        addOn={addOn}
+                        quantity={selectedAddOns[addOn.id] || 0}
+                        unitPrice={getAddOnUnitPrice(addOn.id, addOn)}
+                        onChange={handleAddOnChange}
+                      />
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
 
             {/* Guest of Honor */}
             <SectionHeader icon={User} title="Guest of Honor" />

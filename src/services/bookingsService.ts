@@ -47,6 +47,17 @@ export type CalendarBooking = {
 
 export type BookingAddOn = {
   id: number;
+  /** Catalog add-on id — the web reads `pivot.add_on_id ?? id`. */
+  addOnId: number;
+  name: string;
+  price: number | null;
+  quantity: number;
+  priceAtBooking: number;
+};
+
+/** A booking's attraction line, with the price frozen at booking time. */
+export type BookingAttraction = {
+  id: number;
   name: string;
   quantity: number;
   priceAtBooking: number;
@@ -84,6 +95,7 @@ export type BookingDetail = {
   guestOfHonorAge: number | null;
   guestOfHonorGender: string | null;
   addOns: BookingAddOn[];
+  attractions: BookingAttraction[];
   totalAmount: number;
   paymentStatus: string;
   paymentMethod: string | null;
@@ -130,8 +142,18 @@ type RawBooking = {
     phone?: string | null;
   } | null;
   // Eager-loaded by the index as `attractions:id,name` / `addOns:id,name`.
-  attractions?: { id?: number }[] | null;
+  attractions?: RawBookingAttraction[] | null;
   add_ons?: RawAddOn[] | null;
+};
+
+type RawBookingAttraction = {
+  id?: number;
+  name?: string | null;
+  pivot?: {
+    attraction_id?: number | null;
+    quantity?: number | string | null;
+    price_at_booking?: number | string | null;
+  } | null;
 };
 
 /** Raw shape of the full booking model returned by GET /api/bookings/{id}. */
@@ -180,7 +202,9 @@ type RawBookingDetail = RawBooking & {
 type RawAddOn = {
   id: number;
   name?: string | null;
+  price?: number | string | null;
   pivot?: {
+    add_on_id?: number | null;
     quantity?: number | string | null;
     price_at_booking?: number | string | null;
   } | null;
@@ -342,7 +366,18 @@ function mapAddOns(raw: RawBookingDetail): BookingAddOn[] {
   const list = raw.add_ons ?? raw.addOns ?? [];
   return list.map((a) => ({
     id: a.id,
+    addOnId: Number(a.pivot?.add_on_id ?? a.id),
     name: a.name?.trim() || "Add-on",
+    price: a.price != null ? Number(a.price) : null,
+    quantity: Number(a.pivot?.quantity ?? 1),
+    priceAtBooking: Number(a.pivot?.price_at_booking ?? 0),
+  }));
+}
+
+function mapBookingAttractions(raw: RawBookingDetail): BookingAttraction[] {
+  return (raw.attractions ?? []).map((a) => ({
+    id: Number(a.pivot?.attraction_id ?? a.id ?? 0),
+    name: a.name?.trim() || "Attraction",
     quantity: Number(a.pivot?.quantity ?? 1),
     priceAtBooking: Number(a.pivot?.price_at_booking ?? 0),
   }));
@@ -385,6 +420,7 @@ export async function fetchBookingDetail(
     guestOfHonorAge: b.guest_of_honor_age ?? null,
     guestOfHonorGender: b.guest_of_honor_gender ?? null,
     addOns: mapAddOns(b),
+    attractions: mapBookingAttractions(b),
     totalAmount: Number(b.total_amount ?? 0),
     paymentStatus: b.payment_status ?? "partial",
     paymentMethod: b.payment_method ?? null,
@@ -1174,6 +1210,17 @@ export type BookingUpdateInput = {
   customerNotes?: string | null;
   internalNotes?: string | null;
   sendEmail?: boolean;
+  /** Sent only when the add-on selection changed, like the web's `additional_addons`. */
+  additionalAddons?: {
+    addon_id: number;
+    quantity: number;
+    price_at_booking: number;
+  }[];
+  /** Recomputed total; sent with `amountPaid` only when a recalc was needed. */
+  totalAmount?: number;
+  amountPaid?: number;
+  /** "paid" | "partial" — written by the Process Payment flow, like the web. */
+  paymentStatus?: string;
 };
 
 /**
@@ -1208,6 +1255,12 @@ export async function updateBooking(
   if (input.internalNotes !== undefined)
     body.internal_notes = input.internalNotes;
   if (input.sendEmail != null) body.send_notification = input.sendEmail;
+  if (input.additionalAddons !== undefined)
+    body.additional_addons = input.additionalAddons;
+  if (input.totalAmount !== undefined) body.total_amount = input.totalAmount;
+  if (input.amountPaid !== undefined) body.amount_paid = input.amountPaid;
+  if (input.paymentStatus !== undefined)
+    body.payment_status = input.paymentStatus;
 
   await apiRequest(`/api/bookings/${id}`, { method: "PUT", token, body });
 }
@@ -1382,8 +1435,16 @@ export async function recordBookingPayment(
     customerId: number | null;
     method?: BookingPaymentMethod;
     notes?: string | null;
+    /** Enables the web's default note text ("In-store payment for booking X"). */
+    referenceNumber?: string | null;
   },
 ): Promise<void> {
+  const method = params.method ?? "in-store";
+  // Same fallback note the web modal writes when the field is left blank.
+  const defaultNote = params.referenceNumber
+    ? `${method === "in-store" ? "In-store" : "Authorize.net"} payment for booking ${params.referenceNumber}`
+    : "Recorded from analytics app";
+
   await apiRequest(`/api/payments`, {
     method: "POST",
     token,
@@ -1393,9 +1454,10 @@ export async function recordBookingPayment(
       customer_id: params.customerId ?? undefined,
       location_id: params.locationId ?? undefined,
       amount: params.amount,
-      method: params.method ?? "in-store",
+      currency: "USD",
+      method,
       status: "completed",
-      notes: params.notes?.trim() || "Recorded from analytics app",
+      notes: params.notes?.trim() || defaultNote,
     },
   });
 }

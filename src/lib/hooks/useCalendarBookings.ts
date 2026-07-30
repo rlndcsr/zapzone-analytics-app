@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CalendarBooking } from "../../services/bookingsService";
 import {
-  fetchAllBookings,
-  type CalendarBooking,
-} from "../../services/bookingsService";
+  bookingCacheKey,
+  getCachedBookings,
+  hasCachedBookings,
+  isBookingCacheFresh,
+  readBookingCache,
+  syncBookingList,
+} from "../bookings/bookingListCache";
 import { getToken } from "../session";
 
 type UseCalendarBookingsParams = {
@@ -13,30 +18,19 @@ type UseCalendarBookingsParams = {
   locationId?: number;
 };
 
-// Session cache of the full booking list; views filter it client-side. One entry
-// PER LOCATION SCOPE: a single shared slot made the location-scoped Booking
-// Calendar and the unscoped Calendar tab evict each other, so every navigation
-// re-paged the whole list (~100 requests) and flooded the API into timeouts.
-type CacheEntry = { fetchedAt: number; data: CalendarBooking[] };
-const cache = new Map<string, CacheEntry>();
-// In-flight fetch per scope, so two mounted calendars share one network trip.
-const inFlight = new Map<string, Promise<CalendarBooking[]>>();
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const cacheKey = (locationId?: number) => String(locationId ?? "all");
-const isFresh = (entry?: CacheEntry) =>
-  !!entry && Date.now() - entry.fetchedAt < CACHE_TTL_MS;
-
+// The booking list lives in the shared bookingListCache — the same entries the
+// Manage Bookings screen fills, so opening a calendar after it is a cache hit.
 export function useCalendarBookings({
   startDate,
   endDate,
   locationId,
 }: UseCalendarBookingsParams) {
-  const cached = cache.get(cacheKey(locationId));
+  const cached = getCachedBookings(bookingCacheKey(locationId));
 
   const [allBookings, setAllBookings] = useState<CalendarBooking[]>(
     cached?.data ?? [],
   );
-  const [loading, setLoading] = useState(!isFresh(cached));
+  const [loading, setLoading] = useState(!isBookingCacheFresh(cached));
   const [error, setError] = useState<string | null>(null);
 
   // Only the latest sync may write state (guards against stale responses).
@@ -45,10 +39,10 @@ export function useCalendarBookings({
   // Fetch + cache this scope's list; `force` (pull-to-refresh) ignores the TTL.
   const sync = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      const k = cacheKey(locationId);
-      const entry = cache.get(k);
+      const k = bookingCacheKey(locationId);
+      const entry = readBookingCache(k, "useCalendarBookings");
 
-      if (isFresh(entry) && !force) {
+      if (isBookingCacheFresh(entry) && !force) {
         setAllBookings(entry!.data);
         setError(null);
         setLoading(false);
@@ -76,16 +70,7 @@ export function useCalendarBookings({
       }
 
       try {
-        // Join an in-flight sync for this scope rather than starting a second.
-        let pending = force ? undefined : inFlight.get(k);
-        if (!pending) {
-          pending = fetchAllBookings({ token, locationId }).finally(() => {
-            inFlight.delete(k);
-          });
-          inFlight.set(k, pending);
-        }
-        const data = await pending;
-        cache.set(k, { fetchedAt: Date.now(), data });
+        const data = await syncBookingList({ token, locationId, force });
         if (isCurrent()) {
           setAllBookings(data);
           setError(null);
@@ -96,7 +81,7 @@ export function useCalendarBookings({
           setError(
             err instanceof Error ? err.message : "Failed to load bookings",
           );
-          if (!cache.has(k)) setAllBookings([]);
+          if (!hasCachedBookings(k)) setAllBookings([]);
         }
       } finally {
         if (isCurrent()) setLoading(false);
