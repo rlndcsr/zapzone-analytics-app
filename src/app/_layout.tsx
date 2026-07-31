@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { AuthGuard } from "../components/AuthGuard";
+import { QuickNavFab } from "../components/navigation/QuickNavFab";
 import { STACK_SCREEN_TRANSITION } from "../components/navigation/tabTransition";
 import "../global.css";
 import { restoreTimeframeSelection } from "../lib/dashboard/timeframeStore";
@@ -53,6 +54,11 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="(tabs)" />
       </Stack>
+      {/* The app's one Quick Navigation FAB. Rendered after the Stack so it
+          floats above every authenticated screen the navigator pushes — screens
+          inherit it without knowing about it. It hides itself on the public
+          screens (login/splash). */}
+      <QuickNavFab />
     </GestureHandlerRootView>
   );
 }

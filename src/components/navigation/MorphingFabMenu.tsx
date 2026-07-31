@@ -55,7 +55,7 @@ import {
   SHADOW_OPACITY_RANGE,
   SHADOW_RADIUS_RANGE,
 } from "./fabMenuMotion";
-import { getCurrentUser } from "../../lib/session";
+import { useCurrentUserRole } from "../../lib/session";
 import { getNavMenuItems, type NavMenuItem } from "./navMenuItems";
 
 const FAB_COLOR = "#0644C7";
@@ -157,10 +157,13 @@ export function MorphingFabMenu({
 
   // Quick Navigation is role-aware: the management entry swaps between User
   // Management (company_admin) and Attendants Management (location_manager),
-  // mirroring the Web Admin sidebar. Memoized so the list isn't rebuilt on the
-  // re-renders that bracket the open/close animation (role is stable while the
-  // menu is mounted).
-  const items = useMemo(() => getNavMenuItems(getCurrentUser()?.role), []);
+  // mirroring the Web Admin sidebar. The role comes from the reactive session
+  // selector, not a snapshot — this menu is now mounted app-wide, so it can
+  // outlive a sign-out/sign-in and must re-resolve rather than latch the role it
+  // saw first. Memoized on the role so the list isn't rebuilt on the re-renders
+  // that bracket the open/close animation.
+  const role = useCurrentUserRole();
+  const items = useMemo(() => getNavMenuItems(role), [role]);
 
   const progress = useSharedValue(0);
   const itemsProgress = useSharedValue(0);

@@ -1,33 +1,29 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import { Image } from "expo-image";
 import { Tabs } from "expo-router";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
-import { ImageSourcePropType, Pressable, Text, View } from "react-native";
+import { useEffect, type ComponentProps } from "react";
+import { Pressable, Text, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
-  FAB_PRESS_IN,
-  FAB_PRESS_OUT_SPRING,
-  FAB_PRESS_SCALE,
-} from "../../components/navigation/fabMenuMotion";
-import {
-  FabRect,
-  MorphingFabMenu,
-} from "../../components/navigation/MorphingFabMenu";
+  TAB_BAR_HEIGHT,
+  TAB_BAR_TOP_INSET,
+  tabBarBottomPadding,
+} from "../../components/navigation/fabLayout";
 import { getRoleTabs } from "../../lib/navigation/navConfig";
 import { getCurrentUser } from "../../lib/session";
 
 const ACTIVE_COLOR = "#0644C7";
 const INACTIVE_COLOR = "#9AA0A6";
 
-// The center "navigation" route is rendered as the elevated action button.
+// The center "navigation" slot is left empty here: the elevated Quick Navigation
+// FAB that fills it is mounted app-wide in app/_layout.tsx (QuickNavFab), which
+// positions itself over this notch from the shared fabLayout geometry.
 const CENTER_ROUTE = "navigation";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
@@ -64,14 +60,6 @@ const TabIcon = ({ name, focused }: TabIconProps) => {
   );
 };
 
-const CenterTabIcon = ({ source }: { source: ImageSourcePropType }) => (
-  <Image
-    source={source}
-    style={{ width: 22, height: 22, tintColor: "#FFFFFF" }}
-    contentFit="contain"
-  />
-);
-
 const FloatingTabBar = ({
   state,
   descriptors,
@@ -79,58 +67,6 @@ const FloatingTabBar = ({
 }: BottomTabBarProps) => {
   if (__DEV__) console.count("[render] FloatingTabBar");
   const insets = useSafeAreaInsets();
-
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuMounted, setMenuMounted] = useState(false);
-  const [fabRect, setFabRect] = useState<FabRect | null>(null);
-  const fabRef = useRef<View>(null);
-
-  const measureFab = () => {
-    fabRef.current?.measureInWindow((x, y, width, height) => {
-      if (width <= 0 || height <= 0) return;
-
-      setFabRect((prev) =>
-        prev &&
-        prev.x === x &&
-        prev.y === y &&
-        prev.width === width &&
-        prev.height === height
-          ? prev
-          : { x, y, width, height },
-      );
-    });
-  };
-
-  const toggleMenu = () => {
-    if (menuOpen) {
-      setMenuOpen(false);
-      return;
-    }
-    if (fabRect) {
-      // Cached rect → open immediately so the sheet reacts on the same frame
-      // as the tap (no measure round-trip in the critical path).
-      setMenuMounted(true);
-      setMenuOpen(true);
-    } else {
-      // First open before layout settled: measure once, then open.
-      fabRef.current?.measureInWindow((x, y, width, height) => {
-        setFabRect({ x, y, width, height });
-        setMenuMounted(true);
-        setMenuOpen(true);
-      });
-    }
-  };
-
-  const fabScale = useSharedValue(1);
-  const fabPressStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: fabScale.value }],
-  }));
-  const onFabPressIn = () => {
-    fabScale.value = withTiming(FAB_PRESS_SCALE, FAB_PRESS_IN);
-  };
-  const onFabPressOut = () => {
-    fabScale.value = withSpring(1, FAB_PRESS_OUT_SPRING);
-  };
 
   const createPressHandlers = (
     route: BottomTabBarProps["state"]["routes"][number],
@@ -151,11 +87,6 @@ const FloatingTabBar = ({
     },
   });
 
-  const centerIndex = state.routes.findIndex((r) => r.name === CENTER_ROUTE);
-  const centerRoute = centerIndex >= 0 ? state.routes[centerIndex] : null;
-  const centerOptions = centerRoute && descriptors[centerRoute.key].options;
-  const centerFocused = centerIndex === state.index;
-
   // Which tabs this role sees, and in what order — driven by navConfig, not
   // hardcoded here. All screens stay registered; we simply render the subset.
   const tabOrder = getRoleTabs(getCurrentUser()?.role);
@@ -169,14 +100,17 @@ const FloatingTabBar = ({
       pointerEvents="box-none"
       className="absolute inset-x-0 bottom-0 px-4"
       style={{
-        paddingTop: 28,
-        paddingBottom: insets.bottom > 0 ? insets.bottom : 14,
+        // Top inset is the strip the app-wide FAB overhangs into; it stays
+        // reserved (and touch-transparent) even though the FAB is no longer a
+        // child here.
+        paddingTop: TAB_BAR_TOP_INSET,
+        paddingBottom: tabBarBottomPadding(insets.bottom),
       }}
     >
       <View
         className="flex-row items-center rounded-3xl border border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2"
         style={{
-          height: 64,
+          height: TAB_BAR_HEIGHT,
           shadowColor: "#0F172A",
           shadowOffset: { width: 0, height: 6 },
           shadowOpacity: 0.1,
@@ -223,56 +157,6 @@ const FloatingTabBar = ({
           );
         })}
       </View>
-
-      {centerRoute && centerOptions && (
-        <View
-          pointerEvents="box-none"
-          className="absolute left-0 right-0 items-center"
-          style={{ top: 10 }}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={menuOpen ? { expanded: true } : {}}
-            accessibilityLabel={centerOptions.tabBarAccessibilityLabel}
-            testID={centerOptions.tabBarButtonTestID}
-            onPress={toggleMenu}
-            onLongPress={toggleMenu}
-            onPressIn={onFabPressIn}
-            onPressOut={onFabPressOut}
-          >
-            {/* Ref sits outside the press-scale Animated.View so measureInWindow
-                returns the FAB's true resting box, not the shrunk-while-pressed size. */}
-            <View ref={fabRef} collapsable={false} onLayout={measureFab}>
-              <Animated.View style={fabPressStyle}>
-                <View
-                  className="h-14 w-14 items-center justify-center rounded-full bg-[#0644C7]"
-                  style={{
-                    opacity: menuMounted ? 0 : 1,
-                    shadowColor: ACTIVE_COLOR,
-                    shadowOffset: { width: 0, height: 3 },
-                    shadowOpacity: 0.4,
-                    shadowRadius: 12,
-                    elevation: 12,
-                  }}
-                >
-                  {centerOptions.tabBarIcon?.({
-                    focused: centerFocused,
-                    color: "#FFFFFF",
-                    size: 26,
-                  })}
-                </View>
-              </Animated.View>
-            </View>
-          </Pressable>
-        </View>
-      )}
-
-      <MorphingFabMenu
-        visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        onClosed={() => setMenuMounted(false)}
-        fabRect={fabRect}
-      />
     </View>
   );
 };
@@ -311,17 +195,9 @@ const TabLayout = () => {
           ),
         }}
       />
-      <Tabs.Screen
-        name="navigation"
-        options={{
-          title: "",
-          tabBarIcon: () => (
-            <CenterTabIcon
-              source={require("../../../assets/zapzone-assests/icon/more.png")}
-            />
-          ),
-        }}
-      />
+      {/* Registered so the tab bar can reserve its center slot; the app-wide
+          QuickNavFab draws over it, so this screen has no icon or label. */}
+      <Tabs.Screen name="navigation" options={{ title: "" }} />
       <Tabs.Screen
         name="calendar"
         options={{

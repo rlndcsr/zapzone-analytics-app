@@ -2,6 +2,7 @@ import { usePathname, useRootNavigationState, useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
+import { isPublicRoute } from "../lib/navigation/publicRoutes";
 import {
   expireSession,
   isSessionExpired,
@@ -35,7 +36,7 @@ export function AuthGuard() {
           pathname + " navKey=" + String(navState?.key),
       );
     if (!navState?.key) return; // wait until the navigator is mounted
-    const isPublic = pathname === "/" || pathname.startsWith("/splash");
+    const isPublic = isPublicRoute(pathname);
     if (authed || isPublic) {
       redirectedRef.current = false;
       return;

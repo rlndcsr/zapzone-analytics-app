@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { useSyncExternalStore } from "react";
 
-import type { AuthUser } from "../services/auth";
+import type { AuthUser, UserRole } from "../services/auth";
 import { resetActiveLocation } from "./location/activeLocationStore";
 
 const TOKEN_KEY = "zapzone_auth_token";
@@ -212,4 +212,15 @@ export function useAuthStatus(): boolean {
   useSyncExternalStore(subscribeAuth, getAuthSnapshot, getAuthSnapshot);
   if (__DEV__) console.count("[render] useAuthStatus consumer tick");
   return isAuthenticated();
+}
+
+function getRoleSnapshot(): UserRole | null {
+  return authUser?.role ?? null;
+}
+
+/** Reactive role of the signed-in user (null when signed out). Role-aware UI
+ *  that outlives a single sign-in — the app-wide Quick Navigation FAB — reads
+ *  this instead of a getCurrentUser() snapshot taken at mount. */
+export function useCurrentUserRole(): UserRole | null {
+  return useSyncExternalStore(subscribeAuth, getRoleSnapshot, getRoleSnapshot);
 }
