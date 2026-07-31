@@ -1,3 +1,13 @@
+import {
+  BarChart3,
+  Calendar,
+  CalendarDays,
+  CheckCircle,
+  ChevronDown,
+  Clock,
+  MapPin,
+  TrendingUp,
+} from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
@@ -20,18 +30,6 @@ import {
   setActiveLocation,
   useActiveLocation,
 } from "../../lib/location/activeLocationStore";
-import {
-  MapPin,
-  ChevronDown,
-  Calendar,
-  CheckCircle,
-  TrendingUp,
-  Users,
-  Ticket,
-  CalendarDays,
-  Clock,
-  BarChart3,
-} from "lucide-react-native";
 
 type DateFilterType =
   | "today"
@@ -51,6 +49,9 @@ type LocationRow = {
   guests: number;
   revenue: number;
   utilization: number;
+  bookingRevenue: number;
+  purchaseRevenue: number;
+  eventPurchaseRevenue: number;
 };
 
 const formatMoney = (value: number) =>
@@ -59,32 +60,66 @@ const formatMoney = (value: number) =>
     maximumFractionDigits: 2,
   })}`;
 
+/** Utilization track + percentage. Web renders one brand blue for every
+ *  location, so the fill is not thresholded here either. */
 const UtilizationBar = ({ value }: { value: number }) => {
   // Ensure value is between 0 and 100
   const clampedValue = Math.min(100, Math.max(0, value));
 
   return (
-    <View className="flex-row items-center gap-3">
-      <View className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-neutral-800 overflow-hidden">
+    <View className="flex-row items-center gap-2">
+      <View className="flex-1 h-2 rounded-full bg-blue-200 dark:bg-blue-900/40 overflow-hidden">
         <View
-          className="h-full rounded-full"
-          style={{
-            width: `${clampedValue}%`,
-            backgroundColor:
-              clampedValue > 70
-                ? "#0644C7"
-                : clampedValue > 40
-                  ? "#F59E0B"
-                  : "#EF4444",
-          }}
+          className="h-full rounded-full bg-[#0644C7]"
+          style={{ width: `${clampedValue}%` }}
         />
       </View>
-      <Text className="text-xs font-semibold text-gray-700 dark:text-gray-300 min-w-[32px] text-right">
+      <Text className="text-xs font-semibold text-[#0644C7] min-w-[34px] text-right">
         {clampedValue}%
       </Text>
     </View>
   );
 };
+
+/** Label above a headline figure — the layout every stat on this screen uses. */
+const StatCell = ({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) => (
+  <View className="flex-1 pr-2">
+    <Text className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">
+      {label}
+    </Text>
+    <Text
+      className="text-lg font-bold text-[#0644C7]"
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      minimumFontScale={0.8}
+    >
+      {value}
+    </Text>
+  </View>
+);
+
+/** Smaller label/value pair for the per-source revenue breakdown row. */
+const RevenueCell = ({ label, value }: { label: string; value: number }) => (
+  <View className="flex-1 pr-2">
+    <Text className="text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">
+      {label}
+    </Text>
+    <Text
+      className="text-xs font-semibold text-gray-700 dark:text-gray-300"
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      minimumFontScale={0.8}
+    >
+      {formatMoney(value)}
+    </Text>
+  </View>
+);
 
 const TopLocationCard = ({
   rank,
@@ -92,82 +127,63 @@ const TopLocationCard = ({
 }: {
   rank: number;
   location: LocationRow;
-}) => {
-  const getRankEmoji = (rank: number) => {
-    switch (rank) {
-      case 1:
-        return "🥇";
-      case 2:
-        return "🥈";
-      case 3:
-        return "🥉";
-      default:
-        return `${rank}`;
-    }
-  };
-
-  return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-3 shadow-sm border border-gray-100 dark:border-neutral-800"
-      style={{
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        elevation: 1,
-      }}
-    >
-      <View className="flex-row items-center justify-between mb-3">
-        <View className="flex-row items-center gap-3 flex-1 mr-2">
-          <View className="w-10 h-10 rounded-full bg-[#0644C7] items-center justify-center shadow-sm">
-            <Text className="text-white font-bold text-sm">
-              {getRankEmoji(rank)}
-            </Text>
-          </View>
-          <View className="flex-1">
-            <Text
-              className="text-base font-bold text-gray-900 dark:text-white"
-              numberOfLines={1}
-            >
-              {location.name}
-            </Text>
-            <View className="flex-row items-center gap-2 mt-0.5">
-              <View className="flex-row items-center gap-1">
-                <Ticket size={10} color="#3B82F6" />
-                <Text className="text-xs text-gray-500 dark:text-gray-400">
-                  {location.bookings} bookings
-                </Text>
-              </View>
-              <View className="flex-row items-center gap-1">
-                <CalendarDays size={10} color="#8B5CF6" />
-                <Text className="text-xs text-gray-500 dark:text-gray-400">
-                  {location.tickets} tickets
-                </Text>
-              </View>
-            </View>
-          </View>
+}) => (
+  <View
+    className="bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4 mb-3 shadow-sm border-2 border-[#0644C7]"
+    style={{
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
+      elevation: 1,
+    }}
+  >
+    {/* Rank + name, with total revenue on the right */}
+    <View className="flex-row items-center justify-between mb-3">
+      <View className="flex-row items-center gap-3 flex-1 mr-3">
+        <View className="w-10 h-10 rounded-full bg-[#0644C7] items-center justify-center shadow-sm">
+          <Text className="text-white font-bold text-lg">{rank}</Text>
         </View>
-        <View className="bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg">
-          <Text className="text-sm font-bold text-[#0644C7]">
-            {formatMoney(location.revenue)}
-          </Text>
-        </View>
+        <Text
+          className="flex-1 text-lg font-bold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {location.name}
+        </Text>
       </View>
-
-      <View className="flex-row items-center gap-4">
-        <View className="flex-1">
-          <UtilizationBar value={location.utilization} />
-        </View>
-        <View className="flex-row items-center gap-2">
-          <Users size={12} color="#22C55E" />
-          <Text className="text-xs text-gray-500 dark:text-gray-400">
-            {location.guests} guests
-          </Text>
-        </View>
+      <View className="items-end">
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">
+          Revenue
+        </Text>
+        <Text className="text-lg font-bold text-[#0644C7]">
+          {formatMoney(location.revenue)}
+        </Text>
       </View>
     </View>
-  );
-};
+
+    {/* Bookings • Tickets • Events • Guests */}
+    <View className="flex-row mb-3">
+      <StatCell label="Bookings" value={location.bookings} />
+      <StatCell label="Tickets" value={location.tickets} />
+      <StatCell label="Events" value={location.events} />
+      <StatCell label="Guests" value={location.guests} />
+    </View>
+
+    <View className="mb-3">
+      <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+        Utilization
+      </Text>
+      <UtilizationBar value={location.utilization} />
+    </View>
+
+    {/* Revenue split by source */}
+    <View className="flex-row pt-3 border-t border-[#0644C7]/20">
+      <RevenueCell label="Bookings Rev." value={location.bookingRevenue} />
+      <RevenueCell label="Tickets Rev." value={location.purchaseRevenue} />
+      <RevenueCell label="Events Rev." value={location.eventPurchaseRevenue} />
+    </View>
+  </View>
+);
 
 const OverviewCard = ({ location }: { location: LocationRow }) => (
   <View
@@ -180,8 +196,8 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
       elevation: 1,
     }}
   >
-    <View className="flex-row items-center justify-between mb-4">
-      <View className="flex-row items-center gap-2 flex-1">
+    <View className="flex-row items-center justify-between mb-3">
+      <View className="flex-row items-center gap-2 flex-1 mr-2">
         <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
           <MapPin size={16} color="#0644C7" />
         </View>
@@ -192,55 +208,33 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
           {location.name}
         </Text>
       </View>
-      <View className="bg-green-50 dark:bg-green-900/30 px-2.5 py-1 rounded-full">
-        <Text className="text-xs font-medium text-green-600 dark:text-green-400">
-          Active
-        </Text>
-      </View>
+      {/* Web shows a utilization dot here (tooltip only); the % itself is
+          rendered in the Utilization column below. */}
+      <View className="w-3 h-3 rounded-full bg-[#0644C7]" />
     </View>
 
-    <View className="flex-row mb-4">
-      <View className="flex-1">
-        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
-          Bookings
-        </Text>
-        <Text className="text-xl font-bold text-gray-900 dark:text-white">
-          {location.bookings}
-        </Text>
-      </View>
-      <View className="flex-1">
-        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
-          Tickets
-        </Text>
-        <Text className="text-xl font-bold text-gray-900 dark:text-white">
-          {location.tickets}
-        </Text>
-      </View>
-      <View className="flex-1">
-        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
-          Events
-        </Text>
-        <Text className="text-xl font-bold text-gray-900 dark:text-white">
-          {location.events}
-        </Text>
-      </View>
+    <View className="flex-row mb-3">
+      <StatCell label="Bookings" value={location.bookings} />
+      <StatCell label="Tickets" value={location.tickets} />
+      <StatCell label="Events" value={location.events} />
     </View>
 
-    <View className="flex-row items-end justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
-      <View>
-        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
-          Revenue
-        </Text>
-        <Text className="text-lg font-bold text-[#0644C7]">
-          {formatMoney(location.revenue)}
-        </Text>
-      </View>
-      <View className="flex-1 ml-4">
-        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">
+    <View className="flex-row mb-3">
+      <StatCell label="Revenue" value={formatMoney(location.revenue)} />
+      <View className="flex-1">
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
           Utilization
         </Text>
-        <UtilizationBar value={location.utilization} />
+        <View className="h-7 justify-center">
+          <UtilizationBar value={location.utilization} />
+        </View>
       </View>
+    </View>
+
+    <View className="flex-row pt-3 border-t border-gray-100 dark:border-neutral-800">
+      <RevenueCell label="Bookings Rev." value={location.bookingRevenue} />
+      <RevenueCell label="Tickets Rev." value={location.purchaseRevenue} />
+      <RevenueCell label="Events Rev." value={location.eventPurchaseRevenue} />
     </View>
   </View>
 );
@@ -285,11 +279,15 @@ const Location = () => {
       id: Number(id),
       name: stats.name,
       bookings: Number(stats.bookings ?? 0),
-      tickets: Number(stats.purchases ?? 0),
+      // Web reads `attractionTickets ?? purchases` for the Tickets figure.
+      tickets: Number(stats.attractionTickets ?? stats.purchases ?? 0),
       events: Number(stats.eventPurchases ?? 0),
       guests: Number(stats.participants ?? 0),
       revenue: Number(stats.revenue ?? 0),
       utilization: Number(stats.utilization ?? 0),
+      bookingRevenue: Number(stats.bookingRevenue ?? 0),
+      purchaseRevenue: Number(stats.purchaseRevenue ?? 0),
+      eventPurchaseRevenue: Number(stats.eventPurchaseRevenue ?? 0),
     }));
   }, [data]);
 
@@ -307,25 +305,24 @@ const Location = () => {
     [allLocations, selectedLocation],
   );
 
-  const topLocations = useMemo(
-    () =>
-      [...filteredLocations]
-        .sort(
-          (a, b) =>
-            b.revenue - a.revenue ||
-            b.guests - a.guests ||
-            b.bookings - a.bookings,
-        )
-        .slice(0, 3),
+  // Web sorts both sections by revenue descending, with no tiebreaker — the
+  // sort is stable, so equal-revenue locations keep their API order.
+  const sortedLocations = useMemo(
+    () => [...filteredLocations].sort((a, b) => b.revenue - a.revenue),
     [filteredLocations],
   );
 
-  // Client-side pagination over the filtered list.
+  const topLocations = useMemo(
+    () => sortedLocations.slice(0, 3),
+    [sortedLocations],
+  );
+
+  // Client-side pagination over the sorted list.
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const paged = useMemo(
-    () => filteredLocations.slice((page - 1) * perPage, page * perPage),
-    [filteredLocations, page, perPage],
+    () => sortedLocations.slice((page - 1) * perPage, page * perPage),
+    [sortedLocations, page, perPage],
   );
 
   // Reset to the first page whenever the result set changes / filters move.
@@ -342,10 +339,26 @@ const Location = () => {
   const dateFilterOptions = [
     { label: "All Time", value: "all_time" as DateFilterType, icon: BarChart3 },
     { label: "Today", value: "today" as DateFilterType, icon: Calendar },
-    { label: "Last 24 Hours", value: "last_24h" as DateFilterType, icon: Clock },
-    { label: "Last 7 Days", value: "last_7d" as DateFilterType, icon: TrendingUp },
-    { label: "Last 30 Days", value: "last_30d" as DateFilterType, icon: CalendarDays },
-    { label: "Custom Range", value: "custom" as DateFilterType, icon: Calendar },
+    {
+      label: "Last 24 Hours",
+      value: "last_24h" as DateFilterType,
+      icon: Clock,
+    },
+    {
+      label: "Last 7 Days",
+      value: "last_7d" as DateFilterType,
+      icon: TrendingUp,
+    },
+    {
+      label: "Last 30 Days",
+      value: "last_30d" as DateFilterType,
+      icon: CalendarDays,
+    },
+    {
+      label: "Custom Range",
+      value: "custom" as DateFilterType,
+      icon: Calendar,
+    },
   ];
 
   const currentDateLabel =
@@ -460,7 +473,7 @@ const Location = () => {
               <View className="flex-row items-center gap-2 mb-4">
                 <TrendingUp size={20} color="#0644C7" />
                 <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                  Top Performers
+                  Top Performing Locations
                 </Text>
               </View>
 
@@ -481,10 +494,13 @@ const Location = () => {
                 <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
                   <MapPin size={18} color="#0644C7" />
                 </View>
-                <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                <Text
+                  numberOfLines={1}
+                  className="shrink-0 text-lg font-bold text-gray-900 dark:text-white"
+                >
                   All Locations
                 </Text>
-                <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
                   <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
                     {filteredLocations.length}
                   </Text>

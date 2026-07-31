@@ -70,6 +70,8 @@ export type LocationStat = {
   name: string;
   bookings: number;
   purchases: number;
+  /** Ticket count (quantity); falls back to `purchases` when absent. */
+  attractionTickets?: number;
   eventPurchases: number;
   eventTickets: number;
   revenue: number;
