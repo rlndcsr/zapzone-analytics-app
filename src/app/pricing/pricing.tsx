@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import { useColorScheme } from "nativewind";
 import {
   useCallback,
   useEffect,
@@ -18,10 +19,17 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import {
+  EMPTY_SPECIAL_PRICING_FILTERS,
+  SpecialPricingFiltersSheet,
+  countActiveSpecialPricingFilters,
+  type SpecialPricingDateTarget,
+  type SpecialPricingFilterValues,
+} from "../../components/ui/SpecialPricingFiltersSheet";
 import { SpecialPricingTable } from "../../components/ui/SpecialPricingTable";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
@@ -29,15 +37,15 @@ import {
   SpecialPricingListSkeleton,
 } from "../../components/ui/skeleton/SpecialPricingSkeleton";
 import {
-  fetchLocations,
-  type LocationOption,
-} from "../../services/locationsService";
-import {
   consumeSpecialPricingsStale,
   markSpecialPricingsStale,
   useSpecialPricings,
 } from "../../lib/hooks/useSpecialPricings";
 import { getToken } from "../../lib/session";
+import {
+  fetchLocations,
+  type LocationOption,
+} from "../../services/locationsService";
 import {
   deleteSpecialPricing,
   toggleSpecialPricingStatus,
@@ -230,7 +238,9 @@ const SpecialPricingCard = ({
       {/* Priority / stackable + actions */}
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
         <View className="flex-row items-center gap-4">
-          {cols.priority && <Meta label="Priority" value={String(row.priority)} />}
+          {cols.priority && (
+            <Meta label="Priority" value={String(row.priority)} />
+          )}
           {cols.stackable && (
             <Meta label="Stackable" value={row.isStackable ? "Yes" : "No"} />
           )}
@@ -296,85 +306,6 @@ const KpiCard = ({
   </View>
 );
 
-type EntityFilter = "all" | SpecialPricingEntityType;
-type RecurrenceFilter = "all" | "one_time" | "weekly" | "monthly";
-type DiscountFilter = "all" | "percentage" | "fixed";
-type StatusFilter = "all" | "active" | "inactive";
-type StackFilter = "all" | "yes" | "no";
-
-const ENTITY_OPTIONS: { label: string; value: EntityFilter }[] = [
-  { label: "All Types", value: "all" },
-  { label: "Packages", value: "package" },
-  { label: "Attractions", value: "attraction" },
-  { label: "Events", value: "event" },
-];
-const RECURRENCE_OPTIONS: { label: string; value: RecurrenceFilter }[] = [
-  { label: "All Recurrences", value: "all" },
-  { label: "One-Time", value: "one_time" },
-  { label: "Weekly", value: "weekly" },
-  { label: "Monthly", value: "monthly" },
-];
-const DISCOUNT_OPTIONS: { label: string; value: DiscountFilter }[] = [
-  { label: "All Discount Types", value: "all" },
-  { label: "Percentage", value: "percentage" },
-  { label: "Fixed", value: "fixed" },
-];
-const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Statuses", value: "all" },
-  { label: "Active", value: "active" },
-  { label: "Inactive", value: "inactive" },
-];
-const STACK_OPTIONS: { label: string; value: StackFilter }[] = [
-  { label: "All", value: "all" },
-  { label: "Stackable", value: "yes" },
-  { label: "Not stackable", value: "no" },
-];
-
-/** A row of chip choices used inside the collapsible Filters panel. */
-function ChipRow<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { label: string; value: T }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <View className="mb-3">
-      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-        {label}
-      </Text>
-      <View className="flex-row flex-wrap gap-2">
-        {options.map((opt) => {
-          const active = value === opt.value;
-          return (
-            <Pressable
-              key={opt.value}
-              onPress={() => onChange(opt.value)}
-              className={`px-3.5 py-2 rounded-lg border ${
-                active
-                  ? "bg-[#0644C7] border-[#0644C7]"
-                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-              }`}
-            >
-              <Text
-                className={`text-xs font-medium ${
-                  active ? "text-white" : "text-gray-600 dark:text-gray-300"
-                }`}
-              >
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
 const Pricing = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -392,34 +323,27 @@ const Pricing = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   // Filters / columns
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showDateSheet, setShowDateSheet] = useState(false);
+  const [dateTarget, setDateTarget] =
+    useState<SpecialPricingDateTarget>("effective");
   const [showColumns, setShowColumns] = useState(false);
   const [cols, setCols] = useState<SpCols>(DEFAULT_SP_COLS);
   const toggleCol = (key: SpColKey) =>
     setCols((prev) => ({ ...prev, [key]: !prev[key] }));
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>("all");
-  const [recurrenceFilter, setRecurrenceFilter] =
-    useState<RecurrenceFilter>("all");
-  const [discountFilter, setDiscountFilter] = useState<DiscountFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [stackFilter, setStackFilter] = useState<StackFilter>("all");
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
-  const [minAmount, setMinAmount] = useState("");
-  const [maxAmount, setMaxAmount] = useState("");
+  const [filters, setFilters] = useState<SpecialPricingFilterValues>(
+    EMPTY_SPECIAL_PRICING_FILTERS,
+  );
   const [exporting, setExporting] = useState(false);
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [locationsLoading, setLocationsLoading] = useState(false);
 
   const loadLocations = useCallback(async () => {
     const token = getToken();
     if (!token || locations.length > 0) return;
-    setLocationsLoading(true);
     try {
       setLocations(await fetchLocations(token));
     } catch {
-      // Non-fatal; location filter just stays empty.
-    } finally {
-      setLocationsLoading(false);
+      // Non-fatal; the Location dropdown just shows no locations.
     }
   }, [locations.length]);
 
@@ -460,61 +384,88 @@ const Pricing = () => {
     return { total, active, weekly, monthly, oneTime };
   }, [specialPricings]);
 
-  // Search + full filter panel (mirrors the web filters).
+  // Search + every filter from the sheet. Same rules as the web page.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const min = minAmount.trim() ? Number(minAmount) : null;
-    const max = maxAmount.trim() ? Number(maxAmount) : null;
+    const min = filters.amountMin.trim() ? Number(filters.amountMin) : null;
+    const max = filters.amountMax.trim() ? Number(filters.amountMax) : null;
+
     return specialPricings.filter((p) => {
       if (term && !`${p.name} ${p.description}`.toLowerCase().includes(term))
         return false;
-      if (entityFilter !== "all" && p.entityType !== entityFilter) return false;
-      if (recurrenceFilter !== "all" && p.recurrenceType !== recurrenceFilter)
+      // A rule set to "all entities" counts for every entity type, like the web.
+      if (
+        filters.entityType !== "all" &&
+        p.entityType !== filters.entityType &&
+        p.entityType !== "all"
+      )
         return false;
-      if (discountFilter !== "all" && p.discountType !== discountFilter)
+      if (
+        filters.recurrence !== "all" &&
+        p.recurrenceType !== filters.recurrence
+      )
         return false;
-      if (statusFilter !== "all" && p.status !== statusFilter) return false;
-      if (stackFilter === "yes" && !p.isStackable) return false;
-      if (stackFilter === "no" && p.isStackable) return false;
-      if (locationFilter !== "all" && p.locationId !== locationFilter)
+      if (
+        filters.discountType !== "all" &&
+        p.discountType !== filters.discountType
+      )
         return false;
+      if (filters.status !== "all" && p.status !== filters.status) return false;
+      if (filters.stackable === "yes" && !p.isStackable) return false;
+      if (filters.stackable === "no" && p.isStackable) return false;
+      // Picking a location also keeps company-wide rules, like the web.
+      if (filters.location === "company") {
+        if (p.locationId !== null) return false;
+      } else if (filters.location !== "all") {
+        if (p.locationId !== Number(filters.location) && p.locationId !== null)
+          return false;
+      }
       if (min != null && p.discountAmount < min) return false;
       if (max != null && p.discountAmount > max) return false;
+
+      if (filters.effectiveStart || filters.effectiveEnd) {
+        // One-time rules run on their own date; repeating ones on the start date.
+        const d =
+          p.recurrenceType === "one_time" ? p.specificDate : p.startDate;
+        if (!d) return false;
+        if (filters.effectiveStart && d < filters.effectiveStart) return false;
+        if (filters.effectiveEnd && d > filters.effectiveEnd) return false;
+      }
+      if (filters.createdStart || filters.createdEnd) {
+        const d = p.createdAt ? p.createdAt.substring(0, 10) : null;
+        if (!d) return false;
+        if (filters.createdStart && d < filters.createdStart) return false;
+        if (filters.createdEnd && d > filters.createdEnd) return false;
+      }
       return true;
     });
-  }, [
-    specialPricings,
-    search,
-    entityFilter,
-    recurrenceFilter,
-    discountFilter,
-    statusFilter,
-    stackFilter,
-    locationFilter,
-    minAmount,
-    maxAmount,
-  ]);
+  }, [specialPricings, search, filters]);
 
-  const filtersActive =
-    entityFilter !== "all" ||
-    recurrenceFilter !== "all" ||
-    discountFilter !== "all" ||
-    statusFilter !== "all" ||
-    stackFilter !== "all" ||
-    locationFilter !== "all" ||
-    !!minAmount.trim() ||
-    !!maxAmount.trim();
+  const activeFilterCount = countActiveSpecialPricingFilters(filters);
 
-  const clearFilters = () => {
-    setEntityFilter("all");
-    setRecurrenceFilter("all");
-    setDiscountFilter("all");
-    setStatusFilter("all");
-    setStackFilter("all");
-    setLocationFilter("all");
-    setMinAmount("");
-    setMaxAmount("");
-  };
+  // Date ranges reuse the shared calendar. Both are native sheets, so close one
+  // fully before opening the other (two stacked sheets crash Android).
+  const openDateRange = useCallback((target: SpecialPricingDateTarget) => {
+    setDateTarget(target);
+    setShowFilterSheet(false);
+    setTimeout(() => setShowDateSheet(true), 280);
+  }, []);
+  const closeDateRange = useCallback(() => {
+    setShowDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+  const applyDateRange = useCallback(
+    (start: string, end: string) => {
+      setFilters((f) =>
+        dateTarget === "effective"
+          ? { ...f, effectiveStart: start, effectiveEnd: end }
+          : { ...f, createdStart: start, createdEnd: end },
+      );
+      setShowDateSheet(false);
+      setTimeout(() => setShowFilterSheet(true), 280);
+    },
+    [dateTarget],
+  );
 
   const exportCsv = useCallback(async () => {
     if (filtered.length === 0) {
@@ -526,15 +477,30 @@ const Pricing = () => {
       const FileSystem = await import("expo-file-system/legacy");
       const Sharing = await import("expo-sharing");
       const header = [
-        "ID", "Name", "Discount", "Type", "Recurrence",
-        "Entity", "Location", "Priority", "Stackable", "Status",
+        "ID",
+        "Name",
+        "Discount",
+        "Type",
+        "Recurrence",
+        "Entity",
+        "Location",
+        "Priority",
+        "Stackable",
+        "Status",
       ];
       const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       const lines = filtered.map((p) =>
         [
-          p.id, p.name, p.discountLabel, p.discountType, p.recurrenceDisplay,
-          p.entityType, p.locationName, p.priority,
-          p.isStackable ? "Yes" : "No", p.status,
+          p.id,
+          p.name,
+          p.discountLabel,
+          p.discountType,
+          p.recurrenceDisplay,
+          p.entityType,
+          p.locationName,
+          p.priority,
+          p.isStackable ? "Yes" : "No",
+          p.status,
         ]
           .map(esc)
           .join(","),
@@ -552,7 +518,10 @@ const Pricing = () => {
           UTI: "public.comma-separated-values-text",
         });
       } else {
-        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+        Alert.alert(
+          "Sharing unavailable",
+          "Sharing isn't available on this device.",
+        );
       }
     } catch (err) {
       Alert.alert(
@@ -572,18 +541,7 @@ const Pricing = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [
-    search,
-    perPage,
-    entityFilter,
-    recurrenceFilter,
-    discountFilter,
-    statusFilter,
-    stackFilter,
-    locationFilter,
-    minAmount,
-    maxAmount,
-  ]);
+  }, [search, perPage, filters]);
 
   const hasResults = filtered.length > 0;
 
@@ -695,7 +653,6 @@ const Pricing = () => {
         }
       >
         <View className="px-5">
-
           <Pressable
             onPress={() => router.push("/pricing/fee-support")}
             className="mt-5 mb-5 flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
@@ -725,17 +682,38 @@ const Pricing = () => {
             </View>
           </Pressable>
 
-           <Pressable
-            onPress={() => router.push("/pricing/create-special-pricing")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create Special Pricing
-            </Text>
-          </Pressable>
+          {/* Export CSV sits beside Create Special Pricing, as on the web. */}
+          <View className="flex-row items-center gap-3 mb-5">
+            <Pressable
+              onPress={exportCsv}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color="#6B7280" />
+              ) : (
+                <Feather name="download" size={16} color="#6B7280" />
+              )}
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Export CSV
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/pricing/create-special-pricing")}
+              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-white"
+              >
+                Special Pricing
+              </Text>
+            </Pressable>
+          </View>
 
-          
           {/* Error state */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
@@ -798,13 +776,17 @@ const Pricing = () => {
             )}
           </View>
 
-          {/* Controls — segmented pill (Filters · Export CSV) */}
+          {/* Controls — segmented pill (Filters · Columns) */}
           <FilterPill>
             <PillSegment
-              label="Filters"
-              active={showFilters || filtersActive}
-              onPress={() => setShowFilters((v) => !v)}
-              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={showFilterSheet || activeFilterCount > 0}
+              onPress={() => setShowFilterSheet(true)}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
             <PillSegment
               label="Columns"
@@ -812,139 +794,7 @@ const Pricing = () => {
               onPress={() => setShowColumns(true)}
               renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
             />
-            <PillSegment
-              label="Export CSV"
-              onPress={exportCsv}
-              renderIcon={(c) =>
-                exporting ? (
-                  <ActivityIndicator size="small" color={c} />
-                ) : (
-                  <Feather name="download" size={15} color={c} />
-                )
-              }
-            />
           </FilterPill>
-
-          {/* Filters panel */}
-          {showFilters && (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
-            >
-              <ChipRow
-                label="Entity Type"
-                options={ENTITY_OPTIONS}
-                value={entityFilter}
-                onChange={setEntityFilter}
-              />
-              <ChipRow
-                label="Recurrence"
-                options={RECURRENCE_OPTIONS}
-                value={recurrenceFilter}
-                onChange={setRecurrenceFilter}
-              />
-              <ChipRow
-                label="Discount Type"
-                options={DISCOUNT_OPTIONS}
-                value={discountFilter}
-                onChange={setDiscountFilter}
-              />
-              <ChipRow
-                label="Status"
-                options={STATUS_OPTIONS}
-                value={statusFilter}
-                onChange={setStatusFilter}
-              />
-              <ChipRow
-                label="Stackable"
-                options={STACK_OPTIONS}
-                value={stackFilter}
-                onChange={setStackFilter}
-              />
-
-              {/* Location */}
-              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-                Location
-              </Text>
-              <View className="flex-row flex-wrap gap-2 mb-3">
-                <Pressable
-                  onPress={() => setLocationFilter("all")}
-                  className={`px-3.5 py-2 rounded-lg border ${
-                    locationFilter === "all"
-                      ? "bg-[#0644C7] border-[#0644C7]"
-                      : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                  }`}
-                >
-                  <Text
-                    className={`text-xs font-medium ${
-                      locationFilter === "all"
-                        ? "text-white"
-                        : "text-gray-600 dark:text-gray-300"
-                    }`}
-                  >
-                    All Locations
-                  </Text>
-                </Pressable>
-                {locationsLoading && locations.length === 0 && (
-                  <ActivityIndicator color={PRIMARY} />
-                )}
-                {locations.map((loc) => {
-                  const active = locationFilter === loc.id;
-                  return (
-                    <Pressable
-                      key={loc.id}
-                      onPress={() => setLocationFilter(loc.id)}
-                      className={`px-3.5 py-2 rounded-lg border ${
-                        active
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-medium ${
-                          active ? "text-white" : "text-gray-600 dark:text-gray-300"
-                        }`}
-                        numberOfLines={1}
-                      >
-                        {loc.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {/* Discount Amount range */}
-              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-                Discount Amount
-              </Text>
-              <View className="flex-row gap-3">
-                <TextInput
-                  value={minAmount}
-                  onChangeText={setMinAmount}
-                  placeholder="Min"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="decimal-pad"
-                  className="flex-1 bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700"
-                />
-                <TextInput
-                  value={maxAmount}
-                  onChangeText={setMaxAmount}
-                  placeholder="Max"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="decimal-pad"
-                  className="flex-1 bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700"
-                />
-              </View>
-
-              {filtersActive && (
-                <Pressable onPress={clearFilters} className="self-end mt-3">
-                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Clear Filters
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          )}
 
           {/* List header + layout toggle (Table default / Cards) */}
           {!loading && !error && (
@@ -1099,6 +949,35 @@ const Pricing = () => {
         </View>
       </ScrollView>
 
+      {/* All filters in one sheet, same as the other list screens. */}
+      <SpecialPricingFiltersSheet
+        visible={showFilterSheet}
+        values={filters}
+        locations={locations}
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_SPECIAL_PRICING_FILTERS)}
+        onClose={() => setShowFilterSheet(false)}
+        onOpenDateRange={openDateRange}
+      />
+
+      {/* Shared calendar for the two date ranges, opened once the filter sheet
+          is closed so two sheets are never stacked. */}
+      <DateRangeSheet
+        visible={showDateSheet}
+        initialStart={
+          (dateTarget === "effective"
+            ? filters.effectiveStart
+            : filters.createdStart) || undefined
+        }
+        initialEnd={
+          (dateTarget === "effective"
+            ? filters.effectiveEnd
+            : filters.createdEnd) || undefined
+        }
+        onClose={closeDateRange}
+        onApply={applyDateRange}
+      />
+
       {/* Toggle Columns */}
       <BottomSheet
         visible={showColumns}
@@ -1122,7 +1001,12 @@ const Pricing = () => {
                   }`}
                 >
                   {on && (
-                    <Feather name="check" size={14} color="#FFFFFF" strokeWidth={3} />
+                    <Feather
+                      name="check"
+                      size={14}
+                      color="#FFFFFF"
+                      strokeWidth={3}
+                    />
                   )}
                 </View>
                 <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">

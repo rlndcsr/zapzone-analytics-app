@@ -30,6 +30,10 @@ export type SpecialPricingRow = {
   locationId: number | null;
   locationName: string;
   createdAt: string | null;
+  /** Start of a weekly/monthly rule (YYYY-MM-DD). */
+  startDate: string | null;
+  /** The single date a one-time rule runs on (YYYY-MM-DD). */
+  specificDate: string | null;
 };
 
 /** Raw special pricing as returned by GET /api/special-pricings (snake_case). */
@@ -46,6 +50,8 @@ type RawSpecialPricing = {
   is_stackable?: boolean | null;
   is_active?: boolean | null;
   created_at?: string | null;
+  start_date?: string | null;
+  specific_date?: string | null;
   location_id?: number | null;
   location?: { id?: number; name?: string | null } | null;
 };
@@ -114,6 +120,8 @@ function mapSpecialPricing(raw: RawSpecialPricing): SpecialPricingRow {
     locationId: raw.location?.id ?? raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
+    startDate: raw.start_date ? raw.start_date.substring(0, 10) : null,
+    specificDate: raw.specific_date ? raw.specific_date.substring(0, 10) : null,
   };
 }
 

@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import { useColorScheme } from "nativewind";
 import {
   useCallback,
   useEffect,
@@ -18,9 +19,15 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
+import {
+  EMPTY_FEE_SUPPORT_FILTERS,
+  FeeSupportFiltersSheet,
+  countActiveFeeSupportFilters,
+  type FeeSupportFilterValues,
+} from "../../components/ui/FeeSupportFiltersSheet";
 import { FeeSupportTable } from "../../components/ui/FeeSupportTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -28,10 +35,6 @@ import {
   FeeSupportKpiSkeleton,
   FeeSupportListSkeleton,
 } from "../../components/ui/skeleton/FeeSupportSkeleton";
-import {
-  fetchLocations,
-  type LocationOption,
-} from "../../services/locationsService";
 import {
   consumeFeeSupportsStale,
   markFeeSupportsStale,
@@ -44,6 +47,10 @@ import {
   type FeeSupportEntityType,
   type FeeSupportRow,
 } from "../../services/feeSupportService";
+import {
+  fetchLocations,
+  type LocationOption,
+} from "../../services/locationsService";
 
 const PRIMARY = "#0644C7";
 
@@ -93,7 +100,10 @@ const StatusBadge = ({
       }`}
     >
       {busy ? (
-        <ActivityIndicator size="small" color={active ? "#16A34A" : "#9CA3AF"} />
+        <ActivityIndicator
+          size="small"
+          color={active ? "#16A34A" : "#9CA3AF"}
+        />
       ) : (
         <Feather
           name="power"
@@ -143,34 +153,6 @@ const Field = ({
   </View>
 );
 
-type CalcFilter = "all" | "fixed" | "percentage";
-type AppFilter = "all" | "additive" | "inclusive";
-type EntityFilter = "all" | FeeSupportEntityType;
-type StatusFilter = "all" | "active" | "inactive";
-
-const CALC_OPTIONS: { label: string; value: CalcFilter }[] = [
-  { label: "All", value: "all" },
-  { label: "Fixed", value: "fixed" },
-  { label: "Percentage", value: "percentage" },
-];
-const APP_OPTIONS: { label: string; value: AppFilter }[] = [
-  { label: "All", value: "all" },
-  { label: "Additive", value: "additive" },
-  { label: "Inclusive", value: "inclusive" },
-];
-const ENTITY_OPTIONS: { label: string; value: EntityFilter }[] = [
-  { label: "All Types", value: "all" },
-  { label: "Packages", value: "package" },
-  { label: "Attractions", value: "attraction" },
-  { label: "Events", value: "event" },
-  { label: "Memberships", value: "membership" },
-];
-const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Statuses", value: "all" },
-  { label: "Active", value: "active" },
-  { label: "Inactive", value: "inactive" },
-];
-
 /** Toggleable card fields (mirrors the web "Columns" menu). */
 type ColKey =
   | "amount"
@@ -199,51 +181,6 @@ const COLUMN_META: { key: ColKey; label: string }[] = [
   { key: "location", label: "Location" },
   { key: "status", label: "Status" },
 ];
-
-/** A row of chip choices used inside the collapsible Filters panel. */
-function ChipRow<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { label: string; value: T }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <View className="mb-3">
-      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-        {label}
-      </Text>
-      <View className="flex-row flex-wrap gap-2">
-        {options.map((opt) => {
-          const on = value === opt.value;
-          return (
-            <Pressable
-              key={opt.value}
-              onPress={() => onChange(opt.value)}
-              className={`px-3.5 py-2 rounded-lg border ${
-                on
-                  ? "bg-[#0644C7] border-[#0644C7]"
-                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-              }`}
-            >
-              <Text
-                className={`text-xs font-medium ${
-                  on ? "text-white" : "text-gray-600 dark:text-gray-300"
-                }`}
-              >
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
 
 const FeeSupportCard = ({
   row,
@@ -294,12 +231,17 @@ const FeeSupportCard = ({
           />
         )}
         {cols.calculation && (
-          <Field label="Calculation" value={isPercent ? "Percentage" : "Fixed"} />
+          <Field
+            label="Calculation"
+            value={isPercent ? "Percentage" : "Fixed"}
+          />
         )}
         {cols.application && (
           <Field
             label="Application"
-            value={row.applicationType === "additive" ? "Additive" : "Inclusive"}
+            value={
+              row.applicationType === "additive" ? "Additive" : "Inclusive"
+            }
           />
         )}
         {cols.entityType && (
@@ -402,28 +344,23 @@ const FeeSupport = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   // Filters / columns
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showCreatedDateSheet, setShowCreatedDateSheet] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
-  const [calcFilter, setCalcFilter] = useState<CalcFilter>("all");
-  const [appFilter, setAppFilter] = useState<AppFilter>("all");
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
+  const [filters, setFilters] = useState<FeeSupportFilterValues>(
+    EMPTY_FEE_SUPPORT_FILTERS,
+  );
   const [cols, setCols] = useState<Cols>(DEFAULT_COLS);
   const [exporting, setExporting] = useState(false);
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [locationsLoading, setLocationsLoading] = useState(false);
 
   const loadLocations = useCallback(async () => {
     const token = getToken();
     if (!token || locations.length > 0) return;
-    setLocationsLoading(true);
     try {
       setLocations(await fetchLocations(token));
     } catch {
-      // Non-fatal.
-    } finally {
-      setLocationsLoading(false);
+      // Non-fatal; the Location dropdown just shows no locations.
     }
   }, [locations.length]);
 
@@ -464,28 +401,62 @@ const FeeSupport = () => {
     };
   }, [feeSupports]);
 
-  // Search + filter panel.
+  // Search + every filter from the sheet. Same rules as the web page.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
+    const min = filters.amountMin.trim() ? Number(filters.amountMin) : null;
+    const max = filters.amountMax.trim() ? Number(filters.amountMax) : null;
+
     return feeSupports.filter((f) => {
       if (term && !f.feeName.toLowerCase().includes(term)) return false;
-      if (calcFilter !== "all" && f.calculationType !== calcFilter) return false;
-      if (appFilter !== "all" && f.applicationType !== appFilter) return false;
-      if (entityFilter !== "all" && f.entityType !== entityFilter) return false;
-      if (statusFilter !== "all" && f.status !== statusFilter) return false;
-      if (locationFilter !== "all" && f.locationId !== locationFilter)
+      if (filters.entityType !== "all" && f.entityType !== filters.entityType)
         return false;
+      if (
+        filters.calculation !== "all" &&
+        f.calculationType !== filters.calculation
+      )
+        return false;
+      if (
+        filters.application !== "all" &&
+        f.applicationType !== filters.application
+      )
+        return false;
+      if (filters.status !== "all" && f.status !== filters.status) return false;
+      // "Company-wide" means the fee has no location of its own.
+      if (filters.location === "company-wide") {
+        if (f.locationId !== null) return false;
+      } else if (filters.location !== "all") {
+        if (String(f.locationId) !== filters.location) return false;
+      }
+      if (min != null && f.feeAmount < min) return false;
+      if (max != null && f.feeAmount > max) return false;
+      if (filters.createdStart || filters.createdEnd) {
+        const d = f.createdAt ? f.createdAt.substring(0, 10) : null;
+        if (!d) return false;
+        if (filters.createdStart && d < filters.createdStart) return false;
+        if (filters.createdEnd && d > filters.createdEnd) return false;
+      }
       return true;
     });
-  }, [
-    feeSupports,
-    search,
-    calcFilter,
-    appFilter,
-    entityFilter,
-    statusFilter,
-    locationFilter,
-  ]);
+  }, [feeSupports, search, filters]);
+
+  const activeFilterCount = countActiveFeeSupportFilters(filters);
+
+  // The calendar is a native sheet too, so close the filters first (two stacked
+  // sheets crash Android).
+  const openCreatedDate = useCallback(() => {
+    setShowFilterSheet(false);
+    setTimeout(() => setShowCreatedDateSheet(true), 280);
+  }, []);
+  const closeCreatedDate = useCallback(() => {
+    setShowCreatedDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+  const applyCreatedDate = useCallback((start: string, end: string) => {
+    setFilters((f) => ({ ...f, createdStart: start, createdEnd: end }));
+    setShowCreatedDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
@@ -495,30 +466,7 @@ const FeeSupport = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [
-    search,
-    perPage,
-    calcFilter,
-    appFilter,
-    entityFilter,
-    statusFilter,
-    locationFilter,
-  ]);
-
-  const filtersActive =
-    calcFilter !== "all" ||
-    appFilter !== "all" ||
-    entityFilter !== "all" ||
-    statusFilter !== "all" ||
-    locationFilter !== "all";
-
-  const clearFilters = () => {
-    setCalcFilter("all");
-    setAppFilter("all");
-    setEntityFilter("all");
-    setStatusFilter("all");
-    setLocationFilter("all");
-  };
+  }, [search, perPage, filters]);
 
   const toggleCol = (key: ColKey) =>
     setCols((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -533,14 +481,28 @@ const FeeSupport = () => {
       const FileSystem = await import("expo-file-system/legacy");
       const Sharing = await import("expo-sharing");
       const header = [
-        "ID", "Fee Name", "Amount", "Calculation", "Application",
-        "Entity Type", "Entities", "Location", "Status",
+        "ID",
+        "Fee Name",
+        "Amount",
+        "Calculation",
+        "Application",
+        "Entity Type",
+        "Entities",
+        "Location",
+        "Status",
       ];
       const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       const lines = filtered.map((f) =>
         [
-          f.id, f.feeName, f.amountLabel, f.calculationType, f.applicationType,
-          f.entityType, f.entityCount, f.locationName, f.status,
+          f.id,
+          f.feeName,
+          f.amountLabel,
+          f.calculationType,
+          f.applicationType,
+          f.entityType,
+          f.entityCount,
+          f.locationName,
+          f.status,
         ]
           .map(esc)
           .join(","),
@@ -558,7 +520,10 @@ const FeeSupport = () => {
           UTI: "public.comma-separated-values-text",
         });
       } else {
-        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+        Alert.alert(
+          "Sharing unavailable",
+          "Sharing isn't available on this device.",
+        );
       }
     } catch (err) {
       Alert.alert(
@@ -673,29 +638,56 @@ const FeeSupport = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
-            progressBackgroundColor={colorScheme === "dark" ? "#171717" : "#FFFFFF"}
+            progressBackgroundColor={
+              colorScheme === "dark" ? "#171717" : "#FFFFFF"
+            }
           />
         }
       >
         <View className="px-5">
+          {/* Export CSV sits beside Create Fee Support, as on the web. */}
+          <View className="flex-row items-center gap-3 mt-5 mb-3">
+            <Pressable
+              onPress={exportCsv}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color="#6B7280" />
+              ) : (
+                <Feather name="download" size={16} color="#6B7280" />
+              )}
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Export CSV
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/pricing/create-fee-support")}
+              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-white"
+              >
+                Fee Support
+              </Text>
+            </Pressable>
+          </View>
 
-          <Pressable
-            onPress={() => router.push("/pricing/create-fee-support")}
-            className="flex-row mt-5 mb-3 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create Fee Support
-            </Text>
-          </Pressable>
-
-          {/* Controls — segmented pill (Filters · Columns · Export CSV) */}
+          {/* Controls — segmented pill (Filters · Columns) */}
           <FilterPill>
             <PillSegment
-              label="Filters"
-              active={showFilters || filtersActive}
-              onPress={() => setShowFilters((v) => !v)}
-              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={showFilterSheet || activeFilterCount > 0}
+              onPress={() => setShowFilterSheet(true)}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
             <PillSegment
               label="Columns"
@@ -703,107 +695,7 @@ const FeeSupport = () => {
               onPress={() => setShowColumns(true)}
               renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
             />
-            <PillSegment
-              label="Export CSV"
-              onPress={exportCsv}
-              renderIcon={(c) =>
-                exporting ? (
-                  <ActivityIndicator size="small" color={c} />
-                ) : (
-                  <Feather name="download" size={15} color={c} />
-                )
-              }
-            />
           </FilterPill>
-
-          {/* Filters panel */}
-          {showFilters && (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
-            >
-              <ChipRow
-                label="Calculation"
-                options={CALC_OPTIONS}
-                value={calcFilter}
-                onChange={setCalcFilter}
-              />
-              <ChipRow
-                label="Application"
-                options={APP_OPTIONS}
-                value={appFilter}
-                onChange={setAppFilter}
-              />
-              <ChipRow
-                label="Entity Type"
-                options={ENTITY_OPTIONS}
-                value={entityFilter}
-                onChange={setEntityFilter}
-              />
-              <ChipRow
-                label="Status"
-                options={STATUS_OPTIONS}
-                value={statusFilter}
-                onChange={setStatusFilter}
-              />
-              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-                Location
-              </Text>
-              <View className="flex-row flex-wrap gap-2">
-                <Pressable
-                  onPress={() => setLocationFilter("all")}
-                  className={`px-3.5 py-2 rounded-lg border ${
-                    locationFilter === "all"
-                      ? "bg-[#0644C7] border-[#0644C7]"
-                      : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                  }`}
-                >
-                  <Text
-                    className={`text-xs font-medium ${
-                      locationFilter === "all"
-                        ? "text-white"
-                        : "text-gray-600 dark:text-gray-300"
-                    }`}
-                  >
-                    All Locations
-                  </Text>
-                </Pressable>
-                {locationsLoading && locations.length === 0 && (
-                  <ActivityIndicator color={PRIMARY} />
-                )}
-                {locations.map((loc) => {
-                  const on = locationFilter === loc.id;
-                  return (
-                    <Pressable
-                      key={loc.id}
-                      onPress={() => setLocationFilter(loc.id)}
-                      className={`px-3.5 py-2 rounded-lg border ${
-                        on
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-medium ${
-                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
-                        }`}
-                        numberOfLines={1}
-                      >
-                        {loc.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {filtersActive && (
-                <Pressable onPress={clearFilters} className="self-end mt-3">
-                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Clear Filters
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          )}
 
           {/* Error state */}
           {!loading && error && (
@@ -1038,6 +930,27 @@ const FeeSupport = () => {
         </View>
       </ScrollView>
 
+      {/* All filters in one sheet, same as the other list screens. */}
+      <FeeSupportFiltersSheet
+        visible={showFilterSheet}
+        values={filters}
+        locations={locations}
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_FEE_SUPPORT_FILTERS)}
+        onClose={() => setShowFilterSheet(false)}
+        onOpenCreatedDate={openCreatedDate}
+      />
+
+      {/* Shared calendar for Created Date, opened once the filter sheet is
+          closed so two sheets are never stacked. */}
+      <DateRangeSheet
+        visible={showCreatedDateSheet}
+        initialStart={filters.createdStart || undefined}
+        initialEnd={filters.createdEnd || undefined}
+        onClose={closeCreatedDate}
+        onApply={applyCreatedDate}
+      />
+
       {/* Toggle Columns */}
       <BottomSheet
         visible={showColumns}
@@ -1061,7 +974,12 @@ const FeeSupport = () => {
                   }`}
                 >
                   {on && (
-                    <Feather name="check" size={14} color="#FFFFFF" strokeWidth={3} />
+                    <Feather
+                      name="check"
+                      size={14}
+                      color="#FFFFFF"
+                      strokeWidth={3}
+                    />
                   )}
                 </View>
                 <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">

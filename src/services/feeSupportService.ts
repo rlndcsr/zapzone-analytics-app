@@ -121,20 +121,16 @@ type FetchParams = {
 };
 
 /**
- * GET /api/fee-supports — the same endpoint the web Fee Supports page uses.
- * Returns the name-ordered list the user can access (auth-scoped to their
- * company/location by the backend).
+ * GET /api/fee-supports — the same endpoint (and the same params) the web Fee
+ * Supports page uses. Rows come back newest-created first, the order the web
+ * table shows.
  */
 export async function fetchFeeSupports({
   token,
   locationId,
   signal,
 }: FetchParams): Promise<FeeSupportRow[]> {
-  const params = new URLSearchParams({
-    per_page: String(PER_PAGE),
-    sort_by: "fee_name",
-    sort_order: "asc",
-  });
+  const params = new URLSearchParams({ per_page: String(PER_PAGE) });
   if (locationId != null) params.append("location_id", String(locationId));
 
   const res = await apiRequest<FeeSupportListResponse>(
@@ -142,7 +138,14 @@ export async function fetchFeeSupports({
     { token, signal },
   );
   const items = res?.data?.fee_supports ?? [];
-  return items.map(mapFeeSupport);
+  // Newest first, like the web table's default sort.
+  return items
+    .map(mapFeeSupport)
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt ?? 0).getTime() -
+        new Date(a.createdAt ?? 0).getTime(),
+    );
 }
 
 type ToggleResponse = {
