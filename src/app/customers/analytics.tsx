@@ -7,6 +7,8 @@ import React, {
   type ComponentProps,
 } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -16,6 +18,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import {
+  AnalyticsExportSheet,
+  DEFAULT_ANALYTICS_EXPORT,
+  type AnalyticsExportValues,
+} from "../../components/ui/AnalyticsExportSheet";
 import { AreaChart } from "../../components/ui/AreaChart";
 import { BarChart } from "../../components/ui/BarChart";
 import {
@@ -29,6 +36,7 @@ import { StatusBadge } from "../../components/ui/StatusBadge";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  exportCustomerAnalytics,
   fetchCustomerAnalytics,
   type CustomerAnalytics,
   type CustomerDateRange,
@@ -124,15 +132,17 @@ const TopTable = ({
         No data available.
       </Text>
     ) : (
+      // Names and item titles wrap onto as many lines as they need — nothing is
+      // cut off with "...".
       rows.map((r, i) => (
         <View
           key={i}
           className="flex-row py-2.5 border-b border-gray-50 dark:border-neutral-800/50"
         >
-          <Text className="flex-1 text-sm text-gray-900 dark:text-white" numberOfLines={1}>
+          <Text className="flex-1 pr-2 text-sm text-gray-900 dark:text-white">
             {r.customer}
           </Text>
-          <Text className="flex-1 text-sm text-gray-600 dark:text-gray-300" numberOfLines={1}>
+          <Text className="flex-1 pr-2 text-sm text-gray-600 dark:text-gray-300">
             {r.item}
           </Text>
           <Text className="w-16 text-right text-sm font-semibold text-gray-900 dark:text-white">
@@ -168,6 +178,14 @@ const CustomersAnalytics = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Export sheet — its own date range, separate from the one on screen.
+  const [showExportSheet, setShowExportSheet] = useState(false);
+  const [showExportRangeSheet, setShowExportRangeSheet] = useState(false);
+  const [exportValues, setExportValues] = useState<AnalyticsExportValues>(
+    DEFAULT_ANALYTICS_EXPORT,
+  );
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -209,6 +227,78 @@ const CustomersAnalytics = () => {
     await load();
     setRefreshing(false);
   };
+
+  // The calendar is a native sheet too, so close the export sheet first.
+  const openExportRange = useCallback(() => {
+    setShowExportSheet(false);
+    setTimeout(() => setShowExportRangeSheet(true), 280);
+  }, []);
+  const closeExportRange = useCallback(() => {
+    setShowExportRangeSheet(false);
+    setTimeout(() => setShowExportSheet(true), 280);
+  }, []);
+  const applyExportRange = useCallback((start: string, end: string) => {
+    setExportValues((v) => ({ ...v, start, end }));
+    setShowExportRangeSheet(false);
+    setTimeout(() => setShowExportSheet(true), 280);
+  }, []);
+
+  // Ask the server for the file, save it, then open the share sheet.
+  const runExport = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not signed in", "Please sign in again to export.");
+      return;
+    }
+    if (
+      exportValues.dateRange === "custom" &&
+      (!exportValues.start || !exportValues.end)
+    ) {
+      Alert.alert(
+        "Pick a date range",
+        "Please select both start and end dates for custom range.",
+      );
+      return;
+    }
+    setExporting(true);
+    try {
+      const file = await exportCustomerAnalytics({
+        token,
+        userId: user?.id,
+        format: exportValues.format,
+        sections: exportValues.sections,
+        dateRange: exportValues.dateRange,
+        startDate: exportValues.start || undefined,
+        endDate: exportValues.end || undefined,
+        locationId: activeLocationId ?? null,
+      });
+
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const uri = `${FileSystem.cacheDirectory}${file.filename}`;
+      await FileSystem.writeAsStringAsync(uri, file.base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { dialogTitle: "Export Analytics" });
+      } else {
+        Alert.alert(
+          "Sharing unavailable",
+          "Sharing isn't available on this device.",
+        );
+      }
+      setShowExportSheet(false);
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error
+          ? err.message
+          : "Failed to export analytics. Please try again.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [exportValues, user?.id, activeLocationId]);
 
   const growthLabels = data?.customerGrowth.map((p) => p.month) ?? [];
   const revenueLabels = data?.revenueTrend.map((p) => p.month) ?? [];
@@ -263,8 +353,8 @@ const CustomersAnalytics = () => {
             </Text>
           </View>
 
-          {/* Filters */}
-          <View className="flex-row gap-3">
+          {/* Period picker + Export, side by side like the web header. */}
+          <View className="flex-row items-center gap-3">
             <View className="flex-1">
               <SheetSelect
                 icon="calendar"
@@ -274,6 +364,19 @@ const CustomersAnalytics = () => {
                 onSelect={(v) => setDateRange(v as CustomerDateRange)}
               />
             </View>
+            <Pressable
+              onPress={() => setShowExportSheet(true)}
+              className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-5 py-3.5 rounded-xl active:opacity-90"
+              accessibilityRole="button"
+              accessibilityLabel="Export analytics"
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Feather name="download" size={16} color="#FFFFFF" />
+              )}
+              <Text className="text-sm font-semibold text-white">Export</Text>
+            </Pressable>
           </View>
 
           {/* Custom range trigger */}
@@ -473,24 +576,19 @@ const CustomersAnalytics = () => {
                       key={c.id}
                       className="py-3 border-b border-gray-50 dark:border-neutral-800/50"
                     >
-                      <View className="flex-row items-center justify-between">
-                        <Text
-                          className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2"
-                          numberOfLines={1}
-                        >
+                      {/* Full name and email, wrapped instead of cut short. */}
+                      <View className="flex-row items-start justify-between">
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2">
                           {c.name}
                         </Text>
                         <StatusBadge status={c.status} />
                       </View>
                       {!!c.email && (
-                        <Text
-                          className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-                          numberOfLines={1}
-                        >
+                        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                           {c.email}
                         </Text>
                       )}
-                      <View className="flex-row items-center gap-4 mt-1.5">
+                      <View className="flex-row flex-wrap items-center gap-x-4 gap-y-1 mt-1.5">
                         <Text className="text-xs text-gray-500 dark:text-gray-400">
                           ${c.totalSpent.toFixed(2)}
                         </Text>
@@ -520,6 +618,25 @@ const CustomersAnalytics = () => {
           setCustomEnd(end);
           setShowDateSheet(false);
         }}
+      />
+
+      <AnalyticsExportSheet
+        visible={showExportSheet}
+        values={exportValues}
+        exporting={exporting}
+        onChange={setExportValues}
+        onClose={() => setShowExportSheet(false)}
+        onExport={runExport}
+        onOpenCustomRange={openExportRange}
+      />
+
+      {/* Calendar for the export's own custom range. */}
+      <DateRangeSheet
+        visible={showExportRangeSheet}
+        initialStart={exportValues.start || undefined}
+        initialEnd={exportValues.end || undefined}
+        onClose={closeExportRange}
+        onApply={applyExportRange}
       />
     </View>
   );

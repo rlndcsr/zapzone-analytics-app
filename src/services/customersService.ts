@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/api";
+import { apiRequest, apiUrl } from "../lib/api";
 
 /** A customer match from the search-as-you-type lookup. */
 export type CustomerHit = {
@@ -205,5 +205,92 @@ export async function fetchCustomerAnalytics({
       lastActivity: (r.lastActivity as string) ?? null,
       status: str(r.status, "—"),
     })),
+  };
+}
+
+/** File types the analytics export can produce. */
+export type AnalyticsExportFormat = "csv" | "pdf" | "receipt";
+
+/** Sections the export can include. */
+export type AnalyticsExportSection =
+  | "customers"
+  | "revenue"
+  | "bookings"
+  | "activities"
+  | "packages"
+  | "events";
+
+export type AnalyticsExportParams = {
+  token: string;
+  userId?: number;
+  format: AnalyticsExportFormat;
+  sections: AnalyticsExportSection[];
+  dateRange: string;
+  startDate?: string;
+  endDate?: string;
+  locationId?: number | null;
+};
+
+/** The downloaded file, ready to be written to disk and shared. */
+export type AnalyticsExportFile = {
+  /** File contents as base64 (no data-URL prefix). */
+  base64: string;
+  filename: string;
+};
+
+/**
+ * POST /api/customers/analytics/export — the same call the web Export button
+ * makes. The reply is a file, not JSON, so this bypasses the usual request
+ * helper and hands back base64 the caller can save and share.
+ */
+export async function exportCustomerAnalytics({
+  token,
+  userId,
+  format,
+  sections,
+  dateRange,
+  startDate,
+  endDate,
+  locationId,
+}: AnalyticsExportParams): Promise<AnalyticsExportFile> {
+  const body: Record<string, unknown> = {
+    format,
+    include_sections: sections,
+    date_range: dateRange || "all",
+  };
+  if (userId != null) body.user_id = userId;
+  if (dateRange === "custom" && startDate && endDate) {
+    body.start_date = startDate;
+    body.end_date = endDate;
+  }
+  if (locationId != null) body.location_id = locationId;
+
+  const res = await fetch(apiUrl("/api/customers/analytics/export"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "*/*",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`Export failed (${res.status}). Please try again.`);
+  }
+
+  // Read the file as a data URL, then keep just the base64 part.
+  const blob = await res.blob();
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+
+  const named = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/);
+  const extension = format === "receipt" ? "png" : format;
+  return {
+    base64: dataUrl.slice(dataUrl.indexOf(",") + 1),
+    filename: named?.[1] ?? `analytics_export_${Date.now()}.${extension}`,
   };
 }

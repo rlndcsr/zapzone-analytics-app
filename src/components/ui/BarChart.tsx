@@ -90,7 +90,7 @@ export function BarChart({
           <Text
             key={`${d.label}-${i}`}
             className="flex-1 text-[9px] text-gray-400 dark:text-gray-500 text-center px-0.5"
-            numberOfLines={1}
+            numberOfLines={2}
           >
             {d.label}
           </Text>

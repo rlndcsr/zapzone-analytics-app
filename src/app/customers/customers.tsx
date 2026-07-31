@@ -16,12 +16,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AddTagSheet } from "../../components/ui/AddTagSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { ContactActionsSheet } from "../../components/ui/ContactActionsSheet";
-import { CustomersTable } from "../../components/ui/CustomersTable";
 import {
-  DateRangeSheet,
-  formatShortDate,
-} from "../../components/ui/DateRangeSheet";
+  CampaignExportSheet,
+  EMPTY_CAMPAIGN_EXPORT_FILTERS,
+  type CampaignExportFilters,
+} from "../../components/ui/CampaignExportSheet";
+import { ContactActionsSheet } from "../../components/ui/ContactActionsSheet";
+import {
+  CustomerFiltersSheet,
+  EMPTY_CUSTOMER_FILTERS,
+  countActiveCustomerFilters,
+  type CustomerFilterValues,
+} from "../../components/ui/CustomerFiltersSheet";
+import { CustomersTable } from "../../components/ui/CustomersTable";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { type SheetSelectOption } from "../../components/ui/SheetSelect";
@@ -34,12 +42,12 @@ import { consumeContactsStale } from "../../lib/contactsStale";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteContact,
+  exportContactsForCampaign,
   fetchAllContacts,
   fetchContactStats,
   fetchContactTags,
   type ContactRow,
   type ContactStats,
-  type ContactStatus,
 } from "../../services/contactsService";
 
 const PRIMARY = "#0644C7";
@@ -51,18 +59,6 @@ const CARD_SHADOW = {
   shadowRadius: 8,
   elevation: 2,
 } as const;
-
-const STATUS_FILTERS: { label: string; value: ContactStatus | "all" }[] = [
-  { label: "All", value: "all" },
-  { label: "Active", value: "active" },
-  { label: "Inactive", value: "inactive" },
-];
-
-const SMS_OPTIONS = [
-  { label: "All SMS", value: "all" },
-  { label: "Opted In", value: "opted_in" },
-  { label: "Opted Out", value: "opted_out" },
-];
 
 const SORT_OPTIONS = [
   { label: "Newest", value: "created_at:desc" },
@@ -156,15 +152,20 @@ const Customers = () => {
 
   // Filters (all client-side, mirroring the web admin).
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<ContactStatus | "all">("all");
-  const [tag, setTag] = useState("all");
-  const [source, setSource] = useState("all");
-  const [company, setCompany] = useState("all");
-  const [sms, setSms] = useState("all");
-  const [dateStart, setDateStart] = useState<string | undefined>();
-  const [dateEnd, setDateEnd] = useState<string | undefined>();
+  const [filters, setFilters] = useState<CustomerFilterValues>(
+    EMPTY_CUSTOMER_FILTERS,
+  );
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showDateSheet, setShowDateSheet] = useState(false);
   const [sort, setSort] = useState("created_at:desc");
+
+  // Exports — the plain CSV and the campaign mailing list.
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [showCampaignSheet, setShowCampaignSheet] = useState(false);
+  const [campaignFilters, setCampaignFilters] = useState<CampaignExportFilters>(
+    EMPTY_CAMPAIGN_EXPORT_FILTERS,
+  );
+  const [campaignExporting, setCampaignExporting] = useState(false);
 
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(PAGE_SIZE);
@@ -274,15 +275,19 @@ const Customers = () => {
   const filtered = useMemo(() => {
     const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const result = allRows.filter((c) => {
-      if (status !== "all" && c.status !== status) return false;
-      if (tag !== "all" && !c.tags.includes(tag)) return false;
-      if (source !== "all" && (c.source ?? "") !== source) return false;
-      if (company !== "all" && (c.companyName ?? "") !== company) return false;
-      if (sms === "opted_in" && !c.smsConsent) return false;
-      if (sms === "opted_out" && c.smsConsent) return false;
+      if (filters.status !== "all" && c.status !== filters.status) return false;
+      if (filters.tag !== "all" && !c.tags.includes(filters.tag)) return false;
+      if (filters.source !== "all" && (c.source ?? "") !== filters.source)
+        return false;
+      if (filters.company !== "all" && (c.companyName ?? "") !== filters.company)
+        return false;
+      if (filters.sms === "opted_in" && !c.smsConsent) return false;
+      if (filters.sms === "not_opted_in" && c.smsConsent) return false;
       const created = c.createdAt ? c.createdAt.slice(0, 10) : null;
-      if (dateStart && (!created || created < dateStart)) return false;
-      if (dateEnd && (!created || created > dateEnd)) return false;
+      if (filters.createdStart && (!created || created < filters.createdStart))
+        return false;
+      if (filters.createdEnd && (!created || created > filters.createdEnd))
+        return false;
       if (terms.length) {
         const hay = [
           c.firstName,
@@ -317,12 +322,12 @@ const Customers = () => {
       return sortOrder === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [allRows, search, status, tag, source, company, sms, dateStart, dateEnd, sort]);
+  }, [allRows, search, filters, sort]);
 
   // Reset to the first page whenever the result set changes.
   useEffect(() => {
     setPage(1);
-  }, [search, status, tag, source, company, sms, dateStart, dateEnd, sort, perPage]);
+  }, [search, filters, sort, perPage]);
 
   const visible = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
@@ -334,7 +339,7 @@ const Customers = () => {
   // action never touches off-screen rows.
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [search, status, tag, source, company, sms, dateStart, dateEnd, sort, page, perPage, viewMode]);
+  }, [search, filters, sort, page, perPage, viewMode]);
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
@@ -355,23 +360,23 @@ const Customers = () => {
       return allSelected ? new Set() : new Set(visible.map((c) => c.id));
     });
   }, [visible]);
-  const activeFilterCount =
-    (status !== "all" ? 1 : 0) +
-    (tag !== "all" ? 1 : 0) +
-    (source !== "all" ? 1 : 0) +
-    (company !== "all" ? 1 : 0) +
-    (sms !== "all" ? 1 : 0) +
-    (dateStart || dateEnd ? 1 : 0);
+  const activeFilterCount = countActiveCustomerFilters(filters);
 
-  const clearFilters = () => {
-    setStatus("all");
-    setTag("all");
-    setSource("all");
-    setCompany("all");
-    setSms("all");
-    setDateStart(undefined);
-    setDateEnd(undefined);
-  };
+  // The calendar is a native sheet too, so close the filters first (two stacked
+  // sheets crash Android).
+  const openCreatedDate = useCallback(() => {
+    setShowFilterSheet(false);
+    setTimeout(() => setShowDateSheet(true), 280);
+  }, []);
+  const closeCreatedDate = useCallback(() => {
+    setShowDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+  const applyCreatedDate = useCallback((start: string, end: string) => {
+    setFilters((f) => ({ ...f, createdStart: start, createdEnd: end }));
+    setShowDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
 
   const afterMutation = () => load();
 
@@ -454,6 +459,114 @@ const Customers = () => {
       ],
     );
   }, [selectedIds, load]);
+
+  // Write a CSV to a temp file and hand it to the share sheet.
+  const shareCsv = useCallback(async (csv: string, dialogTitle: string) => {
+    const FileSystem = await import("expo-file-system/legacy");
+    const Sharing = await import("expo-sharing");
+    const date = new Date().toISOString().split("T")[0];
+    const uri = `${FileSystem.cacheDirectory}customers-export-${date}.csv`;
+    await FileSystem.writeAsStringAsync(uri, csv, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, {
+        mimeType: "text/csv",
+        dialogTitle,
+        UTI: "public.comma-separated-values-text",
+      });
+    } else {
+      Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+    }
+  }, []);
+
+  // Export CSV — the rows currently on screen, with the web's column set.
+  const exportCsv = useCallback(async () => {
+    if (filtered.length === 0) {
+      Alert.alert("Nothing to export", "There are no customers to export.");
+      return;
+    }
+    setExportingCsv(true);
+    try {
+      const header = [
+        "ID", "Name", "Email", "Phone", "Company", "Job Title", "Location",
+        "Tags", "Source", "Status", "SMS", "Address", "City", "State", "ZIP",
+        "Country", "Notes", "Created", "Updated", "First Name", "Last Name",
+      ];
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const stamp = (v: string | null) =>
+        v ? new Date(v).toLocaleString() : "";
+      const lines = filtered.map((c) =>
+        [
+          c.id, c.name, c.email, c.phone, c.companyName, c.jobTitle,
+          c.locationName, c.tags.join("; "), c.source, c.status,
+          c.smsConsent ? "Opted In" : "No", c.address, c.city, c.state, c.zip,
+          c.country, c.notes, stamp(c.createdAt), stamp(c.updatedAt),
+          c.firstName, c.lastName,
+        ]
+          .map(esc)
+          .join(","),
+      );
+      await shareCsv(
+        [header.map(esc).join(","), ...lines].join("\n"),
+        "Export Customers",
+      );
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export.",
+      );
+    } finally {
+      setExportingCsv(false);
+    }
+  }, [filtered, shareCsv]);
+
+  // Campaign Export — asks the server for the mailing list, then shares it.
+  const runCampaignExport = useCallback(async () => {
+    const token = getToken();
+    if (!token || companyId == null) {
+      Alert.alert("Not available", "No company is linked to this account.");
+      return;
+    }
+    setCampaignExporting(true);
+    try {
+      const contacts = await exportContactsForCampaign(token, {
+        companyId,
+        locationId: user?.location_id ?? null,
+        tags: campaignFilters.tags.length ? campaignFilters.tags : undefined,
+        // The web only sends a status when exactly one box is ticked.
+        status:
+          campaignFilters.statuses.length === 1
+            ? (campaignFilters.statuses[0] as "active" | "inactive")
+            : undefined,
+        activeOnly: campaignFilters.activeOnly,
+      });
+      if (contacts.length === 0) {
+        Alert.alert("Nothing to export", "No customers matched those filters.");
+        return;
+      }
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const header = ["ID", "Name", "Email", "First Name", "Last Name"];
+      const lines = contacts.map((c) =>
+        [c.id, c.name, c.email, c.firstName, c.lastName].map(esc).join(","),
+      );
+      await shareCsv(
+        [header.map(esc).join(","), ...lines].join("\n"),
+        "Export Customers",
+      );
+      setShowCampaignSheet(false);
+      setCampaignFilters(EMPTY_CAMPAIGN_EXPORT_FILTERS);
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error
+          ? err.message
+          : "Failed to export customers. Please try again.",
+      );
+    } finally {
+      setCampaignExporting(false);
+    }
+  }, [companyId, user?.location_id, campaignFilters, shareCsv]);
 
   // Show the page skeleton on initial load AND pull-to-refresh (not just when empty).
   const showSkeleton = loading && !error;
@@ -548,7 +661,42 @@ const Customers = () => {
             </View>
           ) : null}
 
-          {/* Add customer (above the filter pills) */}
+          {/* Export CSV + Campaign Export, then Add Customer — same order as web. */}
+          <View className="flex-row items-center gap-3">
+            <Pressable
+              onPress={exportCsv}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+              accessibilityRole="button"
+              accessibilityLabel="Export CSV"
+            >
+              {exportingCsv ? (
+                <ActivityIndicator size="small" color="#6B7280" />
+              ) : (
+                <Feather name="download" size={16} color="#6B7280" />
+              )}
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Export CSV
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowCampaignSheet(true)}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+              accessibilityRole="button"
+              accessibilityLabel="Campaign Export"
+            >
+              <Feather name="send" size={16} color="#6B7280" />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Campaign Export
+              </Text>
+            </Pressable>
+          </View>
+
           <Pressable
             onPress={() => setSheetContact(null)}
             className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
@@ -580,103 +728,24 @@ const Customers = () => {
             )}
           </View>
 
-          {/* Tags · Sources · Companies */}
+          {/* Controls — segmented pill (Filters · Sort) */}
           <FilterPill>
-            <PillSelect
-              icon="tag"
-              title="All Tags"
-              value={tag}
-              options={[
-                { label: "All Tags", value: "all" },
-                ...tagChoices.map((t) => ({ label: t, value: t })),
-              ]}
-              onSelect={setTag}
-            />
-            <PillSelect
-              icon="git-branch"
-              title="All Sources"
-              value={source}
-              options={[
-                { label: "All Sources", value: "all" },
-                ...sourceOptions.map((s) => ({ label: s, value: s })),
-              ]}
-              onSelect={setSource}
-            />
-            <PillSelect
-              icon="briefcase"
-              title="All Companies"
-              value={company}
-              options={[
-                { label: "All Companies", value: "all" },
-                ...companyOptions.map((c) => ({ label: c, value: c })),
-              ]}
-              onSelect={setCompany}
-            />
-          </FilterPill>
-
-          {/* SMS · Created Date · Sort */}
-          <FilterPill>
-            <PillSelect
-              icon="message-square"
-              title="All SMS"
-              value={sms}
-              options={SMS_OPTIONS}
-              onSelect={setSms}
-            />
             <PillSegment
               label={
-                dateStart && dateEnd
-                  ? `${formatShortDate(dateStart)} – ${formatShortDate(dateEnd)}`
-                  : "Created Date"
+                activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"
               }
-              active={showDateSheet}
-              onPress={() => setShowDateSheet(true)}
-              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
+              active={showFilterSheet || activeFilterCount > 0}
+              onPress={() => setShowFilterSheet(true)}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
             <PillSelect
-              icon="sliders"
+              icon="bar-chart-2"
               title="Newest"
               value={sort}
               options={SORT_OPTIONS}
               onSelect={setSort}
             />
           </FilterPill>
-
-
-           {/* Status chips + clear */}
-          <View className="flex-row items-center justify-between">
-            <View className="flex-row gap-2">
-              {STATUS_FILTERS.map((s) => {
-                const active = status === s.value;
-                return (
-                  <Pressable
-                    key={s.value}
-                    onPress={() => setStatus(s.value)}
-                    className={`px-3.5 py-2 rounded-lg border ${
-                      active
-                        ? "bg-[#0644C7] border-[#0644C7]"
-                        : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
-                    }`}
-                  >
-                    <Text
-                      className={`text-sm font-medium ${
-                        active ? "text-white" : "text-gray-700 dark:text-gray-200"
-                      }`}
-                    >
-                      {s.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {activeFilterCount > 0 && (
-              <Pressable onPress={clearFilters} hitSlop={8}>
-                <Text className="text-xs font-semibold text-[#0644C7]">
-                  Clear ({activeFilterCount})
-                </Text>
-              </Pressable>
-            )}
-          </View>
 
           {/* Count + layout toggle (Table default / Cards) */}
           {!showSkeleton && !showError && (
@@ -913,16 +982,40 @@ const Customers = () => {
         onAdded={load}
       />
 
+      {/* All filters in one sheet, same as the other list screens. */}
+      <CustomerFiltersSheet
+        visible={showFilterSheet}
+        values={filters}
+        tags={tagChoices}
+        sources={sourceOptions}
+        companies={companyOptions}
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_CUSTOMER_FILTERS)}
+        onClose={() => setShowFilterSheet(false)}
+        onOpenCreatedDate={openCreatedDate}
+      />
+
+      {/* Shared calendar for Created Date, opened once the filter sheet is
+          closed so two sheets are never stacked. */}
       <DateRangeSheet
         visible={showDateSheet}
-        initialStart={dateStart}
-        initialEnd={dateEnd}
-        onClose={() => setShowDateSheet(false)}
-        onApply={(start, end) => {
-          setDateStart(start);
-          setDateEnd(end);
-          setShowDateSheet(false);
+        initialStart={filters.createdStart || undefined}
+        initialEnd={filters.createdEnd || undefined}
+        onClose={closeCreatedDate}
+        onApply={applyCreatedDate}
+      />
+
+      <CampaignExportSheet
+        visible={showCampaignSheet}
+        values={campaignFilters}
+        availableTags={tagChoices}
+        exporting={campaignExporting}
+        onChange={setCampaignFilters}
+        onClose={() => {
+          setShowCampaignSheet(false);
+          setCampaignFilters(EMPTY_CAMPAIGN_EXPORT_FILTERS);
         }}
+        onExport={runCampaignExport}
       />
     </View>
   );

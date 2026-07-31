@@ -42,10 +42,8 @@ export function StatTile({
           <Feather name={icon} size={18} color={iconColor} />
         </View>
         <View className="flex-1 flex-row items-center gap-1">
-          <Text
-            className="text-sm font-bold text-gray-900 dark:text-white shrink"
-            numberOfLines={2}
-          >
+          {/* Wraps to as many lines as the label needs, never cut short. */}
+          <Text className="text-sm font-bold text-gray-900 dark:text-white shrink">
             {label}
           </Text>
           {info ? (

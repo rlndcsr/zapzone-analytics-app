@@ -390,3 +390,58 @@ export async function removeContactTag(
     body: { tag },
   });
 }
+
+/** One customer row in a campaign export. */
+export type CampaignExportContact = {
+  id: number;
+  name: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+};
+
+/** What the Campaign Export sheet asks the server to include. */
+export type CampaignExportParams = {
+  companyId: number;
+  locationId?: number | null;
+  tags?: string[];
+  status?: "active" | "inactive";
+  activeOnly?: boolean;
+};
+
+/**
+ * POST /api/contacts/export-for-campaign — the mailing list behind the web's
+ * "Campaign Export". Only the keys the web sends are included; leaving a key
+ * out lets the server apply its own default.
+ */
+export async function exportContactsForCampaign(
+  token: string,
+  params: CampaignExportParams,
+): Promise<CampaignExportContact[]> {
+  const body: Record<string, unknown> = { company_id: params.companyId };
+  if (params.locationId != null) body.location_id = params.locationId;
+  if (params.tags?.length) body.tags = params.tags;
+  if (params.status) body.status = params.status;
+  if (params.activeOnly) body.active_only = true;
+
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: {
+      contacts?: {
+        id?: number;
+        email?: string | null;
+        name?: string | null;
+        first_name?: string | null;
+        last_name?: string | null;
+      }[];
+    };
+  }>("/api/contacts/export-for-campaign", { method: "POST", token, body });
+
+  return (res?.data?.contacts ?? []).map((c) => ({
+    id: Number(c.id ?? 0),
+    name: c.name?.trim() ?? "",
+    email: c.email?.trim() ?? "",
+    firstName: c.first_name?.trim() ?? "",
+    lastName: c.last_name?.trim() ?? "",
+  }));
+}
