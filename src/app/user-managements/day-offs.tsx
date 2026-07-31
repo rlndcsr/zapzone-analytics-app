@@ -15,11 +15,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { SelectField, type SelectOption } from "../../components/ui/FormControls";
 import { Pagination } from "../../components/ui/Pagination";
+import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
 import { useDayOffs } from "../../lib/hooks/useDayOffs";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { fetchAttractions } from "../../services/attractionsService";
 import { fetchRooms } from "../../services/bookingsService";
+import { fetchEvents } from "../../services/eventsService";
 import { fetchPackages } from "../../services/packagesService";
 import {
   bulkDeleteDayOffs,
@@ -75,20 +81,49 @@ const SORT_ORDER_OPTIONS: { label: string; value: SortOrder }[] = [
 ];
 
 /** "What should be blocked?" scope (mirrors the web BlockingScope). */
-type BlockingScope = "location" | "packages" | "rooms" | "both";
-type ResourceOption = { id: number; name: string };
+type BlockingScope =
+  | "location"
+  | "packages"
+  | "rooms"
+  | "both"
+  | "attractions"
+  | "events";
+type ResourceOption = { id: number; name: string; locationName?: string };
 
+/** Same six tiles, order and copy as the web's "What should be blocked?" grid. */
 const SCOPE_OPTIONS: {
   value: BlockingScope;
   title: string;
   sub: string;
   icon: ComponentProps<typeof Feather>["name"];
 }[] = [
-  { value: "location", title: "Entire Location", sub: "All packages & spaces", icon: "home" },
+  { value: "location", title: "Entire Location", sub: "All packages & rooms", icon: "home" },
   { value: "packages", title: "Packages Only", sub: "Select packages", icon: "package" },
-  { value: "rooms", title: "Spaces Only", sub: "Select spaces", icon: "grid" },
-  { value: "both", title: "Both", sub: "Packages & spaces", icon: "layers" },
+  { value: "rooms", title: "Spaces Only", sub: "Select spaces", icon: "columns" },
+  { value: "both", title: "Both", sub: "Packages & rooms", icon: "layers" },
+  { value: "attractions", title: "Attractions Only", sub: "Select attractions", icon: "grid" },
+  { value: "events", title: "Events Only", sub: "Select events", icon: "calendar" },
 ];
+
+/** Which id list each scope requires the user to fill in. */
+const SCOPE_REQUIRES: Record<
+  BlockingScope,
+  ("packages" | "rooms" | "attractions" | "events")[]
+> = {
+  location: [],
+  packages: ["packages"],
+  rooms: ["rooms"],
+  both: ["packages", "rooms"],
+  attractions: ["attractions"],
+  events: ["events"],
+};
+
+const RESOURCE_LABEL = {
+  packages: { title: "Select Packages", loading: "Loading packages...", empty: "No active packages found", error: "Please select at least one package." },
+  rooms: { title: "Select Spaces", loading: "Loading spaces...", empty: "No available spaces found", error: "Please select at least one space." },
+  attractions: { title: "Select Attractions", loading: "Loading attractions...", empty: "No active attractions found", error: "Please select at least one attraction." },
+  events: { title: "Select Events", loading: "Loading events...", empty: "No active events found", error: "Please select at least one event." },
+} as const;
 
 /* ------------------------------------------------------------------ dates -- */
 
@@ -111,10 +146,16 @@ function prettyDate(dateStr: string): string {
   });
 }
 
-function shiftDate(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return ymd(d);
+/** "14:30" → "2:30 PM"; empty stays empty so the field shows its placeholder. */
+function prettyTime(time: string): string {
+  if (!time) return "";
+  const [hStr, mStr] = time.split(":");
+  const h = Number(hStr);
+  const m = Number(mStr ?? 0);
+  if (Number.isNaN(h) || Number.isNaN(m)) return time;
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
 /** Grid cells for a month: leading nulls + YYYY-MM-DD day keys. */
@@ -136,84 +177,271 @@ const timeRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
 /* ------------------------------------------------------------- components -- */
 
-/** Single-select filter sheet reused by every day-off filter. */
-function FilterOptionSheet<T extends string>({
-  visible,
-  onClose,
-  title,
-  options,
-  value,
-  onSelect,
+/** Field label with the web's red required asterisk. */
+function FieldLabel({
+  children,
+  required = false,
 }: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  options: { label: string; value: T }[];
-  value: T;
-  onSelect: (value: T) => void;
+  children: string;
+  required?: boolean;
 }) {
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={title}>
-      <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-        {options.map((option) => {
-          const isSelected = value === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => {
-                onSelect(option.value);
-                onClose();
-              }}
-              className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-              }`}
-            >
-              <Text
-                className={`text-base font-medium ${
-                  isSelected
-                    ? "text-blue-600 dark:text-blue-400"
-                    : "text-gray-700 dark:text-gray-200"
-                }`}
-              >
-                {option.label}
-              </Text>
-              {isSelected && (
-                <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                  <Feather name="check" size={14} color="#FFFFFF" />
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
+    <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+      {children}
+      {required && <Text className="text-red-500"> *</Text>}
+    </Text>
   );
 }
 
-/** A bordered filter pill that opens a filter sheet. */
-function FilterChip({
+/** The web's grey bordered panel that wraps a group of related fields. */
+function SectionCard({ children }: { children: React.ReactNode }) {
+  return (
+    <View className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/40 p-4 mb-4">
+      {children}
+    </View>
+  );
+}
+
+/**
+ * The web's LocationSelector rendered as a two-column card grid — the picker is
+ * inline in the form (not a separate sheet) so it matches the web modal.
+ */
+function LocationGrid({
+  locations,
+  selectedId,
+  onSelect,
+}: {
+  locations: { id: number; name: string }[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  return (
+    <>
+      <View className="flex-row items-center gap-1.5 mb-2">
+        <Feather name="map-pin" size={13} color="#6B7280" />
+        <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+          Select Location
+        </Text>
+      </View>
+      <View className="flex-row flex-wrap -mx-1">
+        {locations.map((loc) => {
+          const active = selectedId === loc.id;
+          return (
+            <View key={loc.id} className="w-1/2 px-1 mb-2">
+              <Pressable
+                onPress={() => onSelect(loc.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                className={`flex-row items-center gap-2 rounded-xl border p-2.5 ${
+                  active
+                    ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
+                    : "border-gray-200 dark:border-neutral-700"
+                }`}
+              >
+                <View
+                  className={`w-8 h-8 rounded-lg items-center justify-center ${
+                    active ? "bg-[#0644C7]" : "bg-blue-50 dark:bg-blue-900/20"
+                  }`}
+                >
+                  <Feather
+                    name="user"
+                    size={15}
+                    color={active ? "#FFFFFF" : PRIMARY}
+                  />
+                </View>
+                <Text
+                  className={`flex-1 text-xs font-semibold ${
+                    active
+                      ? "text-[#0644C7]"
+                      : "text-gray-800 dark:text-gray-100"
+                  }`}
+                  numberOfLines={1}
+                >
+                  {loc.name}
+                </Text>
+                {active && (
+                  <Feather name="check-circle" size={14} color={PRIMARY} />
+                )}
+              </Pressable>
+            </View>
+          );
+        })}
+      </View>
+    </>
+  );
+}
+
+/** Scrollable checkbox list of packages / spaces / attractions / events. */
+function ResourceChecklist({
+  kind,
+  options,
+  selectedIds,
+  loading,
+  showLocation,
+  onToggle,
+}: {
+  kind: keyof typeof RESOURCE_LABEL;
+  options: ResourceOption[];
+  selectedIds: Set<number>;
+  loading: boolean;
+  showLocation: boolean;
+  onToggle: (id: number) => void;
+}) {
+  const label = RESOURCE_LABEL[kind];
+  return (
+    <View className="mb-3">
+      <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+        {label.title}
+        <Text className="text-red-500"> *</Text>
+      </Text>
+      {loading ? (
+        <Text className="text-sm text-gray-500 dark:text-gray-400 py-2">
+          {label.loading}
+        </Text>
+      ) : options.length === 0 ? (
+        <Text className="text-sm text-gray-500 dark:text-gray-400 py-2">
+          {label.empty}
+        </Text>
+      ) : (
+        // max-h mirrors the web's `max-h-32 overflow-y-auto` scroll box.
+        <View className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 overflow-hidden">
+          <ScrollView
+            style={{ maxHeight: 168 }}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+          >
+            {options.map((option, idx) => {
+              const checked = selectedIds.has(option.id);
+              return (
+                <Pressable
+                  key={option.id}
+                  onPress={() => onToggle(option.id)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked }}
+                  className={`flex-row items-center gap-2.5 px-3.5 py-2.5 active:bg-gray-50 dark:active:bg-neutral-800 ${
+                    idx > 0
+                      ? "border-t border-gray-100 dark:border-neutral-800"
+                      : ""
+                  }`}
+                >
+                  <Feather
+                    name={checked ? "check-square" : "square"}
+                    size={18}
+                    color={checked ? PRIMARY : "#9CA3AF"}
+                  />
+                  <View className="flex-1">
+                    <Text
+                      className="text-sm text-gray-700 dark:text-gray-100"
+                      numberOfLines={1}
+                    >
+                      {option.name}
+                    </Text>
+                    {showLocation && !!option.locationName && (
+                      <Text
+                        className="text-xs text-gray-400 dark:text-gray-500"
+                        numberOfLines={1}
+                      >
+                        {option.locationName}
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** Tappable read-only field that opens a picker sheet, with an optional clear. */
+function PickerField({
   icon,
-  label,
+  value,
+  placeholder,
   onPress,
+  onClear,
 }: {
   icon: ComponentProps<typeof Feather>["name"];
-  label: string;
+  value: string;
+  placeholder: string;
   onPress: () => void;
+  onClear?: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
-      className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+      accessibilityRole="button"
+      className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-3.5 py-3 rounded-xl border border-gray-200 dark:border-neutral-700"
     >
-      <Feather name={icon} size={16} color={PRIMARY} />
       <Text
-        className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+        className={`flex-1 text-sm ${
+          value
+            ? "text-gray-900 dark:text-white"
+            : "text-gray-400 dark:text-gray-500"
+        }`}
         numberOfLines={1}
       >
-        {label}
+        {value || placeholder}
       </Text>
-      <Feather name="chevron-down" size={14} color="#9CA3AF" />
+      {value && onClear ? (
+        <Pressable onPress={onClear} hitSlop={10} accessibilityLabel="Clear">
+          <Feather name="x" size={16} color="#9CA3AF" />
+        </Pressable>
+      ) : (
+        <Feather name={icon} size={16} color="#9CA3AF" />
+      )}
     </Pressable>
+  );
+}
+
+/** The web's six-tile "What should be blocked?" grid. */
+function ScopeGrid({
+  scope,
+  onChange,
+}: {
+  scope: BlockingScope;
+  onChange: (scope: BlockingScope) => void;
+}) {
+  return (
+    <View className="flex-row flex-wrap -mx-1 mb-1">
+      {SCOPE_OPTIONS.map((opt) => {
+        const active = scope === opt.value;
+        return (
+          <View key={opt.value} className="w-1/2 px-1 mb-2">
+            <Pressable
+              onPress={() => onChange(opt.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              className={`flex-row items-start gap-2 rounded-xl border-2 p-3 ${
+                active
+                  ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
+                  : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+              }`}
+            >
+              <Feather
+                name={opt.icon}
+                size={18}
+                color={active ? PRIMARY : "#6B7280"}
+              />
+              <View className="flex-1">
+                <Text
+                  className={`text-sm font-medium ${
+                    active ? "text-[#0644C7]" : "text-gray-900 dark:text-white"
+                  }`}
+                >
+                  {opt.title}
+                </Text>
+                <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+                  {opt.sub}
+                </Text>
+              </View>
+            </Pressable>
+          </View>
+        );
+      })}
+    </View>
   );
 }
 
@@ -358,8 +586,21 @@ const DayOffCard = ({
 
 /* --------------------------------------------------------------- form types -- */
 
+/** The four selectable resource kinds, keyed the same way in state and payload. */
+type ResourceKind = "packages" | "rooms" | "attractions" | "events";
+
+type SelectionState = Record<ResourceKind, Set<number>>;
+
+const emptySelection = (): SelectionState => ({
+  packages: new Set<number>(),
+  rooms: new Set<number>(),
+  attractions: new Set<number>(),
+  events: new Set<number>(),
+});
+
 type FormState = {
   id: number | null;
+  /** YYYY-MM-DD; empty until the user picks one (required, like the web). */
   date: string;
   reason: string;
   locationId: number | null;
@@ -369,22 +610,43 @@ type FormState = {
   timeStart: string;
   timeEnd: string;
   scope: BlockingScope;
-  packageIds: number[];
-  roomIds: number[];
+  selection: SelectionState;
 };
 
 const emptyForm = (locationId: number | null): FormState => ({
   id: null,
-  date: ymd(new Date()),
+  date: "",
   reason: "",
   locationId,
   isRecurring: false,
   timeStart: "",
   timeEnd: "",
   scope: "location",
-  packageIds: [],
-  roomIds: [],
+  selection: emptySelection(),
 });
+
+/** Maps the current scope + selections onto the API's four nullable id lists. */
+function scopePayload(scope: BlockingScope, selection: SelectionState) {
+  const ids = (kind: ResourceKind) => [...selection[kind]];
+  const required = SCOPE_REQUIRES[scope];
+  return {
+    package_ids: required.includes("packages") ? ids("packages") : null,
+    room_ids: required.includes("rooms") ? ids("rooms") : null,
+    attraction_ids: required.includes("attractions") ? ids("attractions") : null,
+    event_ids: required.includes("events") ? ids("events") : null,
+  };
+}
+
+/** First unmet "select at least one …" requirement for a scope, if any. */
+function scopeError(
+  scope: BlockingScope,
+  selection: SelectionState,
+): string | null {
+  for (const kind of SCOPE_REQUIRES[scope]) {
+    if (selection[kind].size === 0) return RESOURCE_LABEL[kind].error;
+  }
+  return null;
+}
 
 /* ------------------------------------------------------------------ screen -- */
 
@@ -410,15 +672,14 @@ const DayOffs = () => {
 
   const [sheet, setSheet] = useState<
     | null
-    | "location"
+    | "filters"
     | "form"
-    | "formLocation"
-    | "daterange"
-    | "type"
-    | "sortby"
-    | "sortorder"
+    | "formDate"
+    | "formTimeEnd"
+    | "formTimeStart"
     | "bulk"
-    | "bulkLocation"
+    | "bulkTimeEnd"
+    | "bulkTimeStart"
   >(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
@@ -448,10 +709,11 @@ const DayOffs = () => {
   const [bulkCreating, setBulkCreating] = useState(false);
   // "What should be blocked?" scope + selectable resources for the location.
   const [bulkScope, setBulkScope] = useState<BlockingScope>("location");
-  const [bulkPackageIds, setBulkPackageIds] = useState<Set<number>>(new Set());
-  const [bulkRoomIds, setBulkRoomIds] = useState<Set<number>>(new Set());
-  const [availablePackages, setAvailablePackages] = useState<ResourceOption[]>([]);
-  const [availableRooms, setAvailableRooms] = useState<ResourceOption[]>([]);
+  const [bulkSelection, setBulkSelection] =
+    useState<SelectionState>(emptySelection);
+  const [resources, setResources] = useState<
+    Record<ResourceKind, ResourceOption[]>
+  >({ packages: [], rooms: [], attractions: [], events: [] });
   const [loadingResources, setLoadingResources] = useState(false);
 
   const { locations } = useLocationOptions();
@@ -512,19 +774,33 @@ const DayOffs = () => {
   /* ---- single create / edit ---- */
 
   const openCreate = useCallback(() => {
-    setForm(emptyForm(isCompanyAdmin ? null : ownLocationId));
+    // Company admins start on the filtered location (or the first one), the
+    // same default the web modal opens with — so the resource lists load
+    // straight away instead of waiting on a location tap.
+    setForm(
+      emptyForm(
+        isCompanyAdmin
+          ? (locationFilter ?? locations[0]?.id ?? null)
+          : ownLocationId,
+      ),
+    );
     setSheet("form");
-  }, [isCompanyAdmin, ownLocationId]);
+  }, [isCompanyAdmin, ownLocationId, locationFilter, locations]);
 
   const openEdit = useCallback((d: DayOff) => {
-    const scope: BlockingScope =
-      d.packageIds.length && d.roomIds.length
-        ? "both"
-        : d.packageIds.length
-          ? "packages"
-          : d.roomIds.length
-            ? "rooms"
-            : "location";
+    // Same precedence as the web's applyBlockingScopeFromDayOff: attractions and
+    // events are exclusive scopes, so they win over packages/rooms.
+    const scope: BlockingScope = d.attractionIds.length
+      ? "attractions"
+      : d.eventIds.length
+        ? "events"
+        : d.packageIds.length && d.roomIds.length
+          ? "both"
+          : d.packageIds.length
+            ? "packages"
+            : d.roomIds.length
+              ? "rooms"
+              : "location";
     setForm({
       id: d.id,
       date: d.date || ymd(new Date()),
@@ -534,8 +810,12 @@ const DayOffs = () => {
       timeStart: d.timeStart ? d.timeStart.substring(0, 5) : "",
       timeEnd: d.timeEnd ? d.timeEnd.substring(0, 5) : "",
       scope,
-      packageIds: [...d.packageIds],
-      roomIds: [...d.roomIds],
+      selection: {
+        packages: new Set(d.packageIds),
+        rooms: new Set(d.roomIds),
+        attractions: new Set(d.attractionIds),
+        events: new Set(d.eventIds),
+      },
     });
     setSheet("form");
   }, []);
@@ -573,18 +853,13 @@ const DayOffs = () => {
       Alert.alert("Location required", "Please choose a location for this day off.");
       return;
     }
-    if (
-      (form.scope === "packages" || form.scope === "both") &&
-      form.packageIds.length === 0
-    ) {
-      Alert.alert("Select packages", "Please select at least one package.");
+    if (!form.date) {
+      Alert.alert("Date required", "Please choose a date for this day off.");
       return;
     }
-    if (
-      (form.scope === "rooms" || form.scope === "both") &&
-      form.roomIds.length === 0
-    ) {
-      Alert.alert("Select spaces", "Please select at least one space.");
+    const selectionError = scopeError(form.scope, form.selection);
+    if (selectionError) {
+      Alert.alert("Selection required", selectionError);
       return;
     }
     if (form.timeStart && !timeRe.test(form.timeStart)) {
@@ -596,16 +871,6 @@ const DayOffs = () => {
       return;
     }
 
-    // Derive package_ids / room_ids from the scope (same switch as the web).
-    let packageIds: number[] | null = null;
-    let roomIds: number[] | null = null;
-    if (form.scope === "packages") packageIds = form.packageIds;
-    else if (form.scope === "rooms") roomIds = form.roomIds;
-    else if (form.scope === "both") {
-      packageIds = form.packageIds;
-      roomIds = form.roomIds;
-    }
-
     const payload: DayOffPayload = {
       location_id: form.locationId,
       date: form.date,
@@ -613,8 +878,8 @@ const DayOffs = () => {
       is_recurring: form.isRecurring,
       time_start: form.timeStart || null,
       time_end: form.timeEnd || null,
-      package_ids: packageIds,
-      room_ids: roomIds,
+      // package_ids / room_ids / attraction_ids / event_ids from the scope.
+      ...scopePayload(form.scope, form.selection),
     };
 
     setSaving(true);
@@ -699,19 +964,26 @@ const DayOffs = () => {
     setBulkTimeStart("");
     setBulkTimeEnd("");
     setBulkScope("location");
-    setBulkPackageIds(new Set());
-    setBulkRoomIds(new Set());
+    setBulkSelection(emptySelection());
     setBulkLocationId(isCompanyAdmin ? (locations[0]?.id ?? null) : ownLocationId);
     setSheet("bulk");
   }, [isCompanyAdmin, ownLocationId, locations]);
 
-  // Load packages + spaces for the "What should be blocked?" scope selector
-  // whenever the create/edit form OR the bulk sheet is open (and on location
-  // change). Mirrors the web's Promise.all fetch; reuses existing mobile
-  // services — no backend change. Selections are cleared in the location
-  // pickers (not here) so an edit's pre-selected ids survive the initial load.
-  const resourceLocationId =
-    sheet === "form" ? form.locationId : sheet === "bulk" ? bulkLocationId : null;
+  // Load packages, spaces, attractions and events for the "What should be
+  // blocked?" scope selector whenever the create/edit form OR the bulk sheet is
+  // open (and on location change). Mirrors the web's four-way Promise.all;
+  // reuses the existing mobile services — no backend change. Selections are
+  // cleared by the location pickers (not here) so an edit's pre-selected ids
+  // survive the initial load. Nested picker sheets ("formDate", "formTimeStart",
+  // …) keep the form's location so the lists aren't dropped and refetched.
+  const inFormFlow = sheet != null && sheet.startsWith("form");
+  const inBulkFlow = sheet != null && sheet.startsWith("bulk");
+  const resourceLocationId = inFormFlow
+    ? form.locationId
+    : inBulkFlow
+      ? bulkLocationId
+      : null;
+  const userId = currentUser?.id;
   useEffect(() => {
     if (resourceLocationId == null) return;
     const token = getToken();
@@ -721,22 +993,62 @@ const DayOffs = () => {
     Promise.all([
       fetchPackages({
         token,
-        userId: currentUser?.id,
+        userId,
         locationId: resourceLocationId,
         signal: controller.signal,
       }).catch(() => []),
       fetchRooms(token, resourceLocationId).catch(() => []),
+      // The attractions/events endpoints scope by user, so they need an id.
+      userId == null
+        ? Promise.resolve([])
+        : fetchAttractions({
+            token,
+            userId,
+            locationId: resourceLocationId,
+            isActive: true,
+            signal: controller.signal,
+          }).catch(() => []),
+      userId == null
+        ? Promise.resolve([])
+        : fetchEvents({
+            token,
+            userId,
+            locationId: resourceLocationId,
+            signal: controller.signal,
+          }).catch(() => []),
     ])
-      .then(([pkgs, rooms]) => {
+      .then(([pkgs, rooms, attractions, events]) => {
         if (controller.signal.aborted) return;
-        setAvailablePackages(pkgs.map((p) => ({ id: p.id, name: p.name })));
-        setAvailableRooms(rooms.map((r) => ({ id: r.id, name: r.name })));
+        setResources({
+          // The mobile packages endpoint has no is_active filter, so drop
+          // inactive rows here to match the web's `is_active: true` query.
+          packages: pkgs
+            .filter((p) => p.status === "active")
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              locationName: p.locationName,
+            })),
+          rooms: rooms.map((r) => ({ id: r.id, name: r.name })),
+          attractions: attractions.map((a) => ({
+            id: a.id,
+            name: a.name,
+            locationName: a.locationName,
+          })),
+          events: events
+            .filter((e) => e.status === "active")
+            .map((e) => ({
+              id: e.id,
+              name: e.name,
+              locationName: e.locationName,
+            })),
+        });
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoadingResources(false);
       });
     return () => controller.abort();
-  }, [resourceLocationId, currentUser?.id]);
+  }, [resourceLocationId, userId]);
 
   const toggleBulkDate = useCallback((key: string) => {
     setBulkDates((prev) => {
@@ -749,40 +1061,24 @@ const DayOffs = () => {
 
   const bulkCells = useMemo(() => monthGridCells(bulkMonth), [bulkMonth]);
 
-  const toggleFormPackage = useCallback((id: number) => {
-    setForm((f) => ({
-      ...f,
-      packageIds: f.packageIds.includes(id)
-        ? f.packageIds.filter((x) => x !== id)
-        : [...f.packageIds, id],
-    }));
+  /** Flip one id inside one resource kind of a SelectionState. */
+  const toggleIn = (
+    selection: SelectionState,
+    kind: ResourceKind,
+    id: number,
+  ): SelectionState => {
+    const next = new Set(selection[kind]);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return { ...selection, [kind]: next };
+  };
+
+  const toggleFormResource = useCallback((kind: ResourceKind, id: number) => {
+    setForm((f) => ({ ...f, selection: toggleIn(f.selection, kind, id) }));
   }, []);
 
-  const toggleFormRoom = useCallback((id: number) => {
-    setForm((f) => ({
-      ...f,
-      roomIds: f.roomIds.includes(id)
-        ? f.roomIds.filter((x) => x !== id)
-        : [...f.roomIds, id],
-    }));
-  }, []);
-
-  const toggleBulkPackage = useCallback((id: number) => {
-    setBulkPackageIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleBulkRoom = useCallback((id: number) => {
-    setBulkRoomIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const toggleBulkResource = useCallback((kind: ResourceKind, id: number) => {
+    setBulkSelection((prev) => toggleIn(prev, kind, id));
   }, []);
 
   const bulkCreate = useCallback(async () => {
@@ -794,19 +1090,10 @@ const DayOffs = () => {
       Alert.alert("No dates selected", "Please pick at least one date.");
       return;
     }
-    // Scope validation — mirrors the web (require ≥1 package / ≥1 space).
-    if (
-      (bulkScope === "packages" || bulkScope === "both") &&
-      bulkPackageIds.size === 0
-    ) {
-      Alert.alert("Select packages", "Please select at least one package.");
-      return;
-    }
-    if (
-      (bulkScope === "rooms" || bulkScope === "both") &&
-      bulkRoomIds.size === 0
-    ) {
-      Alert.alert("Select spaces", "Please select at least one space.");
+    // Scope validation — mirrors the web (require ≥1 of the scoped resource).
+    const selectionError = scopeError(bulkScope, bulkSelection);
+    if (selectionError) {
+      Alert.alert("Selection required", selectionError);
       return;
     }
     if (bulkTimeStart && !timeRe.test(bulkTimeStart)) {
@@ -818,15 +1105,7 @@ const DayOffs = () => {
       return;
     }
 
-    // Derive package_ids / room_ids from the scope (same switch as the web).
-    let packageIds: number[] | null = null;
-    let roomIds: number[] | null = null;
-    if (bulkScope === "packages") packageIds = [...bulkPackageIds];
-    else if (bulkScope === "rooms") roomIds = [...bulkRoomIds];
-    else if (bulkScope === "both") {
-      packageIds = [...bulkPackageIds];
-      roomIds = [...bulkRoomIds];
-    }
+    const scopeIds = scopePayload(bulkScope, bulkSelection);
 
     setBulkCreating(true);
     const dates = [...bulkDates].sort();
@@ -843,8 +1122,7 @@ const DayOffs = () => {
           is_recurring: bulkIsRecurring,
           time_start: bulkTimeStart || null,
           time_end: bulkTimeEnd || null,
-          package_ids: packageIds,
-          room_ids: roomIds,
+          ...scopeIds,
         });
         ok += 1;
       } catch {
@@ -866,8 +1144,7 @@ const DayOffs = () => {
     bulkLocationId,
     bulkDates,
     bulkScope,
-    bulkPackageIds,
-    bulkRoomIds,
+    bulkSelection,
     bulkTimeStart,
     bulkTimeEnd,
     bulkReason,
@@ -896,32 +1173,29 @@ const DayOffs = () => {
     locationFilter != null ||
     search.trim() !== "";
 
-  /* ---- labels ---- */
+  /** Non-default filters — drives the "Filters (N)" pill badge. Search isn't
+   *  counted: it has its own visible field above the pill. */
+  const activeFilterCount =
+    (dateRange !== "upcoming" ? 1 : 0) +
+    (typeFilter !== "all" ? 1 : 0) +
+    (sortBy !== "date" ? 1 : 0) +
+    (sortOrder !== "asc" ? 1 : 0) +
+    (locationFilter != null ? 1 : 0);
 
-  const locationLabel =
-    locationFilter == null
-      ? "All Locations"
-      : (locations.find((l) => l.id === locationFilter)?.name ?? "Location");
-  const dateRangeLabel =
-    DATE_RANGE_OPTIONS.find((o) => o.value === dateRange)?.label ?? "Upcoming Only";
-  const typeLabel =
-    TYPE_OPTIONS.find((o) => o.value === typeFilter)?.label ?? "All Types";
-  const sortByLabel =
-    SORT_BY_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Date";
-  const sortOrderLabel =
-    SORT_ORDER_OPTIONS.find((o) => o.value === sortOrder)?.label ?? "Ascending";
-  const formLocationLabel =
-    form.locationId == null
-      ? "Select location..."
-      : (locations.find((l) => l.id === form.locationId)?.name ??
-        currentUser?.location?.name ??
-        `Location #${form.locationId}`);
-  const bulkLocationLabel =
-    bulkLocationId == null
-      ? "Select location..."
-      : (locations.find((l) => l.id === bulkLocationId)?.name ??
-        currentUser?.location?.name ??
-        `Location #${bulkLocationId}`);
+  /** Location options for the filter panel ("All Locations" + each location). */
+  const locationFilterOptions: SelectOption[] = [
+    { label: "All Locations", value: 0 },
+    ...locations.map((l) => ({ label: l.name, value: l.id })),
+  ];
+
+  /** Which resource checklists the current scope needs, in the web's order. */
+  const formResourceKinds = SCOPE_REQUIRES[form.scope];
+  const bulkResourceKinds = SCOPE_REQUIRES[bulkScope];
+
+  // Editing an existing past-dated day off must keep that date reachable, so the
+  // calendar's floor is the earlier of today and the date already on the record.
+  const formMinDate =
+    form.date && form.date < ymd(new Date()) ? form.date : ymd(new Date());
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -1049,60 +1323,20 @@ const DayOffs = () => {
             )}
           </View>
 
-          {/* Filters — Date Range, Type, Sort By, Sort Order (mirrors web) */}
-          <View className="flex-row gap-3 mb-3">
-            <FilterChip
-              icon="calendar"
-              label={dateRangeLabel}
-              onPress={() => setSheet("daterange")}
+          {/* Filters — one pill opening the full panel (same as the catalog
+              screens); every filter lives inside the sheet. */}
+          <FilterPill>
+            <PillSegment
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={sheet === "filters" || activeFilterCount > 0}
+              onPress={() => setSheet("filters")}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
-            <FilterChip
-              icon="repeat"
-              label={typeLabel}
-              onPress={() => setSheet("type")}
-            />
-          </View>
-          <View className="flex-row gap-3 mb-3">
-            <FilterChip
-              icon="bar-chart-2"
-              label={`Sort: ${sortByLabel}`}
-              onPress={() => setSheet("sortby")}
-            />
-            <FilterChip
-              icon={sortOrder === "asc" ? "arrow-up" : "arrow-down"}
-              label={sortOrderLabel}
-              onPress={() => setSheet("sortorder")}
-            />
-          </View>
-
-          {isCompanyAdmin && (
-            <Pressable
-              onPress={() => setSheet("location")}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3"
-            >
-              <Feather name="map-pin" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {locationLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          )}
-
-          {hasActiveFilters && (
-            <Pressable
-              onPress={clearFilters}
-              className="h-11 rounded-xl items-center justify-center flex-row gap-2 border border-gray-200 dark:border-neutral-700 mb-5"
-            >
-              <Feather name="x-circle" size={15} color="#6B7280" />
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-sm">
-                Clear Filters
-              </Text>
-            </Pressable>
-          )}
-          {!hasActiveFilters && <View className="mb-2" />}
+          </FilterPill>
 
           {/* Selection bulk-action bar */}
           {selectionMode && dayOffs.length > 0 && (
@@ -1215,79 +1449,71 @@ const DayOffs = () => {
         </View>
       </ScrollView>
 
-      {/* Filter sheets */}
-      <FilterOptionSheet
-        visible={sheet === "daterange"}
-        onClose={() => setSheet(null)}
-        title="Date Range"
-        options={DATE_RANGE_OPTIONS}
-        value={dateRange}
-        onSelect={setDateRange}
-      />
-      <FilterOptionSheet
-        visible={sheet === "type"}
-        onClose={() => setSheet(null)}
-        title="Type"
-        options={TYPE_OPTIONS}
-        value={typeFilter}
-        onSelect={setTypeFilter}
-      />
-      <FilterOptionSheet
-        visible={sheet === "sortby"}
-        onClose={() => setSheet(null)}
-        title="Sort By"
-        options={SORT_BY_OPTIONS}
-        value={sortBy}
-        onSelect={setSortBy}
-      />
-      <FilterOptionSheet
-        visible={sheet === "sortorder"}
-        onClose={() => setSheet(null)}
-        title="Sort Order"
-        options={SORT_ORDER_OPTIONS}
-        value={sortOrder}
-        onSelect={setSortOrder}
-      />
-
-      {/* Location filter (company admin) */}
+      {/* Filters — one panel holding every filter (same shape as the catalog
+          screens' FiltersSheet). Values apply live to the list behind it. */}
       <BottomSheet
-        visible={sheet === "location"}
+        visible={sheet === "filters"}
         onClose={() => setSheet(null)}
-        title="Filter by Location"
+        title="Filters"
       >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: null as number | null, name: "All Locations" }, ...locations].map(
-            (option) => {
-              const isSelected = locationFilter === option.id;
-              return (
-                <Pressable
-                  key={String(option.id ?? "all")}
-                  onPress={() => {
-                    setLocationFilter(option.id);
-                    setSheet(null);
-                  }}
-                  className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                >
-                  <Text
-                    className={`text-base font-medium ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    {option.name}
-                  </Text>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                      <Feather name="check" size={14} color="#FFFFFF" />
-                    </View>
-                  )}
-                </Pressable>
-              );
-            },
-          )}
+        <ScrollView
+          className="px-5"
+          contentContainerStyle={{ paddingBottom: 28 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View className="gap-4 pt-1">
+            {isCompanyAdmin && (
+              <SelectField
+                label="Location"
+                value={locationFilter ?? 0}
+                options={locationFilterOptions}
+                onSelect={(v) => setLocationFilter(Number(v) || null)}
+              />
+            )}
+            <SelectField
+              label="Date Range"
+              value={dateRange}
+              options={DATE_RANGE_OPTIONS as SelectOption[]}
+              onSelect={(v) => setDateRange(String(v) as DateRange)}
+            />
+            <SelectField
+              label="Type"
+              value={typeFilter}
+              options={TYPE_OPTIONS as SelectOption[]}
+              onSelect={(v) => setTypeFilter(String(v) as TypeFilter)}
+            />
+            <SelectField
+              label="Sort By"
+              value={sortBy}
+              options={SORT_BY_OPTIONS as SelectOption[]}
+              onSelect={(v) => setSortBy(String(v) as SortBy)}
+            />
+            <SelectField
+              label="Sort Order"
+              value={sortOrder}
+              options={SORT_ORDER_OPTIONS as SelectOption[]}
+              onSelect={(v) => setSortOrder(String(v) as SortOrder)}
+            />
+
+            {/* Footer: Clear Filters (secondary) + Done (primary) */}
+            <View className="flex-row gap-3 mt-2">
+              <Pressable
+                onPress={clearFilters}
+                className="flex-1 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700 active:opacity-70"
+              >
+                <Text className="text-gray-700 dark:text-gray-200 font-semibold text-base">
+                  Clear Filters
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setSheet(null)}
+                className="flex-1 h-12 rounded-xl items-center justify-center bg-[#0644C7] active:opacity-90"
+              >
+                <Text className="text-white font-semibold text-base">Done</Text>
+              </Pressable>
+            </View>
+          </View>
         </ScrollView>
       </BottomSheet>
 
@@ -1298,249 +1524,117 @@ const DayOffs = () => {
         title={form.id != null ? "Edit Day Off" : "Add Day Off"}
       >
         <ScrollView className="px-5 pb-8" showsVerticalScrollIndicator={false}>
-          {/* Location (company admin) */}
+          {/* Location (company admin) — inline card grid, as on the web */}
           {isCompanyAdmin && (
             <>
-              <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                Location
-              </Text>
-              <Pressable
-                onPress={() => setSheet("formLocation")}
-                className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 mb-4"
-              >
-                <Feather name="map-pin" size={16} color={PRIMARY} />
-                <Text
-                  className={`text-sm flex-1 ${
-                    form.locationId == null
-                      ? "text-gray-400 dark:text-gray-500"
-                      : "text-gray-900 dark:text-white"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {formLocationLabel}
-                </Text>
-                <Feather name="chevron-down" size={14} color="#9CA3AF" />
-              </Pressable>
+              <FieldLabel required>Location</FieldLabel>
+              <LocationGrid
+                locations={locations}
+                selectedId={form.locationId}
+                onSelect={(id) =>
+                  setForm((f) => ({
+                    ...f,
+                    locationId: id,
+                    // Selections belong to the previous location's resources.
+                    selection:
+                      f.locationId === id ? f.selection : emptySelection(),
+                  }))
+                }
+              />
+              <View className="mb-2" />
             </>
           )}
 
-          {/* Date stepper */}
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-            Date
-          </Text>
-          <View className="flex-row items-center gap-2 mb-2">
-            <Pressable
-              onPress={() => setForm((f) => ({ ...f, date: shiftDate(f.date, -1) }))}
-              className="w-11 h-11 rounded-xl bg-gray-100 dark:bg-neutral-800 items-center justify-center"
-            >
-              <Feather name="chevron-left" size={18} color={headerIcon} />
-            </Pressable>
-            <View className="flex-1 h-11 rounded-xl border border-gray-200 dark:border-neutral-700 items-center justify-center">
-              <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                {prettyDate(form.date)}
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => setForm((f) => ({ ...f, date: shiftDate(f.date, 1) }))}
-              className="w-11 h-11 rounded-xl bg-gray-100 dark:bg-neutral-800 items-center justify-center"
-            >
-              <Feather name="chevron-right" size={18} color={headerIcon} />
-            </Pressable>
+          {/* Date */}
+          <FieldLabel required>Date</FieldLabel>
+          <View className="mb-4">
+            <PickerField
+              icon="calendar"
+              value={form.date ? prettyDate(form.date) : ""}
+              placeholder="Select a date"
+              onPress={() => setSheet("formDate")}
+            />
           </View>
-          <Pressable onPress={() => setForm((f) => ({ ...f, date: ymd(new Date()) }))}>
-            <Text className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-4">
-              Reset to today
-            </Text>
-          </Pressable>
 
           {/* Reason */}
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-            Reason
-          </Text>
+          <FieldLabel>Reason</FieldLabel>
           <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 mb-4">
             <TextInput
               value={form.reason}
               onChangeText={(t) => setForm((f) => ({ ...f, reason: t }))}
-              placeholder="e.g. Corporate Party, Holiday..."
+              placeholder="e.g., Holiday, Maintenance, etc."
               placeholderTextColor="#9CA3AF"
               className="text-sm text-gray-900 dark:text-white"
             />
           </View>
 
           {/* What should be blocked? (scope) */}
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-            What should be blocked?
-          </Text>
-          <View className="flex-row flex-wrap -mx-1 mb-1">
-            {SCOPE_OPTIONS.map((opt) => {
-              const active = form.scope === opt.value;
-              return (
-                <View key={opt.value} className="w-1/2 px-1 mb-2">
-                  <Pressable
-                    onPress={() => setForm((f) => ({ ...f, scope: opt.value }))}
-                    className={`rounded-xl border p-3 ${
-                      active
-                        ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
-                        : "border-gray-200 dark:border-neutral-700"
-                    }`}
-                  >
-                    <Feather
-                      name={opt.icon}
-                      size={16}
-                      color={active ? PRIMARY : "#6B7280"}
-                    />
-                    <Text
-                      className={`text-sm font-semibold mt-1.5 ${
-                        active
-                          ? "text-[#0644C7]"
-                          : "text-gray-800 dark:text-gray-100"
-                      }`}
-                    >
-                      {opt.title}
-                    </Text>
-                    <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-                      {opt.sub}
-                    </Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
-
-          {(form.scope === "packages" || form.scope === "both") && (
-            <View className="mb-4">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Select Packages
-              </Text>
-              {loadingResources ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  Loading packages...
-                </Text>
-              ) : availablePackages.length === 0 ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  No active packages found
-                </Text>
-              ) : (
-                <View className="rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
-                  {availablePackages.map((p, idx) => {
-                    const checked = form.packageIds.includes(p.id);
-                    return (
-                      <Pressable
-                        key={p.id}
-                        onPress={() => toggleFormPackage(p.id)}
-                        className={`flex-row items-center gap-2.5 px-3.5 py-3 active:bg-gray-50 dark:active:bg-neutral-800 ${
-                          idx > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""
-                        }`}
-                      >
-                        <Feather
-                          name={checked ? "check-square" : "square"}
-                          size={18}
-                          color={checked ? PRIMARY : "#9CA3AF"}
-                        />
-                        <Text
-                          className="text-sm text-gray-800 dark:text-gray-100 flex-1"
-                          numberOfLines={1}
-                        >
-                          {p.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-          )}
-
-          {(form.scope === "rooms" || form.scope === "both") && (
-            <View className="mb-4">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Select Spaces
-              </Text>
-              {loadingResources ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  Loading spaces...
-                </Text>
-              ) : availableRooms.length === 0 ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  No available spaces found
-                </Text>
-              ) : (
-                <View className="rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
-                  {availableRooms.map((r, idx) => {
-                    const checked = form.roomIds.includes(r.id);
-                    return (
-                      <Pressable
-                        key={r.id}
-                        onPress={() => toggleFormRoom(r.id)}
-                        className={`flex-row items-center gap-2.5 px-3.5 py-3 active:bg-gray-50 dark:active:bg-neutral-800 ${
-                          idx > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""
-                        }`}
-                      >
-                        <Feather
-                          name={checked ? "check-square" : "square"}
-                          size={18}
-                          color={checked ? PRIMARY : "#9CA3AF"}
-                        />
-                        <Text
-                          className="text-sm text-gray-800 dark:text-gray-100 flex-1"
-                          numberOfLines={1}
-                        >
-                          {r.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-          )}
+          <SectionCard>
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+              What should be blocked?
+            </Text>
+            <ScopeGrid
+              scope={form.scope}
+              onChange={(scope) => setForm((f) => ({ ...f, scope }))}
+            />
+            {formResourceKinds.map((kind) => (
+              <ResourceChecklist
+                key={kind}
+                kind={kind}
+                options={resources[kind]}
+                selectedIds={form.selection[kind]}
+                loading={loadingResources}
+                showLocation={isCompanyAdmin}
+                onToggle={(id) => toggleFormResource(kind, id)}
+              />
+            ))}
+          </SectionCard>
 
           {/* Partial Day Closure */}
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-            Partial Day Closure{" "}
-            <Text className="text-gray-400 dark:text-gray-500">(Optional)</Text>
-          </Text>
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mb-2">
-            Leave both empty for full day closure. Set one or both for partial closures.
-          </Text>
-          <View className="flex-row gap-3 mb-4">
-            <View className="flex-1">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Delayed Opening Until
+          <SectionCard>
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+              Partial Day Closure{" "}
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                (Optional)
               </Text>
-              <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700">
-                <TextInput
-                  value={form.timeEnd}
-                  onChangeText={(t) => setForm((f) => ({ ...f, timeEnd: t }))}
-                  placeholder="HH:mm"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="numbers-and-punctuation"
-                  className="text-sm text-gray-900 dark:text-white"
+            </Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Leave both empty for full day closure. Set one or both for partial
+              closures.
+            </Text>
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Delayed Opening Until
+                </Text>
+                <PickerField
+                  icon="clock"
+                  value={prettyTime(form.timeEnd)}
+                  placeholder="--:-- --"
+                  onPress={() => setSheet("formTimeEnd")}
+                  onClear={() => setForm((f) => ({ ...f, timeEnd: "" }))}
                 />
+                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                  Closed until this time
+                </Text>
               </View>
-              <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                Closed until this time
-              </Text>
-            </View>
-            <View className="flex-1">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Close Starting At
-              </Text>
-              <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700">
-                <TextInput
-                  value={form.timeStart}
-                  onChangeText={(t) => setForm((f) => ({ ...f, timeStart: t }))}
-                  placeholder="HH:mm"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="numbers-and-punctuation"
-                  className="text-sm text-gray-900 dark:text-white"
+              <View className="flex-1">
+                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Close Starting At
+                </Text>
+                <PickerField
+                  icon="clock"
+                  value={prettyTime(form.timeStart)}
+                  placeholder="--:-- --"
+                  onPress={() => setSheet("formTimeStart")}
+                  onClear={() => setForm((f) => ({ ...f, timeStart: "" }))}
                 />
+                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                  Closed from this time
+                </Text>
               </View>
-              <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                Closed from this time
-              </Text>
             </View>
-          </View>
+          </SectionCard>
 
           {/* Recurring */}
           <Pressable
@@ -1585,52 +1679,39 @@ const DayOffs = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Form location picker (company admin) */}
-      <BottomSheet
-        visible={sheet === "formLocation"}
+      {/* Form date + time pickers. Each swaps the form sheet out and back so
+          only one Modal is ever presented at a time. */}
+      <DatePickerSheet
+        visible={sheet === "formDate"}
+        value={form.date || null}
+        minDate={formMinDate}
+        title="Select Date"
         onClose={() => setSheet("form")}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {locations.map((option) => {
-            const isSelected = form.locationId === option.id;
-            return (
-              <Pressable
-                key={option.id}
-                onPress={() => {
-                  // Changing location clears scope selections (they belong to
-                  // the previous location's packages/spaces).
-                  setForm((f) => ({
-                    ...f,
-                    locationId: option.id,
-                    packageIds: f.locationId === option.id ? f.packageIds : [],
-                    roomIds: f.locationId === option.id ? f.roomIds : [],
-                  }));
-                  setSheet("form");
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.name}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+        onSelect={(date) => {
+          setForm((f) => ({ ...f, date }));
+          setSheet("form");
+        }}
+      />
+      <TimePickerSheet
+        visible={sheet === "formTimeEnd"}
+        value={form.timeEnd}
+        title="Delayed Opening Until"
+        onClose={() => setSheet("form")}
+        onSelect={(time) => {
+          setForm((f) => ({ ...f, timeEnd: time }));
+          setSheet("form");
+        }}
+      />
+      <TimePickerSheet
+        visible={sheet === "formTimeStart"}
+        value={form.timeStart}
+        title="Close Starting At"
+        onClose={() => setSheet("form")}
+        onSelect={(time) => {
+          setForm((f) => ({ ...f, timeStart: time }));
+          setSheet("form");
+        }}
+      />
 
       {/* Bulk Add */}
       <BottomSheet
@@ -1735,36 +1816,25 @@ const DayOffs = () => {
             )}
           </View>
 
-          {/* Location (company admin) */}
+          {/* Location (company admin) — inline card grid, as on the web */}
           {isCompanyAdmin && (
             <>
-              <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                Location
-              </Text>
-              <Pressable
-                onPress={() => setSheet("bulkLocation")}
-                className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 mb-4"
-              >
-                <Feather name="map-pin" size={16} color={PRIMARY} />
-                <Text
-                  className={`text-sm flex-1 ${
-                    bulkLocationId == null
-                      ? "text-gray-400 dark:text-gray-500"
-                      : "text-gray-900 dark:text-white"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {bulkLocationLabel}
-                </Text>
-                <Feather name="chevron-down" size={14} color="#9CA3AF" />
-              </Pressable>
+              <FieldLabel required>Location</FieldLabel>
+              <LocationGrid
+                locations={locations}
+                selectedId={bulkLocationId}
+                onSelect={(id) => {
+                  // Selections belong to the previous location's resources.
+                  if (id !== bulkLocationId) setBulkSelection(emptySelection());
+                  setBulkLocationId(id);
+                }}
+              />
+              <View className="mb-2" />
             </>
           )}
 
           {/* Reason */}
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-            Reason (applies to all selected dates)
-          </Text>
+          <FieldLabel>Reason (applies to all selected dates)</FieldLabel>
           <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 mb-4">
             <TextInput
               value={bulkReason}
@@ -1776,179 +1846,69 @@ const DayOffs = () => {
           </View>
 
           {/* What should be blocked? (scope) */}
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-            What should be blocked?
-          </Text>
-          <View className="flex-row flex-wrap -mx-1 mb-1">
-            {SCOPE_OPTIONS.map((opt) => {
-              const active = bulkScope === opt.value;
-              return (
-                <View key={opt.value} className="w-1/2 px-1 mb-2">
-                  <Pressable
-                    onPress={() => setBulkScope(opt.value)}
-                    className={`rounded-xl border p-3 ${
-                      active
-                        ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
-                        : "border-gray-200 dark:border-neutral-700"
-                    }`}
-                  >
-                    <Feather
-                      name={opt.icon}
-                      size={16}
-                      color={active ? PRIMARY : "#6B7280"}
-                    />
-                    <Text
-                      className={`text-sm font-semibold mt-1.5 ${
-                        active
-                          ? "text-[#0644C7]"
-                          : "text-gray-800 dark:text-gray-100"
-                      }`}
-                    >
-                      {opt.title}
-                    </Text>
-                    <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-                      {opt.sub}
-                    </Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
-
-          {(bulkScope === "packages" || bulkScope === "both") && (
-            <View className="mb-4">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Select Packages
-              </Text>
-              {loadingResources ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  Loading packages...
-                </Text>
-              ) : availablePackages.length === 0 ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  No active packages found
-                </Text>
-              ) : (
-                <View className="rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
-                  {availablePackages.map((p, idx) => {
-                    const checked = bulkPackageIds.has(p.id);
-                    return (
-                      <Pressable
-                        key={p.id}
-                        onPress={() => toggleBulkPackage(p.id)}
-                        className={`flex-row items-center gap-2.5 px-3.5 py-3 active:bg-gray-50 dark:active:bg-neutral-800 ${
-                          idx > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""
-                        }`}
-                      >
-                        <Feather
-                          name={checked ? "check-square" : "square"}
-                          size={18}
-                          color={checked ? PRIMARY : "#9CA3AF"}
-                        />
-                        <Text
-                          className="text-sm text-gray-800 dark:text-gray-100 flex-1"
-                          numberOfLines={1}
-                        >
-                          {p.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-          )}
-
-          {(bulkScope === "rooms" || bulkScope === "both") && (
-            <View className="mb-4">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Select Spaces
-              </Text>
-              {loadingResources ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  Loading spaces...
-                </Text>
-              ) : availableRooms.length === 0 ? (
-                <Text className="text-sm text-gray-400 dark:text-gray-500 py-2">
-                  No available spaces found
-                </Text>
-              ) : (
-                <View className="rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
-                  {availableRooms.map((r, idx) => {
-                    const checked = bulkRoomIds.has(r.id);
-                    return (
-                      <Pressable
-                        key={r.id}
-                        onPress={() => toggleBulkRoom(r.id)}
-                        className={`flex-row items-center gap-2.5 px-3.5 py-3 active:bg-gray-50 dark:active:bg-neutral-800 ${
-                          idx > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""
-                        }`}
-                      >
-                        <Feather
-                          name={checked ? "check-square" : "square"}
-                          size={18}
-                          color={checked ? PRIMARY : "#9CA3AF"}
-                        />
-                        <Text
-                          className="text-sm text-gray-800 dark:text-gray-100 flex-1"
-                          numberOfLines={1}
-                        >
-                          {r.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-          )}
+          <SectionCard>
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+              What should be blocked?
+            </Text>
+            <ScopeGrid scope={bulkScope} onChange={setBulkScope} />
+            {bulkResourceKinds.map((kind) => (
+              <ResourceChecklist
+                key={kind}
+                kind={kind}
+                options={resources[kind]}
+                selectedIds={bulkSelection[kind]}
+                loading={loadingResources}
+                showLocation={isCompanyAdmin}
+                onToggle={(id) => toggleBulkResource(kind, id)}
+              />
+            ))}
+          </SectionCard>
 
           {/* Partial Day Closure */}
-          <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-            Partial Day Closure{" "}
-            <Text className="text-gray-400 dark:text-gray-500">(Optional)</Text>
-          </Text>
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mb-2">
-            Leave both empty for full day closure. Set one or both for partial closures.
-          </Text>
-          <View className="flex-row gap-3 mb-4">
-            <View className="flex-1">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Delayed Opening Until
+          <SectionCard>
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+              Partial Day Closure{" "}
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                (Optional)
               </Text>
-              <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700">
-                <TextInput
-                  value={bulkTimeEnd}
-                  onChangeText={setBulkTimeEnd}
-                  placeholder="HH:mm"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="numbers-and-punctuation"
-                  className="text-sm text-gray-900 dark:text-white"
+            </Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Leave both empty for full day closure. Set one or both for partial
+              closures.
+            </Text>
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Delayed Opening Until
+                </Text>
+                <PickerField
+                  icon="clock"
+                  value={prettyTime(bulkTimeEnd)}
+                  placeholder="--:-- --"
+                  onPress={() => setSheet("bulkTimeEnd")}
+                  onClear={() => setBulkTimeEnd("")}
                 />
+                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                  Closed until this time
+                </Text>
               </View>
-              <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                Closed until this time
-              </Text>
-            </View>
-            <View className="flex-1">
-              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Close Starting At
-              </Text>
-              <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700">
-                <TextInput
-                  value={bulkTimeStart}
-                  onChangeText={setBulkTimeStart}
-                  placeholder="HH:mm"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="numbers-and-punctuation"
-                  className="text-sm text-gray-900 dark:text-white"
+              <View className="flex-1">
+                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Close Starting At
+                </Text>
+                <PickerField
+                  icon="clock"
+                  value={prettyTime(bulkTimeStart)}
+                  placeholder="--:-- --"
+                  onPress={() => setSheet("bulkTimeStart")}
+                  onClear={() => setBulkTimeStart("")}
                 />
+                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                  Closed from this time
+                </Text>
               </View>
-              <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                Closed from this time
-              </Text>
             </View>
-          </View>
+          </SectionCard>
 
           {/* Recurring */}
           <Pressable
@@ -1983,49 +1943,27 @@ const DayOffs = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Bulk location picker (company admin) */}
-      <BottomSheet
-        visible={sheet === "bulkLocation"}
+      {/* Bulk time pickers */}
+      <TimePickerSheet
+        visible={sheet === "bulkTimeEnd"}
+        value={bulkTimeEnd}
+        title="Delayed Opening Until"
         onClose={() => setSheet("bulk")}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {locations.map((option) => {
-            const isSelected = bulkLocationId === option.id;
-            return (
-              <Pressable
-                key={option.id}
-                onPress={() => {
-                  if (option.id !== bulkLocationId) {
-                    setBulkPackageIds(new Set());
-                    setBulkRoomIds(new Set());
-                  }
-                  setBulkLocationId(option.id);
-                  setSheet("bulk");
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.name}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+        onSelect={(time) => {
+          setBulkTimeEnd(time);
+          setSheet("bulk");
+        }}
+      />
+      <TimePickerSheet
+        visible={sheet === "bulkTimeStart"}
+        value={bulkTimeStart}
+        title="Close Starting At"
+        onClose={() => setSheet("bulk")}
+        onSelect={(time) => {
+          setBulkTimeStart(time);
+          setSheet("bulk");
+        }}
+      />
     </View>
   );
 };

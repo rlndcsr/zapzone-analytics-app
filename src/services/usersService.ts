@@ -101,7 +101,21 @@ function fullName(first?: string | null, last?: string | null): string {
   return name || "—";
 }
 
+/** "2026-07-23T…" | "2026-07-23" → "2026-07-23". */
+function dateOnly(value: string | null | undefined): string | null {
+  const v = value?.trim();
+  return v ? v.split("T")[0] : null;
+}
+
+/**
+ * The web admin never renders these four columns blank — it derives a value
+ * from what it does know (`ManageAccounts.tsx`'s row mapper). Mirror that here
+ * so the app's table, filters and detail sheet read identically to the web:
+ * an unset employee id becomes ZAP-{id}, an unset department "Administration",
+ * an unset position the role's label, and an unset hire date the created date.
+ */
 function mapUser(raw: RawUser): StaffUser {
+  const role = raw.role ?? "attendant";
   return {
     id: raw.id,
     firstName: raw.first_name ?? "",
@@ -109,16 +123,16 @@ function mapUser(raw: RawUser): StaffUser {
     name: raw.name?.trim() || fullName(raw.first_name, raw.last_name),
     email: raw.email ?? "—",
     phone: raw.phone?.trim() || null,
-    role: raw.role ?? "attendant",
+    role,
     status: raw.status ?? "active",
     companyId: raw.company_id ?? null,
     locationId: raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || null,
-    department: raw.department?.trim() || null,
-    position: raw.position?.trim() || null,
-    employeeId: raw.employee_id?.trim() || null,
+    department: raw.department?.trim() || "Administration",
+    position: raw.position?.trim() || roleLabel(role),
+    employeeId: raw.employee_id?.trim() || `ZAP-${raw.id}`,
     shift: raw.shift?.trim() || null,
-    hireDate: raw.hire_date ?? null,
+    hireDate: dateOnly(raw.hire_date) ?? dateOnly(raw.created_at),
     lastLogin: raw.last_login ?? null,
     createdAt: raw.created_at ?? null,
   };
@@ -223,12 +237,43 @@ export async function fetchRecentStaff(
   return res.users;
 }
 
+/** Sort a merged multi-pass result the way the server would have. */
+function sortStaff(
+  users: StaffUser[],
+  sortBy: NonNullable<StaffFilters["sortBy"]>,
+  sortOrder: "asc" | "desc",
+): StaffUser[] {
+  const key = (u: StaffUser): string => {
+    switch (sortBy) {
+      case "first_name":
+        return u.firstName;
+      case "last_name":
+        return u.lastName;
+      case "email":
+        return u.email;
+      case "role":
+        return u.role;
+      case "created_at":
+        return u.createdAt ?? "";
+      case "last_login":
+        return u.lastLogin ?? "";
+    }
+  };
+  const dir = sortOrder === "desc" ? -1 : 1;
+  return [...users].sort((a, b) => key(a).localeCompare(key(b)) * dir);
+}
+
 /**
  * Every staff account matching a filter, following pagination to the last page.
  * The web Attendants page loads the full (server-scoped) attendant set once and
  * does all search/filter/sort/paginate client-side; this mirrors that so the
  * KPI aggregates (departments, ≤30-day counts) match the web exactly. Bounded
  * by `maxPages` as a runaway guard — a single location's staff is small.
+ *
+ * `GET /users` falls back to active-only when no `status` is sent, so asking
+ * for "everything" has to be two passes — otherwise deactivated accounts are
+ * silently missing and the Inactive filter and "N active" KPIs can never be
+ * right. The merged result is re-sorted because each pass is ordered on its own.
  */
 export async function fetchAllStaffUsers(
   token: string,
@@ -237,14 +282,27 @@ export async function fetchAllStaffUsers(
   perPage = 100,
   maxPages = 20,
 ): Promise<StaffUser[]> {
-  const first = await fetchStaffUsers(token, filters, 1, perPage, signal);
-  const users = [...first.users];
-  const pages = Math.min(first.lastPage, maxPages);
-  for (let page = 2; page <= pages; page += 1) {
-    const next = await fetchStaffUsers(token, filters, page, perPage, signal);
-    users.push(...next.users);
+  const passes: StaffFilters[] = filters.status
+    ? [filters]
+    : [
+        { ...filters, status: "active" },
+        { ...filters, status: "inactive" },
+      ];
+
+  const users: StaffUser[] = [];
+  for (const pass of passes) {
+    const first = await fetchStaffUsers(token, pass, 1, perPage, signal);
+    users.push(...first.users);
+    const pages = Math.min(first.lastPage, maxPages);
+    for (let page = 2; page <= pages; page += 1) {
+      const next = await fetchStaffUsers(token, pass, page, perPage, signal);
+      users.push(...next.users);
+    }
   }
-  return users;
+
+  return passes.length > 1 && filters.sortBy
+    ? sortStaff(users, filters.sortBy, filters.sortOrder ?? "asc")
+    : users;
 }
 
 /* ------------------------------------------------------------- create/edit -- */
@@ -365,14 +423,56 @@ export async function deleteStaffUser(token: string, id: number): Promise<void> 
   await apiRequest(`/api/users/${id}`, { method: "DELETE", token });
 }
 
-/** POST /api/users/{id}/resend-credentials — regenerate + email a password. */
+export type ResendCredentialsInput = {
+  passwordMode: "generate" | "custom";
+  /** Required when passwordMode is "custom"; min 8 characters (server-enforced). */
+  password?: string;
+  sendEmail: boolean;
+  /** Ask the API to return the new password so it can be shown once. */
+  returnPassword: boolean;
+};
+
+export type ResendCredentialsResult = {
+  emailSent: boolean;
+  emailError: string | null;
+  /** Only present when `returnPassword` was requested. */
+  password: string | null;
+};
+
+/**
+ * POST /api/users/{id}/resend-credentials — rotate the password and email it.
+ * Returns 200 even when the email fails (the password IS rotated either way),
+ * so callers must read `emailSent` rather than assume success.
+ */
 export async function resendStaffCredentials(
   token: string,
   id: number,
-): Promise<void> {
-  await apiRequest(`/api/users/${id}/resend-credentials`, {
+  input: ResendCredentialsInput = {
+    passwordMode: "generate",
+    sendEmail: true,
+    returnPassword: false,
+  },
+): Promise<ResendCredentialsResult> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: {
+      email_sent?: boolean;
+      email_error?: string | null;
+      generated_password?: string | null;
+    };
+  }>(`/api/users/${id}/resend-credentials`, {
     method: "POST",
     token,
-    body: { password_mode: "generate" },
+    body: {
+      password_mode: input.passwordMode,
+      ...(input.passwordMode === "custom" ? { password: input.password } : {}),
+      send_email: input.sendEmail,
+      return_password: input.returnPassword,
+    },
   });
+  return {
+    emailSent: !!res?.data?.email_sent,
+    emailError: res?.data?.email_error ?? null,
+    password: res?.data?.generated_password ?? null,
+  };
 }

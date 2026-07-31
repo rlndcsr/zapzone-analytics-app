@@ -26,9 +26,9 @@ export type DayOff = {
   roomIds: number[];
   attractionIds: number[];
   eventIds: number[];
-  /** No package/room scoping → the block covers the entire location. */
+  /** No package/room/attraction/event scoping → the block covers the whole location. */
   isLocationWide: boolean;
-  /** "Entire Location" | "N package(s)" | "N room(s)". */
+  /** "Entire Location" | "N Attractions" | "N Events" | "N Resources" | … */
   scopeLabel: string;
   /** "Full Day" | "Close Early" | "Delayed Opening" | "9:00 AM – 5:00 PM". */
   durationLabel: string;
@@ -86,20 +86,37 @@ function durationLabel(start: string | null, end: string | null): string {
   return `${s} – ${e}`;
 }
 
-function scopeLabel(packageIds: number[], roomIds: number[]): string {
-  if (packageIds.length === 0 && roomIds.length === 0) return "Entire Location";
-  const parts: string[] = [];
-  if (packageIds.length)
-    parts.push(`${packageIds.length} package${packageIds.length === 1 ? "" : "s"}`);
-  if (roomIds.length)
-    parts.push(`${roomIds.length} room${roomIds.length === 1 ? "" : "s"}`);
-  return parts.join(" · ");
+/**
+ * Same precedence as the web's `getBlockingScopeBadge`: attractions and events
+ * are exclusive scopes, so they win outright; packages/rooms collapse into a
+ * combined "N Resources" when both are set.
+ */
+function scopeLabel(
+  packageIds: number[],
+  roomIds: number[],
+  attractionIds: number[],
+  eventIds: number[],
+): string {
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (attractionIds.length) return plural(attractionIds.length, "Attraction");
+  if (eventIds.length) return plural(eventIds.length, "Event");
+  if (!packageIds.length && !roomIds.length) return "Entire Location";
+  if (packageIds.length && roomIds.length)
+    return plural(packageIds.length + roomIds.length, "Resource");
+  if (packageIds.length) return plural(packageIds.length, "Package");
+  return plural(roomIds.length, "Space");
 }
 
 function mapDayOff(raw: RawDayOff): DayOff {
   const packageIds = raw.package_ids ?? [];
   const roomIds = raw.room_ids ?? [];
-  const isLocationWide = packageIds.length === 0 && roomIds.length === 0;
+  const attractionIds = raw.attraction_ids ?? [];
+  const eventIds = raw.event_ids ?? [];
+  const isLocationWide =
+    packageIds.length === 0 &&
+    roomIds.length === 0 &&
+    attractionIds.length === 0 &&
+    eventIds.length === 0;
   return {
     id: raw.id,
     locationId: raw.location_id ?? null,
@@ -111,10 +128,10 @@ function mapDayOff(raw: RawDayOff): DayOff {
     isRecurring: !!raw.is_recurring,
     packageIds,
     roomIds,
-    attractionIds: raw.attraction_ids ?? [],
-    eventIds: raw.event_ids ?? [],
+    attractionIds,
+    eventIds,
     isLocationWide,
-    scopeLabel: scopeLabel(packageIds, roomIds),
+    scopeLabel: scopeLabel(packageIds, roomIds, attractionIds, eventIds),
     durationLabel: durationLabel(raw.time_start ?? null, raw.time_end ?? null),
   };
 }
@@ -214,6 +231,8 @@ export type DayOffPayload = {
   is_recurring?: boolean;
   package_ids?: number[] | null;
   room_ids?: number[] | null;
+  attraction_ids?: number[] | null;
+  event_ids?: number[] | null;
 };
 
 /** POST /api/day-offs — create a blocked date. */

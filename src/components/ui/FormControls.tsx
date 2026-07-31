@@ -181,6 +181,40 @@ export function ToggleRow({
 }
 
 /** A checkbox + label row (matches the web plan form's boolean flags). */
+/** Single-choice row — the checkbox's round twin, for mutually exclusive
+ *  options (the web's `<input type="radio">` groups). */
+export function RadioRow({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      className="flex-row items-center gap-2.5 py-1.5"
+    >
+      <View
+        className={`w-5 h-5 rounded-full border-2 items-center justify-center ${
+          selected
+            ? "border-[#0644C7]"
+            : "border-gray-300 dark:border-neutral-700"
+        }`}
+      >
+        {selected && <View className="w-2.5 h-2.5 rounded-full bg-[#0644C7]" />}
+      </View>
+      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1">
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export function CheckboxRow({
   label,
   checked,

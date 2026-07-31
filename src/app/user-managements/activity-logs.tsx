@@ -15,6 +15,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { SelectField, type SelectOption } from "../../components/ui/FormControls";
 import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
@@ -70,19 +72,6 @@ function timeAgo(value: string | null): string {
     month: "short",
     day: "numeric",
     year: "numeric",
-  });
-}
-
-function fullTimestamp(value: string | null): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
   });
 }
 
@@ -149,6 +138,93 @@ function actionIcon(action: string): FeatherName {
   if (a.includes("purchase") || a.includes("payment") || a.includes("paid"))
     return "shopping-cart";
   return "clock";
+}
+
+/**
+ * Compose the row's sentence the way the web's `formatActivityDescription`
+ * does for a generic action: "<Action> <resourceType> \"<resourceName>\" #<id>",
+ * then " • " for each recognised metadata detail, then the backend's own
+ * description. The web resolves resourceType from `category` (falling back to
+ * entity_type) and resourceName from `metadata.resource_name` (falling back to
+ * entity_type) — mirrored here so the same log reads identically on both.
+ *
+ * The web additionally hand-writes ~50 action-specific sentences (Booking
+ * Created, Payment Recorded, …). Those are NOT ported: this generic path is
+ * what every unrecognised action falls through to there, and it is what the
+ * screenshotted row renders.
+ */
+function activityDescription(log: ActivityLogEntry): string {
+  const meta = log.metadata ?? {};
+  const get = (key: string): unknown => meta[key];
+
+  const action = log.action.replace(/_/g, " ");
+  const resourceType = log.category || log.entityType || "general";
+  const resourceName = (get("resource_name") as string) || log.entityType || "";
+  const resourceId = log.entityId != null ? `#${log.entityId}` : "";
+
+  let description: string;
+  switch (log.action) {
+    case "created":
+      description = `Created ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "updated":
+      description = `Updated ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "deleted":
+      description = `Deleted ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "viewed":
+      description = `Viewed ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "checked_in":
+      description = `Checked in customer for ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "checked_out":
+      description = `Checked out customer from ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "purchased":
+      description = `Processed purchase of ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "logged_in":
+      description = "Logged into the system";
+      break;
+    case "logged_out":
+      description = "Logged out of the system";
+      break;
+    case "approved":
+      description = `Approved ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "rejected":
+      description = `Rejected ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "managed":
+      description = `Managed ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    case "reported":
+      description = `Generated report for ${resourceType} "${resourceName}" ${resourceId}`;
+      break;
+    default:
+      description =
+        `${action.charAt(0).toUpperCase()}${action.slice(1)} ${resourceType} "${resourceName}" ${resourceId}`.trim();
+  }
+
+  const details: string[] = [];
+  if (log.action === "logged_in" && get("ip_address"))
+    details.push(`IP: ${get("ip_address")}`);
+  if (log.action === "rejected" && get("reason"))
+    details.push(`Reason: ${get("reason")}`);
+  if (get("reference_number")) details.push(`Ref: ${get("reference_number")}`);
+  if (get("customer_name")) details.push(`Customer: ${get("customer_name")}`);
+  if (get("amount"))
+    details.push(`Amount: $${parseFloat(String(get("amount"))).toFixed(2)}`);
+  if (get("quantity")) details.push(`Qty: ${get("quantity")}`);
+  if (get("status")) details.push(`Status: ${get("status")}`);
+
+  if (details.length > 0) description += ` • ${details.join(" • ")}`;
+  if (log.description && !description.includes(log.description))
+    description += ` • ${log.description}`;
+
+  return description.trim();
 }
 
 /** Flatten a metadata object into label/value pairs (mirrors the web panel). */
@@ -378,89 +454,6 @@ function buildActivityCsv(logs: ActivityLogEntry[]): string {
   return [CSV_HEADERS.join(","), ...rows].join("\n");
 }
 
-/* ---------------------------------------------------------------- filters -- */
-
-/** Single-select filter sheet reused by every activity filter. */
-function FilterOptionSheet({
-  visible,
-  onClose,
-  title,
-  options,
-  value,
-  onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  options: { label: string; value: string }[];
-  value: string;
-  onSelect: (value: string) => void;
-}) {
-  return (
-    <BottomSheet visible={visible} onClose={onClose} title={title}>
-      <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-        {options.map((option) => {
-          const isSelected = value === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => {
-                onSelect(option.value);
-                onClose();
-              }}
-              className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-              }`}
-            >
-              <Text
-                className={`text-base font-medium ${
-                  isSelected
-                    ? "text-blue-600 dark:text-blue-400"
-                    : "text-gray-700 dark:text-gray-200"
-                }`}
-              >
-                {option.label}
-              </Text>
-              {isSelected && (
-                <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                  <Feather name="check" size={14} color="#FFFFFF" />
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
-  );
-}
-
-/** A bordered filter pill that opens a filter sheet. */
-function FilterChip({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: FeatherName;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-    >
-      <Feather name={icon} size={16} color={PRIMARY} />
-      <Text
-        className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
-      <Feather name="chevron-down" size={14} color="#9CA3AF" />
-    </Pressable>
-  );
-}
-
 const CategoryBadge = ({ category }: { category: string }) => {
   const cls = toneClass(category);
   return (
@@ -498,37 +491,48 @@ const RoleBadge = ({
   );
 };
 
+/** Faint separator dot the web puts between inline meta chips. */
+const Dot = () => <Text className="text-gray-300 dark:text-neutral-600">•</Text>;
+
+/**
+ * One activity row — the mobile twin of the web LocationActivityLogs row:
+ * severity-tinted action icon, actor + user-type badge, the composed
+ * description, then a wrapped chip line (category · severity · ID · when ·
+ * View Details). Details expand INLINE into the metadata panel + raw JSON
+ * rather than opening a separate sheet, exactly as on the web.
+ */
 const LogCard = ({
   log,
   showLocation,
-  onPress,
+  expanded,
+  onToggleExpanded,
 }: {
   log: ActivityLogEntry;
   showLocation: boolean;
-  onPress: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) => {
   const severity = determineSeverity(log.action);
   const iconTone = SEVERITY_ICON_TONE[severity];
+  const metadataItems = formatMetadataItems(log.metadata);
+  const hasMetadata = metadataItems.length > 0;
   return (
-    <Pressable
-      onPress={onPress}
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
+    <View
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
       style={CARD_SHADOW}
-      accessibilityRole="button"
-      accessibilityLabel={`Activity: ${log.action}`}
     >
       <View className="flex-row items-start gap-3">
         {/* Severity-tinted action icon */}
         <View
-          className="w-10 h-10 rounded-xl items-center justify-center"
+          className="w-9 h-9 rounded-lg items-center justify-center"
           style={{ backgroundColor: iconTone.bg }}
         >
-          <Feather name={actionIcon(log.action)} size={18} color={iconTone.tint} />
+          <Feather name={actionIcon(log.action)} size={16} color={iconTone.tint} />
         </View>
 
         <View className="flex-1 min-w-0">
-          {/* Row 1: actor name + role/user-type badge */}
-          <View className="flex-row items-center gap-2 flex-wrap">
+          {/* Row 1: actor name + user-type badge (+ location, as on the web) */}
+          <View className="flex-row items-center gap-2 flex-wrap mb-1.5">
             <Text
               className="text-base font-bold text-gray-900 dark:text-white shrink"
               numberOfLines={1}
@@ -536,74 +540,159 @@ const LogCard = ({
               {log.actor.name}
             </Text>
             <RoleBadge role={log.actor.role} label={log.actor.roleLabel} />
-          </View>
-
-          {/* Row 2: description */}
-          <Text
-            className="text-sm text-gray-700 dark:text-gray-200 mt-1 leading-relaxed"
-            numberOfLines={2}
-          >
-            {log.description || log.action}
-          </Text>
-
-          {/* Row 3: type + severity + entity id chips */}
-          <View className="flex-row items-center gap-2 flex-wrap mt-2">
-            <CategoryBadge category={log.category} />
-            <SeverityBadge severity={severity} />
-            {log.entityId != null && (
-              <Text className="text-[10px] font-mono text-gray-500 dark:text-gray-400">
-                ID: {log.entityId}
-              </Text>
+            {showLocation && !!log.locationName && (
+              <>
+                <Dot />
+                <View className="flex-row items-center gap-1 shrink">
+                  <Feather name="map-pin" size={11} color="#9CA3AF" />
+                  <Text
+                    className="text-xs text-gray-500 dark:text-gray-400"
+                    numberOfLines={1}
+                  >
+                    {log.locationName}
+                  </Text>
+                </View>
+              </>
             )}
           </View>
 
-          {/* Location (company admin only) */}
-          {showLocation && !!log.locationName && (
-            <View className="flex-row items-center gap-1.5 mt-2">
-              <Feather name="map-pin" size={12} color="#9CA3AF" />
-              <Text
-                className="text-xs text-gray-500 dark:text-gray-400"
-                numberOfLines={1}
-              >
-                {log.locationName}
-              </Text>
-            </View>
-          )}
+          {/* Row 2: composed description */}
+          <Text className="text-sm text-gray-700 dark:text-gray-200 mb-2 leading-relaxed">
+            {activityDescription(log)}
+          </Text>
 
-          {/* Footer: relative time + view-details affordance */}
-          <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-            <View className="flex-row items-center gap-1.5">
-              <Feather name="clock" size={12} color="#9CA3AF" />
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
-                {timeAgo(log.createdAt)}
-              </Text>
-            </View>
-            <View className="flex-row items-center gap-1">
-              <Text className="text-[11px] font-medium text-blue-600 dark:text-blue-400">
-                View details
-              </Text>
-              <Feather name="chevron-right" size={12} color="#2563EB" />
-            </View>
+          {/* Row 3: chips — category · severity · ID · when · View Details */}
+          <View className="flex-row items-center gap-2 flex-wrap">
+            <CategoryBadge category={log.category} />
+            <SeverityBadge severity={severity} />
+            {log.entityId != null && (
+              <>
+                <Dot />
+                <Text className="text-[11px] font-mono text-gray-600 dark:text-gray-400">
+                  ID: {log.entityId}
+                </Text>
+              </>
+            )}
+            <Dot />
+            <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+              {timeAgo(log.createdAt)}
+            </Text>
+            {hasMetadata && (
+              <>
+                <Dot />
+                <Pressable
+                  onPress={onToggleExpanded}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded }}
+                  className={`flex-row items-center gap-1 px-2 py-1 rounded-full ${
+                    expanded
+                      ? "bg-blue-100 dark:bg-blue-900/30"
+                      : "bg-gray-100 dark:bg-neutral-800"
+                  }`}
+                >
+                  <Feather
+                    name="info"
+                    size={11}
+                    color={expanded ? PRIMARY : "#6B7280"}
+                  />
+                  <Text
+                    className={`text-[11px] font-medium ${
+                      expanded
+                        ? "text-[#0644C7] dark:text-blue-300"
+                        : "text-gray-600 dark:text-gray-300"
+                    }`}
+                  >
+                    {expanded ? "Hide Details" : "View Details"}
+                  </Text>
+                  <Feather
+                    name={expanded ? "chevron-up" : "chevron-down"}
+                    size={11}
+                    color={expanded ? PRIMARY : "#6B7280"}
+                  />
+                </Pressable>
+              </>
+            )}
           </View>
+
+          {expanded && hasMetadata && (
+            <MetadataPanel items={metadataItems} metadata={log.metadata} />
+          )}
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 };
 
-const DetailRow = ({ label, value }: { label: string; value: string }) => (
-  <View className="flex-row items-start justify-between py-2 border-b border-gray-100 dark:border-neutral-800">
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-      {label}
-    </Text>
-    <Text
-      className="text-sm text-gray-800 dark:text-gray-100 flex-1 text-right ml-4"
-      selectable
-    >
-      {value}
-    </Text>
-  </View>
-);
+/** The web's expanded "Activity Metadata" block: a two-column key/value grid
+ *  above a collapsible raw-JSON dump. */
+const MetadataPanel = ({
+  items,
+  metadata,
+}: {
+  items: { key: string; value: string }[];
+  metadata: Record<string, unknown> | null;
+}) => {
+  const [showRaw, setShowRaw] = useState(false);
+  return (
+    <View className="mt-4 p-4 rounded-xl bg-gray-50 dark:bg-neutral-800/40 border border-gray-200 dark:border-neutral-700">
+      <View className="flex-row items-center gap-2 mb-3">
+        <Feather name="info" size={13} color="#6B7280" />
+        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+          Activity Metadata
+        </Text>
+      </View>
+
+      <View className="flex-row flex-wrap -mx-1.5">
+        {items.map((item) => (
+          <View key={item.key} className="w-1/2 px-1.5 mb-3">
+            <Text className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              {item.key}
+            </Text>
+            <Text
+              className="text-sm text-gray-800 dark:text-gray-100"
+              selectable
+            >
+              {item.value}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <Pressable
+        onPress={() => setShowRaw((s) => !s)}
+        className="flex-row items-center gap-1 mt-1"
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showRaw }}
+      >
+        <Feather
+          name={showRaw ? "chevron-down" : "chevron-right"}
+          size={12}
+          color="#6B7280"
+        />
+        <Text className="text-xs text-gray-500 dark:text-gray-400">
+          View Raw JSON
+        </Text>
+      </Pressable>
+      {showRaw && (
+        <ScrollView
+          style={{ maxHeight: 240 }}
+          nestedScrollEnabled
+          className="mt-2 p-3 rounded-lg bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700"
+        >
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <Text
+              className="text-xs text-gray-800 dark:text-gray-100"
+              style={{ fontFamily: "monospace" }}
+              selectable
+            >
+              {JSON.stringify(metadata, null, 2)}
+            </Text>
+          </ScrollView>
+        </ScrollView>
+      )}
+    </View>
+  );
+};
 
 const ActivityLogs = () => {
   const insets = useSafeAreaInsets();
@@ -621,14 +710,21 @@ const ActivityLogs = () => {
   const [dateRange, setDateRange] = useState("all");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [sheet, setSheet] = useState<
-    null | "action" | "resource" | "attendant" | "daterange"
-  >(null);
+  const [sheet, setSheet] = useState<null | "filters">(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [refreshing, setRefreshing] = useState(false);
   const [statsNonce, setStatsNonce] = useState(0);
-  const [selected, setSelected] = useState<ActivityLogEntry | null>(null);
+  // Rows whose metadata panel is expanded (the web's `expandedLogIds`).
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const toggleExpanded = useCallback((id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const [exporting, setExporting] = useState(false);
 
   // Location comes from the global workspace selector (shown below the header),
@@ -782,24 +878,13 @@ const ActivityLogs = () => {
     setPage(1);
   }, []);
 
-  const hasActiveFilters =
-    actionFilter !== "all" ||
-    resourceTypeFilter !== "all" ||
-    attendantFilter !== "all" ||
-    dateRange !== "all" ||
-    search.trim() !== "";
-
-  const actionLabel =
-    actionFilter === "all" ? "All Actions" : formatActionLabel(actionFilter);
-  const resourceLabel =
-    resourceTypeFilter === "all" ? "All Types" : capitalize(resourceTypeFilter);
-  const attendantLabel =
-    attendantFilter === "all"
-      ? "All Attendants"
-      : (attendantOptions.find((o) => o.value === attendantFilter)?.label ??
-        "Attendant");
-  const dateRangeLabel =
-    DATE_RANGE_OPTIONS.find((o) => o.value === dateRange)?.label ?? "All Time";
+  /** Non-default filters — drives the "Filters (N)" pill badge. Search isn't
+   *  counted: it has its own visible field above the pill. */
+  const activeFilterCount =
+    (actionFilter !== "all" ? 1 : 0) +
+    (resourceTypeFilter !== "all" ? 1 : 0) +
+    (attendantFilter !== "all" ? 1 : 0) +
+    (dateRange !== "all" ? 1 : 0);
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -817,7 +902,22 @@ const ActivityLogs = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Activity Log
           </Text>
-          <View style={{ width: 36 }} />
+          {/* Export CSV lives in the header as an icon-only action. */}
+          <Pressable
+            onPress={exportCsv}
+            disabled={exporting}
+            className={`bg-gray-100 dark:bg-neutral-800 p-2 rounded-full ${
+              exporting ? "opacity-60" : ""
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel="Export CSV"
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color={headerIcon} />
+            ) : (
+              <Feather name="download" size={20} color={headerIcon} />
+            )}
+          </Pressable>
         </View>
       </View>
 
@@ -942,68 +1042,20 @@ const ActivityLogs = () => {
             )}
           </View>
 
-          {/* Filters — Action, Resource Type, Attendant, Date Range (mirrors web) */}
-          <View className="flex-row gap-3 mb-3">
-            <FilterChip
-              icon="zap"
-              label={actionLabel}
-              onPress={() => setSheet("action")}
+          {/* Filters — one pill opening the full panel (same as the catalog
+              screens); every filter lives inside the sheet. */}
+          <FilterPill>
+            <PillSegment
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={sheet === "filters" || activeFilterCount > 0}
+              onPress={() => setSheet("filters")}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
-            <FilterChip
-              icon="layers"
-              label={resourceLabel}
-              onPress={() => setSheet("resource")}
-            />
-          </View>
-          <View className="flex-row gap-3 mb-3">
-            <FilterChip
-              icon="user"
-              label={attendantLabel}
-              onPress={() => setSheet("attendant")}
-            />
-            <FilterChip
-              icon="calendar"
-              label={dateRangeLabel}
-              onPress={() => setSheet("daterange")}
-            />
-          </View>
-
-          {/* Actions — Clear Filters + Export CSV (mirrors the web toolbar) */}
-          <View className="flex-row gap-3 mb-5">
-            <Pressable
-              onPress={clearFilters}
-              disabled={!hasActiveFilters}
-              className={`flex-1 h-12 rounded-xl items-center justify-center flex-row gap-2 border ${
-                hasActiveFilters
-                  ? "border-gray-200 dark:border-neutral-700"
-                  : "border-gray-100 dark:border-neutral-800 opacity-50"
-              }`}
-              accessibilityRole="button"
-              accessibilityLabel="Clear Filters"
-            >
-              <Feather name="x-circle" size={16} color="#6B7280" />
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-sm">
-                Clear Filters
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={exportCsv}
-              disabled={exporting}
-              className={`flex-1 h-12 rounded-xl items-center justify-center flex-row gap-2 ${
-                exporting ? "bg-[#0644C7]/60" : "bg-[#0644C7]"
-              }`}
-              accessibilityRole="button"
-              accessibilityLabel="Export CSV"
-            >
-              {exporting ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Feather name="download" size={16} color="#FFFFFF" />
-              )}
-              <Text className="text-white font-semibold text-sm">Export CSV</Text>
-            </Pressable>
-          </View>
+          </FilterPill>
 
           {/* List header */}
           {!loading && !error && (
@@ -1047,7 +1099,8 @@ const ActivityLogs = () => {
                     key={log.id}
                     log={log}
                     showLocation={isCompanyAdmin}
-                    onPress={() => setSelected(log)}
+                    expanded={expandedIds.has(log.id)}
+                    onToggleExpanded={() => toggleExpanded(log.id)}
                   />
                 ))}
 
@@ -1065,114 +1118,66 @@ const ActivityLogs = () => {
         </View>
       </ScrollView>
 
-      {/* Action filter */}
-      <FilterOptionSheet
-        visible={sheet === "action"}
-        onClose={() => setSheet(null)}
-        title="Filter by Action"
-        options={actionOptions}
-        value={actionFilter}
-        onSelect={setActionFilter}
-      />
-
-      {/* Resource Type filter */}
-      <FilterOptionSheet
-        visible={sheet === "resource"}
-        onClose={() => setSheet(null)}
-        title="Filter by Resource Type"
-        options={resourceTypeOptions}
-        value={resourceTypeFilter}
-        onSelect={setResourceTypeFilter}
-      />
-
-      {/* Attendant filter */}
-      <FilterOptionSheet
-        visible={sheet === "attendant"}
-        onClose={() => setSheet(null)}
-        title="Filter by Attendant"
-        options={attendantOptions}
-        value={attendantFilter}
-        onSelect={setAttendantFilter}
-      />
-
-      {/* Date range filter */}
-      <FilterOptionSheet
-        visible={sheet === "daterange"}
-        onClose={() => setSheet(null)}
-        title="Filter by Date Range"
-        options={DATE_RANGE_OPTIONS}
-        value={dateRange}
-        onSelect={setDateRange}
-      />
-
-      {/* Activity detail */}
+      {/* Filters — one panel holding every filter (same shape as the catalog
+          screens' FiltersSheet). Values apply live to the list behind it. */}
       <BottomSheet
-        visible={selected !== null}
-        onClose={() => setSelected(null)}
-        title={selected?.action ?? "Activity"}
+        visible={sheet === "filters"}
+        onClose={() => setSheet(null)}
+        title="Filters"
       >
-        <ScrollView className="px-5 pb-8" showsVerticalScrollIndicator={false}>
-          {selected && (
-            <>
-              <View className="flex-row items-center gap-2 mb-3">
-                <CategoryBadge category={selected.category} />
-                <SeverityBadge severity={determineSeverity(selected.action)} />
-                <Text className="text-xs text-gray-400 dark:text-gray-500 flex-1 text-right">
-                  {timeAgo(selected.createdAt)}
+        <ScrollView
+          className="px-5"
+          contentContainerStyle={{ paddingBottom: 28 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View className="gap-4 pt-1">
+            <SelectField
+              label="Action"
+              value={actionFilter}
+              options={actionOptions as SelectOption[]}
+              onSelect={(v) => setActionFilter(String(v))}
+            />
+            <SelectField
+              label="Resource Type"
+              value={resourceTypeFilter}
+              options={resourceTypeOptions as SelectOption[]}
+              onSelect={(v) => setResourceTypeFilter(String(v))}
+            />
+            <SelectField
+              label="Attendant"
+              value={attendantFilter}
+              options={attendantOptions as SelectOption[]}
+              onSelect={(v) => setAttendantFilter(String(v))}
+            />
+            <SelectField
+              label="Date Range"
+              value={dateRange}
+              options={DATE_RANGE_OPTIONS as SelectOption[]}
+              onSelect={(v) => setDateRange(String(v))}
+            />
+
+            {/* Footer: Clear Filters (secondary) + Done (primary) */}
+            <View className="flex-row gap-3 mt-2">
+              <Pressable
+                onPress={clearFilters}
+                className="flex-1 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700 active:opacity-70"
+              >
+                <Text className="text-gray-700 dark:text-gray-200 font-semibold text-base">
+                  Clear Filters
                 </Text>
-              </View>
-              <Text className="text-sm text-gray-700 dark:text-gray-200 mb-4">
-                {selected.description || selected.action}
-              </Text>
-
-              <DetailRow label="Action" value={selected.action} />
-              <DetailRow label="User" value={selected.actor.name} />
-              <DetailRow label="Role" value={selected.actor.roleLabel} />
-              {!!selected.actor.email && (
-                <DetailRow label="Email" value={selected.actor.email} />
-              )}
-              {!!selected.locationName && (
-                <DetailRow label="Location" value={selected.locationName} />
-              )}
-              {!!selected.entityType && (
-                <DetailRow
-                  label="Entity"
-                  value={`${selected.entityType}${
-                    selected.entityId != null ? ` #${selected.entityId}` : ""
-                  }`}
-                />
-              )}
-              {!!selected.ipAddress && (
-                <DetailRow label="IP Address" value={selected.ipAddress} />
-              )}
-              <DetailRow label="When" value={fullTimestamp(selected.createdAt)} />
-              {!!selected.userAgent && (
-                <DetailRow label="Device" value={selected.userAgent} />
-              )}
-
-              {/* Metadata (previously unused) — mirrors the web metadata panel. */}
-              {(() => {
-                const items = formatMetadataItems(selected.metadata);
-                if (items.length === 0) return null;
-                return (
-                  <>
-                    <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mt-5 mb-1">
-                      Metadata
-                    </Text>
-                    {items.map((item) => (
-                      <DetailRow
-                        key={item.key}
-                        label={item.key}
-                        value={item.value}
-                      />
-                    ))}
-                  </>
-                );
-              })()}
-            </>
-          )}
+              </Pressable>
+              <Pressable
+                onPress={() => setSheet(null)}
+                className="flex-1 h-12 rounded-xl items-center justify-center bg-[#0644C7] active:opacity-90"
+              >
+                <Text className="text-white font-semibold text-base">Done</Text>
+              </Pressable>
+            </View>
+          </View>
         </ScrollView>
       </BottomSheet>
+
     </View>
   );
 };

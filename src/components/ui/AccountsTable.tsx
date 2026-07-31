@@ -269,20 +269,21 @@ function buildColumns(h: Handlers): TableColumn<StaffUser>[] {
  * is a tap-to-change dropdown and the Actions cell carries the same inline
  * view / edit / resend-credentials / delete controls as the web admin table.
  * Selection checkboxes and the header select-all come from SelectableTable.
+ *
+ * Rows are deliberately inert: details and editing are reached only from the
+ * Actions cell, so a stray tap while scrolling can't open an account.
  */
 export function AccountsTable({
   accounts,
   selectedIds,
   onToggleRow,
   onToggleAll,
-  onRowPress,
   ...handlers
 }: {
   accounts: StaffUser[];
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
-  onRowPress: (u: StaffUser) => void;
 } & Handlers) {
   const columns = useMemo(
     () => buildColumns(handlers),
@@ -304,7 +305,6 @@ export function AccountsTable({
       columns={columns}
       rows={accounts}
       rowId={(u) => u.id}
-      onRowPress={onRowPress}
       selectedIds={selectedIds}
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}

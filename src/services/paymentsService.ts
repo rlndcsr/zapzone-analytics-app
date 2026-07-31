@@ -23,6 +23,8 @@ export type PaymentRow = {
   customerName: string;
   customerEmail: string;
   amount: number;
+  /** Raw backend `method` ("authorize.net" / "cash" / …) — drives eligibility. */
+  method: string;
   methodLabel: string;
   status: PaymentStatus;
   statusLabel: string;
@@ -31,6 +33,17 @@ export type PaymentRow = {
   createdAt: string | null;
   /** Set for trashed rows (the DELETED AT column). */
   deletedAt: string | null;
+  /** What this payment is for — refund/void/details all need the link. */
+  payableId: number | null;
+  payableType: string | null;
+  notes: string | null;
+  paidAt: string | null;
+  refundedAt: string | null;
+  updatedAt: string | null;
+  /** Customer signature captured at checkout (storage path or data URI). */
+  signatureImage: string | null;
+  /** null when the payment predates terms capture. */
+  termsAccepted: boolean | null;
 };
 
 type RawPayable = {
@@ -46,11 +59,18 @@ type RawPayment = {
   id: number;
   transaction_id?: string | null;
   payment_id?: string | null;
+  payable_id?: number | null;
   payable_type?: string | null;
   amount?: number | string | null;
   method?: string | null;
   status?: string | null;
+  notes?: string | null;
+  signature_image?: string | null;
+  terms_accepted?: boolean | null;
+  paid_at?: string | null;
+  refunded_at?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
   deleted_at?: string | null;
   customer?: {
     first_name?: string | null;
@@ -118,6 +138,7 @@ function mapPayment(raw: RawPayment): PaymentRow {
     customerName: name,
     customerEmail: email,
     amount: Number(raw.amount ?? 0),
+    method: (raw.method ?? "").toLowerCase(),
     methodLabel: methodLabel(raw.method),
     status: raw.status ?? "pending",
     statusLabel: humanize(raw.status) || "Pending",
@@ -125,7 +146,65 @@ function mapPayment(raw: RawPayment): PaymentRow {
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
     deletedAt: raw.deleted_at ?? null,
+    payableId: raw.payable_id ?? null,
+    payableType: raw.payable_type ?? null,
+    notes: raw.notes?.trim() || null,
+    paidAt: raw.paid_at ?? null,
+    refundedAt: raw.refunded_at ?? null,
+    updatedAt: raw.updated_at ?? null,
+    signatureImage: raw.signature_image?.trim() || null,
+    termsAccepted: raw.terms_accepted ?? null,
   };
+}
+
+/* ------------------------------------------------- per-row action eligibility */
+
+/** A payment can only be acted on when it is linked to something payable. */
+const hasPayable = (p: PaymentRow) => p.payableId != null && !!p.payableType;
+
+/** Gateway refund — settled Authorize.Net charges only (web `canRefund`). */
+export function canRefund(p: PaymentRow): boolean {
+  return hasPayable(p) && p.status === "completed" && p.method === "authorize.net";
+}
+
+/**
+ * Void — Authorize.Net only, before settlement. The web treats anything older
+ * than two days as settled and hides the action (web `canVoid`).
+ */
+export function canVoid(p: PaymentRow): boolean {
+  if (!hasPayable(p)) return false;
+  if (p.status !== "completed" && p.status !== "pending") return false;
+  if (p.method !== "authorize.net") return false;
+  const when = p.paidAt ?? p.createdAt;
+  if (when) {
+    const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+    if (Date.now() - new Date(when).getTime() > twoDaysMs) return false;
+  }
+  return true;
+}
+
+/** Manual refund — cash / in-store / card, recorded without a gateway call. */
+export function canManualRefund(p: PaymentRow): boolean {
+  return (
+    hasPayable(p) &&
+    p.status === "completed" &&
+    ["in-store", "cash", "card"].includes(p.method)
+  );
+}
+
+/** Refund/void bookkeeping rows the backend writes alongside the original. */
+export function isRefundRecord(p: PaymentRow): boolean {
+  return p.status === "refunded" && !!p.notes?.includes("Refund from Payment #");
+}
+
+export function isVoidRecord(p: PaymentRow): boolean {
+  return p.status === "voided" && !!p.notes?.includes("Void of Payment #");
+}
+
+/** "#123" out of "Refund from Payment #123" / "Void of Payment #123". */
+export function originalPaymentId(notes: string | null): string | null {
+  const match = notes?.match(/(?:Refund from|Void of) Payment #(\d+)/);
+  return match ? match[1] : null;
 }
 
 function looksLikePayment(v: unknown): v is RawPayment {
@@ -172,6 +251,65 @@ export async function fetchTrashedPayments(token: string): Promise<PaymentList> 
   });
   const { rows, total } = extractPayments(res);
   return { rows: rows.map(mapPayment), total };
+}
+
+/* ------------------------------------------------------------ row actions -- */
+
+/** PATCH /api/payments/{id}/refund — gateway refund via Authorize.Net. */
+export async function refundPayment(
+  token: string,
+  id: number,
+  amount?: number,
+): Promise<void> {
+  await apiRequest(`/api/payments/${id}/refund`, {
+    method: "PATCH",
+    token,
+    body: amount != null ? { amount } : {},
+  });
+}
+
+/** PATCH /api/payments/{id}/manual-refund — record a cash / in-store refund. */
+export async function manualRefundPayment(
+  token: string,
+  id: number,
+  body: { amount?: number; reason?: string } = {},
+): Promise<void> {
+  await apiRequest(`/api/payments/${id}/manual-refund`, {
+    method: "PATCH",
+    token,
+    body,
+  });
+}
+
+/** PATCH /api/payments/{id}/void — cancel an unsettled Authorize.Net charge. */
+export async function voidPayment(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/payments/${id}/void`, { method: "PATCH", token });
+}
+
+/** DELETE /api/payments/{id} — soft delete (restorable from "View Deleted"). */
+export async function deletePayment(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/payments/${id}`, { method: "DELETE", token });
+}
+
+/**
+ * Absolute URL for one payment's invoice PDF. `stream` picks the view endpoint
+ * (inline) over the download one, matching the web's `getInvoice(id, stream)`.
+ * Returns a PDF, so callers fetch it with expo-file-system, not apiRequest.
+ */
+export function invoiceUrl(paymentId: number, stream = false): string {
+  return apiUrl(`/api/payments/${paymentId}/invoice${stream ? "/view" : ""}`);
+}
+
+/**
+ * Absolute URL for one PDF containing the selected payments' invoices — the
+ * endpoint behind the web's "View Selected" / "Download Selected" bulk actions
+ * (`exportBulkInvoices`). `view_mode=individual` gives one invoice per page.
+ */
+export function bulkInvoicesUrl(paymentIds: number[], stream = false): string {
+  const qs = new URLSearchParams({ view_mode: "individual" });
+  paymentIds.forEach((id) => qs.append("payment_ids[]", String(id)));
+  if (stream) qs.append("stream", "true");
+  return apiUrl(`/api/payments/invoices/export?${qs.toString()}`);
 }
 
 /** PATCH /api/payments/{id}/restore — restore a soft-deleted payment. */

@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,14 +22,17 @@ import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import {
   CheckboxRow,
+  RadioRow,
   SelectField,
   type SelectOption,
   TextField,
 } from "../../components/ui/FormControls";
 import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { NavRowCard } from "../../components/ui/NavRowCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -50,6 +54,7 @@ import {
   roleLabel,
   toggleStaffStatus,
   updateStaff,
+  type ResendCredentialsResult,
   type StaffRole,
   type StaffStatus,
   type StaffUser,
@@ -125,7 +130,11 @@ function within30Days(created: string | null): boolean {
 
 function timeValue(value: string | null): number {
   if (!value) return 0;
-  const t = new Date(value).getTime();
+  // A bare YYYY-MM-DD must be read as a LOCAL calendar date; JS parses it as
+  // UTC midnight, which lands on the previous day west of Greenwich and would
+  // drop a matching row from the hire-date range filter.
+  const s = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value;
+  const t = new Date(s).getTime();
   return Number.isNaN(t) ? 0 : t;
 }
 
@@ -193,6 +202,33 @@ function formatLastLogin(value: string | null): string {
   return formatDate(value);
 }
 
+/* The detail sheet prints raw dates the way the web AccountViewModal does —
+ * `toLocaleDateString()` / `toLocaleString()` — rather than the compact
+ * "Jul 22, 2026" / "Today" the list and table use. */
+
+/** Calendar date (no instant): "2026-07-22" → "7/22/2026", parsed locally so a
+ *  UTC-midnight value can't render as the previous day. */
+function formatCalendarDate(value: string | null): string {
+  if (!value) return "—";
+  const [y, m, d] = value.split("T")[0].split("-").map(Number);
+  if (!y || !m || !d) return "—";
+  return new Date(y, m - 1, d).toLocaleDateString("en-US");
+}
+
+/** Timestamp → "7/23/2026", in the viewer's timezone. */
+function formatInstantDate(value: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US");
+}
+
+/** Timestamp → "7/31/2026, 10:11:25 AM", in the viewer's timezone. */
+function formatInstantDateTime(value: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US");
+}
+
 function escapeCsv(value: string): string {
   const s = value ?? "";
   if (s === "") return "";
@@ -243,27 +279,66 @@ const RoleBadge = ({ role }: { role: StaffRole }) => {
   );
 };
 
-const DetailRow = ({
+/** Tinted rounded icon square shown left of a sheet title, matching the web
+ *  modal headers (blue for view/edit, amber for the credentials reset). */
+const SheetIconTile = ({
+  icon,
+  tint,
+  bg,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  tint: string;
+  bg: string;
+}) => (
+  <View
+    className="w-9 h-9 rounded-lg items-center justify-center shrink-0"
+    style={{ backgroundColor: bg }}
+  >
+    <Feather name={icon} size={18} color={tint} />
+  </View>
+);
+
+/** One labelled value in the account detail sheet — the mobile twin of the web
+ *  AccountViewModal's `Field` (grey icon tile, caption label, value beneath). */
+const DetailField = ({
   icon,
   label,
   value,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
-  value: string;
+  value: string | null;
 }) => (
-  <View className="flex-row items-center gap-3 py-2.5">
-    <View className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center">
-      <Feather name={icon} size={15} color={PRIMARY} />
+  <View className="w-1/2 px-1.5 mb-4">
+    <View className="flex-row items-start gap-2.5">
+      <View className="w-7 h-7 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center mt-0.5">
+        <Feather name={icon} size={14} color="#6B7280" />
+      </View>
+      <View className="flex-1">
+        <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+          {label}
+        </Text>
+        <Text className="text-sm text-gray-900 dark:text-white">
+          {value || "—"}
+        </Text>
+      </View>
     </View>
-    <View className="flex-1">
-      <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-        {label}
-      </Text>
-      <Text className="text-sm text-gray-800 dark:text-gray-100" numberOfLines={2}>
-        {value}
-      </Text>
-    </View>
+  </View>
+);
+
+/** Uppercase section heading in the detail sheet (CONTACT / DATES / …). */
+const DetailSection = ({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) => (
+  <View className="mb-2">
+    <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+      {title}
+    </Text>
+    <View className="flex-row flex-wrap -mx-1.5">{children}</View>
   </View>
 );
 
@@ -358,90 +433,49 @@ const AccountCard = ({
   </Pressable>
 );
 
-function FilterOptionSheet<T extends string>({
-  visible,
-  onClose,
-  title,
-  options,
-  value,
-  onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  options: { label: string; value: T }[];
-  value: T;
-  onSelect: (value: T) => void;
-}) {
-  return (
-    <BottomSheet visible={visible} onClose={onClose} title={title}>
-      <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-        {options.map((option) => {
-          const isSelected = value === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => {
-                onSelect(option.value);
-                onClose();
-              }}
-              className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-              }`}
-            >
-              <Text
-                className={`text-base font-medium ${
-                  isSelected
-                    ? "text-blue-600 dark:text-blue-400"
-                    : "text-gray-700 dark:text-gray-200"
-                }`}
-              >
-                {option.label}
-              </Text>
-              {isSelected && (
-                <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                  <Feather name="check" size={14} color="#FFFFFF" />
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
-  );
-}
-
-const FilterChip = ({
+/** Full-width page action button — the same h-12 outlined/filled pair the Day
+ *  Offs screen uses for its toolbar, so every screen's actions read alike. */
+const ActionButton = ({
   icon,
   label,
   onPress,
-  badge,
+  variant = "secondary",
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
   onPress: () => void;
-  badge?: number;
-}) => (
-  <Pressable
-    onPress={onPress}
-    className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-  >
-    <Feather name={icon} size={16} color={PRIMARY} />
-    <Text
-      className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-      numberOfLines={1}
+  variant?: "primary" | "secondary";
+}) => {
+  const primary = variant === "primary";
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      className={`h-12 rounded-xl items-center justify-center flex-row gap-2 mb-3 ${
+        primary
+          ? "bg-[#0644C7] active:opacity-90"
+          : "border border-gray-200 dark:border-neutral-700"
+      }`}
     >
-      {label}
-    </Text>
-    {badge && badge > 0 ? (
-      <View className="bg-[#0644C7] rounded-full min-w-5 h-5 px-1 items-center justify-center">
-        <Text className="text-[10px] font-bold text-white">{badge}</Text>
-      </View>
-    ) : (
-      <Feather name="chevron-down" size={14} color="#9CA3AF" />
-    )}
-  </Pressable>
-);
+      <Feather
+        name={icon}
+        size={primary ? 18 : 16}
+        color={primary ? "#FFFFFF" : PRIMARY}
+      />
+      <Text
+        numberOfLines={1}
+        className={
+          primary
+            ? "text-white font-semibold text-base"
+            : "text-gray-700 dark:text-gray-200 font-semibold text-sm"
+        }
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+};
 
 /** A single chip in the table's bulk-action toolbar (Activate / Deactivate /
  *  Delete). Mirrors the bookings bulk bar's chip look. */
@@ -572,22 +606,30 @@ const ManageAccounts = () => {
 
   const [sheet, setSheet] = useState<
     | null
-    | "status"
-    | "userType"
-    | "department"
-    | "location"
-    | "lastLogin"
-    | "more"
+    | "filters"
     | "createdRange"
     | "hireRange"
     | "actions"
     | "view"
     | "form"
     | "invite"
+    | "resend"
     | "statusPicker"
   >(null);
   const [selected, setSelected] = useState<StaffUser | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+
+  // Resend-credentials sheet (mirrors the web ResendCredentialsModal).
+  const [resendMode, setResendMode] = useState<"generate" | "custom">("generate");
+  const [resendPassword, setResendPassword] = useState("");
+  const [resendSendEmail, setResendSendEmail] = useState(true);
+  const [resendReturnPassword, setResendReturnPassword] = useState(true);
+  const [resendConfirmed, setResendConfirmed] = useState(false);
+  const [resendError, setResendError] = useState<string | null>(null);
+  const [resendResult, setResendResult] = useState<ResendCredentialsResult | null>(
+    null,
+  );
+  const [resendShowPassword, setResendShowPassword] = useState(false);
 
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
@@ -774,8 +816,16 @@ const ManageAccounts = () => {
     debouncedSearch,
   ]);
 
-  const moreActiveCount =
-    (createdFrom || createdTo ? 1 : 0) + (hireFrom || hireTo ? 1 : 0);
+  /** Non-default filters — drives the "Filters (N)" pill badge. Search isn't
+   *  counted: it has its own visible field above the pill. */
+  const activeFilterCount =
+    (statusFilter !== "all" ? 1 : 0) +
+    (userTypeFilter !== "all" ? 1 : 0) +
+    (departmentFilter !== "all" ? 1 : 0) +
+    (locationFilter !== "all" ? 1 : 0) +
+    (lastLoginFilter !== "any" ? 1 : 0) +
+    (createdFrom || createdTo ? 1 : 0) +
+    (hireFrom || hireTo ? 1 : 0);
 
   const total = filtered.length;
   const paged = useMemo(
@@ -992,22 +1042,52 @@ const ManageAccounts = () => {
     [afterMutation],
   );
 
-  const runResendFor = useCallback(async (user: StaffUser) => {
+  /** Open the resend sheet for a user, reset to its default state. */
+  const openResendFor = useCallback((user: StaffUser) => {
+    setSelected(user);
+    setResendMode("generate");
+    setResendPassword("");
+    setResendSendEmail(true);
+    setResendReturnPassword(true);
+    setResendConfirmed(false);
+    setResendError(null);
+    setResendResult(null);
+    setResendShowPassword(false);
+    setSheet("resend");
+  }, []);
+
+  const submitResend = useCallback(async () => {
+    if (!selected) return;
+    setResendError(null);
+    if (resendMode === "custom" && resendPassword.length < 8) {
+      setResendError("Custom password must be at least 8 characters.");
+      return;
+    }
     setActionBusy(true);
     try {
-      await resendStaffCredentials(getToken() ?? "", user.id);
-      Alert.alert("Credentials sent", `A new password was emailed to ${user.email}.`);
-      setSheet(null);
-      setSelected(null);
+      const result = await resendStaffCredentials(getToken() ?? "", selected.id, {
+        passwordMode: resendMode,
+        password: resendPassword,
+        sendEmail: resendSendEmail,
+        returnPassword: resendReturnPassword,
+      });
+      // The password IS rotated even when the email bounces, so always show the
+      // result step rather than treating a failed send as a failed reset.
+      setResendResult(result);
     } catch (err) {
-      Alert.alert(
-        "Send failed",
-        err instanceof Error ? err.message : "Could not resend credentials.",
+      setResendError(
+        err instanceof Error ? err.message : "Could not reset credentials.",
       );
     } finally {
       setActionBusy(false);
     }
-  }, []);
+  }, [
+    selected,
+    resendMode,
+    resendPassword,
+    resendSendEmail,
+    resendReturnPassword,
+  ]);
 
   const confirmDeleteFor = useCallback(
     (user: StaffUser) => {
@@ -1222,18 +1302,6 @@ const ManageAccounts = () => {
     }
   }, [filtered]);
 
-  /* ---- filter chip labels ---- */
-
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Statuses";
-  const userTypeLabel =
-    USER_TYPE_OPTIONS.find((o) => o.value === userTypeFilter)?.label ?? "All Types";
-  const departmentLabel =
-    departmentFilter === "all" ? "All Departments" : departmentFilter;
-  const locationLabel =
-    locationFilter === "all" ? "All Locations" : locationFilter;
-  const lastLoginLabel =
-    LAST_LOGIN_OPTIONS.find((o) => o.value === lastLoginFilter)?.label ?? "Any Time";
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -1251,7 +1319,26 @@ const ManageAccounts = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Manage Accounts
           </Text>
-          <View style={{ width: 36 }} />
+          {/* Export CSV lives in the header as an icon-only action. */}
+          {canManage ? (
+            <Pressable
+              onPress={exportCsv}
+              disabled={exporting}
+              className={`bg-gray-100 dark:bg-neutral-800 p-2 rounded-full ${
+                exporting ? "opacity-60" : ""
+              }`}
+              accessibilityRole="button"
+              accessibilityLabel="Export CSV"
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color={headerIcon} />
+              ) : (
+                <Feather name="download" size={20} color={headerIcon} />
+              )}
+            </Pressable>
+          ) : (
+            <View style={{ width: 36 }} />
+          )}
         </View>
       </View>
 
@@ -1285,88 +1372,40 @@ const ManageAccounts = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Sub-navigation */}
-          <View className="flex-row gap-3 mb-3">
-            <Pressable
+          {/* Page actions — the same full-width NavRowCard the Bookings module
+              uses for Space Schedule, stacked above the primary button. */}
+          <View className="gap-3 mb-3">
+            <NavRowCard
+              icon="activity"
+              title="Activity Log"
+              desc="Review staff account activity"
               onPress={() =>
                 router.push("/user-managements/activity-logs" as never)
               }
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="activity" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                Activity Log
-              </Text>
-              <Feather name="chevron-right" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
+            />
+            <NavRowCard
+              icon="calendar"
+              title="Day Offs"
+              desc="Manage blocked dates and holidays"
               onPress={() => router.push("/user-managements/day-offs" as never)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                Day Offs
-              </Text>
-              <Feather name="chevron-right" size={14} color="#9CA3AF" />
-            </Pressable>
+            />
+            {canManage && (
+              <NavRowCard
+                icon="send"
+                title="Send Invitation"
+                desc="Invite a new staff member by email"
+                onPress={openInvite}
+              />
+            )}
           </View>
 
-          {/* Primary action — Create Staff Account */}
           {canManage && (
-            <Pressable
+            <ActionButton
+              icon="user-plus"
+              label="Create Staff Account"
               onPress={openCreate}
-              className="h-12 rounded-xl items-center justify-center flex-row gap-2 bg-[#0644C7] mb-3"
-              accessibilityRole="button"
-              accessibilityLabel="Create Staff Account"
-            >
-              <Feather name="user-plus" size={18} color="#FFFFFF" />
-              <Text numberOfLines={1} className="text-white font-semibold text-base">
-                Create Staff Account
-              </Text>
-            </Pressable>
-          )}
-
-          {/* Secondary actions — Send Invitation, Export CSV */}
-          {canManage && (
-            <View className="flex-row gap-3 mb-3">
-              <Pressable
-                onPress={openInvite}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800"
-              >
-                <Feather name="send" size={16} color={PRIMARY} />
-                <Text
-                  numberOfLines={1}
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                >
-                  Send Invitation
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={exportCsv}
-                disabled={exporting}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800"
-              >
-                {exporting ? (
-                  <ActivityIndicator size="small" color={PRIMARY} />
-                ) : (
-                  <Feather name="download" size={16} color={PRIMARY} />
-                )}
-                <Text
-                  numberOfLines={1}
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200"
-                >
-                  Export CSV
-                </Text>
-              </Pressable>
-            </View>
+              variant="primary"
+            />
           )}
 
           {/* Error state */}
@@ -1434,57 +1473,20 @@ const ManageAccounts = () => {
             )}
           </View>
 
-          {/* Filters */}
-          <View className="flex-row gap-3 mb-3">
-            <FilterChip
-              icon="check-circle"
-              label={statusLabel}
-              onPress={() => setSheet("status")}
+          {/* Filters — one pill opening the full panel (same as the catalog
+              screens); every filter lives inside the sheet. */}
+          <FilterPill>
+            <PillSegment
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={sheet === "filters" || activeFilterCount > 0}
+              onPress={() => setSheet("filters")}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
-            <FilterChip
-              icon="tag"
-              label={userTypeLabel}
-              onPress={() => setSheet("userType")}
-            />
-          </View>
-          <View className="flex-row gap-3 mb-3">
-            <FilterChip
-              icon="grid"
-              label={departmentLabel}
-              onPress={() => setSheet("department")}
-            />
-            <FilterChip
-              icon="map-pin"
-              label={locationLabel}
-              onPress={() => setSheet("location")}
-            />
-          </View>
-          <View className="flex-row gap-3 mb-3">
-            <FilterChip
-              icon="clock"
-              label={lastLoginLabel}
-              onPress={() => setSheet("lastLogin")}
-            />
-            <FilterChip
-              icon="filter"
-              label="More Filters"
-              onPress={() => setSheet("more")}
-              badge={moreActiveCount}
-            />
-          </View>
-
-          {hasActiveFilters && (
-            <Pressable
-              onPress={clearFilters}
-              className="h-11 rounded-xl items-center justify-center flex-row gap-2 border border-gray-200 dark:border-neutral-700 mb-5"
-            >
-              <Feather name="x-circle" size={15} color="#6B7280" />
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-sm">
-                Clear Filters
-              </Text>
-            </Pressable>
-          )}
-          {!hasActiveFilters && <View className="mb-2" />}
+          </FilterPill>
 
           {/* List header + top pagination (below the title, same state as bottom) */}
           {!loading && !error && (
@@ -1593,10 +1595,6 @@ const ManageAccounts = () => {
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
-                    onRowPress={(u) => {
-                      setSelected(u);
-                      setSheet("actions");
-                    }}
                     currentUserId={currentUser?.id}
                     canManage={canManage}
                     isCompanyAdmin={isCompanyAdmin}
@@ -1609,7 +1607,7 @@ const ManageAccounts = () => {
                       setSelected(u);
                       setSheet("statusPicker");
                     }}
-                    onResend={runResendFor}
+                    onResend={openResendFor}
                     onDelete={confirmDeleteFor}
                   />
                 ) : (
@@ -1639,53 +1637,12 @@ const ManageAccounts = () => {
         </View>
       </ScrollView>
 
-      {/* Filter sheets */}
-      <FilterOptionSheet
-        visible={sheet === "status"}
-        onClose={() => setSheet(null)}
-        title="Filter by Status"
-        options={STATUS_OPTIONS as { label: string; value: StatusFilter }[]}
-        value={statusFilter}
-        onSelect={setStatusFilter}
-      />
-      <FilterOptionSheet
-        visible={sheet === "userType"}
-        onClose={() => setSheet(null)}
-        title="Filter by User Type"
-        options={USER_TYPE_OPTIONS as { label: string; value: UserTypeFilter }[]}
-        value={userTypeFilter}
-        onSelect={setUserTypeFilter}
-      />
-      <FilterOptionSheet
-        visible={sheet === "department"}
-        onClose={() => setSheet(null)}
-        title="Filter by Department"
-        options={departmentOptions}
-        value={departmentFilter}
-        onSelect={setDepartmentFilter}
-      />
-      <FilterOptionSheet
-        visible={sheet === "location"}
-        onClose={() => setSheet(null)}
-        title="Filter by Location"
-        options={locationFilterOptions}
-        value={locationFilter}
-        onSelect={setLocationFilter}
-      />
-      <FilterOptionSheet
-        visible={sheet === "lastLogin"}
-        onClose={() => setSheet(null)}
-        title="Filter by Last Login"
-        options={LAST_LOGIN_OPTIONS as { label: string; value: LastLoginFilter }[]}
-        value={lastLoginFilter}
-        onSelect={setLastLoginFilter}
-      />
-
-      {/* More filters — Created Date + Hire Date ranges */}
+      {/* Filters — one panel holding every filter (same shape as the catalog
+          screens' FiltersSheet). Values apply live to the list behind it. */}
       <BottomSheet
-        visible={sheet === "more"}
+        visible={sheet === "filters"}
         onClose={() => setSheet(null)}
-        title="More Filters"
+        title="Filters"
       >
         <ScrollView
           className="px-5"
@@ -1693,7 +1650,38 @@ const ManageAccounts = () => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View className="gap-4 pt-2">
+          <View className="gap-4 pt-1">
+            <SelectField
+              label="Status"
+              value={statusFilter}
+              options={STATUS_OPTIONS as SelectOption[]}
+              onSelect={(v) => setStatusFilter(v as StatusFilter)}
+            />
+            <SelectField
+              label="User Type"
+              value={userTypeFilter}
+              options={USER_TYPE_OPTIONS as SelectOption[]}
+              onSelect={(v) => setUserTypeFilter(v as UserTypeFilter)}
+            />
+            <SelectField
+              label="Department"
+              value={departmentFilter}
+              options={departmentOptions}
+              onSelect={(v) => setDepartmentFilter(String(v))}
+            />
+            <SelectField
+              label="Location"
+              value={locationFilter}
+              options={locationFilterOptions}
+              onSelect={(v) => setLocationFilter(String(v))}
+            />
+            <SelectField
+              label="Last Login"
+              value={lastLoginFilter}
+              options={LAST_LOGIN_OPTIONS as SelectOption[]}
+              onSelect={(v) => setLastLoginFilter(v as LastLoginFilter)}
+            />
+
             <View>
               <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                 Created Date
@@ -1738,23 +1726,19 @@ const ManageAccounts = () => {
               </View>
             </View>
 
+            {/* Footer: Clear Filters (secondary) + Done (primary) */}
             <View className="flex-row gap-3 mt-2">
               <Pressable
-                onPress={() => {
-                  setCreatedFrom("");
-                  setCreatedTo("");
-                  setHireFrom("");
-                  setHireTo("");
-                }}
-                className="flex-1 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700"
+                onPress={clearFilters}
+                className="flex-1 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700 active:opacity-70"
               >
                 <Text className="text-gray-700 dark:text-gray-200 font-semibold text-base">
-                  Clear
+                  Clear Filters
                 </Text>
               </Pressable>
               <Pressable
                 onPress={() => setSheet(null)}
-                className="flex-1 h-12 rounded-xl items-center justify-center bg-[#0644C7]"
+                className="flex-1 h-12 rounded-xl items-center justify-center bg-[#0644C7] active:opacity-90"
               >
                 <Text className="text-white font-semibold text-base">Done</Text>
               </Pressable>
@@ -1767,22 +1751,22 @@ const ManageAccounts = () => {
         visible={sheet === "createdRange"}
         initialStart={createdFrom}
         initialEnd={createdTo}
-        onClose={() => setSheet("more")}
+        onClose={() => setSheet("filters")}
         onApply={(start, end) => {
           setCreatedFrom(start);
           setCreatedTo(end);
-          setSheet("more");
+          setSheet("filters");
         }}
       />
       <DateRangeSheet
         visible={sheet === "hireRange"}
         initialStart={hireFrom}
         initialEnd={hireTo}
-        onClose={() => setSheet("more")}
+        onClose={() => setSheet("filters")}
         onApply={(start, end) => {
           setHireFrom(start);
           setHireTo(end);
-          setSheet("more");
+          setSheet("filters");
         }}
       />
 
@@ -1850,7 +1834,7 @@ const ManageAccounts = () => {
 
                   {isCompanyAdmin && (
                     <Pressable
-                      onPress={() => selected && runResendFor(selected)}
+                      onPress={() => selected && openResendFor(selected)}
                       className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
                     >
                       <Feather name="key" size={18} color={PRIMARY} />
@@ -1925,63 +1909,89 @@ const ManageAccounts = () => {
         </View>
       </BottomSheet>
 
-      {/* View detail sheet */}
+      {/* View detail sheet — the web AccountViewModal's sections and fields.
+          Closes straight out (never back to the actions sheet), so tapping the
+          table's eye icon shows exactly one sheet. */}
       <BottomSheet
         visible={sheet === "view"}
-        onClose={() => setSheet("actions")}
+        onClose={() => setSheet(null)}
         title={selected?.name ?? "Account"}
+        subtitle={
+          selected
+            ? [selected.status, selected.employeeId, roleLabel(selected.role)]
+                .filter(Boolean)
+                .join(" · ")
+            : undefined
+        }
+        icon={<SheetIconTile icon="user" tint={PRIMARY} bg="#0644C71A" />}
       >
         {selected && (
           <ScrollView className="px-5 pb-8" showsVerticalScrollIndicator={false}>
-            <View className="flex-row items-center gap-2 mb-2">
-              <RoleBadge role={selected.role} />
+            <View className="flex-row items-center gap-2 mb-5">
               <StatusBadge status={selected.status} />
-              {!!selected.employeeId && (
-                <Text className="text-xs text-gray-400 dark:text-gray-500">
-                  {selected.employeeId}
-                </Text>
-              )}
+              <RoleBadge role={selected.role} />
             </View>
 
-            <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-4 mb-1">
-              Contact
-            </Text>
-            <DetailRow icon="mail" label="Email" value={selected.email} />
-            <DetailRow icon="phone" label="Phone" value={selected.phone ?? "—"} />
+            <DetailSection title="Contact">
+              <DetailField icon="mail" label="Email" value={selected.email} />
+              <DetailField icon="phone" label="Phone" value={selected.phone} />
+            </DetailSection>
 
-            <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-4 mb-1">
-              Role & Location
-            </Text>
-            <DetailRow icon="tag" label="User Type" value={roleLabel(selected.role)} />
-            <DetailRow
-              icon="map-pin"
-              label="Location"
-              value={selected.locationName ?? "—"}
-            />
-            <DetailRow
-              icon="briefcase"
-              label="Position"
-              value={selected.position ?? "—"}
-            />
-            <DetailRow
-              icon="grid"
-              label="Department"
-              value={selected.department ?? "—"}
-            />
+            <DetailSection title="Role & Department">
+              <DetailField
+                icon="shield"
+                label="Role"
+                value={roleLabel(selected.role)}
+              />
+              <DetailField
+                icon="briefcase"
+                label="Position"
+                value={selected.position}
+              />
+              <DetailField
+                icon="home"
+                label="Department"
+                value={selected.department}
+              />
+              <DetailField icon="clock" label="Shift" value={selected.shift} />
+              <DetailField
+                icon="hash"
+                label="Employee ID"
+                value={selected.employeeId}
+              />
+              <DetailField
+                icon="map-pin"
+                label="Location"
+                value={selected.locationName}
+              />
+            </DetailSection>
 
-            <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-4 mb-1">
-              Activity
-            </Text>
-            <DetailRow
-              icon="clock"
-              label="Last Login"
-              value={formatLastLogin(selected.lastLogin)}
-            />
-            <DetailRow
-              icon="user-plus"
-              label="Created"
-              value={formatDate(selected.createdAt)}
-            />
+            <DetailSection title="Dates">
+              <DetailField
+                icon="calendar"
+                label="Hire Date"
+                value={formatCalendarDate(selected.hireDate)}
+              />
+              <DetailField
+                icon="calendar"
+                label="Created"
+                value={formatInstantDate(selected.createdAt)}
+              />
+              {!!selected.lastLogin && (
+                <DetailField
+                  icon="log-in"
+                  label="Last Login"
+                  value={formatInstantDateTime(selected.lastLogin)}
+                />
+              )}
+            </DetailSection>
+
+            <Pressable
+              onPress={() => setSheet(null)}
+              className="h-12 rounded-xl items-center justify-center bg-[#0644C7] active:opacity-90 mt-2"
+            >
+              <Text className="text-base font-semibold text-white">Close</Text>
+            </Pressable>
           </ScrollView>
         )}
       </BottomSheet>
@@ -1991,6 +2001,18 @@ const ManageAccounts = () => {
         visible={sheet === "form"}
         onClose={() => (saving ? undefined : setSheet(null))}
         title={isEditing ? "Edit Account" : "Create Staff Account"}
+        subtitle={
+          isEditing && selected
+            ? [selected.name, selected.employeeId].filter(Boolean).join(" · ")
+            : undefined
+        }
+        icon={
+          <SheetIconTile
+            icon={isEditing ? "edit-2" : "user-plus"}
+            tint={PRIMARY}
+            bg="#0644C71A"
+          />
+        }
       >
         <ScrollView
           className="px-5"
@@ -2150,19 +2172,268 @@ const ManageAccounts = () => {
               </>
             )}
 
-            <Pressable
-              onPress={saveForm}
-              disabled={saving}
-              className={`mt-2 h-12 rounded-xl items-center justify-center flex-row gap-2 ${
-                saving ? "bg-[#0644C7]/60" : "bg-[#0644C7]"
-              }`}
-            >
-              {saving && <ActivityIndicator color="#FFFFFF" size="small" />}
-              <Text className="text-white font-semibold text-base">
-                {isEditing ? "Save Changes" : "Create Staff Account"}
-              </Text>
-            </Pressable>
+            {/* Footer: Cancel + primary, as the web modal pairs them. */}
+            <View className="flex-row gap-3 mt-2">
+              <Pressable
+                onPress={() => setSheet(null)}
+                disabled={saving}
+                className={`flex-1 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700 active:opacity-70 ${
+                  saving ? "opacity-50" : ""
+                }`}
+              >
+                <Text className="text-gray-700 dark:text-gray-200 font-semibold text-base">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={saveForm}
+                disabled={saving}
+                className={`flex-1 h-12 rounded-xl items-center justify-center flex-row gap-2 ${
+                  saving ? "bg-[#0644C7]/60" : "bg-[#0644C7] active:opacity-90"
+                }`}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Feather
+                    name={isEditing ? "edit-2" : "user-plus"}
+                    size={16}
+                    color="#FFFFFF"
+                  />
+                )}
+                <Text
+                  numberOfLines={1}
+                  className="text-white font-semibold text-base"
+                >
+                  {isEditing ? "Save changes" : "Create account"}
+                </Text>
+              </Pressable>
+            </View>
           </View>
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Resend credentials sheet — mirrors the web ResendCredentialsModal:
+          warning, password mode, delivery options, an explicit confirmation,
+          then a result step that reveals the password once. */}
+      <BottomSheet
+        visible={sheet === "resend"}
+        onClose={() => (actionBusy ? undefined : setSheet(null))}
+        title={resendResult ? "Credentials reset" : "Resend credentials"}
+        subtitle={selected?.name}
+        icon={<SheetIconTile icon="key" tint="#B45309" bg="#FEF3C7" />}
+      >
+        <ScrollView
+          className="px-5"
+          contentContainerStyle={{ paddingBottom: 28 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {resendResult ? (
+            <View className="gap-4 pt-1">
+              <View
+                className={`flex-row items-start gap-2 rounded-xl border p-3 ${
+                  resendResult.emailSent
+                    ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/40"
+                    : "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/40"
+                }`}
+              >
+                <Feather
+                  name={resendResult.emailSent ? "check-circle" : "alert-triangle"}
+                  size={18}
+                  color={resendResult.emailSent ? "#10B981" : "#D97706"}
+                />
+                <View className="flex-1">
+                  <Text
+                    className={`text-sm font-semibold ${
+                      resendResult.emailSent
+                        ? "text-emerald-800 dark:text-emerald-300"
+                        : "text-amber-800 dark:text-amber-300"
+                    }`}
+                  >
+                    Password rotated successfully.
+                  </Text>
+                  <Text
+                    className={`text-sm mt-0.5 ${
+                      resendResult.emailSent
+                        ? "text-emerald-700 dark:text-emerald-400"
+                        : "text-amber-700 dark:text-amber-400"
+                    }`}
+                  >
+                    {resendResult.emailSent
+                      ? `New credentials emailed to ${selected?.email}.`
+                      : "Email could not be delivered — share the password manually."}
+                  </Text>
+                </View>
+              </View>
+
+              {!resendResult.emailSent && !!resendResult.emailError && (
+                <View className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 rounded-xl p-3">
+                  <Text className="text-sm text-amber-800 dark:text-amber-300">
+                    {resendResult.emailError}
+                  </Text>
+                </View>
+              )}
+
+              {!!resendResult.password && (
+                <View>
+                  <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                    New password
+                  </Text>
+                  <View className="flex-row gap-2">
+                    <View className="flex-1 flex-row items-center justify-between bg-gray-50 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl px-3.5 py-3">
+                      <Text
+                        className="text-sm text-gray-900 dark:text-white flex-1"
+                        style={{ fontFamily: "monospace" }}
+                        numberOfLines={1}
+                      >
+                        {resendShowPassword
+                          ? resendResult.password
+                          : "••••••••••••"}
+                      </Text>
+                      <Pressable
+                        onPress={() => setResendShowPassword((s) => !s)}
+                        hitSlop={10}
+                        accessibilityLabel={
+                          resendShowPassword ? "Hide password" : "Show password"
+                        }
+                      >
+                        <Feather
+                          name={resendShowPassword ? "eye-off" : "eye"}
+                          size={16}
+                          color="#6B7280"
+                        />
+                      </Pressable>
+                    </View>
+                    <Pressable
+                      onPress={async () => {
+                        await Clipboard.setStringAsync(resendResult.password!);
+                        Alert.alert("Copied", "Password copied to the clipboard.");
+                      }}
+                      className="w-12 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                      accessibilityLabel="Copy password"
+                    >
+                      <Feather name="copy" size={16} color={PRIMARY} />
+                    </Pressable>
+                  </View>
+                  <View className="flex-row items-start gap-1.5 mt-2">
+                    <Feather name="alert-triangle" size={13} color="#B45309" />
+                    <Text className="text-xs text-amber-700 dark:text-amber-400 flex-1">
+                      This password will not be shown again.
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              <Pressable
+                onPress={() => setSheet(null)}
+                className="h-12 rounded-xl items-center justify-center bg-[#0644C7] active:opacity-90 mt-1"
+              >
+                <Text className="text-base font-semibold text-white">Done</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View className="gap-4 pt-1">
+              <View className="flex-row items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 rounded-xl p-3">
+                <Feather name="alert-triangle" size={16} color="#D97706" />
+                <Text className="text-sm text-amber-800 dark:text-amber-300 flex-1">
+                  This will <Text className="font-bold">replace</Text>{" "}
+                  {selected?.name}&rsquo;s current password. Their existing login
+                  will stop working immediately.
+                </Text>
+              </View>
+
+              {!!resendError && (
+                <View className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-xl p-3">
+                  <Text className="text-sm text-red-700 dark:text-red-400">
+                    {resendError}
+                  </Text>
+                </View>
+              )}
+
+              <View>
+                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                  New password
+                </Text>
+                <RadioRow
+                  label="Generate a strong password"
+                  selected={resendMode === "generate"}
+                  onPress={() => setResendMode("generate")}
+                />
+                <RadioRow
+                  label="Set a custom password"
+                  selected={resendMode === "custom"}
+                  onPress={() => setResendMode("custom")}
+                />
+                {resendMode === "custom" && (
+                  <View className="mt-2">
+                    <TextField
+                      value={resendPassword}
+                      onChangeText={setResendPassword}
+                      placeholder="Min 8 characters"
+                      autoCapitalize="none"
+                    />
+                  </View>
+                )}
+              </View>
+
+              <View className="border-t border-gray-100 dark:border-neutral-800 pt-4 gap-2">
+                <CheckboxRow
+                  label="Email new credentials to the user"
+                  checked={resendSendEmail}
+                  onToggle={() => setResendSendEmail((v) => !v)}
+                />
+                <CheckboxRow
+                  label="Show me the password after reset"
+                  checked={resendReturnPassword}
+                  onToggle={() => setResendReturnPassword((v) => !v)}
+                />
+              </View>
+
+              <View className="border-t border-gray-100 dark:border-neutral-800 pt-4">
+                <CheckboxRow
+                  label="I understand this will replace the user's password."
+                  checked={resendConfirmed}
+                  onToggle={() => setResendConfirmed((v) => !v)}
+                />
+              </View>
+
+              <View className="flex-row gap-3">
+                <Pressable
+                  onPress={() => setSheet(null)}
+                  disabled={actionBusy}
+                  className={`flex-1 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700 active:opacity-70 ${
+                    actionBusy ? "opacity-50" : ""
+                  }`}
+                >
+                  <Text className="text-gray-700 dark:text-gray-200 font-semibold text-base">
+                    Cancel
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={submitResend}
+                  disabled={actionBusy || !resendConfirmed}
+                  className={`flex-1 h-12 rounded-xl items-center justify-center flex-row gap-2 bg-[#0644C7] ${
+                    actionBusy || !resendConfirmed
+                      ? "opacity-50"
+                      : "active:opacity-90"
+                  }`}
+                >
+                  {actionBusy ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Feather name="key" size={16} color="#FFFFFF" />
+                  )}
+                  <Text
+                    numberOfLines={1}
+                    className="text-white font-semibold text-base"
+                  >
+                    {actionBusy ? "Resetting..." : "Reset & email"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
         </ScrollView>
       </BottomSheet>
 

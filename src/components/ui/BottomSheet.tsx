@@ -27,6 +27,10 @@ type BottomSheetProps = {
   visible: boolean;
   onClose: () => void;
   title: string;
+  /** Secondary line under the title (e.g. "Devin Decator · ZAP-14"). */
+  subtitle?: string;
+  /** Tinted icon tile left of the title, mirroring the web modal headers. */
+  icon?: React.ReactNode;
   children: React.ReactNode;
 };
 
@@ -34,6 +38,8 @@ export function BottomSheet({
   visible,
   onClose,
   title,
+  subtitle,
+  icon,
   children,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
@@ -113,13 +119,24 @@ export function BottomSheet({
             <GestureDetector gesture={dragGesture}>
               <View className="pb-1">
                 <View className="w-10 h-1 rounded-full bg-gray-300 self-center mt-3" />
-                <View className="flex-row items-center justify-between px-6 pt-4 pb-3">
+                <View className="flex-row items-center justify-between px-6 pt-4 pb-3 gap-3">
+                  {icon}
                   {/* flex-1 lets long titles wrap instead of pushing the close
                       button off-screen; pr-4 keeps a gap. Short titles are
                       unaffected (still left-aligned with the button at right). */}
-                  <Text className="text-lg font-bold text-gray-900 dark:text-white flex-1 pr-4">
-                    {title}
-                  </Text>
+                  <View className="flex-1 pr-4">
+                    <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                      {title}
+                    </Text>
+                    {!!subtitle && (
+                      <Text
+                        className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
+                        numberOfLines={1}
+                      >
+                        {subtitle}
+                      </Text>
+                    )}
+                  </View>
                   <Pressable onPress={onClose} className="p-1 shrink-0">
                     <Text className="text-xl text-gray-500 dark:text-gray-400">✕</Text>
                   </Pressable>

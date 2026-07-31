@@ -1,20 +1,17 @@
 import { Feather } from "@expo/vector-icons";
-import { memo, type ComponentProps, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { memo, useMemo, type ComponentProps } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import type { PaymentRow } from "../../services/paymentsService";
+import {
+  isRefundRecord,
+  isVoidRecord,
+  originalPaymentId,
+} from "../../services/paymentsService";
+import type { ColumnMeta } from "./ColumnsSheet";
+import { SelectableTable, type TableColumn } from "./SelectableTable";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
-const HEADER_MIN_HEIGHT = 48;
-const ROW_MIN_HEIGHT = 64;
-
+const PRIMARY = "#0644C7";
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 const MUTED = "#9CA3AF";
 
@@ -86,229 +83,357 @@ function typeIcon(typeLabel: string): FeatherName {
   return "tag";
 }
 
-type RowContext = { onView: () => void };
+/* ------------------------------------------------------------------ columns -- */
 
-type Column = {
-  key: string;
-  label: string;
-  width: number;
-  render: (p: PaymentRow, ctx: RowContext) => ReactNode;
+/**
+ * Toggleable columns, in the web Columns dropdown's order and grouping.
+ * Transaction and Actions are locked visible — without them a row can't be
+ * identified or acted on.
+ */
+export const PAYMENT_COLUMN_META: ColumnMeta[] = [
+  { key: "paymentId", label: "Payment ID", group: "Identifiers", lockVisible: false },
+  { key: "transaction", label: "Transaction", group: "Identifiers", lockVisible: true },
+  { key: "type", label: "Type", group: "Source", lockVisible: false },
+  { key: "customer", label: "Customer", group: "Customer", lockVisible: false },
+  { key: "amount", label: "Amount", group: "Payment", lockVisible: false },
+  { key: "method", label: "Method", group: "Payment", lockVisible: false },
+  { key: "status", label: "Status", group: "Status", lockVisible: false },
+  { key: "location", label: "Location", group: "Location", lockVisible: false },
+  { key: "date", label: "Date", group: "Dates", lockVisible: false },
+  { key: "paidAt", label: "Paid At", group: "Dates", lockVisible: false },
+  { key: "refundedAt", label: "Refunded At", group: "Dates", lockVisible: false },
+  { key: "updatedAt", label: "Updated At", group: "Dates", lockVisible: false },
+  { key: "notes", label: "Notes", group: "Details", lockVisible: false },
+  { key: "actions", label: "Actions", group: "Details", lockVisible: true },
+];
+
+/** Columns shown before the user touches the Columns picker (matches the web). */
+export const DEFAULT_PAYMENT_COLUMNS = [
+  "transaction",
+  "type",
+  "customer",
+  "amount",
+  "method",
+  "status",
+  "location",
+  "date",
+  "actions",
+];
+
+/** Per-row action callbacks — the trailing Actions cell is the only way in. */
+export type PaymentRowActions = {
+  onSignature: (p: PaymentRow) => void;
+  onInvoice: (p: PaymentRow) => void;
+  onMore: (p: PaymentRow) => void;
 };
 
-const COLUMNS: Column[] = [
-  {
-    key: "transaction",
-    label: "Transaction",
-    width: 170,
-    render: (p) => (
-      <View>
-        <Text
-          numberOfLines={1}
-          className="text-sm font-semibold text-[#0644C7] dark:text-blue-300"
-        >
-          {p.reference}
-        </Text>
-        <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-          ID: {p.id}
-        </Text>
-      </View>
-    ),
-  },
-  {
-    key: "type",
-    label: "Type",
-    width: 230,
-    render: (p) => (
-      <View className="flex-row items-center gap-2.5">
-        <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
-          <Feather name={typeIcon(p.typeLabel)} size={15} color="#0644C7" />
-        </View>
-        <View className="flex-1">
+const IconButton = ({
+  icon,
+  label,
+  busy,
+  onPress,
+}: {
+  icon: FeatherName;
+  label: string;
+  busy?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    disabled={busy}
+    hitSlop={4}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className="w-8 h-8 rounded-lg items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+  >
+    {busy ? (
+      <ActivityIndicator size="small" color={PRIMARY} />
+    ) : (
+      <Feather name={icon} size={15} color="#6B7280" />
+    )}
+  </Pressable>
+);
+
+function buildColumns(
+  actions: PaymentRowActions,
+  invoiceBusyId: number | null,
+): Record<string, TableColumn<PaymentRow>> {
+  return {
+    paymentId: {
+      key: "paymentId",
+      label: "Payment ID",
+      width: 110,
+      render: (p) => <Text className={CELL_TEXT}>#{p.id}</Text>,
+    },
+    transaction: {
+      key: "transaction",
+      label: "Transaction",
+      width: 190,
+      render: (p) => {
+        // Refund/void bookkeeping rows point back at the payment they undo.
+        const original = originalPaymentId(p.notes);
+        const refund = isRefundRecord(p);
+        const voided = isVoidRecord(p);
+        return (
+          <View>
+            <Text
+              numberOfLines={1}
+              className="text-sm font-semibold text-[#0644C7] dark:text-blue-300"
+            >
+              {p.reference}
+            </Text>
+            <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+              ID: {p.id}
+              {original && refund ? `  ↩ from #${original}` : ""}
+              {original && voided ? `  ✕ from #${original}` : ""}
+            </Text>
+          </View>
+        );
+      },
+    },
+    type: {
+      key: "type",
+      label: "Type",
+      width: 230,
+      render: (p) => {
+        const refund = isRefundRecord(p);
+        const voided = isVoidRecord(p);
+        return (
+          <View className="flex-row items-center gap-2.5">
+            <View
+              className={`w-8 h-8 rounded-lg items-center justify-center ${
+                refund
+                  ? "bg-orange-100 dark:bg-orange-900/30"
+                  : voided
+                    ? "bg-red-100 dark:bg-red-900/30"
+                    : "bg-[#0644C7]/10"
+              }`}
+            >
+              <Feather
+                name={refund ? "rotate-ccw" : voided ? "slash" : typeIcon(p.typeLabel)}
+                size={15}
+                color={refund ? "#EA580C" : voided ? "#DC2626" : PRIMARY}
+              />
+            </View>
+            <View className="flex-1">
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-900 dark:text-white"
+              >
+                {p.payableReference ?? p.reference}
+              </Text>
+              <Text
+                numberOfLines={1}
+                className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
+              >
+                {p.typeLabel}
+                {p.countLabel ? ` • ${p.countLabel}` : ""}
+              </Text>
+            </View>
+          </View>
+        );
+      },
+    },
+    customer: {
+      key: "customer",
+      label: "Customer",
+      width: 200,
+      render: (p) => (
+        <View>
           <Text
             numberOfLines={1}
             className="text-sm font-semibold text-gray-900 dark:text-white"
           >
-            {p.payableReference ?? p.reference}
+            {p.customerName}
           </Text>
-          <Text numberOfLines={1} className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            {p.typeLabel}
-            {p.countLabel ? ` • ${p.countLabel}` : ""}
-          </Text>
+          {!!p.customerEmail && (
+            <Text
+              numberOfLines={1}
+              className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+            >
+              {p.customerEmail}
+            </Text>
+          )}
         </View>
-      </View>
-    ),
-  },
-  {
-    key: "customer",
-    label: "Customer",
-    width: 200,
-    render: (p) => (
-      <View>
+      ),
+    },
+    amount: {
+      key: "amount",
+      label: "Amount",
+      width: 110,
+      render: (p) => (
         <Text
           numberOfLines={1}
-          className="text-sm font-semibold text-gray-900 dark:text-white"
+          className="text-sm font-bold text-gray-900 dark:text-white"
         >
-          {p.customerName}
+          {money(p.amount)}
         </Text>
-        {!!p.customerEmail && (
-          <Text numberOfLines={1} className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-            {p.customerEmail}
-          </Text>
-        )}
-      </View>
-    ),
-  },
-  {
-    key: "amount",
-    label: "Amount",
-    width: 110,
-    render: (p) => (
-      <Text numberOfLines={1} className="text-sm font-bold text-gray-900 dark:text-white">
-        {money(p.amount)}
-      </Text>
-    ),
-  },
-  {
-    key: "method",
-    label: "Method",
-    width: 170,
-    render: (p) => (
-      <View className="flex-row items-center gap-1.5">
-        <Feather name="credit-card" size={13} color={MUTED} />
-        <Text numberOfLines={1} className={`flex-1 ${CELL_TEXT}`}>
-          {p.methodLabel}
-        </Text>
-      </View>
-    ),
-  },
-  {
-    key: "status",
-    label: "Status",
-    width: 140,
-    render: (p) => {
-      const s = statusPill(p.status);
-      return (
-        <View className={`flex-row items-center gap-1 self-start px-2.5 py-1 rounded-full ${s.pill}`}>
-          <Feather name={s.icon} size={11} color={MUTED} />
-          <Text className={`text-xs font-semibold ${s.text}`}>{p.statusLabel}</Text>
-        </View>
-      );
+      ),
     },
-  },
-  {
-    key: "location",
-    label: "Location",
-    width: 180,
-    render: (p) => (
-      <Text numberOfLines={2} className={CELL_TEXT}>
-        {p.locationName || "—"}
-      </Text>
-    ),
-  },
-  {
-    key: "date",
-    label: "Date",
-    width: 190,
-    render: (p) => (
-      <Text numberOfLines={2} className={CELL_TEXT}>
-        {fmtDateTime(p.createdAt)}
-      </Text>
-    ),
-  },
-  {
-    key: "actions",
-    label: "Actions",
-    width: 90,
-    render: (_p, ctx) => (
-      <Pressable
-        onPress={ctx.onView}
-        className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center"
-        accessibilityRole="button"
-        accessibilityLabel="View payment"
-      >
-        <Feather name="eye" size={15} color="#0644C7" />
-      </Pressable>
-    ),
-  },
-];
-
-const TABLE_WIDTH = COLUMNS.reduce((sum, c) => sum + c.width, 0);
+    method: {
+      key: "method",
+      label: "Method",
+      width: 170,
+      render: (p) => (
+        <View className="flex-row items-center gap-1.5">
+          <Feather name="credit-card" size={13} color={MUTED} />
+          <Text numberOfLines={1} className={`flex-1 ${CELL_TEXT}`}>
+            {p.methodLabel}
+          </Text>
+        </View>
+      ),
+    },
+    status: {
+      key: "status",
+      label: "Status",
+      width: 140,
+      render: (p) => {
+        const s = statusPill(p.status);
+        return (
+          <View
+            className={`flex-row items-center gap-1 self-start px-2.5 py-1 rounded-full ${s.pill}`}
+          >
+            <Feather name={s.icon} size={11} color={MUTED} />
+            <Text className={`text-xs font-semibold ${s.text}`}>{p.statusLabel}</Text>
+          </View>
+        );
+      },
+    },
+    location: {
+      key: "location",
+      label: "Location",
+      width: 180,
+      render: (p) => (
+        <Text numberOfLines={2} className={CELL_TEXT}>
+          {p.locationName || "—"}
+        </Text>
+      ),
+    },
+    date: {
+      key: "date",
+      label: "Date",
+      width: 190,
+      render: (p) => (
+        <Text numberOfLines={2} className={CELL_TEXT}>
+          {fmtDateTime(p.createdAt)}
+        </Text>
+      ),
+    },
+    paidAt: {
+      key: "paidAt",
+      label: "Paid At",
+      width: 190,
+      render: (p) => (
+        <Text numberOfLines={2} className={CELL_TEXT}>
+          {fmtDateTime(p.paidAt)}
+        </Text>
+      ),
+    },
+    refundedAt: {
+      key: "refundedAt",
+      label: "Refunded At",
+      width: 190,
+      render: (p) => (
+        <Text numberOfLines={2} className={CELL_TEXT}>
+          {fmtDateTime(p.refundedAt)}
+        </Text>
+      ),
+    },
+    updatedAt: {
+      key: "updatedAt",
+      label: "Updated At",
+      width: 190,
+      render: (p) => (
+        <Text numberOfLines={2} className={CELL_TEXT}>
+          {fmtDateTime(p.updatedAt)}
+        </Text>
+      ),
+    },
+    notes: {
+      key: "notes",
+      label: "Notes",
+      width: 240,
+      render: (p) => (
+        <Text numberOfLines={2} className={CELL_TEXT}>
+          {p.notes || "—"}
+        </Text>
+      ),
+    },
+    actions: {
+      key: "actions",
+      label: "Actions",
+      width: 130,
+      render: (p) => (
+        <View className="flex-row items-center gap-0.5">
+          <IconButton
+            icon="edit-3"
+            label={`View signature and terms for payment ${p.id}`}
+            onPress={() => actions.onSignature(p)}
+          />
+          <IconButton
+            icon="download"
+            label={`Download invoice for payment ${p.id}`}
+            busy={invoiceBusyId === p.id}
+            onPress={() => actions.onInvoice(p)}
+          />
+          <IconButton
+            icon="more-vertical"
+            label={`More actions for payment ${p.id}`}
+            onPress={() => actions.onMore(p)}
+          />
+        </View>
+      ),
+    },
+  };
+}
 
 /**
  * Table layout for the Payments list, mirroring the web admin's transactions
- * table: Transaction (ref + ID), Type (icon + payable ref + type/count),
- * Customer, Amount, Method, Status, Location, Date, and a trailing Actions cell
- * (View — the only per-row action available for active payments). Horizontally
- * scrollable with fixed column widths; tapping a row opens the detail sheet.
+ * table. Built on the shared {@link SelectableTable}, so it gets checkbox
+ * selection and the indeterminate header checkbox for free.
+ *
+ * Rows are deliberately inert: signature, invoice, and the refund / void /
+ * details / delete menu are all reached from the trailing Actions cell, so a
+ * stray tap while scrolling can't open anything. Which columns render is driven
+ * by `visibleKeys` (see {@link PAYMENT_COLUMN_META}).
  */
 export const PaymentsTable = memo(function PaymentsTable({
   payments,
-  onRowPress,
+  selectedIds,
+  onToggleRow,
+  onToggleAll,
+  visibleKeys,
+  actions,
+  invoiceBusyId = null,
 }: {
   payments: PaymentRow[];
-  onRowPress: (p: PaymentRow) => void;
+  selectedIds: Set<number>;
+  onToggleRow: (id: number) => void;
+  onToggleAll: () => void;
+  visibleKeys: Set<string>;
+  actions: PaymentRowActions;
+  /** Row whose invoice is downloading — swaps its icon for a spinner. */
+  invoiceBusyId?: number | null;
 }) {
-  return (
-    <View
-      className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-100 dark:border-neutral-800"
-      style={CARD_SHADOW}
-    >
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
-        <View style={{ width: TABLE_WIDTH }}>
-          {/* Header */}
-          <View
-            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
-            style={{ minHeight: HEADER_MIN_HEIGHT }}
-          >
-            {COLUMNS.map((col) => (
-              <View
-                key={col.key}
-                className="justify-center px-4 py-3"
-                style={{ width: col.width }}
-              >
-                <Text
-                  numberOfLines={1}
-                  className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
-                >
-                  {col.label}
-                </Text>
-              </View>
-            ))}
-          </View>
+  const columns = useMemo(() => {
+    const byKey = buildColumns(actions, invoiceBusyId);
+    // Drive order from the meta list so the Columns picker and the table agree.
+    return PAYMENT_COLUMN_META.filter(
+      (m) => m.lockVisible || visibleKeys.has(m.key),
+    )
+      .map((m) => byKey[m.key])
+      .filter(Boolean);
+  }, [actions, visibleKeys, invoiceBusyId]);
 
-          {/* Rows */}
-          {payments.map((p, i) => {
-            const ctx: RowContext = { onView: () => onRowPress(p) };
-            return (
-              <Pressable
-                key={p.id}
-                onPress={() => onRowPress(p)}
-                accessibilityRole="button"
-                accessibilityLabel={`View payment ${p.reference}`}
-                className={`flex-row items-center ${
-                  i < payments.length - 1
-                    ? "border-b border-gray-100 dark:border-neutral-800"
-                    : ""
-                }`}
-                style={({ pressed }) => ({
-                  minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed ? 0.6 : 1,
-                })}
-              >
-                {COLUMNS.map((col) => (
-                  <View
-                    key={col.key}
-                    className="justify-center px-4 py-3"
-                    style={{ width: col.width }}
-                  >
-                    {col.render(p, ctx)}
-                  </View>
-                ))}
-              </Pressable>
-            );
-          })}
-        </View>
-      </ScrollView>
-    </View>
+  return (
+    <SelectableTable
+      columns={columns}
+      rows={payments}
+      rowId={(p) => p.id}
+      selectedIds={selectedIds}
+      onToggleRow={onToggleRow}
+      onToggleAll={onToggleAll}
+      rowLabel={(p) => `payment ${p.reference}`}
+    />
   );
 });

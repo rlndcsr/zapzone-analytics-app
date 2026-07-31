@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -15,21 +16,37 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
+import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { SelectField } from "../../components/ui/FormControls";
 import { Pagination } from "../../components/ui/Pagination";
-import { PaymentsTable } from "../../components/ui/PaymentsTable";
+import {
+  DEFAULT_PAYMENT_COLUMNS,
+  PAYMENT_COLUMN_META,
+  PaymentsTable,
+} from "../../components/ui/PaymentsTable";
 import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { PaymentsListSkeleton } from "../../components/ui/skeleton/PaymentsSkeleton";
+import { mediaUrl } from "../../lib/api";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { fetchPackages } from "../../services/packagesService";
 import {
+  bulkInvoicesUrl,
+  canManualRefund,
+  canRefund,
+  canVoid,
+  deletePayment,
   fetchPayments,
   fetchTrashedPayments,
   forceDeletePayment,
+  invoiceUrl,
+  manualRefundPayment,
   packageInvoicesUrl,
+  refundPayment,
   restorePayment,
+  voidPayment,
   type PaymentRow,
 } from "../../services/paymentsService";
 
@@ -184,8 +201,41 @@ const Payments = () => {
   const [showInvoices, setShowInvoices] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
 
-  // The payment whose detail sheet is open (null = closed). Opened by tapping a
-  // card or by deep link from a notification (/payments/payments?openId=123).
+  // Table selection (checkbox column) — ids, so it survives re-sorts and paging.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Which columns the table renders (the web's Columns dropdown).
+  const [showColumns, setShowColumns] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
+    () => new Set(DEFAULT_PAYMENT_COLUMNS),
+  );
+  const toggleColumn = useCallback((key: string) => {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Row actions: the signature sheet, and the "more actions" menu.
+  const [signaturePayment, setSignaturePayment] = useState<PaymentRow | null>(null);
+  const [actionsPayment, setActionsPayment] = useState<PaymentRow | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [invoiceBusyId, setInvoiceBusyId] = useState<number | null>(null);
+  /** Which bulk-invoice button is running, so only it shows a spinner. */
+  const [bulkBusy, setBulkBusy] = useState<"view" | "download" | null>(null);
+
+  // The payment whose detail sheet is open (null = closed). Opened from the
+  // actions menu or by deep link (/payments/payments?openId=123).
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
   const selectedPayment = useMemo(
     () => payments.find((p) => p.id === selectedPaymentId) ?? null,
@@ -276,15 +326,163 @@ const Payments = () => {
     });
   }, [payments, search, statusFilter, activeLocationId]);
 
-  // Reset to page 1 whenever the filters change the result set.
+  // Reset to page 1 whenever the filters change the result set. Selection is
+  // cleared too — keeping ids that are no longer on screen reads as a bug.
   useEffect(() => {
     setPage(1);
+    setSelectedIds(new Set());
   }, [search, statusFilter, activeLocationId]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage));
   const currentPage = Math.min(page, pageCount);
   const start = (currentPage - 1) * perPage;
   const visible = filtered.slice(start, start + perPage);
+
+  /* ---- row actions ---- */
+
+  const toggleAllOnPage = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const everySelected =
+        visible.length > 0 && visible.every((p) => next.has(p.id));
+      visible.forEach((p) => (everySelected ? next.delete(p.id) : next.add(p.id)));
+      return next;
+    });
+  }, [visible]);
+
+  /**
+   * Pull an invoice PDF and hand it to the share sheet. The endpoints stream a
+   * PDF, so this goes through expo-file-system with the bearer header rather
+   * than the JSON client (same flow as the package invoices export).
+   */
+  const shareInvoicePdf = useCallback(
+    async (url: string, filename: string, dialogTitle: string) => {
+      const token = getToken();
+      if (!token) return;
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const dest = `${FileSystem.cacheDirectory}${filename}`;
+      const { status: httpStatus, uri } = await FileSystem.downloadAsync(url, dest, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/pdf" },
+      });
+      if (httpStatus !== 200) {
+        let message = "Could not generate the invoice.";
+        try {
+          const parsed = JSON.parse(await FileSystem.readAsStringAsync(uri));
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          // Non-JSON error body — keep the generic message.
+        }
+        Alert.alert("Invoice unavailable", message);
+        return;
+      }
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "application/pdf",
+          dialogTitle,
+          UTI: "com.adobe.pdf",
+        });
+      } else {
+        Alert.alert("Invoice ready", `Saved to ${uri}`);
+      }
+    },
+    [],
+  );
+
+  /** Row action — one payment's invoice. */
+  const downloadInvoice = useCallback(
+    async (p: PaymentRow) => {
+      setInvoiceBusyId(p.id);
+      try {
+        await shareInvoicePdf(
+          invoiceUrl(p.id),
+          `invoice-${p.id}.pdf`,
+          `Invoice #${p.id}`,
+        );
+      } catch (err) {
+        Alert.alert(
+          "Download failed",
+          err instanceof Error ? err.message : "Could not download the invoice.",
+        );
+      } finally {
+        setInvoiceBusyId(null);
+      }
+    },
+    [shareInvoicePdf],
+  );
+
+  /**
+   * Bulk action — one PDF holding every selected payment's invoice. `stream`
+   * asks the server to render inline ("View Selected") instead of as an
+   * attachment ("Download Selected"), matching the web's two buttons.
+   */
+  const exportSelectedInvoices = useCallback(
+    async (stream: boolean) => {
+      const ids = [...selectedIds];
+      if (ids.length === 0) return;
+      setBulkBusy(stream ? "view" : "download");
+      try {
+        await shareInvoicePdf(
+          bulkInvoicesUrl(ids, stream),
+          `invoices-${ids.length}.pdf`,
+          `${ids.length} invoice${ids.length === 1 ? "" : "s"}`,
+        );
+        setSelectedIds(new Set());
+      } catch (err) {
+        Alert.alert(
+          "Export failed",
+          err instanceof Error ? err.message : "Could not export the invoices.",
+        );
+      } finally {
+        setBulkBusy(null);
+      }
+    },
+    [selectedIds, shareInvoicePdf],
+  );
+
+  /** Run one of the menu's mutations, then close the sheet and refresh. */
+  const runAction = useCallback(
+    async (label: string, fn: () => Promise<void>) => {
+      setActionBusy(true);
+      try {
+        await fn();
+        setActionsPayment(null);
+        await load();
+      } catch (err) {
+        Alert.alert(
+          `${label} failed`,
+          err instanceof Error ? err.message : `Could not ${label.toLowerCase()}.`,
+        );
+      } finally {
+        setActionBusy(false);
+      }
+    },
+    [load],
+  );
+
+  /** Destructive menu entries confirm first — they move money or hide records. */
+  const confirmAction = useCallback(
+    (title: string, message: string, verb: string, fn: () => Promise<void>) => {
+      Alert.alert(title, message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: verb,
+          style: "destructive",
+          onPress: () => runAction(title, fn),
+        },
+      ]);
+    },
+    [runAction],
+  );
+
+  const tableActions = useMemo(
+    () => ({
+      onSignature: (p: PaymentRow) => setSignaturePayment(p),
+      onInvoice: (p: PaymentRow) => downloadInvoice(p),
+      onMore: (p: PaymentRow) => setActionsPayment(p),
+    }),
+    [downloadInvoice],
+  );
 
   const showInitialLoader = loading && payments.length === 0;
   const showError = !loading && !!error && payments.length === 0;
@@ -421,6 +619,21 @@ const Payments = () => {
                 })}
               </View>
 
+              {/* Columns — only meaningful for the table layout, so it's
+                  hidden in Cards (mirrors the web table toolbar). */}
+              {viewMode === "table" && (
+                <FilterPill>
+                  <PillSegment
+                    label="Columns"
+                    active={showColumns}
+                    onPress={() => setShowColumns(true)}
+                    renderIcon={(c) => (
+                      <Feather name="columns" size={15} color={c} />
+                    )}
+                  />
+                </FilterPill>
+              )}
+
               {/* List header + layout toggle (Table default / Cards) */}
               <View className="flex-row items-center justify-between gap-2">
                 <View className="flex-row items-center gap-2 shrink">
@@ -439,14 +652,68 @@ const Payments = () => {
                 <ViewToggle mode={viewMode} onChange={setViewMode} />
               </View>
 
-             
+              {/* Bulk actions — appears the moment a row is checked, as on the
+                  web (BulkActionsBar): count, View Selected, Download Selected. */}
+              {viewMode === "table" && selectedIds.size > 0 && (
+                <View className="flex-row items-center gap-3 flex-wrap rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
+                  <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                    {selectedIds.size} payment{selectedIds.size === 1 ? "" : "s"}{" "}
+                    selected
+                  </Text>
+                  <View className="flex-1" />
+                  <Pressable
+                    onPress={() => exportSelectedInvoices(true)}
+                    disabled={bulkBusy != null}
+                    accessibilityRole="button"
+                    accessibilityLabel="View selected invoices"
+                    className={`flex-row items-center gap-2 h-9 px-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70 ${
+                      bulkBusy != null ? "opacity-60" : ""
+                    }`}
+                  >
+                    {bulkBusy === "view" ? (
+                      <ActivityIndicator size="small" color={PRIMARY} />
+                    ) : (
+                      <Feather name="eye" size={14} color="#374151" />
+                    )}
+                    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                      View Selected
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => exportSelectedInvoices(false)}
+                    disabled={bulkBusy != null}
+                    accessibilityRole="button"
+                    accessibilityLabel="Download selected invoices"
+                    className={`flex-row items-center gap-2 h-9 px-3 rounded-lg bg-[#0644C7] active:opacity-90 ${
+                      bulkBusy != null ? "opacity-60" : ""
+                    }`}
+                  >
+                    {bulkBusy === "download" ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Feather name="printer" size={14} color="#FFFFFF" />
+                    )}
+                    <Text className="text-xs font-semibold text-white">
+                      Download Selected
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+
               {/* List — table (default) and card layouts render from the same
-                  `visible` slice, so switching is instant and never refetches. */}
+                  `visible` slice, so switching is instant and never refetches.
+                  Table rows are inert: everything is reached from the Actions
+                  cell, so a stray tap while scrolling can't open a payment. */}
               {visible.length > 0 &&
                 (viewMode === "table" ? (
                   <PaymentsTable
                     payments={visible}
-                    onRowPress={(p) => setSelectedPaymentId(p.id)}
+                    selectedIds={selectedIds}
+                    onToggleRow={toggleRow}
+                    onToggleAll={toggleAllOnPage}
+                    visibleKeys={visibleColumns}
+                    actions={tableActions}
+                    invoiceBusyId={invoiceBusyId}
                   />
                 ) : (
                   visible.map((p) => (
@@ -486,6 +753,65 @@ const Payments = () => {
         </View>
       </ScrollView>
 
+      <ColumnsSheet
+        visible={showColumns}
+        columns={PAYMENT_COLUMN_META}
+        visibleKeys={visibleColumns}
+        onToggle={toggleColumn}
+        onShowAll={() =>
+          setVisibleColumns(new Set(PAYMENT_COLUMN_META.map((c) => c.key)))
+        }
+        onReset={() => setVisibleColumns(new Set(DEFAULT_PAYMENT_COLUMNS))}
+        onClose={() => setShowColumns(false)}
+      />
+
+      <SignatureSheet
+        payment={signaturePayment}
+        onClose={() => setSignaturePayment(null)}
+      />
+
+      <PaymentActionsSheet
+        payment={actionsPayment}
+        busy={actionBusy}
+        onClose={() => (actionBusy ? undefined : setActionsPayment(null))}
+        onRefund={(p) =>
+          confirmAction(
+            "Refund",
+            `Refund ${money(p.amount)} to the original card via Authorize.Net? This cannot be undone.`,
+            "Refund",
+            () => refundPayment(getToken() ?? "", p.id),
+          )
+        }
+        onManualRefund={(p) =>
+          confirmAction(
+            "Manual refund",
+            `Record a ${p.methodLabel} refund of ${money(p.amount)}? No money moves through the gateway.`,
+            "Record refund",
+            () => manualRefundPayment(getToken() ?? "", p.id),
+          )
+        }
+        onVoid={(p) =>
+          confirmAction(
+            "Void",
+            "Cancel this transaction before it settles? No money moves — the charge is simply removed.",
+            "Void",
+            () => voidPayment(getToken() ?? "", p.id),
+          )
+        }
+        onViewDetails={(p) => {
+          setActionsPayment(null);
+          setSelectedPaymentId(p.id);
+        }}
+        onDelete={(p) =>
+          confirmAction(
+            "Delete",
+            "Soft delete this payment? It can be restored later from View Deleted, and linked totals are recalculated.",
+            "Delete",
+            () => deletePayment(getToken() ?? "", p.id),
+          )
+        }
+      />
+
       <PaymentDetailSheet
         payment={selectedPayment}
         visible={selectedPaymentId != null}
@@ -500,6 +826,228 @@ const Payments = () => {
     </View>
   );
 };
+
+/* ------------------------------------------------------------------ */
+/* Signature & Terms sheet                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The web's "Signature & Terms" modal: whether the customer accepted the terms
+ * at checkout, and the signature they drew. Both come straight off the payment
+ * record (`terms_accepted` / `signature_image`) — no extra request. The image
+ * may be a storage path or an inline data URI, which `mediaUrl` resolves.
+ */
+function SignatureSheet({
+  payment,
+  onClose,
+}: {
+  payment: PaymentRow | null;
+  onClose: () => void;
+}) {
+  const src = payment?.signatureImage ? mediaUrl(payment.signatureImage) : null;
+  return (
+    <BottomSheet
+      visible={payment != null}
+      onClose={onClose}
+      title="Signature & Terms"
+      subtitle={payment ? `Payment #${payment.id} — ${payment.customerName}` : undefined}
+      icon={
+        <View
+          className="w-9 h-9 rounded-lg items-center justify-center shrink-0"
+          style={{ backgroundColor: "#0644C71A" }}
+        >
+          <Feather name="edit-3" size={18} color={PRIMARY} />
+        </View>
+      }
+    >
+      <ScrollView className="px-5 pb-8" showsVerticalScrollIndicator={false}>
+        <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+          Terms &amp; Conditions
+        </Text>
+        {payment?.termsAccepted === true ? (
+          <View className="flex-row items-center gap-2 rounded-xl border border-green-200 dark:border-green-900/40 bg-green-50 dark:bg-green-900/20 px-3.5 py-3">
+            <Feather name="check-circle" size={16} color="#16A34A" />
+            <Text className="text-sm font-medium text-green-800 dark:text-green-300">
+              Accepted
+            </Text>
+          </View>
+        ) : payment?.termsAccepted === false ? (
+          <View className="flex-row items-center gap-2 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 px-3.5 py-3">
+            <Feather name="x-circle" size={16} color="#DC2626" />
+            <Text className="text-sm font-medium text-red-800 dark:text-red-300">
+              Not accepted
+            </Text>
+          </View>
+        ) : (
+          <View className="rounded-xl border border-gray-200 dark:border-neutral-700 px-3.5 py-3">
+            <Text className="text-sm text-gray-500 dark:text-gray-400">
+              Not recorded
+            </Text>
+          </View>
+        )}
+
+        <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mt-5 mb-2">
+          Signature
+        </Text>
+        <View className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800/40 items-center justify-center p-3 min-h-[140px]">
+          {src ? (
+            <Image
+              source={{ uri: src }}
+              style={{ width: "100%", height: 140 }}
+              contentFit="contain"
+              transition={120}
+              accessibilityLabel="Customer signature"
+            />
+          ) : (
+            <Text className="text-sm text-gray-500 dark:text-gray-400">
+              No signature provided
+            </Text>
+          )}
+        </View>
+
+        <Pressable
+          onPress={onClose}
+          className="h-12 rounded-xl items-center justify-center bg-[#0644C7] active:opacity-90 mt-5"
+        >
+          <Text className="text-base font-semibold text-white">Close</Text>
+        </Pressable>
+      </ScrollView>
+    </BottomSheet>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* More actions sheet                                                 */
+/* ------------------------------------------------------------------ */
+
+/** One entry in the actions menu — title, explanatory line, and a tint. */
+function ActionEntry({
+  icon,
+  title,
+  desc,
+  tint,
+  disabled,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  title: string;
+  desc: string;
+  tint: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      className={`flex-row items-start gap-3 px-4 py-3.5 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800 ${
+        disabled ? "opacity-50" : ""
+      }`}
+    >
+      <Feather name={icon} size={18} color={tint} style={{ marginTop: 2 }} />
+      <View className="flex-1">
+        <Text className="text-base font-medium" style={{ color: tint }}>
+          {title}
+        </Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+          {desc}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * The web's per-row "more actions" dropdown, as a sheet. Which entries appear
+ * is decided by the same eligibility rules the web uses (`canRefund` /
+ * `canVoid` / `canManualRefund`), so the app can never offer an action the
+ * gateway would reject.
+ */
+function PaymentActionsSheet({
+  payment,
+  busy,
+  onClose,
+  onRefund,
+  onManualRefund,
+  onVoid,
+  onViewDetails,
+  onDelete,
+}: {
+  payment: PaymentRow | null;
+  busy: boolean;
+  onClose: () => void;
+  onRefund: (p: PaymentRow) => void;
+  onManualRefund: (p: PaymentRow) => void;
+  onVoid: (p: PaymentRow) => void;
+  onViewDetails: (p: PaymentRow) => void;
+  onDelete: (p: PaymentRow) => void;
+}) {
+  return (
+    <BottomSheet
+      visible={payment != null}
+      onClose={onClose}
+      title={payment ? `Payment #${payment.id}` : "Payment"}
+      subtitle={payment ? `${payment.reference} — ${money(payment.amount)}` : undefined}
+    >
+      <View className="px-4 pb-8">
+        {busy ? (
+          <View className="py-8 items-center">
+            <ActivityIndicator color={PRIMARY} />
+          </View>
+        ) : (
+          payment && (
+            <>
+              {canRefund(payment) && (
+                <ActionEntry
+                  icon="rotate-ccw"
+                  tint="#EA580C"
+                  title="Refund (Authorize.Net)"
+                  desc="Returns money to the original card via the payment gateway. Use for settled transactions."
+                  onPress={() => onRefund(payment)}
+                />
+              )}
+              {canVoid(payment) && (
+                <ActionEntry
+                  icon="slash"
+                  tint="#DC2626"
+                  title="Void Transaction"
+                  desc="Cancels the transaction before it settles. No money moves — the charge is simply removed."
+                  onPress={() => onVoid(payment)}
+                />
+              )}
+              {canManualRefund(payment) && (
+                <ActionEntry
+                  icon="rotate-ccw"
+                  tint="#EA580C"
+                  title={`Manual Refund (${payment.methodLabel})`}
+                  desc="Records a cash/in-store refund. No gateway involved — marks the refund in the system only."
+                  onPress={() => onManualRefund(payment)}
+                />
+              )}
+              <ActionEntry
+                icon="file-text"
+                tint="#374151"
+                title="View Details"
+                desc="Open the full payment record."
+                onPress={() => onViewDetails(payment)}
+              />
+              <View className="h-px bg-gray-100 dark:bg-neutral-800 my-1" />
+              <ActionEntry
+                icon="trash-2"
+                tint="#DC2626"
+                title="Delete Payment"
+                desc="Soft delete — can be restored later. Linked totals will be recalculated."
+                onPress={() => onDelete(payment)}
+              />
+            </>
+          )
+        )}
+      </View>
+    </BottomSheet>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Payment detail sheet                                               */
