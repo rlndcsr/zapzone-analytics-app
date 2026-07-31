@@ -127,19 +127,16 @@ export const availableTimeSlotsForDate = (
 
 /**
  * Full-day blocks only, using the same scope + recurrence rules as
- * {@link computeDayOffAvailability}. This is the web EditPurchase rule: a
+ * {@link computeDayOffAvailability}. This is the web edit-purchase rule: a
  * time-restricted day-off is skipped outright there (no limited-hours state and
  * no slot trimming), so an edited purchase keeps every hour the web offers.
+ * `applies` decides scoping for the entity being rescheduled.
  */
-export function fullDayOffDatesFor({
-  dayOffs,
-  attractionId,
-  today,
-}: {
-  dayOffs: DayOff[];
-  attractionId: number;
-  today: Date;
-}): Set<string> {
+function fullDayBlocks(
+  dayOffs: DayOff[],
+  today: Date,
+  applies: (off: DayOff) => boolean,
+): Set<string> {
   const blocked = new Set<string>();
 
   for (const off of dayOffs) {
@@ -148,7 +145,7 @@ export function fullDayOffDatesFor({
       off.roomIds.length === 0 &&
       off.attractionIds.length === 0 &&
       off.eventIds.length === 0;
-    if (!isLocationWide && !off.attractionIds.includes(attractionId)) continue;
+    if (!isLocationWide && !applies(off)) continue;
     if (off.timeStart || off.timeEnd) continue;
 
     const normalized = off.date.substring(0, 10);
@@ -174,6 +171,37 @@ export function fullDayOffDatesFor({
   }
 
   return blocked;
+}
+
+/** Full-day blocks for an attraction — the web EditPurchase calendar's set. */
+export function fullDayOffDatesFor({
+  dayOffs,
+  attractionId,
+  today,
+}: {
+  dayOffs: DayOff[];
+  attractionId: number;
+  today: Date;
+}): Set<string> {
+  return fullDayBlocks(dayOffs, today, (off) =>
+    off.attractionIds.includes(attractionId),
+  );
+}
+
+/**
+ * Full-day blocks for an event — the web EditEventPurchase calendar's set.
+ * Same rules, scoped by `event_ids` instead of `attraction_ids`.
+ */
+export function eventFullDayOffDatesFor({
+  dayOffs,
+  eventId,
+  today,
+}: {
+  dayOffs: DayOff[];
+  eventId: number;
+  today: Date;
+}): Set<string> {
+  return fullDayBlocks(dayOffs, today, (off) => off.eventIds.includes(eventId));
 }
 
 /**

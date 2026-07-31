@@ -186,6 +186,23 @@ type EventAvailabilityParams = {
 };
 
 /**
+ * GET /api/events/{id}/{...} — a single event (its add-on catalog, price and
+ * daily hours). Same endpoint the web `eventService.getEvent` calls; the
+ * response may be the bare model or `{ data }`, so accept both.
+ */
+export async function fetchEventDetail(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<EventRow | null> {
+  const res = await apiRequest<unknown>(`/api/events/${id}`, { token, signal });
+  if (!res || typeof res !== "object") return null;
+  const obj = res as Record<string, unknown>;
+  const raw = (obj.data && typeof obj.data === "object" ? obj.data : obj) as RawEvent;
+  return raw?.id != null ? mapEvent(raw) : null;
+}
+
+/**
  * GET /api/events/{id}/available-dates — the bookable dates for an event, as the
  * web onsite-purchase page uses. Returns `YYYY-MM-DD` strings.
  */

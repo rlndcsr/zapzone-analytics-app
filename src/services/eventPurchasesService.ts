@@ -381,6 +381,224 @@ export async function fetchEventPurchaseDetail(
   return raw ? mapDetail(raw) : null;
 }
 
+/* ------------------------------------------------------- purchase edit --- */
+
+/** Payment methods the web Edit Event Purchase form offers. */
+export type EventPaymentMethod =
+  | "card"
+  | "in-store"
+  | "paylater"
+  | "authorize.net";
+
+/** Payment states the update endpoint accepts (`in:paid,partial,pending`). */
+export type EditableEventPaymentStatus = "paid" | "partial" | "pending";
+
+/** One add-on already on the purchase, with its frozen `price_at_purchase`. */
+export type EventPurchaseAddOnPivot = {
+  id: number;
+  name: string;
+  price: number;
+  quantity: number;
+  priceAtPurchase: number;
+};
+
+/**
+ * The purchase as the Edit Event Purchase form needs it — every field the web
+ * EditEventPurchase seeds its state from, flattened out of
+ * GET /api/event-purchases/{id}.
+ */
+export type EventPurchaseEditRecord = {
+  id: number;
+  referenceNumber: string;
+  eventId: number | null;
+  customerId: number | null;
+  /** "First Last" of the linked customer account, when there is one. */
+  customerName: string | null;
+  locationId: number | null;
+  locationName: string;
+  guestName: string;
+  guestEmail: string;
+  guestPhone: string;
+  quantity: number;
+  status: EventPurchaseStatus;
+  paymentStatus: EditableEventPaymentStatus;
+  paymentMethod: EventPaymentMethod;
+  amountPaid: number;
+  discountAmount: number;
+  notes: string;
+  specialRequests: string;
+  /** YYYY-MM-DD, or "" when unscheduled. */
+  purchaseDate: string;
+  /** HH:MM, or "" when unscheduled. */
+  purchaseTime: string;
+  addOns: EventPurchaseAddOnPivot[];
+  appliedFees: AppliedFee[];
+  appliedDiscounts: AppliedDiscount[];
+  /** The purchase's event — the fallback when GET /api/events/{id} fails. */
+  event: {
+    id: number;
+    name: string;
+    price: number;
+    timeStart: string;
+    timeEnd: string;
+    locationName: string | null;
+  } | null;
+};
+
+type RawEventEditPurchase = Omit<
+  RawEventPurchaseDetail,
+  "event" | "applied_fees" | "applied_discounts"
+> & {
+  event_id?: number | null;
+  customer_id?: number | null;
+  event?: {
+    id?: number;
+    name?: string | null;
+    price?: number | string | null;
+    time_start?: string | null;
+    time_end?: string | null;
+    location?: { name?: string | null } | null;
+  } | null;
+  applied_fees?:
+    | {
+        fee_name?: string | null;
+        fee_amount?: number | string | null;
+        fee_application_type?: "additive" | "inclusive" | null;
+      }[]
+    | null;
+  applied_discounts?:
+    | {
+        discount_name?: string | null;
+        discount_amount?: number | string | null;
+        discount_type?: "fixed" | "percentage" | null;
+        original_price?: number | string | null;
+        special_pricing_id?: number | null;
+      }[]
+    | null;
+};
+
+function mapEditRecord(raw: RawEventEditPurchase): EventPurchaseEditRecord {
+  const customer = raw.customer;
+  const payment = raw.payment_status ?? "pending";
+  return {
+    id: raw.id,
+    referenceNumber: raw.reference_number?.trim() || "",
+    eventId: raw.event_id ?? raw.event?.id ?? null,
+    customerId: raw.customer_id ?? null,
+    customerName: customer
+      ? `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() || null
+      : null,
+    locationId: raw.location_id ?? null,
+    locationName: raw.location?.name?.trim() || "",
+    guestName: raw.guest_name ?? "",
+    guestEmail: raw.guest_email ?? "",
+    guestPhone: raw.guest_phone ?? "",
+    quantity: Number(raw.quantity ?? 1) || 1,
+    status: (raw.status as EventPurchaseStatus) ?? "pending",
+    // Only paid / partial / pending round-trip through the update endpoint.
+    paymentStatus: (payment === "paid" || payment === "partial"
+      ? payment
+      : "pending") as EditableEventPaymentStatus,
+    paymentMethod: (raw.payment_method || "in-store") as EventPaymentMethod,
+    amountPaid: Number(raw.amount_paid ?? 0),
+    discountAmount: Number(raw.discount_amount ?? 0),
+    notes: raw.notes ?? "",
+    specialRequests: raw.special_requests ?? "",
+    purchaseDate: raw.purchase_date ? raw.purchase_date.split("T")[0] : "",
+    purchaseTime: raw.purchase_time ? raw.purchase_time.substring(0, 5) : "",
+    addOns: (raw.add_ons ?? []).map((a, i) => ({
+      id: a.id ?? i,
+      name: a.name?.trim() || "Add-on",
+      price: Number(a.price ?? a.pivot?.price_at_purchase ?? 0),
+      quantity: Number(a.pivot?.quantity ?? 0),
+      priceAtPurchase: Number(a.pivot?.price_at_purchase ?? a.price ?? 0),
+    })),
+    appliedFees: (raw.applied_fees ?? []).map((f) => ({
+      fee_name: f.fee_name?.trim() || "",
+      fee_amount: Number(f.fee_amount ?? 0),
+      fee_application_type: f.fee_application_type ?? "additive",
+    })),
+    appliedDiscounts: (raw.applied_discounts ?? []).map((d) => ({
+      discount_name: d.discount_name?.trim() || "",
+      discount_amount: Number(d.discount_amount ?? 0),
+      discount_type: d.discount_type ?? "fixed",
+      original_price: Number(d.original_price ?? 0),
+      special_pricing_id: d.special_pricing_id ?? null,
+    })),
+    event: raw.event?.id
+      ? {
+          id: raw.event.id,
+          name: raw.event.name?.trim() || "Unknown Event",
+          price: Number(raw.event.price ?? 0),
+          timeStart: raw.event.time_start ?? "",
+          timeEnd: raw.event.time_end ?? "",
+          locationName: raw.event.location?.name?.trim() || null,
+        }
+      : null,
+  };
+}
+
+/**
+ * GET /api/event-purchases/{id} — the same endpoint the web EditEventPurchase
+ * loads, mapped to everything its form seeds from. Returns `null` when the
+ * purchase can't be resolved (the web's "Purchase Not Found" state).
+ */
+export async function fetchEventPurchaseForEdit(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<EventPurchaseEditRecord | null> {
+  const res = await apiRequest<unknown>(`/api/event-purchases/${id}`, {
+    token,
+    signal,
+  });
+  const raw = extractPurchase(res) as RawEventEditPurchase | null;
+  return raw ? mapEditRecord(raw) : null;
+}
+
+/**
+ * Body for PUT /api/event-purchases/{id} — field-for-field the web
+ * `UpdateEventPurchaseData` the EditEventPurchase form submits. The event and
+ * location are immutable on an existing purchase, so neither is sent.
+ */
+export type UpdateEventPurchaseInput = {
+  guest_name?: string;
+  guest_email?: string;
+  guest_phone?: string;
+  quantity: number;
+  purchase_date: string;
+  purchase_time: string;
+  status: EventPurchaseStatus;
+  payment_status: EditableEventPaymentStatus;
+  payment_method: EventPaymentMethod;
+  amount_paid: number;
+  total_amount: number;
+  discount_amount: number;
+  applied_fees: AppliedFee[] | null;
+  applied_discounts: AppliedDiscount[] | null;
+  notes?: string;
+  special_requests?: string;
+  /** Always sent; the endpoint `sync()`s the pivot from this list. */
+  add_ons: EventPurchaseAddonInput[];
+};
+
+/**
+ * PUT /api/event-purchases/{id} — save an edited event purchase. The backend
+ * emails the customer on a date/time change or a move to Cancelled.
+ */
+export async function updateEventPurchase(
+  token: string,
+  id: number,
+  input: UpdateEventPurchaseInput,
+): Promise<boolean> {
+  const res = await apiRequest<{ success?: boolean } | null>(
+    `/api/event-purchases/${id}`,
+    { method: "PUT", token, body: input },
+  );
+  // A bare model (no envelope) still means success, like the web's reader.
+  return res == null || res.success !== false;
+}
+
 /**
  * PATCH /api/event-purchases/{id}/status — update a purchase's status. Mirrors
  * the web `updateStatus` the bulk bar loops over (no bulk-status endpoint).

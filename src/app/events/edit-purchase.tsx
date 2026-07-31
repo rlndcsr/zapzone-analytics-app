@@ -19,35 +19,33 @@ import {
   TextInput,
   View,
 } from "react-native";
-import QRCode from "react-native-qrcode-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FieldLabel, SelectField } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
 import { Toast, type ToastType } from "../../components/ui/Toast";
-import {
-  fullDayOffDatesFor,
-  generateTimeSlots,
-} from "../../lib/attractions/dayOffAvailability";
+import { eventFullDayOffDatesFor } from "../../lib/attractions/dayOffAvailability";
 import { WEEKDAY_NAMES_LOWER, formatFullDate } from "../../lib/date/calendar";
-import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
-import { getCurrentUser, getToken } from "../../lib/session";
-import {
-  fetchAttractionPurchaseForEdit,
-  sendAttractionPurchaseReceipt,
-  updateAttractionPurchase,
-  type AttractionPaymentMethod,
-  type AttractionPurchaseEditRecord,
-  type EditablePurchaseStatus,
-  type PurchaseAddonInput,
-  type UpdateAttractionPurchaseInput,
-} from "../../services/attractionPurchasesService";
-import {
-  fetchAttractions,
-  type AvailabilitySchedule,
-} from "../../services/attractionsService";
+import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
+import { getToken } from "../../lib/session";
 import { fetchDayOffsByLocation } from "../../services/dayOffsService";
+import {
+  fetchEventPurchaseForEdit,
+  updateEventPurchase,
+  type EditableEventPaymentStatus,
+  type EventPaymentMethod,
+  type EventPurchaseAddonInput,
+  type EventPurchaseEditRecord,
+  type EventPurchaseStatus,
+  type UpdateEventPurchaseInput,
+} from "../../services/eventPurchasesService";
+import {
+  fetchEventAvailableDates,
+  fetchEventAvailableTimeSlots,
+  fetchEventDetail,
+  type EventRow,
+} from "../../services/eventsService";
 import { metricsCacheService } from "../../services/metricsCacheService";
 import type {
   AppliedDiscount,
@@ -70,18 +68,24 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 /** The web form's `parseFloat(value) || 0` on every money input. */
 const num = (v: string) => parseFloat(v) || 0;
 
-const STATUS_OPTIONS: { label: string; value: EditablePurchaseStatus }[] = [
+const STATUS_OPTIONS: { label: string; value: EventPurchaseStatus }[] = [
   { label: "Pending", value: "pending" },
   { label: "Confirmed", value: "confirmed" },
   { label: "Checked In", value: "checked-in" },
+  { label: "Completed", value: "completed" },
   { label: "Cancelled", value: "cancelled" },
-  { label: "Refunded", value: "refunded" },
 ];
 
-const PAYMENT_METHOD_OPTIONS: {
+const PAYMENT_STATUS_OPTIONS: {
   label: string;
-  value: AttractionPaymentMethod;
+  value: EditableEventPaymentStatus;
 }[] = [
+  { label: "Paid", value: "paid" },
+  { label: "Partial", value: "partial" },
+  { label: "Pending", value: "pending" },
+];
+
+const PAYMENT_METHOD_OPTIONS: { label: string; value: EventPaymentMethod }[] = [
   { label: "In-Store", value: "in-store" },
   { label: "Authorize.Net", value: "authorize.net" },
   { label: "Card", value: "card" },
@@ -89,7 +93,7 @@ const PAYMENT_METHOD_OPTIONS: {
 ];
 
 /** Status pill palette, mirroring the web `statusConfig`. */
-const STATUS_PILL: Record<EditablePurchaseStatus, { bg: string; fg: string }> = {
+const STATUS_PILL: Record<EventPurchaseStatus, { bg: string; fg: string }> = {
   pending: {
     bg: "bg-yellow-100 dark:bg-yellow-900/30",
     fg: "text-yellow-800 dark:text-yellow-300",
@@ -102,26 +106,26 @@ const STATUS_PILL: Record<EditablePurchaseStatus, { bg: string; fg: string }> = 
     bg: "bg-green-100 dark:bg-green-900/30",
     fg: "text-green-800 dark:text-green-300",
   },
+  completed: {
+    bg: "bg-emerald-100 dark:bg-emerald-900/30",
+    fg: "text-emerald-800 dark:text-emerald-300",
+  },
   cancelled: {
     bg: "bg-red-100 dark:bg-red-900/30",
     fg: "text-red-800 dark:text-red-300",
   },
-  refunded: {
-    bg: "bg-purple-100 dark:bg-purple-900/30",
-    fg: "text-purple-800 dark:text-purple-300",
-  },
 };
 
-const statusLabel = (s: EditablePurchaseStatus) =>
+const statusLabel = (s: EventPurchaseStatus) =>
   STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s;
 
-const pillFor = (s: EditablePurchaseStatus) =>
+const pillFor = (s: EventPurchaseStatus) =>
   STATUS_PILL[s] ?? {
     bg: "bg-gray-100 dark:bg-neutral-800",
     fg: "text-gray-800 dark:text-gray-200",
   };
 
-/** "14:00" -> "2:00 PM" (the summary's `toLocaleTimeString` output). */
+/** "18:30" -> "6:30 PM" (the summary's `toLocaleTimeString` output). */
 const formatTime12Hour = (time: string): string => {
   const [h, m] = time.split(":");
   const hours = Number(h);
@@ -140,18 +144,16 @@ const backLabelFor = (from?: string) => {
     case "details":
       return "Purchase Details";
     default:
-      return "Purchases";
+      return "Event Purchases";
   }
 };
 
-/** Attraction as the picker + schedule need it (a slim `AttractionRow`). */
-type PickerAttraction = {
+/** Add-on as the editor needs it (event catalog or a line already purchased). */
+type EditableAddOn = {
   id: number;
   name: string;
   price: number;
-  locationId: number | null;
-  availability: AvailabilitySchedule[];
-  addOns: { id: number; name: string; price: number; maxQuantity: number }[];
+  maxQuantity: number;
 };
 
 /** Editable fee line — amounts stay strings while typing (web `type=number`). */
@@ -285,7 +287,7 @@ const SummaryRow = ({
   </View>
 );
 
-const EditPurchaseScreen = () => {
+const EditEventPurchaseScreen = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
@@ -299,38 +301,36 @@ const EditPurchaseScreen = () => {
     null,
   );
 
-  const [record, setRecord] = useState<AttractionPurchaseEditRecord | null>(null);
-  const [originalScheduledDate, setOriginalScheduledDate] = useState("");
-  const [originalScheduledTime, setOriginalScheduledTime] = useState("");
-  const [attractions, setAttractions] = useState<PickerAttraction[]>([]);
+  const [record, setRecord] = useState<EventPurchaseEditRecord | null>(null);
+  const [eventFull, setEventFull] = useState<EventRow | null>(null);
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [originalPurchaseDate, setOriginalPurchaseDate] = useState("");
+  const [originalPurchaseTime, setOriginalPurchaseTime] = useState("");
 
-  const [attractionId, setAttractionId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [status, setStatus] = useState<EditablePurchaseStatus>("pending");
+  const [status, setStatus] = useState<EventPurchaseStatus>("pending");
+  const [paymentStatus, setPaymentStatus] =
+    useState<EditableEventPaymentStatus>("pending");
   const [paymentMethod, setPaymentMethod] =
-    useState<AttractionPaymentMethod>("in-store");
+    useState<EventPaymentMethod>("in-store");
   const [amountPaid, setAmountPaid] = useState("0");
   const [notes, setNotes] = useState("");
-  const [scheduledDate, setScheduledDate] = useState("");
-  const [scheduledTime, setScheduledTime] = useState("");
+  const [specialRequests, setSpecialRequests] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState("");
+  const [purchaseTime, setPurchaseTime] = useState("");
+  const [availableTimeSlots, setAvailableTimeSlots] = useState<string[]>([]);
   const [dayOffDates, setDayOffDates] = useState<Set<string>>(new Set());
   const [selectedAddOns, setSelectedAddOns] = useState<Record<number, number>>({});
   const [appliedFees, setAppliedFees] = useState<FeeDraft[]>([]);
   const [appliedDiscounts, setAppliedDiscounts] = useState<DiscountDraft[]>([]);
   const [discountAmount, setDiscountAmount] = useState("0");
-  const [sendNotification, setSendNotification] = useState(true);
 
-  // Off-screen QR used only to build the receipt attachment on save (the web's
-  // `generatePurchaseQRCode`); `toDataURL` is the only way to get its PNG here.
-  const qrRef = useRef<{ toDataURL?: (cb: (data: string) => void) => void } | null>(
-    null,
-  );
   const submitLockRef = useRef(false);
 
-  /* --- Load the purchase, then its location's attractions ------------------ */
+  /* --- Load the purchase, then its event + bookable dates ------------------ */
 
   useEffect(() => {
     if (purchaseId == null || Number.isNaN(purchaseId)) {
@@ -348,7 +348,7 @@ const EditPurchaseScreen = () => {
 
     (async () => {
       try {
-        const purchase = await fetchAttractionPurchaseForEdit(
+        const purchase = await fetchEventPurchaseForEdit(
           token,
           purchaseId,
           controller.signal,
@@ -361,19 +361,20 @@ const EditPurchaseScreen = () => {
         }
 
         setRecord(purchase);
-        setAttractionId(purchase.attractionId);
         setQuantity(purchase.quantity);
         setGuestName(purchase.guestName);
         setGuestEmail(purchase.guestEmail);
         setGuestPhone(purchase.guestPhone);
         setStatus(purchase.status);
+        setPaymentStatus(purchase.paymentStatus);
         setPaymentMethod(purchase.paymentMethod);
         setAmountPaid(String(purchase.amountPaid));
         setNotes(purchase.notes);
-        setScheduledDate(purchase.scheduledDate);
-        setScheduledTime(purchase.scheduledTime);
-        setOriginalScheduledDate(purchase.scheduledDate);
-        setOriginalScheduledTime(purchase.scheduledTime);
+        setSpecialRequests(purchase.specialRequests);
+        setPurchaseDate(purchase.purchaseDate);
+        setPurchaseTime(purchase.purchaseTime);
+        setOriginalPurchaseDate(purchase.purchaseDate);
+        setOriginalPurchaseTime(purchase.purchaseTime);
 
         const initialAddOns: Record<number, number> = {};
         purchase.addOns.forEach((a) => {
@@ -399,49 +400,26 @@ const EditPurchaseScreen = () => {
         setDiscountAmount(String(purchase.discountAmount));
         setLoading(false);
 
-        // Active attractions at this location back the picker; the purchase's
-        // own attraction is appended when it isn't among them (web parity).
-        const locationId = purchase.locationId;
-        const userId = getCurrentUser()?.id;
-        if (locationId == null || userId == null) return;
+        const eventId = purchase.eventId;
+        if (eventId == null) return;
+
+        // The full event carries the add-on catalog + daily hours; the purchase's
+        // own embedded event is the fallback, as on the web.
         try {
-          const rows = await fetchAttractions({
+          const detail = await fetchEventDetail(token, eventId, controller.signal);
+          if (!controller.signal.aborted && detail) setEventFull(detail);
+        } catch {
+          // Falls back to `record.event`.
+        }
+        try {
+          const dates = await fetchEventAvailableDates({
             token,
-            userId,
-            locationId,
-            isActive: true,
+            eventId,
             signal: controller.signal,
           });
-          if (controller.signal.aborted) return;
-          const list: PickerAttraction[] = rows.map((a) => ({
-            id: a.id,
-            name: a.name,
-            price: a.price,
-            locationId: a.locationId,
-            availability: a.availability,
-            addOns: a.addOns.map((x) => ({
-              id: x.id,
-              name: x.name,
-              price: x.price,
-              maxQuantity: x.maxQuantity,
-            })),
-          }));
-          if (
-            purchase.attraction &&
-            !list.some((a) => a.id === purchase.attractionId)
-          ) {
-            list.push({
-              id: purchase.attraction.id,
-              name: purchase.attraction.name,
-              price: purchase.attraction.price,
-              locationId: purchase.attraction.locationId ?? locationId,
-              availability: [],
-              addOns: [],
-            });
-          }
-          setAttractions(list);
+          if (!controller.signal.aborted) setAvailableDates(dates);
         } catch {
-          // Picker stays empty — the web swallows this failure too.
+          // Calendar simply offers no extra dates.
         }
       } catch {
         if (controller.signal.aborted) return;
@@ -453,12 +431,12 @@ const EditPurchaseScreen = () => {
     return () => controller.abort();
   }, [purchaseId]);
 
-  const selectedAttraction = useMemo(
-    () => attractions.find((a) => a.id === attractionId) ?? null,
-    [attractions, attractionId],
-  );
-
+  const eventPrice = eventFull?.price ?? record?.event?.price ?? 0;
+  const eventName = eventFull?.name ?? record?.event?.name ?? "Unknown Event";
+  const eventLocationName =
+    eventFull?.locationName || record?.locationName || record?.event?.locationName;
   const locationId = record?.locationId ?? null;
+  const eventId = record?.eventId ?? null;
 
   /* --- Add-ons ------------------------------------------------------------- */
 
@@ -471,8 +449,13 @@ const EditPurchaseScreen = () => {
     return map;
   }, [record]);
 
-  const availableAddOns = useMemo(() => {
-    const list = [...(selectedAttraction?.addOns ?? [])];
+  const availableAddOns = useMemo<EditableAddOn[]>(() => {
+    const list: EditableAddOn[] = (eventFull?.addOns ?? []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      price: a.price,
+      maxQuantity: a.maxQuantity,
+    }));
     const ids = new Set(list.map((a) => a.id));
     (record?.addOns ?? []).forEach((a) => {
       if (ids.has(a.id)) return;
@@ -480,7 +463,7 @@ const EditPurchaseScreen = () => {
       ids.add(a.id);
     });
     return list;
-  }, [selectedAttraction, record]);
+  }, [eventFull, record]);
 
   const getAddOnUnitPrice = useCallback(
     (addOnId: number, price: number) =>
@@ -500,27 +483,11 @@ const EditPurchaseScreen = () => {
     });
   };
 
-  // Only send `additional_addons` when the lines actually changed, like the web
-  // (the endpoint rewrites the whole pivot table when the key is present).
-  const addOnsChanged = useMemo(() => {
-    const original: Record<number, number> = {};
-    (record?.addOns ?? []).forEach((a) => {
-      if (a.quantity > 0) original[a.id] = a.quantity;
-    });
-    const norm = (m: Record<number, number>) =>
-      Object.entries(m)
-        .filter(([, q]) => q > 0)
-        .map(([k, q]) => `${k}:${q}`)
-        .sort()
-        .join(",");
-    return norm(original) !== norm(selectedAddOns);
-  }, [record, selectedAddOns]);
-
-  /* --- Totals (identical to the web EditPurchase) -------------------------- */
+  /* --- Totals (identical to the web EditEventPurchase) --------------------- */
 
   const discountNum = num(discountAmount);
   const amountPaidNum = num(amountPaid);
-  const baseSubtotal = selectedAttraction ? selectedAttraction.price * quantity : 0;
+  const baseSubtotal = eventPrice * quantity;
   const addOnsTotal = useMemo(
     () =>
       Object.entries(selectedAddOns).reduce((sum, [addId, qty]) => {
@@ -541,26 +508,30 @@ const EditPurchaseScreen = () => {
 
   /* --- Schedule ------------------------------------------------------------ */
 
-  const attractionAvailability = useMemo(
-    () => selectedAttraction?.availability ?? [],
-    [selectedAttraction],
-  );
-
-  // Keep the saved visit day pickable even when the attraction no longer opens
-  // on that weekday, so an edit never silently loses the existing schedule.
+  // One window covering every weekday the event has a bookable date on, plus
+  // the purchase's own weekday, at the event's daily hours — the web's rule.
   const scheduleAvailability = useMemo(() => {
-    if (!originalScheduledDate) return attractionAvailability;
-    const savedWeekday =
-      WEEKDAY_NAMES_LOWER[new Date(`${originalScheduledDate}T00:00:00`).getDay()];
-    const covered = attractionAvailability.some((s) =>
-      s.days.map((d) => d.toLowerCase()).includes(savedWeekday),
-    );
-    if (covered) return attractionAvailability;
+    const days = new Set<string>();
+    availableDates.forEach((d) => {
+      const parsed = new Date(`${d.split("T")[0]}T00:00:00`);
+      if (!Number.isNaN(parsed.getTime())) {
+        days.add(WEEKDAY_NAMES_LOWER[parsed.getDay()]);
+      }
+    });
+    if (originalPurchaseDate) {
+      days.add(
+        WEEKDAY_NAMES_LOWER[new Date(`${originalPurchaseDate}T00:00:00`).getDay()],
+      );
+    }
+    if (days.size === 0) return [];
     return [
-      ...attractionAvailability,
-      { days: [savedWeekday], start_time: "00:00", end_time: "23:59" },
+      {
+        days: [...days],
+        start_time: eventFull?.timeStart || record?.event?.timeStart || "09:00",
+        end_time: eventFull?.timeEnd || record?.event?.timeEnd || "17:00",
+      },
     ];
-  }, [attractionAvailability, originalScheduledDate]);
+  }, [availableDates, originalPurchaseDate, eventFull, record]);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -570,102 +541,89 @@ const EditPurchaseScreen = () => {
 
   useEffect(() => {
     const token = getToken();
-    if (!token || locationId == null || attractionId == null) {
+    if (!token || locationId == null || eventId == null) {
       setDayOffDates(new Set());
       return;
     }
     const controller = new AbortController();
     fetchDayOffsByLocation(token, locationId, controller.signal)
       .then((dayOffs) =>
-        setDayOffDates(fullDayOffDatesFor({ dayOffs, attractionId, today })),
+        setDayOffDates(eventFullDayOffDatesFor({ dayOffs, eventId, today })),
       )
       .catch(() => {
         if (!controller.signal.aborted) setDayOffDates(new Set());
       });
     return () => controller.abort();
-  }, [locationId, attractionId, today]);
+  }, [locationId, eventId, today]);
 
-  // The purchase's own visit date is never blocked by a day-off added later.
+  // The purchase's own date is never blocked by a day-off added later.
   const effectiveDayOffDates = useMemo(() => {
     const set = new Set(dayOffDates);
-    if (originalScheduledDate) set.delete(originalScheduledDate);
+    if (originalPurchaseDate) set.delete(originalPurchaseDate);
     return set;
-  }, [dayOffDates, originalScheduledDate]);
+  }, [dayOffDates, originalPurchaseDate]);
 
-  const availableTimeSlots = useMemo(() => {
-    if (!scheduledDate || !selectedAttraction) return [];
-    const weekday =
-      WEEKDAY_NAMES_LOWER[new Date(`${scheduledDate}T00:00:00`).getDay()];
-    const daySlot = attractionAvailability.find((s) =>
-      s.days.map((d) => d.toLowerCase()).includes(weekday),
-    );
-    let slots = daySlot
-      ? generateTimeSlots(daySlot.start_time, daySlot.end_time, 60)
-      : [];
-    // The saved time survives even if it falls outside the current window.
-    if (
-      scheduledDate === originalScheduledDate &&
-      originalScheduledTime &&
-      !slots.includes(originalScheduledTime)
-    ) {
-      slots = [...slots, originalScheduledTime].sort();
+  // Slots come from the event's own endpoint, per selected date (web parity).
+  useEffect(() => {
+    const token = getToken();
+    if (!token || !purchaseDate || eventId == null) {
+      setAvailableTimeSlots([]);
+      return;
     }
-    return slots;
-  }, [
-    scheduledDate,
-    selectedAttraction,
-    attractionAvailability,
-    originalScheduledDate,
-    originalScheduledTime,
-  ]);
+    const controller = new AbortController();
+    const keepOriginal = (slots: string[]) =>
+      purchaseDate === originalPurchaseDate &&
+      originalPurchaseTime &&
+      !slots.includes(originalPurchaseTime)
+        ? [...slots, originalPurchaseTime].sort()
+        : slots;
+
+    fetchEventAvailableTimeSlots({
+      token,
+      eventId,
+      date: purchaseDate,
+      signal: controller.signal,
+    })
+      .then((slots) => setAvailableTimeSlots(keepOriginal(slots)))
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        // The saved time stays pickable even when the lookup fails.
+        setAvailableTimeSlots(keepOriginal([]));
+      });
+    return () => controller.abort();
+  }, [purchaseDate, eventId, originalPurchaseDate, originalPurchaseTime]);
 
   /* --- Save ---------------------------------------------------------------- */
 
-  /** Base64 PNG of the ticket QR, in the data-URL form the web posts. */
-  const buildQrDataUrl = () =>
-    new Promise<string>((resolve, reject) => {
-      const svg = qrRef.current;
-      if (!svg?.toDataURL) {
-        reject(new Error("QR code not ready"));
-        return;
-      }
-      // Guard the native callback so a save can never hang on the receipt leg.
-      const timer = setTimeout(() => reject(new Error("QR code timed out")), 5000);
-      svg.toDataURL((data) => {
-        clearTimeout(timer);
-        resolve(`data:image/png;base64,${data}`);
-      });
-    });
-
   const handleSubmit = async () => {
     if (!record) return;
-    if (!scheduledDate || !scheduledTime) {
-      setToast({
-        message: "Please select a visit date and time.",
-        type: "error",
-      });
+    if (!purchaseDate || !purchaseTime) {
+      setToast({ message: "Please select a date and time.", type: "error" });
       return;
     }
     const token = getToken();
     if (!token) {
-      setToast({ message: "Error updating purchase. Please try again.", type: "error" });
+      setToast({
+        message: "Error updating purchase. Please try again.",
+        type: "error",
+      });
       return;
     }
     if (submitLockRef.current) return;
 
-    const additionalAddons: PurchaseAddonInput[] = Object.entries(selectedAddOns)
+    const addOns: EventPurchaseAddonInput[] = Object.entries(selectedAddOns)
       .filter(([, qty]) => qty > 0)
       .map(([addId, qty]) => {
         const addOn = availableAddOns.find((a) => a.id === Number(addId));
         return addOn
           ? {
-              addon_id: addOn.id,
+              add_on_id: addOn.id,
               quantity: qty,
               price_at_purchase: getAddOnUnitPrice(addOn.id, addOn.price),
             }
           : null;
       })
-      .filter((x): x is PurchaseAddonInput => x !== null);
+      .filter((x): x is EventPurchaseAddonInput => x !== null);
 
     const fees: AppliedFee[] = appliedFees.map((f) => ({
       fee_name: f.fee_name,
@@ -680,29 +638,30 @@ const EditPurchaseScreen = () => {
       special_pricing_id: d.special_pricing_id,
     }));
 
-    const body: UpdateAttractionPurchaseInput = {
-      attraction_id: attractionId ?? undefined,
+    const body: UpdateEventPurchaseInput = {
       guest_name: guestName || undefined,
       guest_email: guestEmail || undefined,
       guest_phone: guestPhone || undefined,
       quantity,
-      scheduled_date: scheduledDate,
-      scheduled_time: scheduledTime,
+      purchase_date: purchaseDate,
+      purchase_time: purchaseTime,
       status,
+      payment_status: paymentStatus,
       payment_method: paymentMethod,
       amount_paid: amountPaidNum,
-      notes: notes || undefined,
+      total_amount: displayTotal,
+      discount_amount: discountNum,
       applied_fees: fees.length > 0 ? fees : null,
       applied_discounts: discounts.length > 0 ? discounts : null,
-      discount_amount: discountNum,
-      total_amount: displayTotal,
-      ...(addOnsChanged && { additional_addons: additionalAddons }),
+      notes: notes || undefined,
+      special_requests: specialRequests || undefined,
+      add_ons: addOns,
     };
 
     submitLockRef.current = true;
     setSubmitting(true);
     try {
-      const ok = await updateAttractionPurchase(token, record.id, body);
+      const ok = await updateEventPurchase(token, record.id, body);
       if (!ok) {
         setToast({
           message: "Failed to update purchase. Please try again.",
@@ -713,20 +672,14 @@ const EditPurchaseScreen = () => {
         return;
       }
 
-      // Refresh what the web refreshes: the purchase list cache + the metrics.
-      markAttractionPurchasesStale();
+      // Refresh what the web refreshes: the metrics caches (+ the mobile list).
+      markEventPurchasesStale();
       void metricsCacheService.clearAllCaches();
 
-      if (sendNotification) {
-        try {
-          const qr = await buildQrDataUrl();
-          await sendAttractionPurchaseReceipt(token, record.id, qr, true);
-        } catch {
-          // The receipt is best-effort on the web too; the save still stands.
-        }
-      }
-
-      setToast({ message: "Purchase updated successfully!", type: "success" });
+      setToast({
+        message: "Event purchase updated successfully!",
+        type: "success",
+      });
       setTimeout(() => router.back(), 1200);
     } catch {
       setToast({
@@ -755,13 +708,13 @@ const EditPurchaseScreen = () => {
         </Pressable>
         <View className="flex-1">
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Edit Purchase
+            Edit Event Purchase
           </Text>
           {!!record && (
             <Text className="text-xs text-gray-500 dark:text-gray-400">
-              Purchase ID:{" "}
+              Reference:{" "}
               <Text className="font-medium text-gray-700 dark:text-gray-300">
-                #{record.id}
+                {record.referenceNumber || `#${record.id}`}
               </Text>
             </Text>
           )}
@@ -798,7 +751,7 @@ const EditPurchaseScreen = () => {
             Purchase Not Found
           </Text>
           <Text className="text-gray-500 dark:text-gray-400 text-sm mt-1 text-center">
-            The purchase you&apos;re looking for doesn&apos;t exist.
+            The event purchase you&apos;re looking for doesn&apos;t exist.
           </Text>
           <Pressable
             onPress={() => router.back()}
@@ -830,34 +783,27 @@ const EditPurchaseScreen = () => {
             paddingBottom: insets.bottom + 40,
           }}
         >
-          {/* Attraction */}
-          <Section icon="tag" title="Attraction">
-            <SelectField
-              placeholder="Select an attraction"
-              value={attractionId}
-              options={attractions.map((a) => ({
-                label: `${a.name} - ${money(a.price)}`,
-                value: a.id,
-              }))}
-              onSelect={(v) => setAttractionId(Number(v))}
-            />
-
-            {!!selectedAttraction && (
-              <View className="mt-3 rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20 p-3">
-                <Text className="text-sm text-gray-700 dark:text-gray-200">
-                  <Text className="font-medium">Selected:</Text>{" "}
-                  {selectedAttraction.name} • {money(selectedAttraction.price)}
-                </Text>
-                {!!record.attraction?.locationName && (
-                  <View className="flex-row items-center gap-1 mt-1">
-                    <Feather name="map-pin" size={11} color="#9CA3AF" />
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {record.attraction.locationName}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
+          {/* Event — read-only */}
+          <Section icon="map-pin" title="Event">
+            <View className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-4">
+              <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                {eventName}
+              </Text>
+              {!!eventLocationName && (
+                <View className="flex-row items-center gap-1 mt-1">
+                  <Feather name="map-pin" size={11} color="#9CA3AF" />
+                  <Text className="text-sm text-gray-600 dark:text-gray-300">
+                    {eventLocationName}
+                  </Text>
+                </View>
+              )}
+              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                {money(eventPrice)} per ticket
+              </Text>
+              <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                The event and location cannot be changed on an existing purchase.
+              </Text>
+            </View>
 
             <View className="mt-4">
               <FieldLabel>Quantity</FieldLabel>
@@ -868,14 +814,12 @@ const EditPurchaseScreen = () => {
                   min={1}
                   max={9999}
                 />
-                {!!selectedAttraction && (
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">
-                    {money(selectedAttraction.price)} × {quantity} ={" "}
-                    <Text className="font-semibold text-gray-800 dark:text-gray-100">
-                      {money(baseSubtotal)}
-                    </Text>
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
+                  {money(eventPrice)} × {quantity} ={" "}
+                  <Text className="font-semibold text-gray-800 dark:text-gray-100">
+                    {money(baseSubtotal)}
                   </Text>
-                )}
+                </Text>
               </View>
             </View>
           </Section>
@@ -923,25 +867,33 @@ const EditPurchaseScreen = () => {
             />
           </Section>
 
-          {/* Schedule */}
-          <Section icon="calendar" title="Schedule">
+          {/* Reschedule */}
+          <Section icon="calendar" title="Reschedule">
+            <View className="flex-row items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 p-3 mb-4">
+              <Feather name="alert-circle" size={15} color="#D97706" />
+              <Text className="flex-1 text-sm text-amber-800 dark:text-amber-300">
+                Changing the date or time will automatically notify the customer
+                by email. Setting the status to Cancelled will also send a
+                cancellation email.
+              </Text>
+            </View>
             {scheduleAvailability.length > 0 ? (
               <ScheduleCalendar
                 availability={scheduleAvailability}
                 dayOffDates={effectiveDayOffDates}
-                scheduledDate={scheduledDate}
-                scheduledTime={scheduledTime}
+                scheduledDate={purchaseDate}
+                scheduledTime={purchaseTime}
                 availableTimeSlots={availableTimeSlots}
                 onDateSelect={(dateKey) => {
-                  setScheduledDate(dateKey);
-                  setScheduledTime("");
+                  setPurchaseDate(dateKey);
+                  setPurchaseTime("");
                 }}
-                onTimeSelect={setScheduledTime}
+                onTimeSelect={setPurchaseTime}
               />
             ) : (
               <View className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-4">
                 <Text className="text-sm text-gray-600 dark:text-gray-300">
-                  No availability configured for this attraction.
+                  No available dates configured for this event.
                 </Text>
               </View>
             )}
@@ -1180,7 +1132,17 @@ const EditPurchaseScreen = () => {
                 label="Status"
                 value={status}
                 options={STATUS_OPTIONS}
-                onSelect={(v) => setStatus(v as EditablePurchaseStatus)}
+                onSelect={(v) => setStatus(v as EventPurchaseStatus)}
+              />
+            </View>
+            <View className="mb-4">
+              <SelectField
+                label="Payment Status"
+                value={paymentStatus}
+                options={PAYMENT_STATUS_OPTIONS}
+                onSelect={(v) =>
+                  setPaymentStatus(v as EditableEventPaymentStatus)
+                }
               />
             </View>
             <View className="mb-4">
@@ -1188,7 +1150,7 @@ const EditPurchaseScreen = () => {
                 label="Payment Method"
                 value={paymentMethod}
                 options={PAYMENT_METHOD_OPTIONS}
-                onSelect={(v) => setPaymentMethod(v as AttractionPaymentMethod)}
+                onSelect={(v) => setPaymentMethod(v as EventPaymentMethod)}
               />
             </View>
             <View className="mb-4">
@@ -1212,7 +1174,8 @@ const EditPurchaseScreen = () => {
           </Section>
 
           {/* Notes */}
-          <Section title="Notes">
+          <Section icon="file-text" title="Notes">
+            <FieldLabel>Notes</FieldLabel>
             <TextInput
               value={notes}
               onChangeText={setNotes}
@@ -1222,66 +1185,20 @@ const EditPurchaseScreen = () => {
               numberOfLines={3}
               textAlignVertical="top"
               style={{ minHeight: 88 }}
+              className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white mb-4"
+            />
+            <FieldLabel>Special Requests</FieldLabel>
+            <TextInput
+              value={specialRequests}
+              onChangeText={setSpecialRequests}
+              placeholder="Any special requests from the customer..."
+              placeholderTextColor="#9CA3AF"
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              style={{ minHeight: 88 }}
               className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white"
             />
-          </Section>
-
-          {/* Email Notification */}
-          <Section title="Email Notification">
-            <View className="flex-row items-center gap-2 mb-3">
-              <Feather
-                name={sendNotification ? "bell" : "bell-off"}
-                size={16}
-                color={sendNotification ? "#16A34A" : "#9CA3AF"}
-              />
-              <Text className="flex-1 text-sm text-gray-700 dark:text-gray-200">
-                {sendNotification
-                  ? "Customer will receive an updated receipt"
-                  : "Silent update (no email)"}
-              </Text>
-            </View>
-            <View className="flex-row">
-              <Pressable
-                onPress={() => setSendNotification(false)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: !sendNotification }}
-                className={`flex-1 items-center py-2.5 rounded-l-xl border ${
-                  !sendNotification
-                    ? "bg-gray-700 border-gray-700"
-                    : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                }`}
-              >
-                <Text
-                  className={`text-xs font-medium ${
-                    !sendNotification
-                      ? "text-white"
-                      : "text-gray-500 dark:text-gray-400"
-                  }`}
-                >
-                  Don&apos;t Send
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setSendNotification(true)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: sendNotification }}
-                className={`flex-1 items-center py-2.5 rounded-r-xl border-y border-r ${
-                  sendNotification
-                    ? "bg-green-600 border-green-600"
-                    : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                }`}
-              >
-                <Text
-                  className={`text-xs font-medium ${
-                    sendNotification
-                      ? "text-white"
-                      : "text-gray-500 dark:text-gray-400"
-                  }`}
-                >
-                  Send Email
-                </Text>
-              </Pressable>
-            </View>
           </Section>
 
           {/* Order Summary — the web's sticky sidebar, stacked here as it is on
@@ -1294,19 +1211,17 @@ const EditPurchaseScreen = () => {
               Order Summary
             </Text>
 
-            {!!selectedAttraction && (
-              <View className="pb-4 mb-4 border-b border-gray-100 dark:border-neutral-800">
-                <Text className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                  Attraction
-                </Text>
-                <Text className="text-base font-semibold text-gray-900 dark:text-white">
-                  {selectedAttraction.name}
-                </Text>
-                <Text className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  {money(selectedAttraction.price)} × {quantity}
-                </Text>
-              </View>
-            )}
+            <View className="pb-4 mb-4 border-b border-gray-100 dark:border-neutral-800">
+              <Text className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                Event
+              </Text>
+              <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                {eventName}
+              </Text>
+              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                {money(eventPrice)} × {quantity}
+              </Text>
+            </View>
 
             <View className="pb-4 mb-4 border-b border-gray-100 dark:border-neutral-800">
               <Text className="text-sm text-gray-500 dark:text-gray-400 mb-1">
@@ -1328,10 +1243,10 @@ const EditPurchaseScreen = () => {
                 Scheduled
               </Text>
               <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                {scheduledDate ? formatFullDate(scheduledDate) : "Not set"}
+                {purchaseDate ? formatFullDate(purchaseDate) : "Not set"}
               </Text>
               <Text className="text-sm text-gray-600 dark:text-gray-300">
-                {scheduledTime ? formatTime12Hour(scheduledTime) : "Not set"}
+                {purchaseTime ? formatTime12Hour(purchaseTime) : "Not set"}
               </Text>
             </View>
 
@@ -1479,22 +1394,6 @@ const EditPurchaseScreen = () => {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Off-screen ticket QR — only read via `toDataURL` for the receipt email. */}
-      <View
-        pointerEvents="none"
-        style={{ position: "absolute", left: -10000, top: 0 }}
-      >
-        <QRCode
-          value={JSON.stringify({ type: "attraction_purchase", id: record.id })}
-          size={300}
-          backgroundColor="#FFFFFF"
-          color="#000000"
-          getRef={(c) => {
-            qrRef.current = c as unknown as typeof qrRef.current;
-          }}
-        />
-      </View>
-
       {!!toast && (
         <Toast
           message={toast.message}
@@ -1506,4 +1405,4 @@ const EditPurchaseScreen = () => {
   );
 };
 
-export default EditPurchaseScreen;
+export default EditEventPurchaseScreen;
