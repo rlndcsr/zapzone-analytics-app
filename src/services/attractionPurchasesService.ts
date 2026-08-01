@@ -186,7 +186,8 @@ export type PurchaseAddonInput = {
 
 /**
  * Payload for POST /api/attraction-purchases — mirrors the web on-site
- * purchase (in-store / pay-later; card payment is web-only and deferred).
+ * purchase. Card purchases post this first (unpaid), then charge the card via
+ * `POST /api/payments/charge`, exactly as the web `CreatePurchase` does.
  */
 export type CreateAttractionPurchaseInput = {
   attraction_id: number;
@@ -208,8 +209,9 @@ export type CreateAttractionPurchaseInput = {
   total_amount: number;
   amount_paid: number;
   currency: "USD";
-  method: "cash" | "paylater";
-  payment_method: "in-store" | "paylater";
+  /** Web parity: "in-store" maps to `cash`; the other two pass through as-is. */
+  method: "cash" | "paylater" | "authorize.net";
+  payment_method: "in-store" | "paylater" | "authorize.net";
   status?: "confirmed";
   location_id: number;
   purchase_date: string;
@@ -607,6 +609,23 @@ export async function deleteAttractionPurchase(
   id: number,
 ): Promise<void> {
   await apiRequest(`/api/attraction-purchases/${id}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+/**
+ * DELETE /api/attraction-purchases/{id}/force-delete — permanent removal.
+ *
+ * Used only to roll back a purchase whose card payment failed, matching the
+ * web's `forceDeletePurchase` cleanup: a soft delete would leave the row in the
+ * "View Deleted" list looking like a real (recoverable) sale that never was.
+ */
+export async function forceDeleteAttractionPurchase(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/attraction-purchases/${id}/force-delete`, {
     method: "DELETE",
     token,
   });

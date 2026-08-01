@@ -469,6 +469,23 @@ export async function deleteBooking(token: string, id: number): Promise<void> {
 }
 
 /**
+ * DELETE /api/bookings/{id}/force-delete — permanent removal.
+ *
+ * Used only to roll back a booking whose card payment failed, matching the
+ * web's `forceDeleteBooking` cleanup: a soft delete would keep the slot's room
+ * reserved and leave a recoverable-looking booking nobody ever paid for.
+ */
+export async function forceDeleteBooking(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/bookings/${id}/force-delete`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+/**
  * POST /api/bookings/check-in — mark a confirmed booking as checked-in, matching
  * the web admin's row "Check In" action. The backend records checked_in_at /
  * checked_in_by (from `user_id` when provided, else the authenticated user) and
@@ -1701,8 +1718,8 @@ export type BookingAttractionInput = {
 
 /**
  * Payload for POST /api/bookings — mirrors the web on-site booking request.
- * Card (authorize.net) tokenization isn't available in React Native, so the
- * mobile flow submits `in-store` or `paylater` only.
+ * Card bookings post this first (unpaid), then charge via
+ * `POST /api/payments/charge`, exactly as the web `OnsiteBooking` does.
  */
 export type CreateBookingInput = {
   guest_name: string;

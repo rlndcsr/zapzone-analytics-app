@@ -64,9 +64,18 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
+import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
+  attractionPurchaseQrValue,
+  useQrDataUri,
+} from "../../lib/payments/useQrDataUri";
+import {
+  CHARGE_UNKNOWN_MESSAGE,
+  chargeOutcomeUnknown,
+  declineMessage,
   fetchAuthorizeNetPublicKey,
-  tokenizeCard,
+  PAYMENT_TYPE,
+  processCardPayment,
   type AuthorizeNetPublicKey,
 } from "../../services/paymentsService";
 
@@ -290,6 +299,10 @@ const PurchasePageScreen = () => {
   }>({});
   const [authorizeCredentials, setAuthorizeCredentials] =
     useState<AuthorizeNetPublicKey | null>(null);
+  /** This attraction's location has no active merchant account (web's
+   *  "Authorize.Net Not Configured" modal). */
+  const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
+  const qr = useQrDataUri();
 
   const [sheet, setSheet] = useState<
     null | "date" | "time" | "country" | "month" | "year"
@@ -300,6 +313,9 @@ const PurchasePageScreen = () => {
   // data + endpoint the web purchase calendar uses).
   const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
   const submitLockRef = useRef(false);
+  /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
+   *  produce a second card charge. */
+  const lastSubmitAtRef = useRef(0);
 
   // Load the attraction detail (same GET /api/attractions/{id} the web uses).
   useEffect(() => {
@@ -361,9 +377,14 @@ const PurchasePageScreen = () => {
     }
     const controller = new AbortController();
     fetchAuthorizeNetPublicKey(token, locId, controller.signal)
-      .then(setAuthorizeCredentials)
+      .then((creds) => {
+        setAuthorizeCredentials(creds.apiLoginId ? creds : null);
+        setAuthorizeUnavailable(!creds.apiLoginId);
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setAuthorizeCredentials(null);
+        if (controller.signal.aborted) return;
+        setAuthorizeCredentials(null);
+        setAuthorizeUnavailable(true);
       });
     return () => controller.abort();
   }, [detail?.locationId]);
@@ -469,17 +490,19 @@ const PurchasePageScreen = () => {
   const submitDisabled =
     submitting ||
     isProcessingPayment ||
-    (paymentMethod === "card" && cardIncomplete);
+    (paymentMethod === "card" && (cardIncomplete || authorizeUnavailable));
 
   const onGalleryScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / galleryWidth);
     if (idx !== imageIndex) setImageIndex(idx);
   };
 
-  // Card leg — signature / terms / card validation in the web's order, then
-  // tokenization. Tokenization runs before any record is created, so nothing is
-  // written while it is still a stub.
-  const runCardPayment = async () => {
+  /**
+   * Card pre-flight — signature / terms / card checks in the web's order, run
+   * before anything is written. Returns false when the card leg can't proceed
+   * (it has already surfaced the reason on the relevant field).
+   */
+  const cardPreflightOk = (): boolean => {
     const stErrors: { signature?: string; terms?: string } = {};
     if (!signatureImage) {
       stErrors.signature = "Please provide your signature before proceeding.";
@@ -489,48 +512,33 @@ const PurchasePageScreen = () => {
     }
     if (Object.keys(stErrors).length > 0) {
       setSignatureTermsErrors(stErrors);
-      return;
+      return false;
     }
     setSignatureTermsErrors({});
 
     if (!cardNumber || !cardMonth || !cardYear || !cardCVV) {
       setPaymentError("Please fill in all card details");
-      return;
+      return false;
     }
     if (!validateCardNumber(cardNumber)) {
       setPaymentError("Invalid card number");
-      return;
+      return false;
     }
     if (isTestCardNumber(cardNumber)) {
       setPaymentError(
         "Test card numbers are not allowed. Please use a real card.",
       );
-      return;
+      return false;
     }
     if (!authorizeCredentials?.apiLoginId) {
       setPaymentError(
         "Payment system not initialized. Please reopen this page and try again.",
       );
-      return;
+      return false;
     }
 
     setPaymentError("");
-    setIsProcessingPayment(true);
-    try {
-      await tokenizeCard(
-        {
-          cardNumber: cardNumber.replace(/\s/g, ""),
-          month: cardMonth,
-          year: cardYear,
-          cardCode: cardCVV,
-        },
-        authorizeCredentials,
-      );
-    } catch (err) {
-      setPaymentError(getPaymentErrorMessage(err));
-    } finally {
-      setIsProcessingPayment(false);
-    }
+    return true;
   };
 
   const handlePurchase = async () => {
@@ -568,6 +576,9 @@ const PurchasePageScreen = () => {
       return;
     }
     if (submitLockRef.current) return;
+    const now = Date.now();
+    if (now - lastSubmitAtRef.current < 3000) return;
+    lastSubmitAtRef.current = now;
 
     const token = getToken();
     if (!token) {
@@ -575,10 +586,8 @@ const PurchasePageScreen = () => {
       return;
     }
 
-    if (paymentMethod === "card") {
-      await runCardPayment();
-      return;
-    }
+    const isCardPayment = paymentMethod === "card";
+    if (isCardPayment && !cardPreflightOk()) return;
 
     const additionalAddons = Object.entries(addonQty)
       .filter(([, qty]) => qty > 0)
@@ -611,8 +620,8 @@ const PurchasePageScreen = () => {
       total_amount: total,
       amount_paid: isPayLater ? 0 : total,
       currency: "USD",
-      method: isPayLater ? "paylater" : "cash",
-      payment_method: paymentMethod,
+      method: isPayLater ? "paylater" : isCardPayment ? "authorize.net" : "cash",
+      payment_method: isCardPayment ? "authorize.net" : paymentMethod,
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
       location_id: locationId,
       purchase_date: todayKey,
@@ -630,9 +639,81 @@ const PurchasePageScreen = () => {
 
     submitLockRef.current = true;
     setSubmitting(true);
+    setIsProcessingPayment(isCardPayment);
     try {
-      await createAttractionPurchase(token, input);
+      // Web order: create the purchase (unpaid) first so the charge has a
+      // payable to link to, then charge the card.
+      const { id: purchaseId } = await createAttractionPurchase(token, input);
       markAttractionPurchasesStale();
+
+      if (isCardPayment) {
+        const qrCode = await qr.generate(attractionPurchaseQrValue(purchaseId));
+
+        let response;
+        try {
+          response = await processCardPayment(
+            token,
+            {
+              cardNumber: cardNumber.replace(/\s/g, ""),
+              month: cardMonth,
+              year: cardYear,
+              cardCode: cardCVV,
+            },
+            authorizeCredentials!,
+            {
+              location_id: locationId,
+              amount: total,
+              order_id: `A${detail.id}-${String(Date.now()).slice(-8)}`,
+              description: `Attraction Purchase: ${detail.name}`,
+              payable_id: purchaseId,
+              payable_type: PAYMENT_TYPE.ATTRACTION_PURCHASE,
+              send_email: sendEmail,
+              qr_code: qrCode ?? undefined,
+              // The web purchase page stores the signed waiver + terms consent
+              // on the payment record itself.
+              signature_image: signatureImage ?? undefined,
+              terms_accepted: termsAccepted,
+              customer: {
+                first_name: firstName.trim(),
+                last_name: lastName.trim(),
+                email: email.trim(),
+                phone: phone.trim(),
+                address: address.trim(),
+                address2: address2.trim(),
+                city: city.trim(),
+                state: stateField.trim(),
+                zip: zip.trim(),
+                country,
+              },
+            },
+          );
+        } catch (payErr) {
+          // A lost response can't prove the card wasn't charged, so keep the
+          // purchase and let staff reconcile rather than risk a double charge.
+          if (chargeOutcomeUnknown(payErr)) {
+            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
+            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            return;
+          }
+          await rollbackAttractionPurchase(token, purchaseId);
+          setPaymentError(getPaymentErrorMessage(payErr));
+          Alert.alert(
+            "Payment failed",
+            `${getPaymentErrorMessage(payErr)}\n\nThe purchase has been cancelled and no charges were made.`,
+          );
+          return;
+        }
+
+        if (!response.success) {
+          await rollbackAttractionPurchase(token, purchaseId);
+          const message = declineMessage(response.message, "purchase");
+          setPaymentError(message);
+          Alert.alert("Payment declined", message);
+          return;
+        }
+        setPaymentError("");
+      }
+
       setConfirmed(true);
     } catch (err) {
       Alert.alert(
@@ -641,6 +722,7 @@ const PurchasePageScreen = () => {
       );
     } finally {
       setSubmitting(false);
+      setIsProcessingPayment(false);
       submitLockRef.current = false;
     }
   };
@@ -796,6 +878,9 @@ const PurchasePageScreen = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
+      {/* Off-screen QR, mounted only while a receipt QR is being generated. */}
+      {qr.node}
+
       <Header title="Purchase" />
 
       <KeyboardAvoidingView
@@ -1124,6 +1209,18 @@ const PurchasePageScreen = () => {
               <View className="mb-4">
                 <CardBrandRow />
               </View>
+
+              {/* Web parity: the "Authorize.Net Not Configured" modal, inline. */}
+              {authorizeUnavailable && (
+                <View className="mb-4 flex-row items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 p-3">
+                  <Feather name="alert-triangle" size={14} color="#B45309" />
+                  <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                    This location has no active Authorize.Net account, so cards
+                    can&apos;t be charged right now. Please contact staff to
+                    complete this purchase.
+                  </Text>
+                </View>
+              )}
 
               <View className="mb-4">
                 <FieldLabel>Card Number</FieldLabel>

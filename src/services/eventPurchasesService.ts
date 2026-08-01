@@ -188,10 +188,11 @@ export type EventPurchaseAddonInput = {
 };
 
 /**
- * Payload for POST /api/event-purchases — mirrors the web on-site purchase
- * (in-store / pay-later; card payment is web-only and deferred). Fees and
- * special-pricing discounts are computed server-side and echoed back on submit
- * as `applied_fees` / `applied_discounts` (same as the web).
+ * Payload for POST /api/event-purchases — mirrors the web on-site purchase.
+ * Card purchases post this first (unpaid), then charge via
+ * `POST /api/payments/charge`, exactly as the web `OnsitePurchaseEvent` does.
+ * Fees and special-pricing discounts are computed server-side and echoed back
+ * on submit as `applied_fees` / `applied_discounts` (same as the web).
  */
 export type CreateEventPurchaseInput = {
   event_id: number;
@@ -206,7 +207,7 @@ export type CreateEventPurchaseInput = {
   total_amount: number;
   amount_paid: number;
   discount_amount?: number;
-  payment_method: "in-store" | "paylater";
+  payment_method: "in-store" | "paylater" | "authorize.net";
   payment_status?: string;
   status?: "confirmed";
   notes?: string;
@@ -624,4 +625,21 @@ export async function deleteEventPurchase(
   id: number,
 ): Promise<void> {
   await apiRequest(`/api/event-purchases/${id}`, { method: "DELETE", token });
+}
+
+/**
+ * DELETE /api/event-purchases/{id}/force-delete — permanent removal.
+ *
+ * Used only to roll back a purchase whose card payment failed, matching the
+ * web's `forceDeletePurchase` cleanup: a soft delete would leave the row in the
+ * "View Deleted" list looking like a real (recoverable) sale that never was.
+ */
+export async function forceDeleteEventPurchase(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/event-purchases/${id}/force-delete`, {
+    method: "DELETE",
+    token,
+  });
 }

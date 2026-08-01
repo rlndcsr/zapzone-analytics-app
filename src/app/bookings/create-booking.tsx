@@ -33,7 +33,25 @@ import {
 } from "../../lib/date/calendar";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
+import {
+  formatCardNumber,
+  getCardType,
+  getPaymentErrorMessage,
+  isTestCardNumber,
+  validateCardNumber,
+} from "../../lib/payments/cardUtils";
+import { rollbackBooking } from "../../lib/payments/rollback";
+import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  CHARGE_UNKNOWN_MESSAGE,
+  chargeOutcomeUnknown,
+  declineMessage,
+  fetchAuthorizeNetPublicKey,
+  PAYMENT_TYPE,
+  processCardPayment,
+  type AuthorizeNetPublicKey,
+} from "../../services/paymentsService";
 import {
   buildAppliedDiscounts,
   buildAppliedFees,
@@ -92,40 +110,6 @@ function formatTime(value: string): string {
 
 type PaymentMethod = "authorize.net" | "in-store" | "paylater";
 
-/** Groups digits in 4s, capped at 16 — the web's formatCardNumber. */
-const formatCardNumber = (value: string) =>
-  value
-    .replace(/\D/g, "")
-    .substring(0, 16)
-    .replace(/(.{4})/g, "$1 ")
-    .trim();
-
-/** Luhn check, the same gate the web's validateCardNumber applies. */
-function validateCardNumber(value: string): boolean {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length < 13 || digits.length > 19) return false;
-  let sum = 0;
-  let double = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let d = Number(digits[i]);
-    if (double) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
-    double = !double;
-  }
-  return sum % 10 === 0;
-}
-
-function getCardType(value: string): string {
-  const d = value.replace(/\D/g, "");
-  if (/^4/.test(d)) return "Visa";
-  if (/^5[1-5]/.test(d) || /^2[2-7]/.test(d)) return "Mastercard";
-  if (/^3[47]/.test(d)) return "American Express";
-  if (/^6(?:011|5)/.test(d)) return "Discover";
-  return "Card";
-}
 type PaymentType = "full" | "partial" | "custom";
 
 // Wizard steps (mirrors the web /bookings/create flow order).
@@ -610,11 +594,19 @@ const CreateBookingScreen = () => {
   const [sendEmail, setSendEmail] = useState(true);
   /** Staff notification — the web's second checkbox on the payment step. */
   const [sendStaffEmail, setSendStaffEmail] = useState(true);
-  // Card fields for the Online method (see the note in the Card Details panel).
+  // Card (Authorize.Net) fields — same anatomy as the web Card Details panel.
   const [cardNumber, setCardNumber] = useState("");
   const [cardMonth, setCardMonth] = useState("");
   const [cardYear, setCardYear] = useState("");
   const [cardCvv, setCardCvv] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [authorizeCredentials, setAuthorizeCredentials] =
+    useState<AuthorizeNetPublicKey | null>(null);
+  /** This location has no active merchant account (web's "Authorize.Net Not
+   *  Configured" modal). */
+  const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
+  const qr = useQrDataUri();
 
   // Customer (email search-as-you-type).
   const [customerEmail, setCustomerEmail] = useState("");
@@ -644,12 +636,16 @@ const CreateBookingScreen = () => {
 
   const [submitting, setSubmitting] = useState(false);
   const submitLockRef = useRef(false);
+  /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
+   *  produce a second card charge. */
+  const lastSubmitAtRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
 
   // Land at the top of each step instead of keeping the previous scroll offset.
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [step]);
+
 
   // Pricing (fees + special pricing), fetched only on the Payment step.
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
@@ -834,6 +830,26 @@ const CreateBookingScreen = () => {
 
   const effectiveLocationId = pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
 
+  // Accept.js credentials for the booking's location — fetched as soon as the
+  // card method is active, exactly like the web `initializeAuthorizeNet`.
+  useEffect(() => {
+    if (paymentMethod !== "authorize.net" || effectiveLocationId == null) return;
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchAuthorizeNetPublicKey(token, effectiveLocationId, controller.signal)
+      .then((creds) => {
+        setAuthorizeCredentials(creds.apiLoginId ? creds : null);
+        setAuthorizeUnavailable(!creds.apiLoginId);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setAuthorizeCredentials(null);
+        setAuthorizeUnavailable(true);
+      });
+    return () => controller.abort();
+  }, [paymentMethod, effectiveLocationId]);
+
   // Fees load as soon as a package is picked so the Booking Summary shows the
   // venue fee on every step, as the web's live summary does.
   useEffect(() => {
@@ -952,8 +968,24 @@ const CreateBookingScreen = () => {
     inStoreTyped,
   ]);
 
-  // Cards can't be tokenized on mobile, so Online records nothing as collected.
-  const amountPaid = paymentMethod === "authorize.net" ? 0 : dueNow;
+  // Web parity: the card leg charges exactly what is due now, so the booking
+  // records the same figure the gateway is asked for.
+  const amountPaid = dueNow;
+
+  /**
+   * Card pre-flight — the web's validation order, run before anything is
+   * written. Returns the reason to show, or null when the card leg may proceed.
+   */
+  const cardPreflightError = (): string | null => {
+    if (!cardNumber || !cardMonth || !cardYear || !cardCvv)
+      return "Please fill in all card details";
+    if (!validateCardNumber(cardNumber)) return "Invalid card number";
+    if (isTestCardNumber(cardNumber))
+      return "Test card numbers are not allowed. Please use a real card.";
+    if (!authorizeCredentials?.apiLoginId)
+      return "Payment system not initialized. Please reopen this screen and try again.";
+    return null;
+  };
 
   const balance = Math.max(0, submitTotal - dueNow);
 
@@ -998,6 +1030,17 @@ const CreateBookingScreen = () => {
     }
   }, [step, pkg, scheduledDate, slot, slots.length, participants, customerName]);
 
+  // A card booking can't be confirmed until the card details are complete and
+  // the location actually has a merchant account (web parity).
+  const cardIncomplete =
+    !cardNumber || !cardMonth || !cardYear || !cardCvv || !cardValid;
+  const confirmDisabled =
+    submitting ||
+    isProcessingPayment ||
+    (paymentMethod === "authorize.net" &&
+      amountPaid > 0 &&
+      (cardIncomplete || authorizeUnavailable));
+
   const goNext = () => {
     if (!stepValid) return;
     setStep((s) => Math.min(TOTAL_STEPS, s + 1));
@@ -1020,14 +1063,32 @@ const CreateBookingScreen = () => {
       Alert.alert("Invalid amount", "Enter a valid custom payment amount.");
       return;
     }
+    const now = Date.now();
+    if (now - lastSubmitAtRef.current < 3000) return;
+    lastSubmitAtRef.current = now;
+
     const token = getToken();
     if (!token) {
       Alert.alert("Not authenticated", "Please sign in again.");
       return;
     }
 
+    // The web only runs the card leg when there is something to collect; a
+    // zero-due card booking is created like any other unpaid booking.
+    const isCardPayment = paymentMethod === "authorize.net" && amountPaid > 0;
+    if (isCardPayment) {
+      const reason = cardPreflightError();
+      if (reason) {
+        setPaymentError(reason);
+        Alert.alert("Check card details", reason);
+        return;
+      }
+      setPaymentError("");
+    }
+
     submitLockRef.current = true;
     setSubmitting(true);
+    setIsProcessingPayment(isCardPayment);
     try {
       const additionalAddons = pkg.addOns
         .filter((a) => (addonQty[a.id] ?? 0) > 0)
@@ -1039,13 +1100,11 @@ const CreateBookingScreen = () => {
       const { duration, unit } = durationForPayload();
 
       const paymentStatus: "paid" | "partial" | "pending" =
-        paymentMethod === "paylater" || paymentMethod === "authorize.net"
-          ? "pending"
-          : amountPaid >= submitTotal
-            ? "paid"
-            : amountPaid > 0
-              ? "partial"
-              : "pending";
+        amountPaid >= submitTotal
+          ? "paid"
+          : amountPaid > 0
+            ? "partial"
+            : "pending";
 
       const { id, referenceNumber, customerId } = await createBooking(token, {
         guest_name: customerName.trim(),
@@ -1068,9 +1127,14 @@ const CreateBookingScreen = () => {
         total_amount: submitTotal,
         amount_paid: amountPaid,
         payment_method: paymentMethod,
+        // Web parity: in-store confirms immediately, pay-later is pending, and
+        // the card leg sends neither — the charge endpoint sets both once the
+        // gateway approves.
         ...(paymentMethod === "in-store"
           ? { status: "confirmed" as const, payment_status: paymentStatus }
-          : { payment_status: "pending" as const }),
+          : paymentMethod === "paylater"
+            ? { payment_status: "pending" as const }
+            : {}),
         notes: notes.trim() || undefined,
         additional_addons: additionalAddons.length ? additionalAddons : undefined,
         additional_attractions: additionalAttractions.length ? additionalAttractions : undefined,
@@ -1106,6 +1170,74 @@ const CreateBookingScreen = () => {
         }
       }
 
+      if (isCardPayment) {
+        // The web encodes the booking's reference number (not its id) — that is
+        // what the check-in scanner reads off a booking QR.
+        const qrCode = referenceNumber ? await qr.generate(referenceNumber) : null;
+
+        let response;
+        try {
+          response = await processCardPayment(
+            token,
+            {
+              cardNumber: cardNumber.replace(/\s/g, ""),
+              month: cardMonth,
+              year: cardYear,
+              cardCode: cardCvv,
+            },
+            authorizeCredentials!,
+            {
+              location_id: effectiveLocationId,
+              amount: amountPaid,
+              order_id: `P${pkg.id}-${String(Date.now()).slice(-8)}`,
+              description: `On-Site Booking: ${pkg.name}`,
+              customer_id: customerId ?? undefined,
+              payable_id: id,
+              payable_type: PAYMENT_TYPE.BOOKING,
+              send_email: sendEmail,
+              qr_code: qrCode ?? undefined,
+              customer: {
+                first_name: firstName.trim(),
+                last_name: lastName.trim(),
+                email: customerEmail.trim(),
+                phone: customerPhone.trim(),
+                address: address.trim(),
+                city: city.trim(),
+                state: stateField.trim(),
+                zip: zip.trim(),
+                country: country.trim(),
+              },
+            },
+          );
+        } catch (payErr) {
+          // A lost response can't prove the card wasn't charged, so keep the
+          // booking and let staff reconcile rather than risk a double charge.
+          if (chargeOutcomeUnknown(payErr)) {
+            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
+            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            return;
+          }
+          await rollbackBooking(token, id);
+          markBookingsStale();
+          setPaymentError(getPaymentErrorMessage(payErr));
+          Alert.alert(
+            "Payment failed",
+            `${getPaymentErrorMessage(payErr)}\n\nThe booking has been cancelled and no charges were made.`,
+          );
+          return;
+        }
+
+        if (!response.success) {
+          await rollbackBooking(token, id);
+          markBookingsStale();
+          const message = declineMessage(response.message, "booking");
+          setPaymentError(message);
+          Alert.alert("Payment declined", message);
+          return;
+        }
+        setPaymentError("");
+      }
+
       markBookingsStale();
       Alert.alert("Booking created", `Reference: ${referenceNumber ?? id}`, [
         { text: "Done", onPress: () => router.back() },
@@ -1118,11 +1250,15 @@ const CreateBookingScreen = () => {
     } finally {
       submitLockRef.current = false;
       setSubmitting(false);
+      setIsProcessingPayment(false);
     }
   };
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
+      {/* Off-screen QR, mounted only while a receipt QR is being generated. */}
+      {qr.node}
+
       {/* Header */}
       <View className="w-full border-b border-gray-100 bg-white px-5 pb-5 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
         <View className="flex-row items-center justify-between">
@@ -1980,14 +2116,18 @@ const CreateBookingScreen = () => {
                 {paymentMethod === "authorize.net" && (
                   <View className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-neutral-700 dark:bg-neutral-800/50">
                     <FieldLabel>Card Details</FieldLabel>
-                    {/* Accept.js is browser-only, so nothing is charged from here. */}
-                    <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-900/40 dark:bg-amber-900/20">
-                      <Feather name="alert-triangle" size={13} color="#B45309" />
-                      <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
-                        Cards can&apos;t be charged from the app — the booking is
-                        created unpaid; finish the charge in web admin.
-                      </Text>
-                    </View>
+
+                    {/* Web parity: the "Authorize.Net Not Configured" modal. */}
+                    {authorizeUnavailable && (
+                      <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-900/40 dark:bg-amber-900/20">
+                        <Feather name="alert-triangle" size={13} color="#B45309" />
+                        <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                          This location has no active Authorize.Net account, so
+                          cards can&apos;t be charged. Use In-Store or Pay Later,
+                          or ask an administrator to connect the merchant account.
+                        </Text>
+                      </View>
+                    )}
 
                     <Text className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">
                       Card Number
@@ -2047,6 +2187,14 @@ const CreateBookingScreen = () => {
                         </View>
                       ))}
                     </View>
+
+                    {!!paymentError && (
+                      <View className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 dark:border-red-900/40 dark:bg-red-900/20">
+                        <Text className="text-xs text-red-800 dark:text-red-300">
+                          {paymentError}
+                        </Text>
+                      </View>
+                    )}
 
                     <View className="mt-3 flex-row items-center gap-1.5">
                       <Feather name="lock" size={12} color="#9CA3AF" />
@@ -2692,9 +2840,9 @@ const CreateBookingScreen = () => {
           ) : (
             <Pressable
               onPress={handleSubmit}
-              disabled={submitting}
+              disabled={confirmDisabled}
               className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] active:opacity-90 ${
-                submitting ? "opacity-60" : ""
+                confirmDisabled ? "opacity-60" : ""
               }`}
             >
               {submitting ? (

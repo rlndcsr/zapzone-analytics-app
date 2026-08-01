@@ -27,11 +27,30 @@ import { InputField } from "../../components/ui/InputField";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import {
+  CARD_MONTHS,
+  cardYears,
+  formatCardNumber,
+  getCardType,
+  getPaymentErrorMessage,
+  isTestCardNumber,
+  validateCardNumber,
+} from "../../lib/payments/cardUtils";
+import { rollbackEventPurchase } from "../../lib/payments/rollback";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createEventPurchase,
   type CreateEventPurchaseInput,
 } from "../../services/eventPurchasesService";
+import {
+  CHARGE_UNKNOWN_MESSAGE,
+  chargeOutcomeUnknown,
+  declineMessage,
+  fetchAuthorizeNetPublicKey,
+  PAYMENT_TYPE,
+  processCardPayment,
+  type AuthorizeNetPublicKey,
+} from "../../services/paymentsService";
 import {
   fetchEventAvailableDates,
   fetchEventAvailableTimeSlots,
@@ -50,6 +69,8 @@ const CARD_SHADOW = {
   shadowRadius: 8,
   elevation: 2,
 } as const;
+
+type PaymentMethod = "authorize.net" | "in-store" | "paylater";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -261,8 +282,21 @@ const CreateEventPurchaseScreen = () => {
   const [addonQty, setAddonQty] = useState<Record<number, number>>({});
   const [purchaseDate, setPurchaseDate] = useState("");
   const [purchaseTime, setPurchaseTime] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"in-store" | "paylater">("in-store");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("in-store");
   const [sendEmail, setSendEmail] = useState(true);
+
+  // Card (Authorize.Net) fields — same anatomy as the web Card Details panel.
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardMonth, setCardMonth] = useState("");
+  const [cardYear, setCardYear] = useState("");
+  const [cardCVV, setCardCVV] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [authorizeCredentials, setAuthorizeCredentials] =
+    useState<AuthorizeNetPublicKey | null>(null);
+  /** This event's location has no active merchant account (web's
+   *  "Authorize.Net Not Configured" modal). */
+  const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
 
   // Bookable dates/slots come from the backend (same endpoints as the web); the
   // client-side schedule derivation is only a fallback if those calls fail.
@@ -323,8 +357,34 @@ const CreateEventPurchaseScreen = () => {
   const [showCustomerList, setShowCustomerList] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
-  const [sheet, setSheet] = useState<null | "location" | "date" | "time">(null);
+  const [sheet, setSheet] = useState<
+    null | "location" | "date" | "time" | "month" | "year"
+  >(null);
   const submitLockRef = useRef(false);
+  /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
+   *  produce a second card charge. */
+  const lastSubmitAtRef = useRef(0);
+
+  // Accept.js credentials for the event's location — fetched as soon as the
+  // card method is active, exactly like the web `initializeAuthorizeNet`.
+  const cardLocationId = selected?.locationId ?? selectedLocationId;
+  useEffect(() => {
+    if (paymentMethod !== "authorize.net" || cardLocationId == null) return;
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchAuthorizeNetPublicKey(token, cardLocationId, controller.signal)
+      .then((creds) => {
+        setAuthorizeCredentials(creds.apiLoginId ? creds : null);
+        setAuthorizeUnavailable(!creds.apiLoginId);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setAuthorizeCredentials(null);
+        setAuthorizeUnavailable(true);
+      });
+    return () => controller.abort();
+  }, [paymentMethod, cardLocationId]);
 
   // Debounced customer lookup by email (mirrors the web).
   useEffect(() => {
@@ -435,6 +495,30 @@ const CreateEventPurchaseScreen = () => {
     purchaseTime,
   });
 
+  const cardValid = validateCardNumber(cardNumber);
+  const cardIncomplete =
+    !cardNumber || !cardMonth || !cardYear || !cardCVV || !cardValid;
+  const submitDisabled =
+    submitting ||
+    isProcessingPayment ||
+    (paymentMethod === "authorize.net" &&
+      (cardIncomplete || authorizeUnavailable));
+
+  /**
+   * Card pre-flight — the web's validation order, run before anything is
+   * written. Returns the reason to show, or null when the card leg may proceed.
+   */
+  const cardPreflightError = (): string | null => {
+    if (!cardNumber || !cardMonth || !cardYear || !cardCVV)
+      return "Please fill in all card details";
+    if (!validateCardNumber(cardNumber)) return "Invalid card number";
+    if (isTestCardNumber(cardNumber))
+      return "Test card numbers are not allowed. Please use a real card.";
+    if (!authorizeCredentials?.apiLoginId)
+      return "Payment system not initialized. Please reopen this screen and try again.";
+    return null;
+  };
+
   const dateLabel = dateOptions.find((d) => d.value === purchaseDate)?.label ?? null;
 
   const locationName =
@@ -475,11 +559,24 @@ const CreateEventPurchaseScreen = () => {
       return;
     }
     if (submitLockRef.current) return;
+    const now = Date.now();
+    if (now - lastSubmitAtRef.current < 3000) return;
+    lastSubmitAtRef.current = now;
 
     const token = getToken();
     if (!token) {
       Alert.alert("Not authenticated", "Please sign in again.");
       return;
+    }
+
+    const isCardPayment = paymentMethod === "authorize.net";
+    if (isCardPayment) {
+      const reason = cardPreflightError();
+      if (reason) {
+        setPaymentError(reason);
+        return;
+      }
+      setPaymentError("");
     }
 
     const addOnsPayload = Object.entries(addonQty)
@@ -493,7 +590,13 @@ const CreateEventPurchaseScreen = () => {
       .filter((x): x is NonNullable<typeof x> => x !== null);
 
     const isPayLater = paymentMethod === "paylater";
-    const paid = isPayLater ? 0 : Number(amountPaid) > 0 ? Number(amountPaid) : total;
+    // Web parity: the card leg pays the full total and the record starts unpaid
+    // — the charge endpoint marks it paid once the gateway approves.
+    const paid = isPayLater || isCardPayment
+      ? 0
+      : Number(amountPaid) > 0
+        ? Number(amountPaid)
+        : total;
 
     const input: CreateEventPurchaseInput = {
       event_id: selected.id,
@@ -511,7 +614,12 @@ const CreateEventPurchaseScreen = () => {
       // already folded into total_amount via the base price).
       discount_amount: specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
       payment_method: paymentMethod,
-      payment_status: isPayLater ? "pending" : paid >= total ? "paid" : "partial",
+      payment_status:
+        isPayLater || isCardPayment
+          ? "pending"
+          : paid >= total
+            ? "paid"
+            : "partial",
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
       notes:
         notes.trim() ||
@@ -524,9 +632,81 @@ const CreateEventPurchaseScreen = () => {
 
     submitLockRef.current = true;
     setSubmitting(true);
+    setIsProcessingPayment(isCardPayment);
     try {
-      await createEventPurchase(token, input);
+      // Web order: create the purchase (unpaid) first so the charge has a
+      // payable to link to, then charge the card.
+      const { id: purchaseId } = await createEventPurchase(token, input);
       markEventPurchasesStale();
+
+      if (isCardPayment) {
+        let response;
+        try {
+          response = await processCardPayment(
+            token,
+            {
+              cardNumber: cardNumber.replace(/\s/g, ""),
+              month: cardMonth,
+              year: cardYear,
+              cardCode: cardCVV,
+            },
+            authorizeCredentials!,
+            {
+              location_id: effectiveLocationId,
+              amount: total,
+              order_id: `E${selected.id}-${String(Date.now()).slice(-8)}`,
+              description: `Event Purchase: ${selected.name}`,
+              customer_id: selectedCustomerId ?? undefined,
+              payable_id: purchaseId,
+              payable_type: PAYMENT_TYPE.EVENT_PURCHASE,
+              send_email: sendEmail,
+              // The web event flow sends no QR here — the ticket QR is built
+              // from the purchase's reference number on the details screen.
+              customer: {
+                first_name: customerName.trim().split(/\s+/)[0] || "",
+                last_name:
+                  customerName.trim().split(/\s+/).slice(1).join(" ") || "",
+                email: customerEmail.trim(),
+                phone: customerPhone.trim(),
+              },
+            },
+          );
+        } catch (payErr) {
+          // A lost response can't prove the card wasn't charged, so keep the
+          // purchase and let staff reconcile rather than risk a double charge.
+          if (chargeOutcomeUnknown(payErr)) {
+            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
+            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            return;
+          }
+          await rollbackEventPurchase(token, purchaseId);
+          setPaymentError(getPaymentErrorMessage(payErr));
+          Alert.alert(
+            "Payment failed",
+            `${getPaymentErrorMessage(payErr)}\n\nThe purchase has been cancelled and no charges were made.`,
+          );
+          return;
+        }
+
+        if (!response.success) {
+          await rollbackEventPurchase(token, purchaseId);
+          const message = declineMessage(response.message, "purchase");
+          setPaymentError(message);
+          Alert.alert("Payment declined", message);
+          return;
+        }
+
+        setPaymentError("");
+        Alert.alert(
+          "Purchase confirmed",
+          `${money(total)} · ${selected.name}\n${
+            sendEmail ? "Receipt sent to email." : "Email not sent per request."
+          }`,
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+        return;
+      }
+
       Alert.alert("Purchase created", `${money(total)} · ${selected.name}`, [
         { text: "OK", onPress: () => router.back() },
       ]);
@@ -537,6 +717,7 @@ const CreateEventPurchaseScreen = () => {
       );
     } finally {
       setSubmitting(false);
+      setIsProcessingPayment(false);
       submitLockRef.current = false;
     }
   };
@@ -834,9 +1015,10 @@ const CreateEventPurchaseScreen = () => {
 
               {/* Payment */}
               <Section icon="credit-card" title="Payment">
-                <View className="flex-row gap-3">
+                <View className="flex-row gap-2">
                   {(
                     [
+                      { key: "authorize.net", label: "Authorize.Net", icon: "credit-card" },
                       { key: "in-store", label: "In-Store", icon: "dollar-sign" },
                       { key: "paylater", label: "Pay Later", icon: "clock" },
                     ] as const
@@ -847,11 +1029,12 @@ const CreateEventPurchaseScreen = () => {
                         key={opt.key}
                         onPress={() => {
                           setPaymentMethod(opt.key);
+                          setPaymentError("");
                           // Clear the override so Amount Paid defaults to the
                           // live total (which updates as fees/discounts load).
                           setAmountPaid("");
                         }}
-                        className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-2xl border ${
+                        className={`flex-1 items-center justify-center gap-1 py-3 rounded-2xl border ${
                           active
                             ? "bg-[#0644C7] border-[#0644C7]"
                             : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
@@ -859,7 +1042,7 @@ const CreateEventPurchaseScreen = () => {
                       >
                         <Feather name={opt.icon} size={16} color={active ? "#FFFFFF" : "#6B7280"} />
                         <Text
-                          className={`text-sm font-semibold ${
+                          className={`text-xs font-semibold ${
                             active ? "text-white" : "text-gray-600 dark:text-gray-300"
                           }`}
                         >
@@ -876,9 +1059,117 @@ const CreateEventPurchaseScreen = () => {
                     </Text>
                   </View>
                 )}
-                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-3">
-                  Card (Authorize.Net) payments are available on the web admin.
-                </Text>
+
+                {paymentMethod === "authorize.net" && (
+                  <View className="mt-3 rounded-2xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-4">
+                    <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+                      Card Details
+                    </Text>
+
+                    {/* Web parity: the "Authorize.Net Not Configured" modal. */}
+                    {authorizeUnavailable && (
+                      <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 p-2.5">
+                        <Feather name="alert-triangle" size={13} color="#B45309" />
+                        <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                          This location has no active Authorize.Net account, so
+                          cards can&apos;t be charged. Use In-Store or Pay Later,
+                          or ask an administrator to connect the merchant account.
+                        </Text>
+                      </View>
+                    )}
+
+                    <FieldLabel>Card Number</FieldLabel>
+                    <View
+                      className={`h-12 flex-row items-center rounded-xl border px-3 bg-white dark:bg-neutral-900 ${
+                        cardNumber && cardValid
+                          ? "border-green-400"
+                          : cardNumber
+                            ? "border-red-400"
+                            : "border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <TextInput
+                        value={cardNumber}
+                        onChangeText={(v) => {
+                          const formatted = formatCardNumber(v);
+                          if (formatted.replace(/\s/g, "").length <= 16) {
+                            setCardNumber(formatted);
+                            setPaymentError("");
+                          }
+                        }}
+                        placeholder="1234 5678 9012 3456"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="number-pad"
+                        maxLength={19}
+                        editable={!isProcessingPayment}
+                        className="flex-1 text-sm text-gray-900 dark:text-white"
+                      />
+                      {!!cardNumber && cardValid && (
+                        <Feather name="check-circle" size={16} color="#16A34A" />
+                      )}
+                    </View>
+                    {!!cardNumber && (
+                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {getCardType(cardNumber)}
+                      </Text>
+                    )}
+
+                    <View className="flex-row gap-2 mt-3">
+                      <View className="flex-1">
+                        <FieldLabel>Month</FieldLabel>
+                        <SelectRow
+                          icon="calendar"
+                          value={cardMonth || null}
+                          placeholder="MM"
+                          onPress={() => setSheet("month")}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <FieldLabel>Year</FieldLabel>
+                        <SelectRow
+                          icon="calendar"
+                          value={cardYear || null}
+                          placeholder="YYYY"
+                          onPress={() => setSheet("year")}
+                        />
+                      </View>
+                    </View>
+
+                    <View className="mt-3">
+                      <FieldLabel>CVV</FieldLabel>
+                      <View className="h-12 justify-center rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3">
+                        <TextInput
+                          value={cardCVV}
+                          onChangeText={(v) => {
+                            const digits = v.replace(/\D/g, "");
+                            if (digits.length <= 4) setCardCVV(digits);
+                          }}
+                          placeholder="123"
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="number-pad"
+                          maxLength={4}
+                          editable={!isProcessingPayment}
+                          className="text-sm text-gray-900 dark:text-white"
+                        />
+                      </View>
+                    </View>
+
+                    {!!paymentError && (
+                      <View className="mt-3 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-2">
+                        <Text className="text-xs text-red-800 dark:text-red-300">
+                          {paymentError}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View className="flex-row items-center gap-2 mt-3">
+                      <Feather name="lock" size={14} color="#9CA3AF" />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        Secure payment powered by Authorize.Net
+                      </Text>
+                    </View>
+                  </View>
+                )}
               </Section>
 
             </>
@@ -982,9 +1273,9 @@ const CreateEventPurchaseScreen = () => {
               </Pressable>
               <Pressable
                 onPress={handleSubmit}
-                disabled={submitting}
+                disabled={submitDisabled}
                 className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] ${
-                  submitting ? "opacity-70" : "active:opacity-90"
+                  submitDisabled ? "opacity-70" : "active:opacity-90"
                 }`}
               >
                 {submitting ? (
@@ -1087,6 +1378,80 @@ const CreateEventPurchaseScreen = () => {
                   }`}
                 >
                   {formatTime(t)}
+                </Text>
+                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Card expiry pickers — the mobile stand-in for the web's MM / YYYY
+          selects, so the same values reach Accept tokenization. */}
+      <BottomSheet
+        visible={sheet === "month"}
+        onClose={() => setSheet(null)}
+        title="Expiration Month"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {CARD_MONTHS.map((m) => {
+            const isSelected = cardMonth === m;
+            return (
+              <Pressable
+                key={m}
+                onPress={() => {
+                  setCardMonth(m);
+                  setPaymentError("");
+                  setSheet(null);
+                }}
+                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium ${
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
+                  }`}
+                >
+                  {m}
+                </Text>
+                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
+      <BottomSheet
+        visible={sheet === "year"}
+        onClose={() => setSheet(null)}
+        title="Expiration Year"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {cardYears().map((y) => {
+            const isSelected = cardYear === y;
+            return (
+              <Pressable
+                key={y}
+                onPress={() => {
+                  setCardYear(y);
+                  setPaymentError("");
+                  setSheet(null);
+                }}
+                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
+                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                }`}
+              >
+                <Text
+                  className={`text-base font-medium ${
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
+                  }`}
+                >
+                  {y}
                 </Text>
                 {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
               </Pressable>

@@ -25,7 +25,27 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import {
+  CARD_MONTHS,
+  cardYears,
+  formatCardNumber,
+  getCardType,
+  getPaymentErrorMessage,
+  isTestCardNumber,
+  validateCardNumber,
+} from "../../lib/payments/cardUtils";
+import { rollbackBooking } from "../../lib/payments/rollback";
+import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  CHARGE_UNKNOWN_MESSAGE,
+  chargeOutcomeUnknown,
+  declineMessage,
+  fetchAuthorizeNetPublicKey,
+  PAYMENT_TYPE,
+  processCardPayment,
+  type AuthorizeNetPublicKey,
+} from "../../services/paymentsService";
 import {
   buildAppliedDiscounts,
   buildAppliedFees,
@@ -122,7 +142,7 @@ const durationLabel = (pkg: BookablePackage): string => {
   return `${pkg.duration} ${u}`;
 };
 
-type PaymentMethod = "in-store" | "paylater";
+type PaymentMethod = "authorize.net" | "in-store" | "paylater";
 type BookingMode = "standard" | "flexible";
 
 const Section = ({
@@ -273,8 +293,28 @@ const ManualBookingScreen = () => {
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
   const [special, setSpecial] = useState<SpecialPricingBreakdown | null>(null);
 
+  // Card (Authorize.Net) fields — same anatomy as the web Card Details panel.
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardMonth, setCardMonth] = useState("");
+  const [cardYear, setCardYear] = useState("");
+  const [cardCVV, setCardCVV] = useState("");
+  const [cardExpiryPicker, setCardExpiryPicker] = useState<null | "month" | "year">(
+    null,
+  );
+  const [paymentError, setPaymentError] = useState("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [authorizeCredentials, setAuthorizeCredentials] =
+    useState<AuthorizeNetPublicKey | null>(null);
+  /** This location has no active merchant account (web's "Authorize.Net Not
+   *  Configured" modal). */
+  const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
+  const qr = useQrDataUri();
+
   const [submitting, setSubmitting] = useState(false);
   const submitLockRef = useRef(false);
+  /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
+   *  produce a second card charge. */
+  const lastSubmitAtRef = useRef(0);
 
   // ---- Package list -------------------------------------------------------
   useEffect(() => {
@@ -478,6 +518,51 @@ const ManualBookingScreen = () => {
   const balance = Math.max(0, finalTotal - finalAmountPaid);
   const paymentStatus = derivePaymentStatus(finalAmountPaid, finalTotal);
 
+  const cardValid = validateCardNumber(cardNumber);
+  const cardIncomplete =
+    !cardNumber || !cardMonth || !cardYear || !cardCVV || !cardValid;
+  /** Only charge when the card method is picked AND money is due (web parity). */
+  const chargesCard = paymentMethod === "authorize.net" && finalAmountPaid > 0;
+  const submitDisabled =
+    submitting ||
+    isProcessingPayment ||
+    (chargesCard && (cardIncomplete || authorizeUnavailable));
+
+  /**
+   * Card pre-flight — the web's validation order, run before anything is
+   * written. Returns the reason to show, or null when the card leg may proceed.
+   */
+  const cardPreflightError = (): string | null => {
+    if (!cardNumber || !cardMonth || !cardYear || !cardCVV)
+      return "Please fill in all card details";
+    if (!validateCardNumber(cardNumber)) return "Invalid card number";
+    if (isTestCardNumber(cardNumber))
+      return "Test card numbers are not allowed. Please use a real card.";
+    if (!authorizeCredentials?.apiLoginId)
+      return "Payment system not initialized. Please reopen this screen and try again.";
+    return null;
+  };
+
+  // Accept.js credentials for the booking's location — fetched as soon as the
+  // card method is active, exactly like the web `initializeAuthorizeNet`.
+  useEffect(() => {
+    if (paymentMethod !== "authorize.net" || effectiveLocationId == null) return;
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchAuthorizeNetPublicKey(token, effectiveLocationId, controller.signal)
+      .then((creds) => {
+        setAuthorizeCredentials(creds.apiLoginId ? creds : null);
+        setAuthorizeUnavailable(!creds.apiLoginId);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setAuthorizeCredentials(null);
+        setAuthorizeUnavailable(true);
+      });
+    return () => controller.abort();
+  }, [paymentMethod, effectiveLocationId]);
+
   // ---- Calendar cells -----------------------------------------------------
   const today = todayKey();
   const cells = useMemo(() => {
@@ -546,9 +631,23 @@ const ManualBookingScreen = () => {
       Alert.alert("Not authenticated", "Please sign in again.");
       return;
     }
+    const now = Date.now();
+    if (now - lastSubmitAtRef.current < 3000) return;
+    lastSubmitAtRef.current = now;
+
+    if (chargesCard) {
+      const reason = cardPreflightError();
+      if (reason) {
+        setPaymentError(reason);
+        Alert.alert("Check card details", reason);
+        return;
+      }
+      setPaymentError("");
+    }
 
     submitLockRef.current = true;
     setSubmitting(true);
+    setIsProcessingPayment(chargesCard);
     try {
       const additionalAddons = pkg.addOns
         .filter((a) => (addonQty[a.id] ?? 0) > 0)
@@ -627,6 +726,75 @@ const ManualBookingScreen = () => {
         }
       }
 
+      if (chargesCard) {
+        // The web encodes the booking's reference number (not its id) — that is
+        // what the check-in scanner reads off a booking QR.
+        const qrCode = referenceNumber ? await qr.generate(referenceNumber) : null;
+
+        let response;
+        try {
+          response = await processCardPayment(
+            token,
+            {
+              cardNumber: cardNumber.replace(/\s/g, ""),
+              month: cardMonth,
+              year: cardYear,
+              cardCode: cardCVV,
+            },
+            authorizeCredentials!,
+            {
+              location_id: effectiveLocationId,
+              amount: finalAmountPaid,
+              order_id: `P${pkg.id}-${String(Date.now()).slice(-8)}`,
+              description: `Manual Booking: ${pkg.name}`,
+              customer_id: customerId ?? undefined,
+              payable_id: id,
+              payable_type: PAYMENT_TYPE.BOOKING,
+              send_email: sendEmail,
+              qr_code: qrCode ?? undefined,
+              customer: {
+                first_name: customerName.trim().split(/\s+/)[0] || "",
+                last_name:
+                  customerName.trim().split(/\s+/).slice(1).join(" ") || "",
+                email: email.trim(),
+                phone: phone.trim(),
+                address: address.trim(),
+                city: city.trim(),
+                state: stateField.trim(),
+                zip: zip.trim(),
+                country: country.trim(),
+              },
+            },
+          );
+        } catch (payErr) {
+          // A lost response can't prove the card wasn't charged, so keep the
+          // booking and let staff reconcile rather than risk a double charge.
+          if (chargeOutcomeUnknown(payErr)) {
+            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
+            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            return;
+          }
+          await rollbackBooking(token, id);
+          markBookingsStale();
+          setPaymentError(getPaymentErrorMessage(payErr));
+          Alert.alert(
+            "Payment failed",
+            `${getPaymentErrorMessage(payErr)}\n\nThe booking has been cancelled and no charges were made.`,
+          );
+          return;
+        }
+
+        if (!response.success) {
+          await rollbackBooking(token, id);
+          markBookingsStale();
+          const message = declineMessage(response.message, "booking");
+          setPaymentError(message);
+          Alert.alert("Payment declined", message);
+          return;
+        }
+        setPaymentError("");
+      }
+
       markBookingsStale();
       Alert.alert(
         bookingMode === "standard" ? "Booking created" : "Booking recorded",
@@ -641,6 +809,7 @@ const ManualBookingScreen = () => {
     } finally {
       submitLockRef.current = false;
       setSubmitting(false);
+      setIsProcessingPayment(false);
     }
   };
 
@@ -652,6 +821,9 @@ const ManualBookingScreen = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
+      {/* Off-screen QR, mounted only while a receipt QR is being generated. */}
+      {qr.node}
+
       {/* Header */}
       <View
         className="w-full border-b border-gray-100 bg-white px-5 pb-4 dark:border-neutral-800 dark:bg-neutral-900"
@@ -1384,6 +1556,7 @@ const ManualBookingScreen = () => {
                     <View className="flex-row gap-2">
                       {(
                         [
+                          { v: "authorize.net", label: "Authorize.Net" },
                           { v: "in-store", label: "In-Store" },
                           { v: "paylater", label: "Pay Later" },
                         ] as const
@@ -1392,7 +1565,10 @@ const ManualBookingScreen = () => {
                         return (
                           <Pressable
                             key={m.v}
-                            onPress={() => setPaymentMethod(m.v)}
+                            onPress={() => {
+                              setPaymentMethod(m.v);
+                              setPaymentError("");
+                            }}
                             className={`flex-1 items-center py-2.5 rounded-xl border ${
                               active
                                 ? "bg-[#0644C7] border-[#0644C7]"
@@ -1412,9 +1588,122 @@ const ManualBookingScreen = () => {
                     </View>
                   </View>
                 </View>
-                <Text className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5">
-                  Card payments are handled on the web admin.
-                </Text>
+
+                {paymentMethod === "authorize.net" && (
+                  <View className="mt-3 rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-3">
+                    <FieldLabel>Card Details</FieldLabel>
+
+                    {/* Web parity: the "Authorize.Net Not Configured" modal. */}
+                    {authorizeUnavailable && (
+                      <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-900/40 dark:bg-amber-900/20">
+                        <Feather name="alert-triangle" size={13} color="#B45309" />
+                        <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                          This location has no active Authorize.Net account, so
+                          cards can&apos;t be charged. Use In-Store or Pay Later,
+                          or ask an administrator to connect the merchant account.
+                        </Text>
+                      </View>
+                    )}
+
+                    <View
+                      className={`h-11 flex-row items-center rounded-xl border px-3 bg-white dark:bg-neutral-900 ${
+                        cardNumber && cardValid
+                          ? "border-green-400"
+                          : cardNumber
+                            ? "border-red-400"
+                            : "border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <TextInput
+                        value={cardNumber}
+                        onChangeText={(v) => {
+                          const formatted = formatCardNumber(v);
+                          if (formatted.replace(/\s/g, "").length <= 16) {
+                            setCardNumber(formatted);
+                            setPaymentError("");
+                          }
+                        }}
+                        placeholder="1234 5678 9012 3456"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="number-pad"
+                        maxLength={19}
+                        editable={!isProcessingPayment}
+                        className="flex-1 py-0 text-sm text-gray-900 dark:text-white"
+                      />
+                      {!!cardNumber && cardValid && (
+                        <Feather name="check-circle" size={15} color="#16A34A" />
+                      )}
+                    </View>
+                    {!!cardNumber && (
+                      <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {getCardType(cardNumber)}
+                      </Text>
+                    )}
+
+                    <View className="mt-3 flex-row gap-2">
+                      <Pressable
+                        onPress={() => setCardExpiryPicker("month")}
+                        className="h-11 flex-1 flex-row items-center justify-between rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3"
+                      >
+                        <Text
+                          className={`text-sm ${
+                            cardMonth
+                              ? "text-gray-900 dark:text-white"
+                              : "text-gray-400"
+                          }`}
+                        >
+                          {cardMonth || "MM"}
+                        </Text>
+                        <Feather name="chevron-down" size={14} color="#9CA3AF" />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setCardExpiryPicker("year")}
+                        className="h-11 flex-1 flex-row items-center justify-between rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3"
+                      >
+                        <Text
+                          className={`text-sm ${
+                            cardYear
+                              ? "text-gray-900 dark:text-white"
+                              : "text-gray-400"
+                          }`}
+                        >
+                          {cardYear || "YYYY"}
+                        </Text>
+                        <Feather name="chevron-down" size={14} color="#9CA3AF" />
+                      </Pressable>
+                      <View className="h-11 flex-1 justify-center rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3">
+                        <TextInput
+                          value={cardCVV}
+                          onChangeText={(v) => {
+                            const digits = v.replace(/\D/g, "");
+                            if (digits.length <= 4) setCardCVV(digits);
+                          }}
+                          placeholder="CVV"
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="number-pad"
+                          maxLength={4}
+                          editable={!isProcessingPayment}
+                          className="py-0 text-sm text-gray-900 dark:text-white"
+                        />
+                      </View>
+                    </View>
+
+                    {!!paymentError && (
+                      <View className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 dark:border-red-900/40 dark:bg-red-900/20">
+                        <Text className="text-xs text-red-800 dark:text-red-300">
+                          {paymentError}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View className="mt-3 flex-row items-center gap-1.5">
+                      <Feather name="lock" size={12} color="#9CA3AF" />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        Secure payment powered by Authorize.Net
+                      </Text>
+                    </View>
+                  </View>
+                )}
 
                 {/* Amounts */}
                 <View className="flex-row gap-3 mt-3">
@@ -1588,9 +1877,9 @@ const ManualBookingScreen = () => {
             </Pressable>
             <Pressable
               onPress={handleSubmit}
-              disabled={submitting || !canSubmit}
+              disabled={submitDisabled || !canSubmit}
               className={`flex-[1.4] py-3.5 rounded-xl bg-[#0644C7] items-center flex-row justify-center gap-2 active:opacity-90 ${
-                submitting || !canSubmit ? "opacity-50" : ""
+                submitDisabled || !canSubmit ? "opacity-50" : ""
               }`}
             >
               {submitting ? (
@@ -1693,6 +1982,57 @@ const ManualBookingScreen = () => {
                   </Pressable>
                 );
               })}
+            </ScrollView>
+          </View>
+        </View>
+      )}
+
+      {/* Card expiry picker — the mobile stand-in for the web's MM / YYYY
+          selects, so the same values reach Accept tokenization. */}
+      {cardExpiryPicker && (
+        <View style={StyleSheet.absoluteFill} className="justify-end">
+          <Pressable
+            style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20,20,20,0.5)" }]}
+            onPress={() => setCardExpiryPicker(null)}
+          />
+          <View
+            className="bg-white dark:bg-neutral-900 rounded-t-3xl max-h-[70%]"
+            style={{ paddingBottom: insets.bottom + 8 }}
+          >
+            <View className="w-10 h-1 rounded-full bg-gray-300 self-center mt-3 mb-1" />
+            <Text className="text-base font-bold text-gray-900 dark:text-white px-5 pt-3 pb-2">
+              {cardExpiryPicker === "month" ? "Expiration Month" : "Expiration Year"}
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {(cardExpiryPicker === "month" ? CARD_MONTHS : cardYears()).map(
+                (v) => {
+                  const active =
+                    v === (cardExpiryPicker === "month" ? cardMonth : cardYear);
+                  return (
+                    <Pressable
+                      key={v}
+                      onPress={() => {
+                        if (cardExpiryPicker === "month") setCardMonth(v);
+                        else setCardYear(v);
+                        setPaymentError("");
+                        setCardExpiryPicker(null);
+                      }}
+                      className="px-5 py-3.5 flex-row items-center justify-between active:bg-gray-50 dark:active:bg-neutral-800"
+                    >
+                      <Text
+                        className={`text-sm ${
+                          active
+                            ? "text-[#0644C7] font-semibold"
+                            : "text-gray-700 dark:text-gray-200"
+                        }`}
+                      >
+                        {v}
+                      </Text>
+                      {active && <Feather name="check" size={18} color={PRIMARY} />}
+                    </Pressable>
+                  );
+                },
+              )}
             </ScrollView>
           </View>
         </View>

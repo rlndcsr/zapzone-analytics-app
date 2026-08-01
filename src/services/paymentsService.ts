@@ -1,4 +1,5 @@
-import { apiRequest, apiUrl } from "../lib/api";
+import { ApiError, apiRequest, apiUrl } from "../lib/api";
+import { tokenizeCardWithAccept } from "../lib/payments/acceptTokenize";
 
 /** Payment lifecycle status (backend `status` column). */
 export type PaymentStatus =
@@ -421,19 +422,24 @@ export type CardData = {
 };
 
 /**
- * Turns card data into Authorize.Net opaque data. The web does this with
- * Accept.js (`window.Accept.dispatchData`), which needs a DOM — on native it
- * requires a WebView host that ships in the next native build, so this stub
- * throws until then. Nothing here ever sends a card number anywhere.
+ * Turns card data into Authorize.Net opaque data — the mobile counterpart of
+ * the web's `window.Accept.dispatchData`. Delegates to the Accept endpoint the
+ * same way Authorize.Net's own mobile SDKs do; the card number goes device →
+ * Authorize.Net and never reaches the ZapZone backend.
  */
 export async function tokenizeCard(
-  _cardData: CardData,
-  _credentials: AuthorizeNetPublicKey,
+  cardData: CardData,
+  credentials: AuthorizeNetPublicKey,
 ): Promise<PaymentOpaqueData> {
-  throw new Error(
-    "Card tokenization is not implemented yet. Card payments become available in the next app build.",
-  );
+  return tokenizeCardWithAccept(cardData, credentials);
 }
+
+/**
+ * A charge round-trips through Authorize.Net, so it routinely outruns the
+ * default 15s budget. The web uses axios with no timeout at all; this is
+ * generous enough to behave the same without hanging forever.
+ */
+const CHARGE_TIMEOUT_MS = 60000;
 
 /** POST /api/payments/charge — charges an already-tokenized card. */
 export async function chargePayment(
@@ -444,7 +450,72 @@ export async function chargePayment(
     method: "POST",
     token,
     body,
+    timeoutMs: CHARGE_TIMEOUT_MS,
   });
+}
+
+/**
+ * Whether a thrown charge failure leaves the outcome genuinely unknown.
+ *
+ * Tokenization errors and HTTP rejections both prove no money moved: the first
+ * never reaches our backend, the second was refused before or by the gateway.
+ * A transport failure (`ApiError.status === 0` — timeout or dropped connection)
+ * is different: the request may have been processed and only the response lost.
+ * Rolling back on that could delete a record the customer actually paid for, so
+ * callers must leave it alone and tell the operator to verify.
+ */
+export function chargeOutcomeUnknown(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 0;
+}
+
+/** What to tell the operator when a charge's outcome can't be determined. */
+export const CHARGE_UNKNOWN_MESSAGE =
+  "The payment result never came back, so it may or may not have gone through. " +
+  "Check the Payments list before charging this card again.";
+
+/**
+ * Tokenize then charge — the mobile equivalent of the web's
+ * `PaymentService.processCardPayment`, so every screen runs the two legs in the
+ * same order with the same payload.
+ *
+ * A resolved response with `success: false` means the gateway declined; callers
+ * roll back the record they created, exactly as the web does. A thrown error
+ * usually means the same, EXCEPT when {@link chargeOutcomeUnknown} holds — see
+ * that function for why those must not be rolled back.
+ */
+export async function processCardPayment(
+  token: string,
+  cardData: CardData,
+  credentials: AuthorizeNetPublicKey,
+  payment: Omit<PaymentChargeRequest, "opaqueData">,
+): Promise<PaymentChargeResponse> {
+  const opaqueData = await tokenizeCard(cardData, credentials);
+  return chargePayment(token, { ...payment, opaqueData });
+}
+
+/**
+ * The web's post-decline copy: it maps the gateway message to a reason and
+ * always states that the record was cancelled and no charge was made, so the
+ * operator knows not to retry against a half-created booking/purchase.
+ *
+ * @param message  Raw `message` from the failed charge response.
+ * @param subject  What was rolled back — "purchase" or "booking".
+ */
+export function declineMessage(
+  message: string | undefined,
+  subject: "purchase" | "booking",
+): string {
+  const raw = (message ?? "").toLowerCase();
+  const cancelled = `The ${subject} has been cancelled and no charges were made.`;
+  if (raw.includes("declin"))
+    return `Your card was declined. ${cancelled} Please check the card details or try a different card.`;
+  if (raw.includes("insufficient"))
+    return `Insufficient funds on the card. ${cancelled} Please try a different card or payment method.`;
+  if (raw.includes("expired") || raw.includes("expiration"))
+    return `The card appears to be expired. ${cancelled} Please use a different card.`;
+  if (raw.includes("cvv") || raw.includes("security code"))
+    return `Invalid security code (CVV). ${cancelled} Please check the code on the card and try again.`;
+  return `Payment could not be processed. ${cancelled} Please check the card details and try again.`;
 }
 
 /** Filters for the Package Invoices PDF export. */
