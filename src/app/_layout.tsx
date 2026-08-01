@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
+import { AppUpdateGate } from "../components/AppUpdateGate";
 import { AuthGuard } from "../components/AuthGuard";
 import { QuickNavFab } from "../components/navigation/QuickNavFab";
 import { STACK_SCREEN_TRANSITION } from "../components/navigation/tabTransition";
@@ -59,6 +60,10 @@ export default function RootLayout() {
           inherit it without knowing about it. It hides itself on the public
           screens (login/splash). */}
       <QuickNavFab />
+      {/* Launch version check. Mounted here (after session restore, once for
+          the whole app) so it runs a single request per launch and its blocking
+          form can cover every screen — including login. */}
+      <AppUpdateGate />
     </GestureHandlerRootView>
   );
 }

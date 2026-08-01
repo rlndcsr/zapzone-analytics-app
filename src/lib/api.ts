@@ -94,6 +94,14 @@ type RequestOptions = {
    * raise it only for known-heavy endpoints (e.g. the dashboard metrics call).
    */
   timeoutMs?: number;
+  /**
+   * Marks a route that needs no authentication (e.g. the mobile version check),
+   * so its response can never touch session state: a 401 from such a route is a
+   * server/proxy misconfiguration, not an expired session, and must not log the
+   * user out — it throws an ApiError like any other failure. Success likewise
+   * doesn't extend the inactivity window, since no user action caused it.
+   */
+  publicEndpoint?: boolean;
 };
 
 export async function apiRequest<T>(
@@ -104,6 +112,7 @@ export async function apiRequest<T>(
     signal,
     token,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    publicEndpoint = false,
   }: RequestOptions = {},
 ): Promise<T> {
   // After a 401 teardown, silently drop pending/new authenticated requests.
@@ -178,7 +187,7 @@ export async function apiRequest<T>(
   if (!response.ok) {
     // 401 → tear down once (idempotent) and swallow silently, so parallel 401s
     // cause no banners and one logout. 403 (role denial) still surfaces below.
-    if (response.status === 401) {
+    if (response.status === 401 && !publicEndpoint) {
       handleUnauthorized();
       return neverSettles<T>();
     }
@@ -189,8 +198,9 @@ export async function apiRequest<T>(
     throw new ApiError(message, response.status, data?.errors, data);
   }
 
-  // Successful requests extend the session (except before login).
-  void touchSession();
+  // Successful requests extend the session (except before login, and except
+  // unauthenticated background calls, which aren't user activity).
+  if (!publicEndpoint) void touchSession();
 
   return data as T;
 }
