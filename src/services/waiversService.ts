@@ -125,6 +125,8 @@ export type WaiverTemplate = {
   dobRequired: boolean;
   relationshipRequired: boolean;
   photoVideoReleaseEnabled: boolean;
+  /** Custom release wording; null/empty means "use the default text". */
+  photoVideoReleaseText: string | null;
   medicalAckEnabled: boolean;
   propertyDamageEnabled: boolean;
   groupLeaderClauseEnabled: boolean;
@@ -239,6 +241,7 @@ type RawTemplate = {
   dob_required?: boolean;
   relationship_required?: boolean;
   photo_video_release_enabled?: boolean;
+  photo_video_release_text?: string | null;
   medical_ack_enabled?: boolean;
   property_damage_enabled?: boolean;
   group_leader_clause_enabled?: boolean;
@@ -385,6 +388,7 @@ function mapTemplate(raw: RawTemplate): WaiverTemplate {
     dobRequired: !!raw.dob_required,
     relationshipRequired: !!raw.relationship_required,
     photoVideoReleaseEnabled: !!raw.photo_video_release_enabled,
+    photoVideoReleaseText: raw.photo_video_release_text ?? null,
     medicalAckEnabled: !!raw.medical_ack_enabled,
     propertyDamageEnabled: !!raw.property_damage_enabled,
     groupLeaderClauseEnabled: !!raw.group_leader_clause_enabled,
@@ -721,6 +725,7 @@ export type TemplatePayload = {
   dob_required?: boolean;
   relationship_required?: boolean;
   photo_video_release_enabled?: boolean;
+  photo_video_release_text?: string | null;
   medical_ack_enabled?: boolean;
   property_damage_enabled?: boolean;
   group_leader_clause_enabled?: boolean;

@@ -156,6 +156,11 @@ export function ContactActionsSheet({
   const [active, setActive] = useState(true);
   const [smsConsent, setSmsConsent] = useState(false);
 
+  // View-mode status, kept locally so the pill flips instantly and the sheet
+  // stays open while the parent list refreshes behind it.
+  const [viewStatus, setViewStatus] = useState<ContactRow["status"]>("active");
+  const [statusBusy, setStatusBusy] = useState(false);
+
   // Tags: `tags` drives the view-mode chip editor (add/remove via API);
   // `formTags` is the create-form tag picker (sent as tags[] on create only).
   const [tags, setTags] = useState<string[]>([]);
@@ -179,6 +184,7 @@ export function ContactActionsSheet({
     setSource(c?.source ?? "");
     setNotes(c?.notes ?? "");
     setActive((c?.status ?? "active") !== "inactive");
+    setViewStatus(c?.status ?? "active");
     setSmsConsent(!!c?.smsConsent);
     setTags(c?.tags ?? []);
     setFormTags([]);
@@ -259,23 +265,32 @@ export function ContactActionsSheet({
     router.push(`/customers/edit-customer?id=${contact.id}`);
   };
 
+  /**
+   * Flip active ⇄ inactive from the details view — the same PUT the web's
+   * clickable status pill fires. The pill updates first and the sheet stays
+   * open (the web keeps its row in place too); a failure rolls it back.
+   */
   const toggleStatus = async () => {
-    if (!contact) return;
+    if (!contact || statusBusy) return;
     const token = getToken();
-    if (!token) return;
-    const next = contact.status === "active" ? "inactive" : "active";
-    setBusy(true);
+    if (!token) return Alert.alert("Not signed in", "Please sign in again.");
+    const previous = viewStatus;
+    const next = previous === "active" ? "inactive" : "active";
+    setViewStatus(next);
+    setActive(next === "active");
+    setStatusBusy(true);
     try {
       await updateContact(token, contact.id, { status: next });
       onChanged();
-      onClose();
     } catch (err) {
+      setViewStatus(previous);
+      setActive(previous === "active");
       Alert.alert(
         "Update failed",
         err instanceof Error ? err.message : "Could not update status.",
       );
     } finally {
-      setBusy(false);
+      setStatusBusy(false);
     }
   };
 
@@ -580,7 +595,7 @@ export function ContactActionsSheet({
             <Text className="text-xl font-bold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={2}>
               {contact.name}
             </Text>
-            <StatusBadge status={contact.status} />
+            <StatusBadge status={viewStatus} />
           </View>
 
           <Section title="Personal Information">
@@ -603,9 +618,33 @@ export function ContactActionsSheet({
             <Field label="Company" value={contact.companyName} />
             <Field label="Job Title" value={contact.jobTitle} />
             <Field label="Source" value={contact.source} />
+            {/* Tap the pill to switch between Active and Inactive, exactly
+                like the web's "Click to activate" status cell. */}
             <Field label="Status">
-              <View className="flex-row">
-                <StatusBadge status={contact.status} />
+              <View className="flex-row items-center gap-2">
+                <Pressable
+                  onPress={toggleStatus}
+                  disabled={statusBusy}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    viewStatus === "active"
+                      ? "Set customer inactive"
+                      : "Set customer active"
+                  }
+                  className="active:opacity-60"
+                >
+                  <StatusBadge status={viewStatus} />
+                </Pressable>
+                {statusBusy ? (
+                  <ActivityIndicator size="small" color={PRIMARY} />
+                ) : (
+                  <Text className="text-xs text-gray-400 dark:text-gray-500">
+                    {viewStatus === "active"
+                      ? "Tap to deactivate"
+                      : "Tap to activate"}
+                  </Text>
+                )}
               </View>
             </Field>
           </Section>

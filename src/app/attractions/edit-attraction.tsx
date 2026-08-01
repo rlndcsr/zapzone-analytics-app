@@ -31,10 +31,10 @@ import {
   PRIMARY,
   Section,
   SelectRow,
-  TIME_OPTIONS,
 } from "../../components/ui/attractionFormKit";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { InputField } from "../../components/ui/InputField";
+import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
 import { mediaUrl } from "../../lib/api";
 import { markAttractionsStale } from "../../lib/hooks/useAttractions";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -436,7 +436,12 @@ const EditAttractionScreen = () => {
             className="flex-1"
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+            contentContainerStyle={{
+              padding: 20,
+              // The action buttons scroll with the content now, so the safe
+              // area has to be cleared here instead of by a pinned footer.
+              paddingBottom: insets.bottom + 32,
+            }}
           >
             {/* Location (read-only on edit) */}
             <Section icon="map-pin" title="Location">
@@ -664,29 +669,29 @@ const EditAttractionScreen = () => {
                     })}
                   </View>
 
-                  <View className="flex-row gap-3">
-                    <View className="flex-1">
-                      <FieldLabel>Start Time</FieldLabel>
-                      <SelectRow
-                        icon="clock"
-                        value={formatTime(schedule.start_time)}
-                        placeholder="Start"
-                        onPress={() =>
-                          setSheet({ kind: "time", index, field: "start_time" })
-                        }
-                      />
-                    </View>
-                    <View className="flex-1">
-                      <FieldLabel>End Time</FieldLabel>
-                      <SelectRow
-                        icon="clock"
-                        value={formatTime(schedule.end_time)}
-                        placeholder="End"
-                        onPress={() =>
-                          setSheet({ kind: "time", index, field: "end_time" })
-                        }
-                      />
-                    </View>
+                  {/* Full-width and stacked — start on top, end below — so the
+                      times stay readable instead of squeezed side by side. */}
+                  <View>
+                    <FieldLabel>Start Time</FieldLabel>
+                    <SelectRow
+                      icon="clock"
+                      value={formatTime(schedule.start_time)}
+                      placeholder="Start"
+                      onPress={() =>
+                        setSheet({ kind: "time", index, field: "start_time" })
+                      }
+                    />
+                  </View>
+                  <View className="mt-3">
+                    <FieldLabel>End Time</FieldLabel>
+                    <SelectRow
+                      icon="clock"
+                      value={formatTime(schedule.end_time)}
+                      placeholder="End"
+                      onPress={() =>
+                        setSheet({ kind: "time", index, field: "end_time" })
+                      }
+                    />
                   </View>
                 </View>
               ))}
@@ -817,39 +822,37 @@ const EditAttractionScreen = () => {
               schedules={schedules}
               imageUri={images.length > 0 ? mediaUrl(images[0]) : null}
             />
-          </ScrollView>
 
-          {/* Sticky footer — Cancel / Update Attraction (matches Packages edit). */}
-          <View
-            className="flex-row gap-3 px-5 pt-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-            style={{ paddingBottom: insets.bottom + 12 }}
-          >
-            <Pressable
-              onPress={() => router.back()}
-              disabled={submitting}
-              className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
-            >
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Cancel
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={handleSubmit}
-              disabled={submitting}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
-            >
-              {submitting ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Feather name="check" size={16} color="#fff" />
-                  <Text className="text-sm font-semibold text-white">
-                    Update Attraction
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          </View>
+            {/* Actions scroll with the form, sitting just below the preview
+                rather than pinned to the bottom of the screen. */}
+            <View className="flex-row gap-3 mt-4">
+              <Pressable
+                onPress={() => router.back()}
+                disabled={submitting}
+                className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
+              >
+                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSubmit}
+                disabled={submitting}
+                className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Feather name="check" size={16} color="#fff" />
+                    <Text className="text-sm font-semibold text-white">
+                      Update Attraction
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       )}
 
@@ -958,53 +961,27 @@ const EditAttractionScreen = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Time picker */}
-      <BottomSheet
+      {/* Time picker — free hour/minute wheels, so any time is selectable. */}
+      <TimePickerSheet
         visible={sheet?.kind === "time"}
-        onClose={() => setSheet(null)}
+        value={
+          sheet?.kind === "time"
+            ? (schedules[sheet.index]?.[sheet.field] ?? "09:00")
+            : "09:00"
+        }
         title={
           sheet?.kind === "time" && sheet.field === "start_time"
             ? "Start Time"
             : "End Time"
         }
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {TIME_OPTIONS.map((t) => {
-            const current =
-              sheet?.kind === "time"
-                ? schedules[sheet.index]?.[sheet.field]
-                : undefined;
-            const isSelected = current === t;
-            return (
-              <Pressable
-                key={t}
-                onPress={() => {
-                  if (sheet?.kind === "time") {
-                    setScheduleTime(sheet.index, sheet.field, t);
-                  }
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {formatTime(t)}
-                </Text>
-                {isSelected && (
-                  <Feather name="check" size={16} color="#3B82F6" />
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+        onClose={() => setSheet(null)}
+        onSelect={(time) => {
+          if (sheet?.kind === "time") {
+            setScheduleTime(sheet.index, sheet.field, time);
+          }
+          setSheet(null);
+        }}
+      />
     </View>
   );
 };

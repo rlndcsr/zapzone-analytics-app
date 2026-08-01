@@ -21,6 +21,7 @@ import { useColorScheme } from "nativewind";
 import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
 import { PurchaseQRSheet } from "../../components/ui/PurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { getToken } from "../../lib/session";
 import {
@@ -56,21 +57,10 @@ const prettyMethod = (m: string): string => {
   return t.replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
-/** "July 27, 2026 at 06:48 PM" — the web `formatLocalDateTime` output. */
+/** "July 27, 2026 at 6:48 PM" — the web `formatLocalDateTime` output, read on
+ *  the venue's clock so a phone in another timezone doesn't shift the day. */
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "N/A";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "N/A";
-  const date = d.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-  const time = d.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  return `${date} at ${time}`;
+  return formatDateTimeET(iso, { showZone: false, fallback: "N/A" });
 }
 
 function formatScheduledDate(dateStr: string): string {

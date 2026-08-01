@@ -15,6 +15,7 @@ import { DeletionLogTable } from "../../components/ui/DeletionLogTable";
 import { Pagination } from "../../components/ui/Pagination";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getToken } from "../../lib/session";
 import {
   fetchDeletionLog,
@@ -42,17 +43,9 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
+/** Deletion instant in venue time, like the web log ("Jul 31, 2026 at 5:06 PM ET"). */
 function formatWhen(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(dateStr, { month: "short" });
 }
 
 const LogCard = ({ entry }: { entry: WaiverDeletionLogEntry }) => (

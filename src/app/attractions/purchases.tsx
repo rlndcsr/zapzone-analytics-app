@@ -42,6 +42,7 @@ import {
   consumeAttractionPurchasesStale,
   useAttractionPurchases,
 } from "../../lib/hooks/useAttractionPurchases";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -107,17 +108,9 @@ function prettyMethod(method: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/** Purchase instant in venue time — no zone suffix, matching the web page. */
 function formatDateTime(dateString: string): string {
-  if (!dateString) return "—";
-  const d = new Date(dateString);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(dateString, { month: "short", showZone: false });
 }
 
 function formatScheduled(dateStr: string, timeStr: string | null): string {
@@ -697,7 +690,7 @@ const ManagePurchases = () => {
           p.totalAmount,
           p.status,
           p.paymentMethod,
-          p.createdAt ? new Date(p.createdAt).toLocaleString() : "",
+          p.createdAt ? formatDateTime(p.createdAt) : "",
         ]
           .map(esc)
           .join(","),

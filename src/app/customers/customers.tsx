@@ -28,7 +28,13 @@ import {
   countActiveCustomerFilters,
   type CustomerFilterValues,
 } from "../../components/ui/CustomerFiltersSheet";
-import { CustomersTable } from "../../components/ui/CustomersTable";
+import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
+import {
+  CUSTOMER_COLUMNS,
+  CustomersTable,
+  allCustomerColumnKeys,
+  defaultCustomerColumnKeys,
+} from "../../components/ui/CustomersTable";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
@@ -39,6 +45,7 @@ import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
 import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
 import { consumeContactsStale } from "../../lib/contactsStale";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteContact,
@@ -46,6 +53,7 @@ import {
   fetchAllContacts,
   fetchContactStats,
   fetchContactTags,
+  updateContact,
   type ContactRow,
   type ContactStats,
 } from "../../services/contactsService";
@@ -177,6 +185,11 @@ const Customers = () => {
   // Bulk selection (table view only) + the in-flight bulk delete flag.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // "Toggle Columns" — which table columns are on (web default set to start).
+  const [showColumnsSheet, setShowColumnsSheet] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
+    defaultCustomerColumnKeys,
+  );
   // The contact whose Add Tag sheet is open (null = closed).
   const [addTagContact, setAddTagContact] = useState<ContactRow | null>(null);
 
@@ -420,6 +433,44 @@ const Customers = () => {
     [load],
   );
 
+  /**
+   * Flip a customer between active and inactive — the same PUT the web's
+   * clickable status pill fires (`updateContact(id, { status })`). The row is
+   * patched in place first so the pill responds immediately, then rolled back
+   * if the request fails.
+   */
+  const handleToggleStatus = useCallback(
+    async (c: ContactRow) => {
+      const token = getToken();
+      if (!token) {
+        Alert.alert("Not signed in", "Please sign in again.");
+        return;
+      }
+      const next = c.status === "active" ? "inactive" : "active";
+      setBusyRowId(c.id);
+      setAllRows((prev) =>
+        prev.map((row) => (row.id === c.id ? { ...row, status: next } : row)),
+      );
+      try {
+        await updateContact(token, c.id, { status: next });
+        await load();
+      } catch (err) {
+        setAllRows((prev) =>
+          prev.map((row) =>
+            row.id === c.id ? { ...row, status: c.status } : row,
+          ),
+        );
+        Alert.alert(
+          "Update failed",
+          err instanceof Error ? err.message : "Could not update the status.",
+        );
+      } finally {
+        setBusyRowId(null);
+      }
+    },
+    [load],
+  );
+
   // Bulk delete — confirm, then fan out per-id DELETE calls (no bulk endpoint),
   // reload and clear the selection. Mirrors the web bulk delete.
   const confirmBulkDelete = useCallback(() => {
@@ -494,8 +545,9 @@ const Customers = () => {
         "Country", "Notes", "Created", "Updated", "First Name", "Last Name",
       ];
       const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      // Venue time, so an export reads the same wherever the phone is.
       const stamp = (v: string | null) =>
-        v ? new Date(v).toLocaleString() : "";
+        v ? formatDateTimeET(v, { month: "short", showZone: false }) : "";
       const lines = filtered.map((c) =>
         [
           c.id, c.name, c.email, c.phone, c.companyName, c.jobTitle,
@@ -745,6 +797,17 @@ const Customers = () => {
               options={SORT_OPTIONS}
               onSelect={setSort}
             />
+            {/* Columns — table view only, like the web table toolbar. */}
+            {viewMode === "table" && (
+              <PillSegment
+                label="Columns"
+                active={showColumnsSheet}
+                onPress={() => setShowColumnsSheet(true)}
+                renderIcon={(c) => (
+                  <Feather name="columns" size={15} color={c} />
+                )}
+              />
+            )}
           </FilterPill>
 
           {/* Count + layout toggle (Table default / Cards) */}
@@ -830,10 +893,14 @@ const Customers = () => {
                   selectedIds={selectedIds}
                   onToggleRow={toggleRow}
                   onToggleAll={toggleAllVisible}
-                  onRowPress={(c) => setSheetContact(c)}
                   onView={(c) => setSheetContact(c)}
+                  onEdit={(c) =>
+                    router.push(`/customers/edit-customer?id=${c.id}`)
+                  }
                   onDelete={handleDelete}
                   onAddTag={(c) => setAddTagContact(c)}
+                  onToggleStatus={handleToggleStatus}
+                  visibleColumns={visibleColumns}
                 />
               )}
 
@@ -980,6 +1047,24 @@ const Customers = () => {
         allTags={tagChoices}
         onClose={() => setAddTagContact(null)}
         onAdded={load}
+      />
+
+      {/* Toggle Columns — mirrors the web table toolbar's Columns dropdown. */}
+      <ColumnsSheet
+        visible={showColumnsSheet}
+        columns={CUSTOMER_COLUMNS}
+        visibleKeys={visibleColumns}
+        onToggle={(key) =>
+          setVisibleColumns((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          })
+        }
+        onShowAll={() => setVisibleColumns(allCustomerColumnKeys())}
+        onReset={() => setVisibleColumns(defaultCustomerColumnKeys())}
+        onClose={() => setShowColumnsSheet(false)}
       />
 
       {/* All filters in one sheet, same as the other list screens. */}

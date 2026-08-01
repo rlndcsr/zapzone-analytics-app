@@ -376,10 +376,15 @@ export function MorphingFabMenu({
   if (!mounted || !fab) return null;
 
   // Items with a route navigate then close; the rest keep their close-only
-  // behavior until their destinations exist.
+  // behavior until their destinations exist. Home is reached with navigate()
+  // so it reuses the tab screen already in the history instead of pushing a
+  // second copy of it on top of the stack.
   const handleSelect = (item: NavMenuItem) => {
     onClose();
-    if (item.route) {
+    if (!item.route) return;
+    if (item.mode === "navigate") {
+      router.navigate(item.route as never);
+    } else {
       router.push(item.route as never);
     }
   };

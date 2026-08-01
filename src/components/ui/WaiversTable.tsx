@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { memo, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { SOURCE_LABELS, type Waiver } from "../../services/waiversService";
 import { StatusBadge } from "./StatusBadge";
 
@@ -43,22 +44,9 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
-/** "Jul 20, 2026 at 10:26 PM" — mirrors the web "Submitted" cell (minus the
- *  server timezone label, which the device can't infer). */
+/** "Jul 20, 2026 at 10:26 PM ET" — the web "Submitted" cell, venue time. */
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const date = d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  const time = d.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `${date} at ${time}`;
+  return formatDateTimeET(iso, { month: "short" });
 }
 
 const linkedLabel = (w: Waiver): string | null =>

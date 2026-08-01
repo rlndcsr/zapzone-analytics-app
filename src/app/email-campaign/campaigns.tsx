@@ -19,6 +19,7 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { consumeEmailCampaignsStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
@@ -265,7 +266,7 @@ const EmailCampaigns = () => {
       const header = ["ID", "Campaign", "Subject", "Recipients", "Sent", "Failed", "Status", "Sent At"];
       const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       const lines = rows.map((c) =>
-        [c.id, c.name, c.subject, c.recipients, c.sentCount, c.failedCount, c.statusLabel, c.sentAt ? new Date(c.sentAt).toLocaleString() : ""]
+        [c.id, c.name, c.subject, c.recipients, c.sentCount, c.failedCount, c.statusLabel, c.sentAt ? formatDateTimeET(c.sentAt, { month: "short", showZone: false }) : ""]
           .map(esc)
           .join(","),
       );

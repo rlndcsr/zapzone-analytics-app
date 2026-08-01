@@ -40,6 +40,7 @@ import {
   consumeStaffStale,
   markStaffStale,
 } from "../../lib/hooks/useStaffAccounts";
+import { formatDateET, formatDateTimeET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchLocations,
@@ -184,14 +185,7 @@ function uniqueSorted(values: (string | null)[]): string[] {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDateET(value, { month: "short" });
 }
 
 function formatLastLogin(value: string | null): string {
@@ -215,18 +209,14 @@ function formatCalendarDate(value: string | null): string {
   return new Date(y, m - 1, d).toLocaleDateString("en-US");
 }
 
-/** Timestamp → "7/23/2026", in the viewer's timezone. */
+/** Timestamp → "Jul 23, 2026", on the venue's clock (not the device's). */
 function formatInstantDate(value: string | null): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US");
+  return formatDateET(value, { month: "short" });
 }
 
-/** Timestamp → "7/31/2026, 10:11:25 AM", in the viewer's timezone. */
+/** Timestamp → "Jul 31, 2026 at 10:11 AM", on the venue's clock. */
 function formatInstantDateTime(value: string | null): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US");
+  return formatDateTimeET(value, { month: "short", showZone: false });
 }
 
 function escapeCsv(value: string): string {
@@ -254,8 +244,8 @@ function buildAccountsCsv(rows: StaffUser[]): string {
       u.position ?? "",
       u.locationName ?? "",
       u.status,
-      u.lastLogin ? new Date(u.lastLogin).toLocaleString() : "",
-      u.createdAt ? new Date(u.createdAt).toLocaleString() : "",
+      u.lastLogin ? formatInstantDateTime(u.lastLogin) : "",
+      u.createdAt ? formatInstantDateTime(u.createdAt) : "",
       u.hireDate ?? "",
     ]
       .map((v) => escapeCsv(String(v ?? "")))

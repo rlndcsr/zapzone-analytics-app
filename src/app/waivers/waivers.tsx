@@ -40,6 +40,7 @@ import {
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
 import { apiUrl } from "../../lib/api";
+import { formatDateET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   checkInWaiver,
@@ -359,7 +360,7 @@ const WaiverCard = ({
             className="text-xs text-gray-500 dark:text-gray-400"
             numberOfLines={1}
           >
-            Submitted {formatDate(waiver.submittedAt)}
+            Submitted {formatDateET(waiver.submittedAt, { month: "short" })}
           </Text>
         </View>
       )}
@@ -599,7 +600,7 @@ const Waivers = () => {
           w.templateTitle, w.locationName,
           SOURCE_LABELS[w.source] ?? w.source, w.minorsCount,
           w.marketingConsentStatus, formatDate(w.selectedDate),
-          w.submittedAt ? formatDate(w.submittedAt) : "", w.status,
+          w.submittedAt ? formatDateET(w.submittedAt, { month: "short" }) : "", w.status,
         ]
           .map(esc)
           .join(","),

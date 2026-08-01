@@ -17,6 +17,7 @@ import {
   type WaiverDetail,
 } from "../../services/waiversService";
 import { apiUrl } from "../../lib/api";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getToken } from "../../lib/session";
 import { BottomSheet } from "./BottomSheet";
 import { StatusBadge } from "./StatusBadge";
@@ -32,17 +33,9 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
+/** "July 31, 2026 at 5:06 PM ET" — identical to the web admin's Submitted. */
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(iso);
 }
 
 function marketingLabel(status: WaiverDetail["marketingConsentStatus"]): string {
@@ -311,6 +304,15 @@ export function WaiverDetailSheet({
                 value={SOURCE_LABELS[detail.source] ?? detail.source}
               />
               <Info label="Submitted" value={formatDateTime(detail.submittedAt)} />
+              {/* Web parity: the admin modal shows the check-in instant here. */}
+              <Info
+                label="Checked In"
+                value={
+                  detail.checkedInAt
+                    ? formatDateTime(detail.checkedInAt)
+                    : "Not checked in"
+                }
+              />
             </View>
 
             {/* Minor Participants */}

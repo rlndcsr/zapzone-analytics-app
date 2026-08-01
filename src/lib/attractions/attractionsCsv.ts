@@ -1,4 +1,5 @@
 import type { AttractionRow } from "../../services/attractionsService";
+import { formatDateTimeET } from "../date/venueTime";
 import { formatDurationDisplay } from "./attractionDisplay";
 import { buildPurchaseLink } from "./purchaseLink";
 
@@ -60,11 +61,17 @@ const COLUMNS: { label: string; value: (a: AttractionRow) => Cell }[] = [
   { label: "Purchase Link", value: (a) => buildPurchaseLink(a) },
   {
     label: "Created",
-    value: (a) => (a.createdAt ? new Date(a.createdAt).toLocaleString() : ""),
+    value: (a) =>
+      a.createdAt
+        ? formatDateTimeET(a.createdAt, { month: "short", showZone: false })
+        : "",
   },
   {
     label: "Updated",
-    value: (a) => (a.updatedAt ? new Date(a.updatedAt).toLocaleString() : ""),
+    value: (a) =>
+      a.updatedAt
+        ? formatDateTimeET(a.updatedAt, { month: "short", showZone: false })
+        : "",
   },
   // The web's `extraColumns` — raw values the display columns above format.
   { label: "Location ID", value: (a) => a.locationId ?? "" },

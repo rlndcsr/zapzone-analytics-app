@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import type {
   EventPaymentStatus,
   EventPurchaseRow,
@@ -39,16 +40,7 @@ function prettyMethod(method: string): string {
 
 /** "…-07-24T…" -> "Jul 24, 2026, 4:00 PM" (created cell). */
 function formatDateTime(dateString: string): string {
-  if (!dateString) return "—";
-  const d = new Date(dateString);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(dateString, { month: "short", showZone: false });
 }
 
 /** Scheduled date (+ optional 12-hour time), mirroring the web scheduled cell. */

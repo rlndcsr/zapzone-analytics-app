@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { markMembershipsStale } from "../../lib/membershipsStale";
 import { getToken } from "../../lib/session";
 import {
@@ -52,18 +53,10 @@ const CARD_SHADOW = {
 const money = (n: number) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// Date + time, e.g. "Jul 23, 2026, 10:50 AM"; em-dash when absent.
+// Date + time on the venue's clock, e.g. "Jul 23, 2026 at 10:50 AM"; em-dash
+// when absent. Venue time keeps these matching the web admin (lib/date/venueTime).
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(iso, { month: "short", showZone: false });
 }
 
 // Date only, e.g. "7/23/2026"; em-dash when absent.

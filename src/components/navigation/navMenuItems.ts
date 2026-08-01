@@ -9,12 +9,19 @@ export type NavMenuItem = {
   icon: ComponentProps<typeof Feather>["name"];
   /** Destination route; items without one just close the menu (not yet wired). */
   route?: string;
+  /**
+   * How to reach `route`. Modules are pushed onto the stack; "navigate" is for
+   * destinations that already live in the history (the Home tab), so returning
+   * to them reuses that screen instead of stacking another copy.
+   */
+  mode?: "push" | "navigate";
 };
 
 // Modules every role sees in Quick Navigation, in display order. The
 // role-scoped team/user administration entry is spliced in before Analytics
 // by getNavMenuItems (see below).
 const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
+  { key: "home", label: "Home", icon: "home", route: "/home", mode: "navigate" },
   { key: "attractions", label: "Attractions", icon: "zap", route: "/attractions/attractions" },
   { key: "events", label: "Events", icon: "flag", route: "/events/events" },
   { key: "bookings", label: "Bookings", icon: "calendar", route: "/bookings/bookings" },

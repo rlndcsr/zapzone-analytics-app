@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { memo, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
+import { formatDateET } from "../../lib/date/venueTime";
 import type { WaiverTemplate } from "../../services/waiversService";
 import { StatusBadge } from "./StatusBadge";
 
@@ -20,15 +21,9 @@ const ROW_MIN_HEIGHT = 64;
 
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 
+/** Instant → the venue's calendar date (see lib/date/venueTime). */
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDateET(dateStr, { month: "short", fallback: dateStr ?? "—" });
 }
 
 type RowContext = {
@@ -36,6 +31,8 @@ type RowContext = {
   canManage: boolean;
   isCompanyAdmin: boolean;
   busy: boolean;
+  /** Opens the per-template actions sheet — the row itself isn't tappable. */
+  onView: () => void;
   onKiosk: () => void;
   onEdit: () => void;
   onToggleStatus: () => void;
@@ -166,14 +163,23 @@ const COLUMNS: Column[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 200,
+    width: 250,
     render: (_t, ctx) => {
-      // Active view: kiosk (all) · power · edit · delete (manage only). Trash
-      // view: restore (manage) · delete-forever (admin). Mirrors the web row
-      // action icons, with the kiosk launcher added first.
+      // Rows themselves aren't tappable — everything a user can do to a
+      // template lives here. Active view: view · kiosk (all) · power · edit ·
+      // delete (manage only). Trash view: view · restore (manage) ·
+      // delete-forever (admin).
       if (!ctx.deleted) {
         return (
           <View className="flex-row items-center gap-2">
+            <IconButton
+              icon="eye"
+              color="#6B7280"
+              bg="bg-gray-100 dark:bg-neutral-800"
+              label="View template"
+              disabled={ctx.busy}
+              onPress={ctx.onView}
+            />
             <IconButton
               icon="tablet"
               color={PRIMARY}
@@ -213,10 +219,16 @@ const COLUMNS: Column[] = [
           </View>
         );
       }
-      if (!ctx.canManage && !ctx.isCompanyAdmin)
-        return <Text className={CELL_TEXT}>—</Text>;
       return (
         <View className="flex-row items-center gap-2">
+          <IconButton
+            icon="eye"
+            color="#6B7280"
+            bg="bg-gray-100 dark:bg-neutral-800"
+            label="View template"
+            disabled={ctx.busy}
+            onPress={ctx.onView}
+          />
           {ctx.canManage && (
             <IconButton
               icon="rotate-ccw"
@@ -247,8 +259,9 @@ const TABLE_WIDTH = COLUMNS.reduce((sum, c) => sum + c.width, 0);
 
 /**
  * Table layout for the Waiver Templates list. Horizontally scrollable with
- * fixed column widths. Each row is a Pressable (same tap target as the card);
- * the trailing Actions cell opens the per-template actions sheet.
+ * fixed column widths. Rows are deliberately NOT tappable — a whole-row target
+ * makes it too easy to open the editor while scrolling the table sideways, so
+ * viewing and editing both happen through the trailing Actions cell.
  */
 export const TemplatesTable = memo(function TemplatesTable({
   templates,
@@ -256,7 +269,7 @@ export const TemplatesTable = memo(function TemplatesTable({
   canManage,
   isCompanyAdmin,
   busy,
-  onRowPress,
+  onView,
   onKiosk,
   onEdit,
   onToggleStatus,
@@ -269,7 +282,7 @@ export const TemplatesTable = memo(function TemplatesTable({
   canManage: boolean;
   isCompanyAdmin: boolean;
   busy: boolean;
-  onRowPress: (t: WaiverTemplate) => void;
+  onView: (t: WaiverTemplate) => void;
   onKiosk: (t: WaiverTemplate) => void;
   onEdit: (t: WaiverTemplate) => void;
   onToggleStatus: (t: WaiverTemplate) => void;
@@ -316,6 +329,7 @@ export const TemplatesTable = memo(function TemplatesTable({
               canManage,
               isCompanyAdmin,
               busy,
+              onView: () => onView(t),
               onKiosk: () => onKiosk(t),
               onEdit: () => onEdit(t),
               onToggleStatus: () => onToggleStatus(t),
@@ -324,20 +338,15 @@ export const TemplatesTable = memo(function TemplatesTable({
               onForceDelete: () => onForceDelete(t),
             };
             return (
-              <Pressable
+              <View
                 key={t.id}
-                onPress={() => onRowPress(t)}
-                accessibilityRole="button"
                 accessibilityLabel={`Template ${t.title}`}
                 className={`flex-row items-center ${
                   i < templates.length - 1
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={({ pressed }) => ({
-                  minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                style={{ minHeight: ROW_MIN_HEIGHT }}
               >
                 {COLUMNS.map((col) => (
                   <View
@@ -348,7 +357,7 @@ export const TemplatesTable = memo(function TemplatesTable({
                     {col.render(t, ctx)}
                   </View>
                 ))}
-              </Pressable>
+              </View>
             );
           })}
         </View>

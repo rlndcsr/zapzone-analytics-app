@@ -21,6 +21,7 @@ import { StatusBadge } from "../../components/ui/StatusBadge";
 import { TemplatesTable } from "../../components/ui/TemplatesTable";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
+import { formatDateET } from "../../lib/date/venueTime";
 import {
   consumeTemplatesStale,
   markTemplatesStale,
@@ -55,15 +56,10 @@ const STATUS_OPTIONS: { label: string; value: TemplateStatus | "all" }[] = [
   { label: "Archived", value: "archived" },
 ];
 
+/** updated_at is an instant, so it's dated on the venue's calendar, not the
+ *  device's — a late-evening edit in Michigan is still "today" here. */
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDateET(dateStr, { month: "short", fallback: dateStr ?? "—" });
 }
 
 const TemplateCard = ({
@@ -288,9 +284,9 @@ const Templates = () => {
     );
   };
 
-  // Tapping a template opens the editor when the user can manage it; otherwise
-  // (or in the deleted/trash view) it opens the actions sheet. Shared by both
-  // the card and the table row so tap behaviour stays identical.
+  // Card taps open the editor when the user can manage the template; otherwise
+  // (or in the deleted/trash view) they open the actions sheet. Table rows are
+  // not tappable at all — there, everything goes through the Actions cell.
   const openTemplate = (t: WaiverTemplate) => {
     if (!showDeleted && canManage) {
       router.push(`/waivers/create-template?id=${t.id}` as never);
@@ -469,7 +465,7 @@ const Templates = () => {
                     canManage={canManage}
                     isCompanyAdmin={isCompanyAdmin}
                     busy={busy}
-                    onRowPress={openTemplate}
+                    onView={setActionsTemplate}
                     onKiosk={setKioskTemplate}
                     onEdit={(t) =>
                       router.push(

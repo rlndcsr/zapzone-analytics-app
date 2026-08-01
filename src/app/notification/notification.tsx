@@ -14,6 +14,7 @@ import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { SwipeableNotificationCard } from "../../components/ui/SwipeableNotificationCard";
 import { UndoSnackbar } from "../../components/ui/UndoSnackbar";
 import { NotificationsListSkeleton } from "../../components/ui/skeleton/NotificationsSkeleton";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import { resolveNotificationRoute } from "../../lib/notifications/notificationRouteMapper";
 import {
@@ -186,15 +187,9 @@ const Notification = () => {
             {item.message}
           </Text>
           <Text className="text-xs text-gray-400 dark:text-gray-500">
-            {new Date(item.created_at).toLocaleDateString("en-US", {
+            {formatDateTimeET(item.created_at, {
               month: "short",
-              day: "numeric",
-              year: "numeric",
-            })}{" "}
-            at{" "}
-            {new Date(item.created_at).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
+              showZone: false,
             })}
           </Text>
         </View>

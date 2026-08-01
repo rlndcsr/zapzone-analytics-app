@@ -20,6 +20,7 @@ import { SelectField, type SelectOption } from "../../components/ui/FormControls
 import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
+import { formatDateET, formatDateTimeET } from "../../lib/date/venueTime";
 import { useActivityLogs, useActivityStats } from "../../lib/hooks/useActivityLogs";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -68,11 +69,9 @@ function timeAgo(value: string | null): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 30) return `${days}d ago`;
-  return new Date(value).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  // Older than a month: fall back to the venue's calendar date, so a log line
+  // isn't dated a day off on a phone in another timezone.
+  return formatDateET(value, { month: "short" });
 }
 
 type Severity = "info" | "success" | "warning" | "error";
@@ -432,7 +431,7 @@ function buildActivityCsv(logs: ActivityLogEntry[]): string {
     const resourceName =
       (log.metadata?.resource_name as string) || log.entityType || "";
     const timestamp = log.createdAt
-      ? new Date(log.createdAt).toLocaleString()
+      ? formatDateTimeET(log.createdAt, { month: "short", fallback: "" })
       : "";
     return [
       timestamp,

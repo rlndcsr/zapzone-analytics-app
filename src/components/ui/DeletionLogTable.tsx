@@ -1,6 +1,7 @@
 import { memo, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import type { WaiverDeletionLogEntry } from "../../services/waiversService";
 
 const CARD_SHADOW = {
@@ -27,17 +28,9 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
+/** Deletion instant in venue time — see lib/date/venueTime. */
 function formatWhen(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(dateStr, { month: "short" });
 }
 
 type Column = {

@@ -21,6 +21,7 @@ import { useColorScheme } from "nativewind";
 import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
 import { EventPurchaseQRSheet } from "../../components/ui/EventPurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { getToken } from "../../lib/session";
 import {
@@ -56,17 +57,9 @@ const prettyMethod = (m: string): string => {
   return t.replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+/** Instant in venue time — no zone suffix, matching the web detail page. */
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(iso, { month: "short", showZone: false });
 }
 
 function formatScheduledDate(dateStr: string): string {

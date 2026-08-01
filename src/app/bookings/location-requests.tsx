@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   LocationChangeConflictError,
@@ -68,18 +69,10 @@ function formatDateLong(raw: string | null): string {
   });
 }
 
-/** ISO -> "Jul 24, 2026, 3:12 PM". */
+/** ISO -> "Jul 24, 2026 at 3:12 PM ET". The web admin's LocationChangeRequests
+ *  page stamps these with formatDateTimeET, so this matches it exactly. */
 function formatDateTime(raw: string | null): string {
-  if (!raw) return "";
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimeET(raw, { month: "short", fallback: "" });
 }
 
 export default function LocationRequestsScreen() {

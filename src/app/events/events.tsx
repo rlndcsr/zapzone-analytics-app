@@ -33,6 +33,7 @@ import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspace
 import { NavRowCard } from "../../components/ui/NavRowCard";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import type { EventRow, EventStatus } from "../../services/eventsService";
@@ -420,7 +421,9 @@ const Events = () => {
           e.dateType,
           e.startDate,
           e.endDate ?? "",
-          e.createdAt ? new Date(e.createdAt).toLocaleString() : "",
+          e.createdAt
+            ? formatDateTimeET(e.createdAt, { month: "short", showZone: false })
+            : "",
         ]
           .map(esc)
           .join(","),
