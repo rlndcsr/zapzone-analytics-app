@@ -21,11 +21,18 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import {
+  countActiveWaiverFilters,
+  EMPTY_WAIVER_FILTERS,
+  WaiverFiltersSheet,
+  type WaiverFilterValues,
+} from "../../components/ui/WaiverFiltersSheet";
 import { WaiversTable } from "../../components/ui/WaiversTable";
 import { WaiverDetailSheet } from "../../components/ui/WaiverDetailSheet";
 import {
@@ -40,7 +47,7 @@ import {
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
 import { apiUrl } from "../../lib/api";
-import { formatDateET } from "../../lib/date/venueTime";
+import { formatDateET, venueDateKey } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   checkInWaiver,
@@ -115,25 +122,6 @@ const DATE_OPTIONS: { label: string; value: DateFilter }[] = [
 
 const PER_PAGE_OPTIONS = [5, 10, 25, 50];
 
-type SourceFilter = "all" | WaiverSource;
-type MarketingFilter = "all" | MarketingConsentStatus;
-
-const SOURCE_OPTIONS: { label: string; value: SourceFilter }[] = [
-  { label: "Any source", value: "all" },
-  { label: "Checkout", value: "checkout" },
-  { label: "Email link", value: "confirmation_email" },
-  { label: "SMS link", value: "sms_link" },
-  { label: "Kiosk", value: "kiosk" },
-  { label: "Staff sent", value: "staff_sent" },
-  { label: "Group invite", value: "bulk_invite" },
-];
-const MARKETING_OPTIONS: { label: string; value: MarketingFilter }[] = [
-  { label: "Any marketing consent", value: "all" },
-  { label: "Opted in", value: "opted_in" },
-  { label: "Not opted in", value: "not_opted_in" },
-  { label: "Withdrawn", value: "withdrawn" },
-];
-
 /** Toggleable card fields (mirrors the web "Columns" menu). */
 type WColKey =
   | "linked"
@@ -171,51 +159,6 @@ const WCOLUMN_META: { key: WColKey; label: string }[] = [
   { key: "status", label: "Status" },
   { key: "marketing", label: "Marketing" },
 ];
-
-/** A row of chip choices used inside the collapsible Filters panel. */
-function ChipRow<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { label: string; value: T }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <View className="mb-3">
-      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-        {label}
-      </Text>
-      <View className="flex-row flex-wrap gap-2">
-        {options.map((opt) => {
-          const on = value === opt.value;
-          return (
-            <Pressable
-              key={opt.value}
-              onPress={() => onChange(opt.value)}
-              className={`px-3.5 py-2 rounded-lg border ${
-                on
-                  ? "bg-[#0644C7] border-[#0644C7]"
-                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-              }`}
-            >
-              <Text
-                className={`text-xs font-medium ${
-                  on ? "text-white" : "text-gray-600 dark:text-gray-300"
-                }`}
-              >
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
 
 function todayKey(): string {
   const now = new Date();
@@ -467,13 +410,15 @@ const Waivers = () => {
     router.setParams({ openId: undefined });
   }, [openId]);
 
-  // Extra filters (Source + Marketing are server-side; Template + Location are
-  // applied client-side over the current page) + column visibility.
+  // Every filter from the web page's Filters dropdown, in one sheet. Source and
+  // Marketing go to the backend as query params; Check-In, Template, Location
+  // and the Submitted range are applied client-side over the current page.
   const [showFilters, setShowFilters] = useState(false);
+  const [showSubmittedRange, setShowSubmittedRange] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
-  const [marketingFilter, setMarketingFilter] = useState<MarketingFilter>("all");
-  const [templateFilter, setTemplateFilter] = useState<string>("all");
+  const [filters, setFilters] = useState<WaiverFilterValues>(
+    EMPTY_WAIVER_FILTERS,
+  );
   const [cols, setCols] = useState<WCols>(DEFAULT_WCOLS);
   const [exporting, setExporting] = useState(false);
   const toggleCol = (key: WColKey) =>
@@ -488,30 +433,32 @@ const Waivers = () => {
   // Reset to page 1 whenever a filter changes.
   useEffect(() => {
     setPage(1);
-  }, [
-    statusFilter,
-    dateFilter,
-    debouncedSearch,
-    perPage,
-    sourceFilter,
-    marketingFilter,
-  ]);
+  }, [statusFilter, dateFilter, debouncedSearch, perPage, filters]);
 
-  const filters = useMemo<WaiverSearchFilters>(
+  const searchFilters = useMemo<WaiverSearchFilters>(
     () => ({
       status: statusFilter,
       all: dateFilter === "all",
       date: dateFilter === "today" ? todayKey() : undefined,
       adultName: debouncedSearch || undefined,
-      source: sourceFilter === "all" ? undefined : sourceFilter,
+      source:
+        filters.source === "all" ? undefined : (filters.source as WaiverSource),
       marketingConsentStatus:
-        marketingFilter === "all" ? undefined : marketingFilter,
+        filters.marketing === "all"
+          ? undefined
+          : (filters.marketing as MarketingConsentStatus),
     }),
-    [statusFilter, dateFilter, debouncedSearch, sourceFilter, marketingFilter],
+    [
+      statusFilter,
+      dateFilter,
+      debouncedSearch,
+      filters.source,
+      filters.marketing,
+    ],
   );
 
   const { waivers, total, lastPage, loading, error, refetch } = useWaivers({
-    filters,
+    filters: searchFilters,
     page,
     perPage,
   });
@@ -542,23 +489,49 @@ const Waivers = () => {
   const dateLabel =
     DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
 
-  // Template + location options derived from the current page (client-side).
-  const templateOptions = useMemo(() => {
-    const set = new Map<string, string>();
-    waivers.forEach((w) => {
-      if (w.templateTitle) set.set(w.templateTitle, w.templateTitle);
-    });
-    return [
-      { label: "Any template", value: "all" },
-      ...Array.from(set.keys()).map((t) => ({ label: t, value: t })),
-    ];
-  }, [waivers]);
-  // Apply the client-side Template filter + the global location over the page.
+  // Template + location choices derived from the loaded page, exactly as the
+  // web builds its Template / Location filter options.
+  const templateNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          waivers
+            .map((w) => w.templateTitle)
+            .filter((t): t is string => !!t),
+        ),
+      ).sort(),
+    [waivers],
+  );
+  const locationNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          waivers.map((w) => w.locationName).filter((l): l is string => !!l),
+        ),
+      ).sort(),
+    [waivers],
+  );
+
+  // The client-side half of the filters — Check-In, Template, Location and the
+  // Submitted range — plus the global workspace location, over the fetched page.
   const displayed = useMemo(
     () =>
       waivers.filter((w) => {
-        if (templateFilter !== "all" && w.templateTitle !== templateFilter)
+        if (filters.checkIn === "checked_in" && !w.checkedInAt) return false;
+        if (filters.checkIn === "not_checked_in" && w.checkedInAt) return false;
+        if (filters.template !== "all" && w.templateTitle !== filters.template)
           return false;
+        if (filters.location !== "all" && w.locationName !== filters.location)
+          return false;
+        if (filters.submittedStart || filters.submittedEnd) {
+          // submittedAt is an instant; compare on its venue calendar day so the
+          // range means the same day the Submitted column shows.
+          const day = venueDateKey(w.submittedAt);
+          if (!day) return false;
+          if (filters.submittedStart && day < filters.submittedStart)
+            return false;
+          if (filters.submittedEnd && day > filters.submittedEnd) return false;
+        }
         if (
           activeLocation.id !== "all" &&
           w.locationName !== activeLocation.name
@@ -566,19 +539,26 @@ const Waivers = () => {
           return false;
         return true;
       }),
-    [waivers, templateFilter, activeLocation],
+    [waivers, filters, activeLocation],
   );
 
-  const filtersActive =
-    sourceFilter !== "all" ||
-    marketingFilter !== "all" ||
-    templateFilter !== "all";
+  const activeFilterCount = countActiveWaiverFilters(filters);
 
-  const clearFilters = () => {
-    setSourceFilter("all");
-    setMarketingFilter("all");
-    setTemplateFilter("all");
-  };
+  // The calendar and the filter sheet are both native sheets, so close one fully
+  // before opening the other (two stacked sheets crash Android).
+  const openSubmittedRange = useCallback(() => {
+    setShowFilters(false);
+    setTimeout(() => setShowSubmittedRange(true), 280);
+  }, []);
+  const closeSubmittedRange = useCallback(() => {
+    setShowSubmittedRange(false);
+    setTimeout(() => setShowFilters(true), 280);
+  }, []);
+  const applySubmittedRange = useCallback((start: string, end: string) => {
+    setFilters((f) => ({ ...f, submittedStart: start, submittedEnd: end }));
+    setShowSubmittedRange(false);
+    setTimeout(() => setShowFilters(true), 280);
+  }, []);
 
   const exportCsv = useCallback(async () => {
     if (displayed.length === 0) {
@@ -847,10 +827,14 @@ const Waivers = () => {
           {/* Filters · Columns · Export pill */}
           <FilterPill>
             <PillSegment
-              label="Filters"
-              active={showFilters || filtersActive}
-              onPress={() => setShowFilters((v) => !v)}
-              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={showFilters || activeFilterCount > 0}
+              onPress={() => setShowFilters(true)}
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
             <PillSegment
               label="Columns"
@@ -870,40 +854,6 @@ const Waivers = () => {
               }
             />
           </FilterPill>
-
-          {/* Filters panel */}
-          {showFilters && (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
-            >
-              <ChipRow
-                label="Source"
-                options={SOURCE_OPTIONS}
-                value={sourceFilter}
-                onChange={setSourceFilter}
-              />
-              <ChipRow
-                label="Marketing Consent"
-                options={MARKETING_OPTIONS}
-                value={marketingFilter}
-                onChange={setMarketingFilter}
-              />
-              <ChipRow
-                label="Template"
-                options={templateOptions}
-                value={templateFilter}
-                onChange={setTemplateFilter}
-              />
-              {filtersActive && (
-                <Pressable onPress={clearFilters} className="self-end mt-1">
-                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Clear Filters
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          )}
 
           {/* Search */}
           <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3">
@@ -1004,6 +954,31 @@ const Waivers = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Every filter from the web page's Filters dropdown, in one sheet. */}
+      <WaiverFiltersSheet
+        visible={showFilters}
+        values={filters}
+        templates={templateNames}
+        locations={locationNames}
+        pinnedLocationName={
+          activeLocation.id === "all" ? null : activeLocation.name
+        }
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_WAIVER_FILTERS)}
+        onClose={() => setShowFilters(false)}
+        onOpenSubmittedRange={openSubmittedRange}
+      />
+
+      {/* Shared calendar for the Submitted range, opened once the filter sheet
+          is closed so two sheets are never stacked. */}
+      <DateRangeSheet
+        visible={showSubmittedRange}
+        initialStart={filters.submittedStart || undefined}
+        initialEnd={filters.submittedEnd || undefined}
+        onClose={closeSubmittedRange}
+        onApply={applySubmittedRange}
+      />
 
       {/* Status filter */}
       <BottomSheet

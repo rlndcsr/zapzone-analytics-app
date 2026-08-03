@@ -352,7 +352,37 @@ export async function fetchAccountingReport({
 /* Performance (company) Analytics                                     */
 /* ================================================================== */
 
+/**
+ * One `key_metrics` entry. The backend sends either a period-over-period
+ * `change` string ("+12.5% vs last period") or a static `info` note, never
+ * both — the web colors `change` green/red by its sign and leaves `info` gray.
+ */
+export type KeyMetric = {
+  value: number;
+  change: string | null;
+  info: string | null;
+  trend: "up" | "down" | null;
+};
+
+/** The web's `key_metrics` block; the last two are only sent when events exist. */
+export type KeyMetrics = {
+  totalRevenue: KeyMetric;
+  totalLocations: KeyMetric;
+  packageBookings: KeyMetric;
+  ticketPurchases: KeyMetric;
+  totalParticipants: KeyMetric;
+  activePackages: KeyMetric;
+  eventTicketPurchases: KeyMetric | null;
+  activeEvents: KeyMetric | null;
+};
+
 export type PerformanceReport = {
+  /** Company header — drives the "All N locations" subtitle. */
+  company: { id: number | null; name: string; totalLocations: number };
+  /** The six-to-eight KPI cards above the charts. */
+  keyMetrics: KeyMetrics;
+  /** Every location the filter can pick from (backend `available_locations`). */
+  availableLocations: { id: number; name: string }[];
   /** Daily/monthly trend: revenue (left axis) + package bookings (right axis). */
   revenueTrend: { label: string; revenue: number; bookings: number }[];
   /** Per-location revenue + package count (bar chart + Top Locations table). */
@@ -362,6 +392,31 @@ export type PerformanceReport = {
   dailyPerformance: { day: string; revenue: number; participants: number }[];
   bookingStatus: { status: string; count: number }[];
   topAttractions: { name: string; ticketsSold: number; revenue: number }[];
+  /** Only present once the company has event sales. */
+  topEvents: { name: string; ticketsSold: number; revenue: number }[];
+};
+
+/** Read one `key_metrics` entry; absent blocks become null so cards can hide. */
+function mapKeyMetric(raw: unknown): KeyMetric | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const change = r.change != null ? String(r.change) : null;
+  const trend = r.trend === "up" || r.trend === "down" ? r.trend : null;
+  return {
+    value: num(r.value),
+    change,
+    info: r.info != null ? String(r.info) : null,
+    // The backend omits `trend` on some metrics; fall back to the sign of the
+    // change string, which is how the web decides green vs red.
+    trend: trend ?? (change ? (change.includes("+") ? "up" : "down") : null),
+  };
+}
+
+const EMPTY_METRIC: KeyMetric = {
+  value: 0,
+  change: null,
+  info: null,
+  trend: null,
 };
 
 export async function fetchCompanyAnalytics({
@@ -369,17 +424,24 @@ export async function fetchCompanyAnalytics({
   companyId,
   dateRange = "30d",
   locationIds = [],
+  startDate,
+  endDate,
 }: {
   token: string;
   companyId: number;
   dateRange?: string;
   locationIds?: number[];
+  /** Only sent for dateRange "custom", matching the web request. */
+  startDate?: string;
+  endDate?: string;
 }): Promise<PerformanceReport> {
   const qs = new URLSearchParams({
     company_id: String(companyId),
     date_range: dateRange,
   });
   locationIds.forEach((id) => qs.append("location_ids[]", String(id)));
+  if (dateRange === "custom" && startDate) qs.append("start_date", startDate);
+  if (dateRange === "custom" && endDate) qs.append("end_date", endDate);
 
   const res = await apiRequest<Record<string, unknown>>(
     `/api/analytics/company?${qs.toString()}`,
@@ -388,7 +450,30 @@ export async function fetchCompanyAnalytics({
   const rows = (key: string): Record<string, unknown>[] =>
     ((res[key] ?? []) as Record<string, unknown>[]) ?? [];
 
+  const company = (res.company ?? {}) as Record<string, unknown>;
+  const km = (res.key_metrics ?? {}) as Record<string, unknown>;
+
   return {
+    company: {
+      id: company.id != null ? Number(company.id) : null,
+      name: String(company.name ?? ""),
+      totalLocations: num(company.total_locations),
+    },
+    keyMetrics: {
+      totalRevenue: mapKeyMetric(km.total_revenue) ?? EMPTY_METRIC,
+      totalLocations: mapKeyMetric(km.total_locations) ?? EMPTY_METRIC,
+      packageBookings: mapKeyMetric(km.package_bookings) ?? EMPTY_METRIC,
+      ticketPurchases: mapKeyMetric(km.ticket_purchases) ?? EMPTY_METRIC,
+      totalParticipants: mapKeyMetric(km.total_participants) ?? EMPTY_METRIC,
+      activePackages: mapKeyMetric(km.active_packages) ?? EMPTY_METRIC,
+      // Optional on the response — the web hides these two cards when absent.
+      eventTicketPurchases: mapKeyMetric(km.event_ticket_purchases),
+      activeEvents: mapKeyMetric(km.active_events),
+    },
+    availableLocations: rows("available_locations").map((r) => ({
+      id: Number(r.id),
+      name: String(r.name ?? "—"),
+    })),
     revenueTrend: rows("revenue_trend").map((r) => ({
       label: String(r.month ?? r.date ?? r.label ?? ""),
       revenue: num(r.revenue),
@@ -419,6 +504,11 @@ export async function fetchCompanyAnalytics({
       count: num(r.count),
     })),
     topAttractions: rows("top_attractions").map((r) => ({
+      name: String(r.name ?? "—"),
+      ticketsSold: num(r.tickets_sold),
+      revenue: num(r.revenue),
+    })),
+    topEvents: rows("top_events").map((r) => ({
       name: String(r.name ?? "—"),
       ticketsSold: num(r.tickets_sold),
       revenue: num(r.revenue),

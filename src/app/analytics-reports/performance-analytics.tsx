@@ -1,12 +1,21 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, {
-  useCallback,
-  useEffect,
-  useState,
-  type ComponentProps,
-} from "react";
 import {
+  Activity,
+  Boxes,
+  Building2,
+  CalendarDays,
+  Clock,
+  DollarSign,
+  MapPin,
+  Package,
+  Ticket,
+  TrendingUp,
+  Users,
+} from "lucide-react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,12 +27,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AreaChart } from "../../components/ui/AreaChart";
 import { BarChart } from "../../components/ui/BarChart";
+import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
 import { PieChart } from "../../components/ui/PieChart";
 import { SheetSelect } from "../../components/ui/SheetSelect";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchCompanyAnalytics,
+  type KeyMetric,
   type PerformanceReport,
 } from "../../services/analyticsService";
 
@@ -36,27 +48,148 @@ const CARD_SHADOW = {
 } as const;
 
 const PRIMARY = "#0644C7";
-type FeatherName = ComponentProps<typeof Feather>["name"];
+/** Any lucide icon — same family the web page uses, so glyphs match exactly. */
+type LucideIcon = React.ComponentType<{ size?: number; color?: string }>;
 
+// Same options and wording as the web page's period <select>.
 const RANGES = [
-  { label: "7 days", value: "7d" },
-  { label: "30 days", value: "30d" },
-  { label: "90 days", value: "90d" },
-  { label: "1 year", value: "1y" },
+  { label: "Last 7 days", value: "7d" },
+  { label: "Last 30 days", value: "30d" },
+  { label: "Last 90 days", value: "90d" },
+  { label: "Last year", value: "1y" },
+  { label: "Custom Range", value: "custom" },
 ];
 
 /** "$14,494.62" with thousands separators. */
 const money = (n: number) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/**
+ * Thousands-separated count. Never rounds: whole numbers print clean ("1,204")
+ * but a fractional value keeps its decimals rather than being silently rounded
+ * to the nearest integer, so a card always shows the value the API sent.
+ */
+const count = (n: number) =>
+  n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+/**
+ * One `key_metrics` card, laid out like the web's: label, big value, then the
+ * change line (green when it contains "+", red otherwise) or the gray info
+ * note, with the tinted icon tile on the right.
+ */
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  metric,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  metric: KeyMetric;
+}) {
+  const changeColor =
+    metric.trend === "up"
+      ? "text-green-600 dark:text-green-400"
+      : "text-red-600 dark:text-red-400";
+  return (
+    <View className="w-1/2 p-1.5">
+      <View
+        className="bg-white dark:bg-neutral-900 rounded-xl p-4 border border-gray-100 dark:border-neutral-800"
+        style={CARD_SHADOW}
+      >
+        <View className="flex-row items-start justify-between gap-2">
+          <View className="flex-1">
+            <Text
+              className="text-sm font-medium text-gray-600 dark:text-gray-400"
+              numberOfLines={2}
+            >
+              {label}
+            </Text>
+            <Text
+              className="text-2xl font-bold text-gray-900 dark:text-white mt-1"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {value}
+            </Text>
+            {metric.change ? (
+              <Text className={`text-xs mt-1 ${changeColor}`} numberOfLines={2}>
+                {metric.change}
+              </Text>
+            ) : metric.info ? (
+              <Text
+                className="text-xs mt-1 text-gray-600 dark:text-gray-400"
+                numberOfLines={2}
+              >
+                {metric.info}
+              </Text>
+            ) : null}
+          </View>
+          <View className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-900/30 items-center justify-center">
+            <Icon size={18} color={PRIMARY} />
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Chart card. Mirrors the web panel header: title on the left with the same
+ * hover-tooltip copy behind a tappable ⓘ, and the section's gray icon on the
+ * right.
+ */
 function Panel({
   icon,
   title,
+  info,
   children,
 }: {
-  icon: FeatherName;
+  icon: LucideIcon;
   title: string;
+  /** The web's tooltip text for this panel, shown in an alert when tapped. */
+  info?: string;
   children: React.ReactNode;
+}) {
+  const Icon = icon;
+  return (
+    <View
+      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
+      style={CARD_SHADOW}
+    >
+      <View className="flex-row items-center justify-between gap-2 mb-3">
+        <View className="flex-row items-center gap-1.5 flex-1">
+          <Text className="text-base font-bold text-gray-900 dark:text-white shrink">
+            {title}
+          </Text>
+          {!!info && (
+            <Pressable onPress={() => Alert.alert(title, info)} hitSlop={8}>
+              <Feather name="info" size={13} color="#9CA3AF" />
+            </Pressable>
+          )}
+        </View>
+        <Icon size={16} color="#9CA3AF" />
+      </View>
+      {children}
+    </View>
+  );
+}
+
+/** Header row + rows for the web's three "top N" tables. */
+function TableCard({
+  icon: Icon,
+  title,
+  columns,
+  rows,
+  empty,
+}: {
+  icon: LucideIcon;
+  title: string;
+  /** [label, width] — the first column flexes, the rest are fixed + right-aligned. */
+  columns: [string, number][];
+  rows: (string | number)[][];
+  empty: string;
 }) {
   return (
     <View
@@ -64,12 +197,51 @@ function Panel({
       style={CARD_SHADOW}
     >
       <View className="flex-row items-center gap-2 mb-3">
-        <Feather name={icon} size={16} color={PRIMARY} />
+        <Icon size={18} color={PRIMARY} />
         <Text className="text-base font-bold text-gray-900 dark:text-white">
           {title}
         </Text>
       </View>
-      {children}
+      {rows.length === 0 ? (
+        <Text className="text-sm text-gray-400 dark:text-gray-500">{empty}</Text>
+      ) : (
+        <>
+          <View className="flex-row pb-2 border-b border-gray-100 dark:border-neutral-800">
+            {columns.map(([label, width], i) => (
+              <Text
+                key={label}
+                style={i === 0 ? undefined : { width }}
+                className={`text-[10px] font-semibold uppercase text-gray-400 ${
+                  i === 0 ? "flex-1" : "text-right"
+                }`}
+              >
+                {label}
+              </Text>
+            ))}
+          </View>
+          {rows.map((row, r) => (
+            <View
+              key={r}
+              className="flex-row items-center py-2.5 border-b border-gray-50 dark:border-neutral-800/50"
+            >
+              {row.map((cell, i) => (
+                <Text
+                  key={i}
+                  style={i === 0 ? undefined : { width: columns[i][1] }}
+                  numberOfLines={1}
+                  className={
+                    i === 0
+                      ? "flex-1 text-xs text-gray-700 dark:text-gray-200 mr-2"
+                      : "text-right text-xs text-gray-600 dark:text-gray-300"
+                  }
+                >
+                  {cell}
+                </Text>
+              ))}
+            </View>
+          ))}
+        </>
+      )}
     </View>
   );
 }
@@ -81,11 +253,23 @@ const PerformanceAnalytics = () => {
   const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const [range, setRange] = useState("30d");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const [showCustomRange, setShowCustomRange] = useState(false);
   const [report, setReport] = useState<PerformanceReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedLoc, setSelectedLoc] = useState<number | null>(null);
+
+  /**
+   * This page's own location filter — a multi-select that goes to the backend as
+   * `location_ids[]`, exactly like the web's "Locations" button. Deliberately
+   * separate from the global workspace location: the web page scopes analytics
+   * on its own, and an empty selection means every location.
+   */
+  const [showLocations, setShowLocations] = useState(false);
+  const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -95,19 +279,28 @@ const PerformanceAnalytics = () => {
       setLoading(false);
       return;
     }
+    // A custom range only makes a request once both ends are picked, as on web.
+    if (range === "custom" && (!customStart || !customEnd)) return;
     setLoading(true);
     setError(null);
     setSelectedLoc(null);
     try {
       setReport(
-        await fetchCompanyAnalytics({ token, companyId, dateRange: range }),
+        await fetchCompanyAnalytics({
+          token,
+          companyId,
+          dateRange: range,
+          locationIds: selectedLocationIds,
+          startDate: customStart || undefined,
+          endDate: customEnd || undefined,
+        }),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load analytics");
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [range, customStart, customEnd, selectedLocationIds]);
 
   useEffect(() => {
     load();
@@ -123,6 +316,35 @@ const PerformanceAnalytics = () => {
     report && selectedLoc != null
       ? report.locationPerformance[selectedLoc]
       : null;
+
+  const toggleLocation = (id: number) =>
+    setSelectedLocationIds((prev) =>
+      prev.includes(id) ? prev.filter((l) => l !== id) : [...prev, id],
+    );
+
+  // The web falls back to the names in location_performance when the backend
+  // sends no available_locations block.
+  const allLocations = useMemo(() => {
+    if (!report) return [];
+    if (report.availableLocations.length > 0) return report.availableLocations;
+    return report.locationPerformance
+      .filter((l) => l.locationId != null)
+      .map((l) => ({ id: l.locationId as number, name: l.name }));
+  }, [report]);
+
+  // "3 locations selected" / "All 7 locations" — the web's header subtitle.
+  const scopeLabel = report
+    ? selectedLocationIds.length > 0
+      ? `${selectedLocationIds.length} location${
+          selectedLocationIds.length !== 1 ? "s" : ""
+        } selected`
+      : `All ${report.company.totalLocations} locations`
+    : "Revenue, bookings, and location performance";
+
+  const rangeLabel =
+    range === "custom" && customStart && customEnd
+      ? `${formatShortDate(customStart)} – ${formatShortDate(customEnd)}`
+      : (RANGES.find((r) => r.value === range)?.label ?? "");
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -166,10 +388,10 @@ const PerformanceAnalytics = () => {
             style={CARD_SHADOW}
           >
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Performance Analytics
+              {report?.company.name || "Company Analytics"}
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Revenue, bookings, and location performance
+              {scopeLabel}
             </Text>
           </View>
 
@@ -204,14 +426,74 @@ const PerformanceAnalytics = () => {
             </Pressable>
           </View>
 
-          {/* Period */}
+          {/* Period + this page's own location filter (the web's header row) */}
           <SheetSelect
             icon="calendar"
             title="Select Period"
             value={range}
             options={RANGES}
-            onSelect={(v) => setRange(String(v))}
+            onSelect={(v) => {
+              const next = String(v);
+              setRange(next);
+              // Picking "Custom Range" goes straight to the calendar, like the
+              // web revealing its DateRangeCalendar beside the select.
+              if (next === "custom") setShowCustomRange(true);
+            }}
           />
+
+          {range === "custom" && (
+            <Pressable
+              onPress={() => setShowCustomRange(true)}
+              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
+            >
+              <Feather name="calendar" size={16} color="#6B7280" />
+              <Text
+                className={`flex-1 text-sm ${
+                  customStart && customEnd
+                    ? "text-gray-900 dark:text-white"
+                    : "text-gray-400 dark:text-gray-500"
+                }`}
+                numberOfLines={1}
+              >
+                {customStart && customEnd ? rangeLabel : "Pick a date range"}
+              </Text>
+              <Feather name="chevron-right" size={16} color="#9CA3AF" />
+            </Pressable>
+          )}
+
+          <Pressable
+            onPress={() => setShowLocations(true)}
+            className={`flex-row items-center gap-2 px-4 py-3.5 rounded-xl border ${
+              selectedLocationIds.length > 0
+                ? "bg-[#0644C7] border-[#0644C7]"
+                : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel="Filter by locations"
+          >
+            <Feather
+              name="filter"
+              size={16}
+              color={selectedLocationIds.length > 0 ? "#FFFFFF" : "#6B7280"}
+            />
+            <Text
+              className={`flex-1 text-sm font-medium ${
+                selectedLocationIds.length > 0
+                  ? "text-white"
+                  : "text-gray-700 dark:text-gray-200"
+              }`}
+              numberOfLines={1}
+            >
+              Locations
+            </Text>
+            {selectedLocationIds.length > 0 && (
+              <View className="px-2 py-0.5 rounded-full bg-white">
+                <Text className="text-xs font-semibold text-gray-900">
+                  {selectedLocationIds.length}
+                </Text>
+              </View>
+            )}
+          </Pressable>
 
           {loading && !report && <AnalyticsSkeleton tiles={0} panels={4} />}
           {error && !report && (
@@ -231,8 +513,70 @@ const PerformanceAnalytics = () => {
 
           {report && (
             <>
+              {/* Key metrics — the web's card grid, same order, labels + icons.
+                  Event Tickets / Active Events only appear when the backend
+                  sends them, exactly as the web conditions those two cards. */}
+              <View className="flex-row flex-wrap -mx-1.5">
+                <MetricCard
+                  icon={DollarSign}
+                  label="Total Revenue"
+                  value={money(report.keyMetrics.totalRevenue.value)}
+                  metric={report.keyMetrics.totalRevenue}
+                />
+                <MetricCard
+                  icon={Building2}
+                  label="Total Locations"
+                  value={count(report.keyMetrics.totalLocations.value)}
+                  metric={report.keyMetrics.totalLocations}
+                />
+                <MetricCard
+                  icon={Package}
+                  label="Package Bookings"
+                  value={count(report.keyMetrics.packageBookings.value)}
+                  metric={report.keyMetrics.packageBookings}
+                />
+                <MetricCard
+                  icon={Ticket}
+                  label="Ticket Purchases"
+                  value={count(report.keyMetrics.ticketPurchases.value)}
+                  metric={report.keyMetrics.ticketPurchases}
+                />
+                <MetricCard
+                  icon={Users}
+                  label="Total Participants"
+                  value={count(report.keyMetrics.totalParticipants.value)}
+                  metric={report.keyMetrics.totalParticipants}
+                />
+                <MetricCard
+                  icon={Boxes}
+                  label="Active Packages"
+                  value={count(report.keyMetrics.activePackages.value)}
+                  metric={report.keyMetrics.activePackages}
+                />
+                {!!report.keyMetrics.eventTicketPurchases && (
+                  <MetricCard
+                    icon={CalendarDays}
+                    label="Event Tickets"
+                    value={count(report.keyMetrics.eventTicketPurchases.value)}
+                    metric={report.keyMetrics.eventTicketPurchases}
+                  />
+                )}
+                {!!report.keyMetrics.activeEvents && (
+                  <MetricCard
+                    icon={CalendarDays}
+                    label="Active Events"
+                    value={count(report.keyMetrics.activeEvents.value)}
+                    metric={report.keyMetrics.activeEvents}
+                  />
+                )}
+              </View>
+
               {/* Revenue & Package Bookings */}
-              <Panel icon="trending-up" title="Revenue & Package Bookings">
+              <Panel
+                icon={TrendingUp}
+                title="Revenue & Package Bookings"
+                info="Total revenue and package booking trends across all locations. Revenue includes both packages and attraction tickets."
+              >
                 <AreaChart
                   height={220}
                   dark={scheme === "dark"}
@@ -257,7 +601,11 @@ const PerformanceAnalytics = () => {
               </Panel>
 
               {/* Location Performance */}
-              <Panel icon="map-pin" title="Location Performance">
+              <Panel
+                icon={MapPin}
+                title="Location Performance"
+                info="Revenue comparison across all locations"
+              >
                 {report.locationPerformance.length === 0 ? (
                   <Text className="text-sm text-gray-400 dark:text-gray-500">
                     No data.
@@ -291,7 +639,11 @@ const PerformanceAnalytics = () => {
               </Panel>
 
               {/* Package Distribution */}
-              <Panel icon="package" title="Package Distribution">
+              <Panel
+                icon={Package}
+                title="Package Distribution"
+                info="Distribution of package bookings by type. Packages are group experiences that can be reserved in advance."
+              >
                 <PieChart
                   data={report.packageDistribution.map((p) => ({
                     label: p.name,
@@ -301,7 +653,11 @@ const PerformanceAnalytics = () => {
               </Panel>
 
               {/* Peak Activity Hours */}
-              <Panel icon="clock" title="Peak Activity Hours">
+              <Panel
+                icon={Clock}
+                title="Peak Activity Hours"
+                info="Hourly activity patterns for package bookings and ticket purchases across all locations"
+              >
                 {report.peakHours.length === 0 ? (
                   <Text className="text-sm text-gray-400 dark:text-gray-500">
                     No data.
@@ -318,7 +674,11 @@ const PerformanceAnalytics = () => {
               </Panel>
 
               {/* Daily Performance */}
-              <Panel icon="activity" title="Daily Performance (7 Days)">
+              <Panel
+                icon={Activity}
+                title="Daily Performance (7 Days)"
+                info="Revenue and participant trends over the last week"
+              >
                 <AreaChart
                   height={220}
                   dark={scheme === "dark"}
@@ -343,7 +703,11 @@ const PerformanceAnalytics = () => {
               </Panel>
 
               {/* Booking Status */}
-              <Panel icon="pie-chart" title="Booking Status">
+              <Panel
+                icon={Activity}
+                title="Booking Status"
+                info="Current status of all bookings"
+              >
                 <PieChart
                   data={report.bookingStatus.map((s) => ({
                     label: `${s.status}: ${s.count}`,
@@ -352,85 +716,141 @@ const PerformanceAnalytics = () => {
                 />
               </Panel>
 
-              {/* Top Locations by Revenue */}
-              <Panel icon="map-pin" title="Top Locations by Revenue">
-                <View className="flex-row pb-2 border-b border-gray-100 dark:border-neutral-800">
-                  <Text className="flex-1 text-[10px] font-semibold uppercase text-gray-400">
-                    Location
-                  </Text>
-                  <Text className="w-24 text-right text-[10px] font-semibold uppercase text-gray-400">
-                    Revenue
-                  </Text>
-                  <Text className="w-16 text-right text-[10px] font-semibold uppercase text-gray-400">
-                    Packages
-                  </Text>
-                </View>
-                {report.locationPerformance.map((l, i) => (
-                  <View
-                    key={`${l.name}-${i}`}
-                    className="flex-row items-center py-2.5 border-b border-gray-50 dark:border-neutral-800/50"
-                  >
-                    <Text
-                      className="flex-1 text-xs text-gray-700 dark:text-gray-200 mr-2"
-                      numberOfLines={1}
-                    >
-                      {l.name}
-                    </Text>
-                    <Text className="w-24 text-right text-xs font-medium text-gray-900 dark:text-white">
-                      {money(l.revenue)}
-                    </Text>
-                    <Text className="w-16 text-right text-xs text-gray-600 dark:text-gray-300">
-                      {l.packages}
-                    </Text>
-                  </View>
-                ))}
-              </Panel>
+              {/* Top Locations by Revenue — the web shows its first 6 rows. */}
+              <TableCard
+                icon={MapPin}
+                title="Top Locations by Revenue"
+                columns={[
+                  ["Location", 0],
+                  ["Revenue", 96],
+                  ["Packages", 64],
+                ]}
+                rows={report.locationPerformance
+                  .slice(0, 6)
+                  .map((l) => [l.name, money(l.revenue), l.packages])}
+                empty="No data."
+              />
 
-              {/* Top Attractions */}
-              <Panel icon="target" title="Top Attractions (Ticket Sales)">
-                {report.topAttractions.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">
-                    No data.
-                  </Text>
-                ) : (
-                  <>
-                    <View className="flex-row pb-2 border-b border-gray-100 dark:border-neutral-800">
-                      <Text className="flex-1 text-[10px] font-semibold uppercase text-gray-400">
-                        Attraction
-                      </Text>
-                      <Text className="w-14 text-right text-[10px] font-semibold uppercase text-gray-400">
-                        Tickets
-                      </Text>
-                      <Text className="w-24 text-right text-[10px] font-semibold uppercase text-gray-400">
-                        Revenue
-                      </Text>
-                    </View>
-                    {report.topAttractions.map((a, i) => (
-                      <View
-                        key={`${a.name}-${i}`}
-                        className="flex-row items-center py-2.5 border-b border-gray-50 dark:border-neutral-800/50"
-                      >
-                        <Text
-                          className="flex-1 text-xs text-gray-700 dark:text-gray-200 mr-2"
-                          numberOfLines={1}
-                        >
-                          {a.name}
-                        </Text>
-                        <Text className="w-14 text-right text-xs text-gray-600 dark:text-gray-300">
-                          {a.ticketsSold}
-                        </Text>
-                        <Text className="w-24 text-right text-xs font-medium text-gray-900 dark:text-white">
-                          {money(a.revenue)}
-                        </Text>
-                      </View>
-                    ))}
-                  </>
-                )}
-              </Panel>
+              {/* Top Attractions (Ticket Sales) */}
+              <TableCard
+                icon={Ticket}
+                title="Top Attractions (Ticket Sales)"
+                columns={[
+                  ["Attraction", 0],
+                  ["Tickets Sold", 80],
+                  ["Revenue", 96],
+                ]}
+                rows={report.topAttractions.map((a) => [
+                  a.name,
+                  a.ticketsSold,
+                  money(a.revenue),
+                ])}
+                empty="No data."
+              />
+
+              {/* Top Events — only rendered when the backend returns any, the
+                  same condition the web card uses. */}
+              {report.topEvents.length > 0 && (
+                <TableCard
+                  icon={CalendarDays}
+                  title="Top Events"
+                  columns={[
+                    ["Event", 0],
+                    ["Tickets Sold", 80],
+                    ["Revenue", 96],
+                  ]}
+                  rows={report.topEvents.map((e) => [
+                    e.name,
+                    e.ticketsSold,
+                    money(e.revenue),
+                  ])}
+                  empty="No data."
+                />
+              )}
             </>
           )}
         </View>
       </ScrollView>
+
+      {/* This page's own location filter — multi-select, "Clear All", and an
+          empty selection meaning every location (the web's Locations panel). */}
+      <BottomSheet
+        visible={showLocations}
+        onClose={() => setShowLocations(false)}
+        title="Select Locations"
+        subtitle={
+          selectedLocationIds.length > 0
+            ? `${selectedLocationIds.length} location(s) selected`
+            : "All locations selected"
+        }
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {allLocations.length === 0 ? (
+            <Text className="text-sm text-gray-400 dark:text-gray-500 px-2 py-4">
+              No locations available.
+            </Text>
+          ) : (
+            <>
+              {allLocations.map((loc) => {
+                const on = selectedLocationIds.includes(loc.id);
+                return (
+                  <Pressable
+                    key={loc.id}
+                    onPress={() => toggleLocation(loc.id)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                    className="flex-row items-center gap-3 px-2 py-3.5"
+                  >
+                    <View
+                      className={`w-6 h-6 rounded-md items-center justify-center border ${
+                        on
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "border-gray-300 dark:border-neutral-600"
+                      }`}
+                    >
+                      {on && <Feather name="check" size={14} color="#FFFFFF" />}
+                    </View>
+                    <Text
+                      className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1"
+                      numberOfLines={1}
+                    >
+                      {loc.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                onPress={() => setSelectedLocationIds([])}
+                disabled={selectedLocationIds.length === 0}
+                className="mt-2 pt-4 border-t border-gray-100 dark:border-neutral-800 px-2"
+              >
+                <Text
+                  className={`text-sm font-semibold ${
+                    selectedLocationIds.length === 0
+                      ? "text-gray-300 dark:text-neutral-600"
+                      : "text-blue-600 dark:text-blue-400"
+                  }`}
+                >
+                  Clear All
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Custom period calendar, for the range select's "Custom Range". */}
+      <DateRangeSheet
+        visible={showCustomRange}
+        initialStart={customStart || undefined}
+        initialEnd={customEnd || undefined}
+        onClose={() => setShowCustomRange(false)}
+        onApply={(start, end) => {
+          setCustomStart(start);
+          setCustomEnd(end);
+          setShowCustomRange(false);
+        }}
+      />
     </View>
   );
 };
