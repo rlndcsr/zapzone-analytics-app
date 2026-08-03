@@ -30,6 +30,7 @@ import {
   type SpecialPricingDateTarget,
   type SpecialPricingFilterValues,
 } from "../../components/ui/SpecialPricingFiltersSheet";
+import { SpecialPricingDetailSheet } from "../../components/ui/SpecialPricingDetailSheet";
 import { SpecialPricingTable } from "../../components/ui/SpecialPricingTable";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
@@ -329,6 +330,8 @@ const Pricing = () => {
     useState<SpecialPricingDateTarget>("effective");
   const [showColumns, setShowColumns] = useState(false);
   const [cols, setCols] = useState<SpCols>(DEFAULT_SP_COLS);
+  // The rule whose detail sheet is open (null = closed).
+  const [detailRow, setDetailRow] = useState<SpecialPricingRow | null>(null);
   const toggleCol = (key: SpColKey) =>
     setCols((prev) => ({ ...prev, [key]: !prev[key] }));
   const [filters, setFilters] = useState<SpecialPricingFilterValues>(
@@ -570,14 +573,21 @@ const Pricing = () => {
     }
   };
 
+  // Edit is a full-screen form, so any open detail sheet is dismissed first.
   const handleEdit = (row: SpecialPricingRow) => {
+    setDetailRow(null);
     router.push({
       pathname: "/pricing/create-special-pricing",
       params: { id: String(row.id) },
     });
   };
 
-  const handleDelete = (row: SpecialPricingRow) => {
+  // `afterDelete` lets the detail sheet close itself once its rule is gone,
+  // instead of lingering over a row that no longer exists.
+  const handleDelete = (
+    row: SpecialPricingRow,
+    afterDelete?: () => void,
+  ) => {
     Alert.alert(
       "Delete special pricing",
       `Delete "${row.name}"? This can't be undone.`,
@@ -600,6 +610,7 @@ const Pricing = () => {
               await deleteSpecialPricing(token, row.id);
               remove(row.id);
               markSpecialPricingsStale();
+              afterDelete?.();
             } catch (err) {
               Alert.alert(
                 "Delete failed",
@@ -843,6 +854,7 @@ const Pricing = () => {
                     rows={paged}
                     cols={cols}
                     busyId={busyId}
+                    onRowPress={setDetailRow}
                     onToggle={handleToggle}
                     onEdit={handleEdit}
                     onDelete={handleDelete}
@@ -948,6 +960,17 @@ const Pricing = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Per-rule details, opened by tapping a table row. Edit / Delete reuse
+          the same handlers as the row's inline action buttons. */}
+      <SpecialPricingDetailSheet
+        visible={detailRow !== null}
+        row={detailRow}
+        busy={detailRow != null && busyId === detailRow.id}
+        onClose={() => setDetailRow(null)}
+        onEdit={handleEdit}
+        onDelete={(row) => handleDelete(row, () => setDetailRow(null))}
+      />
 
       {/* All filters in one sheet, same as the other list screens. */}
       <SpecialPricingFiltersSheet

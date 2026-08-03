@@ -28,6 +28,7 @@ import {
   countActiveFeeSupportFilters,
   type FeeSupportFilterValues,
 } from "../../components/ui/FeeSupportFiltersSheet";
+import { FeeSupportDetailSheet } from "../../components/ui/FeeSupportDetailSheet";
 import { FeeSupportTable } from "../../components/ui/FeeSupportTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -351,6 +352,8 @@ const FeeSupport = () => {
     EMPTY_FEE_SUPPORT_FILTERS,
   );
   const [cols, setCols] = useState<Cols>(DEFAULT_COLS);
+  // The fee whose detail sheet is open (null = closed).
+  const [detailRow, setDetailRow] = useState<FeeSupportRow | null>(null);
   const [exporting, setExporting] = useState(false);
   const [locations, setLocations] = useState<LocationOption[]>([]);
 
@@ -562,14 +565,18 @@ const FeeSupport = () => {
     }
   };
 
+  // Edit is a full-screen form, so any open detail sheet is dismissed first.
   const handleEdit = (row: FeeSupportRow) => {
+    setDetailRow(null);
     router.push({
       pathname: "/pricing/create-fee-support",
       params: { id: String(row.id) },
     });
   };
 
-  const handleDelete = (row: FeeSupportRow) => {
+  // `afterDelete` lets the detail sheet close itself once its fee is gone,
+  // instead of lingering over a row that no longer exists.
+  const handleDelete = (row: FeeSupportRow, afterDelete?: () => void) => {
     Alert.alert(
       "Delete fee support",
       `Delete "${row.feeName}"? This can't be undone.`,
@@ -592,6 +599,7 @@ const FeeSupport = () => {
               await deleteFeeSupport(token, row.id);
               remove(row.id);
               markFeeSupportsStale();
+              afterDelete?.();
             } catch (err) {
               Alert.alert(
                 "Delete failed",
@@ -821,6 +829,7 @@ const FeeSupport = () => {
                     `paged` slice — switching is instant and never refetches. */}
                 {viewMode === "table" ? (
                   <FeeSupportTable
+                    onRowPress={setDetailRow}
                     rows={paged}
                     cols={cols}
                     busyId={busyId}
@@ -929,6 +938,17 @@ const FeeSupport = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Per-fee details, opened by tapping a table row. Edit / Delete reuse
+          the same handlers as the row's inline action buttons. */}
+      <FeeSupportDetailSheet
+        visible={detailRow !== null}
+        row={detailRow}
+        busy={detailRow != null && busyId === detailRow.id}
+        onClose={() => setDetailRow(null)}
+        onEdit={handleEdit}
+        onDelete={(row) => handleDelete(row, () => setDetailRow(null))}
+      />
 
       {/* All filters in one sheet, same as the other list screens. */}
       <FeeSupportFiltersSheet

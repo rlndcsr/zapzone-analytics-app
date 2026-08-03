@@ -242,11 +242,14 @@ const COLUMNS: Column[] = [
  * horizontally (fixed per-column widths keep header + rows aligned); columns
  * respect the same visibility toggles as the card view. Renders from the same
  * `SpecialPricingRow[]` — no separate data source, no refetch on layout switch.
+ * Tapping a row opens its detail sheet; the status pill and the Actions cell
+ * own their own presses, so those never double-fire the row tap.
  */
 export const SpecialPricingTable = memo(function SpecialPricingTable({
   rows,
   cols,
   busyId,
+  onRowPress,
   onToggle,
   onEdit,
   onDelete,
@@ -254,6 +257,7 @@ export const SpecialPricingTable = memo(function SpecialPricingTable({
   rows: SpecialPricingRow[];
   cols: SpCols;
   busyId: number | null;
+  onRowPress: (row: SpecialPricingRow) => void;
   onToggle: (row: SpecialPricingRow) => void;
   onEdit: (row: SpecialPricingRow) => void;
   onDelete: (row: SpecialPricingRow) => void;
@@ -298,14 +302,20 @@ export const SpecialPricingTable = memo(function SpecialPricingTable({
               onDelete: () => onDelete(row),
             };
             return (
-              <View
+              <Pressable
                 key={row.id}
+                onPress={() => onRowPress(row)}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${row.name}`}
                 className={`flex-row items-center ${
                   i < rows.length - 1
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={{ minHeight: ROW_MIN_HEIGHT }}
+                style={({ pressed }) => ({
+                  minHeight: ROW_MIN_HEIGHT,
+                  opacity: pressed ? 0.6 : 1,
+                })}
               >
                 {visible.map((col) => (
                   <View
@@ -316,7 +326,7 @@ export const SpecialPricingTable = memo(function SpecialPricingTable({
                     {col.render(row, ctx)}
                   </View>
                 ))}
-              </View>
+              </Pressable>
             );
           })}
         </View>

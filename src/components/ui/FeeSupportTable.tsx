@@ -239,11 +239,14 @@ const COLUMNS: Column[] = [
  * (fixed per-column widths keep header + rows aligned); columns respect the
  * same visibility toggles as the card view. Renders from the same
  * `FeeSupportRow[]` — no separate data source, no refetch on layout switch.
+ * Tapping a row opens its detail sheet; the status pill and the Actions cell
+ * own their own presses, so those never double-fire the row tap.
  */
 export const FeeSupportTable = memo(function FeeSupportTable({
   rows,
   cols,
   busyId,
+  onRowPress,
   onToggle,
   onEdit,
   onDelete,
@@ -251,6 +254,7 @@ export const FeeSupportTable = memo(function FeeSupportTable({
   rows: FeeSupportRow[];
   cols: FeeCols;
   busyId: number | null;
+  onRowPress: (row: FeeSupportRow) => void;
   onToggle: (row: FeeSupportRow) => void;
   onEdit: (row: FeeSupportRow) => void;
   onDelete: (row: FeeSupportRow) => void;
@@ -295,14 +299,20 @@ export const FeeSupportTable = memo(function FeeSupportTable({
               onDelete: () => onDelete(row),
             };
             return (
-              <View
+              <Pressable
                 key={row.id}
+                onPress={() => onRowPress(row)}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${row.feeName}`}
                 className={`flex-row items-center ${
                   i < rows.length - 1
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={{ minHeight: ROW_MIN_HEIGHT }}
+                style={({ pressed }) => ({
+                  minHeight: ROW_MIN_HEIGHT,
+                  opacity: pressed ? 0.6 : 1,
+                })}
               >
                 {visible.map((col) => (
                   <View
@@ -313,7 +323,7 @@ export const FeeSupportTable = memo(function FeeSupportTable({
                     {col.render(row, ctx)}
                   </View>
                 ))}
-              </View>
+              </Pressable>
             );
           })}
         </View>

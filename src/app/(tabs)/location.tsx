@@ -2,7 +2,6 @@ import {
   BarChart3,
   Calendar,
   CalendarDays,
-  CheckCircle,
   ChevronDown,
   Clock,
   MapPin,
@@ -550,11 +549,6 @@ const Location = () => {
             >
               All Locations
             </Text>
-            {selectedLocation === "all" && (
-              <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
-              </View>
-            )}
           </Pressable>
 
           {locationOptions.map((loc) => {
@@ -577,11 +571,6 @@ const Location = () => {
                 >
                   {loc.name}
                 </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
-                  </View>
-                )}
               </Pressable>
             );
           })}
@@ -621,11 +610,6 @@ const Location = () => {
                     {option.label}
                   </Text>
                 </View>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
-                  </View>
-                )}
               </Pressable>
             );
           })}

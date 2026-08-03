@@ -1006,11 +1006,6 @@ const Home = () => {
                     {option.label}
                   </Text>
                 </View>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <CheckCircle size={14} color="#FFFFFF" fill="#FFFFFF" />
-                  </View>
-                )}
               </Pressable>
             );
           })}
