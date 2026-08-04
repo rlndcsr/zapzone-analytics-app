@@ -27,6 +27,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { runOnJS } from "react-native-worklets";
 
+import { useCurrentUserRole } from "../../lib/session";
 import {
   BACKDROP_COLOR,
   BACKDROP_MAX_OPACITY,
@@ -55,7 +56,6 @@ import {
   SHADOW_OPACITY_RANGE,
   SHADOW_RADIUS_RANGE,
 } from "./fabMenuMotion";
-import { useCurrentUserRole } from "../../lib/session";
 import { getNavMenuItems, type NavMenuItem } from "./navMenuItems";
 
 const FAB_COLOR = "#0644C7";
@@ -67,9 +67,6 @@ const COLUMN_GAP = 12;
 const ROW_GAP = 16;
 const PANEL_PADDING = 16;
 const HEADER_HEIGHT = 52;
-// One cell's content height: icon square (h-12 = 48) + label gap (mt-1.5 = 6) +
-// single-line label (~16). Kept just above the real content so the height math
-// never clips a row, without reserving the dead space the old 84 did.
 const CELL_HEIGHT = 74;
 const MAX_PANEL_WIDTH = 440;
 
@@ -155,13 +152,7 @@ export function MorphingFabMenu({
   const { colorScheme } = useColorScheme();
   const surfaceColor = colorScheme === "dark" ? SURFACE_DARK : SURFACE_LIGHT;
 
-  // Quick Navigation is role-aware: the management entry swaps between User
-  // Management (company_admin) and Attendants Management (location_manager),
-  // mirroring the Web Admin sidebar. The role comes from the reactive session
-  // selector, not a snapshot — this menu is now mounted app-wide, so it can
-  // outlive a sign-out/sign-in and must re-resolve rather than latch the role it
-  // saw first. Memoized on the role so the list isn't rebuilt on the re-renders
-  // that bracket the open/close animation.
+  // quick navigation role awareness
   const role = useCurrentUserRole();
   const items = useMemo(() => getNavMenuItems(role), [role]);
 
@@ -169,8 +160,6 @@ export function MorphingFabMenu({
   const itemsProgress = useSharedValue(0);
   const [mounted, setMounted] = useState(visible);
 
-  // Unmount the morph and reveal the real FAB in one batched commit; splitting
-  // these across two runOnJS hops flicks the FAB for a frame on close.
   const finishClose = () => {
     setMounted(false);
     onClosed?.();
@@ -204,9 +193,6 @@ export function MorphingFabMenu({
   }, [visible]);
 
   const fab = fabRect;
-  // Android's translucent Modal renders from the true screen top while
-  // measureInWindow reports app-window Y, so shift FAB-derived Y down by the
-  // top inset to realign (iOS Modals already share full-screen coordinates).
   const modalYOffset = Platform.OS === "android" ? insets.top : 0;
   const fabBottom = fab ? fab.y + fab.height + modalYOffset : 0;
   const fabCenterX = fab ? fab.x + fab.width / 2 : screenW / 2;
@@ -265,8 +251,6 @@ export function MorphingFabMenu({
         [0, 1],
         [FAB_COLOR, surfaceColor],
       ),
-      // Shadow morphs from the FAB's blue glow to the panel's slate shadow so
-      // the swap with the real FAB is seamless at both ends of the animation.
       shadowColor: interpolateColor(
         progress.value,
         [0, 1],
@@ -375,10 +359,6 @@ export function MorphingFabMenu({
 
   if (!mounted || !fab) return null;
 
-  // Items with a route navigate then close; the rest keep their close-only
-  // behavior until their destinations exist. Home is reached with navigate()
-  // so it reuses the tab screen already in the history instead of pushing a
-  // second copy of it on top of the stack.
   const handleSelect = (item: NavMenuItem) => {
     onClose();
     if (!item.route) return;
@@ -390,9 +370,6 @@ export function MorphingFabMenu({
   };
 
   const grid = (
-    // Each GridItem carries a bottom margin (ROW_GAP) for row spacing; the
-    // negative margin here cancels the last row's trailing one so the grid
-    // measures to its true content height and centers cleanly.
     <View
       className="flex-row flex-wrap justify-between"
       style={{ marginBottom: -ROW_GAP }}
@@ -437,12 +414,7 @@ export function MorphingFabMenu({
 
         <Animated.View
           onStartShouldSetResponder={() => true}
-          style={[
-            { position: "absolute" },
-            // shadowColor / shadowOffset are animated in surfaceStyle so the
-            // FAB→panel shadow morph stays seamless.
-            surfaceStyle,
-          ]}
+          style={[{ position: "absolute" }, surfaceStyle]}
         >
           <Animated.View
             style={[StyleSheet.absoluteFill, { overflow: "hidden" }, clipStyle]}
@@ -487,11 +459,6 @@ export function MorphingFabMenu({
                     {grid}
                   </ScrollView>
                 ) : (
-                  // Center the grid in the space between the header and the
-                  // footer so any leftover height is split evenly above and
-                  // below the icons instead of pooling into one gap at the
-                  // bottom. paddingTop keeps a comfortable margin under the
-                  // title so the grid never crowds the header.
                   <View
                     style={{
                       flex: 1,

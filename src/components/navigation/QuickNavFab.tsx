@@ -10,6 +10,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { isPublicRoute } from "../../lib/navigation/publicRoutes";
+import { useAuthStatus } from "../../lib/session";
 import { fabBottomOffset } from "./fabLayout";
 import {
   FAB_PRESS_IN,
@@ -17,14 +19,12 @@ import {
   FAB_PRESS_SCALE,
 } from "./fabMenuMotion";
 import { FabRect, MorphingFabMenu } from "./MorphingFabMenu";
-import { isPublicRoute } from "../../lib/navigation/publicRoutes";
-import { useAuthStatus } from "../../lib/session";
 
 const FAB_COLOR = "#0644C7";
 
 const moreIcon = require("../../../assets/zapzone-assests/icon/more.png");
 
-/** Keyboard visibility. Only keyboardDid* fires on both platforms. */
+// keyboard visibility
 function useKeyboardVisible(): boolean {
   const [visible, setVisible] = useState(false);
 
@@ -44,19 +44,7 @@ function useKeyboardVisible(): boolean {
   return visible;
 }
 
-/**
- * The single Quick Navigation FAB for the whole authenticated app.
- *
- * Mounted once in the root shell (app/_layout.tsx) as a sibling *after* the
- * root Stack, so it draws above every screen the navigator renders — tab
- * screens, feature screens, nested/detail/edit/create screens alike — and no
- * screen has to know it exists. It anchors to the bottom of the window at the
- * same offset the floating tab bar used to place it at (see fabLayout.ts), so
- * its position on tab screens is unchanged.
- *
- * Screen bottom sheets present in a native Modal, which sits above the root
- * view, so an open sheet still covers the FAB exactly as before.
- */
+// quick navigation FAB for the whole authenticated app
 export function QuickNavFab() {
   const insets = useSafeAreaInsets();
   const authed = useAuthStatus();
@@ -90,12 +78,9 @@ export function QuickNavFab() {
       return;
     }
     if (fabRect) {
-      // Cached rect → open immediately so the sheet reacts on the same frame
-      // as the tap (no measure round-trip in the critical path).
       setMenuMounted(true);
       setMenuOpen(true);
     } else {
-      // First open before layout settled: measure once, then open.
       fabRef.current?.measureInWindow((x, y, width, height) => {
         setFabRect({ x, y, width, height });
         setMenuMounted(true);
@@ -115,12 +100,8 @@ export function QuickNavFab() {
     fabScale.value = withSpring(1, FAB_PRESS_OUT_SPRING);
   };
 
-  // Signed out / on a public screen, and while typing — a bottom-centered FAB
-  // would otherwise sit on top of the field the keyboard was opened for.
   const hidden = !authed || isPublicRoute(pathname) || keyboardVisible;
 
-  // Drop the menu state when the FAB goes away (session expiry, keyboard) so it
-  // doesn't re-open by itself once the FAB comes back.
   useEffect(() => {
     if (!hidden) return;
     setMenuOpen(false);
@@ -149,8 +130,6 @@ export function QuickNavFab() {
         onPressIn={onFabPressIn}
         onPressOut={onFabPressOut}
       >
-        {/* Ref sits outside the press-scale Animated.View so measureInWindow
-            returns the FAB's true resting box, not the shrunk-while-pressed size. */}
         <View ref={fabRef} collapsable={false} onLayout={measureFab}>
           <Animated.View style={fabPressStyle}>
             <View

@@ -1,9 +1,5 @@
 import { Easing } from "react-native-reanimated";
 
-// Reanimated 4 duration-based springs. dampingRatio 1 is critically damped: the
-// morph glides to rest with zero overshoot, which reads as confident rather than
-// playful. Open runs a hair longer for a graceful entrance; close is quicker so
-// dismissals feel instant and responsive.
 export const MORPH_OPEN_SPRING = {
   dampingRatio: 1,
   duration: 400,
@@ -18,8 +14,6 @@ export const CLOSE_COLLAPSE_LEAD = 40;
 
 export const PANEL_RADIUS = 28;
 
-// Shadow morphs from the FAB's blue glow (progress 0) to the panel's soft
-// slate shadow (progress 1) so hiding/showing the real FAB never pops.
 export const SHADOW_OPACITY_RANGE = [0.4, 0.22];
 export const SHADOW_RADIUS_RANGE = [12, 26];
 export const SHADOW_ELEVATION_RANGE = [12, 18];
@@ -37,8 +31,6 @@ export const ICON_MIN_SCALE = 0.6;
 export const BACKDROP_COLOR = "#0B1220";
 export const BACKDROP_MAX_OPACITY = 0.35;
 
-// Icons start rising just after the sheet begins its glide (short delay), then
-// fade/lift in over a snappy window so the reveal feels immediate, not drawn out.
 export const ITEMS_OPEN_DELAY = 40;
 export const ITEMS_OPEN_DURATION = 300;
 export const ITEMS_CLOSE_DURATION = 110;
