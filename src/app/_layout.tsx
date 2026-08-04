@@ -7,8 +7,12 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { AppUpdateGate } from "../components/AppUpdateGate";
 import { AuthGuard } from "../components/AuthGuard";
+import {
+  AUTH_SCREEN_OPTIONS,
+  STACK_SCREEN_OPTIONS,
+} from "../components/navigation/navMotion";
 import { QuickNavFab } from "../components/navigation/QuickNavFab";
-import { STACK_SCREEN_TRANSITION } from "../components/navigation/tabTransition";
+import { screenEnterLayout } from "../components/navigation/ScreenEnter";
 import "../global.css";
 import { restoreTimeframeSelection } from "../lib/dashboard/timeframeStore";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
@@ -50,10 +54,17 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="auto" />
       <AuthGuard />
-      <Stack screenOptions={{ headerShown: false, ...STACK_SCREEN_TRANSITION }}>
-        <Stack.Screen name="splash" options={{ animation: "fade" }} />
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(tabs)" />
+      {/* One stack for the whole app. Module screens (bookings/, attractions/,
+          …) are auto-registered by expo-router as siblings of (tabs), so they
+          inherit STACK_SCREEN_OPTIONS — every nested flow slides identically
+          without being listed here. screenLayout gives each of them the same
+          content entrance for the same reason. */}
+      <Stack screenOptions={STACK_SCREEN_OPTIONS} screenLayout={screenEnterLayout}>
+        {/* The auth boundary cross-fades rather than sliding: these three are
+            router.replace() hand-offs between full-screen surfaces, not pushes. */}
+        <Stack.Screen name="splash" options={AUTH_SCREEN_OPTIONS} />
+        <Stack.Screen name="index" options={AUTH_SCREEN_OPTIONS} />
+        <Stack.Screen name="(tabs)" options={AUTH_SCREEN_OPTIONS} />
       </Stack>
       {/* The app's one Quick Navigation FAB. Rendered after the Stack so it
           floats above every authenticated screen the navigator pushes — screens

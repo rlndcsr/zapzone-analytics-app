@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Dimensions, Modal, Pressable, Text, View } from "react-native";
 import {
   Gesture,
@@ -12,16 +12,17 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  withTiming,
 } from "react-native-reanimated";
 import { runOnJS } from "react-native-worklets";
 
-const SCREEN_HEIGHT = Dimensions.get("window").height;
-// Drag the sheet down past this distance (or flick faster than this) to dismiss.
-const CLOSE_DISTANCE = 120;
-const CLOSE_VELOCITY = 800;
+import {
+  SHEET_CLOSE_DISTANCE,
+  SHEET_CLOSE_SPRING,
+  SHEET_CLOSE_VELOCITY,
+  SHEET_OPEN_SPRING,
+} from "../navigation/navMotion";
 
-const OPEN_SPRING = { damping: 20, stiffness: 200, mass: 0.8 };
+const SCREEN_HEIGHT = Dimensions.get("window").height;
 
 type BottomSheetProps = {
   visible: boolean;
@@ -44,22 +45,36 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   const translateY = useSharedValue(SCREEN_HEIGHT);
+  // Where the finger took over, so a drag that starts mid-animation continues
+  // from the sheet's current position instead of snapping to the touch origin.
+  const dragOrigin = useSharedValue(0);
+  // Fling speed handed from the pan gesture to the exit spring below. A ref, not
+  // a shared value: the gesture sets it through runOnJS immediately before
+  // calling onClose, so it is guaranteed to be current by the time the effect
+  // below reacts — a shared value written on the UI thread can lag a frame.
+  const exitVelocity = useRef(0);
   const [mounted, setMounted] = useState(visible);
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
       translateY.value = SCREEN_HEIGHT;
-      translateY.value = withSpring(0, OPEN_SPRING);
+      exitVelocity.current = 0;
+      translateY.value = withSpring(0, SHEET_OPEN_SPRING);
     } else if (mounted) {
-      translateY.value = withTiming(
+      // Springs from wherever the sheet currently is, carrying the fling
+      // velocity, so a hard flick leaves fast and a tap-to-close glides.
+      translateY.value = withSpring(
         SCREEN_HEIGHT,
-        { duration: 220 },
+        { ...SHEET_CLOSE_SPRING, velocity: exitVelocity.current },
         (done) => {
           if (done) runOnJS(setMounted)(false);
         },
       );
     }
+    // Deliberately keyed on `visible` alone: adding `mounted` would re-run this
+    // the moment setMounted(true) lands and restart the entrance mid-flight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const sheetStyle = useAnimatedStyle(() => ({
@@ -76,19 +91,29 @@ export function BottomSheet({
     ),
   }));
 
+  // Dismiss triggered by a flick: record how hard, then let the parent flip
+  // `visible` so the exit spring above picks the velocity up.
+  const dismissWithVelocity = (velocityY: number) => {
+    exitVelocity.current = Math.max(0, velocityY);
+    onClose();
+  };
+
   // Pan on the handle/header: follow the finger downward, then dismiss or snap back.
   const dragGesture = Gesture.Pan()
+    .onStart(() => {
+      dragOrigin.value = translateY.value;
+    })
     .onUpdate((event) => {
-      translateY.value = Math.max(0, event.translationY);
+      translateY.value = Math.max(0, dragOrigin.value + event.translationY);
     })
     .onEnd((event) => {
       if (
-        event.translationY > CLOSE_DISTANCE ||
-        event.velocityY > CLOSE_VELOCITY
+        event.translationY > SHEET_CLOSE_DISTANCE ||
+        event.velocityY > SHEET_CLOSE_VELOCITY
       ) {
-        runOnJS(onClose)();
+        runOnJS(dismissWithVelocity)(event.velocityY);
       } else {
-        translateY.value = withSpring(0, OPEN_SPRING);
+        translateY.value = withSpring(0, SHEET_OPEN_SPRING);
       }
     });
 

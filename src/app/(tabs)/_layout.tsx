@@ -2,10 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Tabs } from "expo-router";
 import { useEffect, type ComponentProps } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import Animated, {
+  interpolateColor,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,11 +17,21 @@ import {
   TAB_BAR_TOP_INSET,
   tabBarBottomPadding,
 } from "../../components/navigation/fabLayout";
+import {
+  TAB_ICON_FOCUS_SCALE,
+  TAB_PRESS_IN_TIMING,
+  TAB_PRESS_OUT_SPRING,
+  TAB_PRESS_SCALE,
+  TAB_SCREEN_OPTIONS,
+  TAB_STATE_TIMING,
+} from "../../components/navigation/navMotion";
 import { getRoleTabs } from "../../lib/navigation/navConfig";
 import { getCurrentUser } from "../../lib/session";
 
 const ACTIVE_COLOR = "#0644C7";
 const INACTIVE_COLOR = "#9AA0A6";
+
+const ICON_SIZE = 22;
 
 // The center "navigation" slot is left empty here: the elevated Quick Navigation
 // FAB that fills it is mounted app-wide in app/_layout.tsx (QuickNavFab), which
@@ -38,25 +50,109 @@ const TabIcon = ({ name, focused }: TabIconProps) => {
   const progress = useSharedValue(focused ? 1 : 0);
 
   useEffect(() => {
-    progress.value = withTiming(focused ? 1 : 0, { duration: 180 });
+    progress.value = withTiming(focused ? 1 : 0, TAB_STATE_TIMING);
   }, [focused, progress]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + progress.value * 0.1 }],
+  const containerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + progress.value * TAB_ICON_FOCUS_SCALE }],
+  }));
+  const outlineStyle = useAnimatedStyle(() => ({ opacity: 1 - progress.value }));
+  const filledStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+
+  // Both variants are rendered and cross-faded on the UI thread rather than
+  // swapping the icon name on focus — a name swap changes the glyph and its
+  // colour in a single frame, which reads as a flicker next to the smooth scale.
+  return (
+    <Animated.View style={[styles.icon, containerStyle]}>
+      <Animated.View style={[styles.iconLayer, outlineStyle]}>
+        <Ionicons
+          name={`${name}-outline` as IoniconName}
+          size={ICON_SIZE}
+          color={INACTIVE_COLOR}
+        />
+      </Animated.View>
+      <Animated.View style={[styles.iconLayer, filledStyle]}>
+        <Ionicons name={name} size={ICON_SIZE} color={ACTIVE_COLOR} />
+      </Animated.View>
+    </Animated.View>
+  );
+};
+
+type TabButtonProps = {
+  route: BottomTabBarProps["state"]["routes"][number];
+  descriptor: BottomTabBarProps["descriptors"][string];
+  isFocused: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+};
+
+const TabButton = ({
+  route,
+  descriptor,
+  isFocused,
+  onPress,
+  onLongPress,
+}: TabButtonProps) => {
+  const { options } = descriptor;
+  const label =
+    typeof options.title === "string" ? options.title : route.name;
+
+  // Two separate drivers: `focus` follows selection state, `press` follows the
+  // finger. Keeping them apart means a tap reacts instantly even while the
+  // selection animation is still settling.
+  const focus = useSharedValue(isFocused ? 1 : 0);
+  const press = useSharedValue(1);
+
+  useEffect(() => {
+    focus.value = withTiming(isFocused ? 1 : 0, TAB_STATE_TIMING);
+  }, [isFocused, focus]);
+
+  const pressStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: press.value }],
   }));
 
-  // Filled icon when active, outline when inactive — one consistent language
-  // across every tab (Ionicons provides both variants for each name).
-  const iconName = (focused ? name : `${name}-outline`) as IoniconName;
+  const labelStyle = useAnimatedStyle(() => ({
+    color: interpolateColor(
+      focus.value,
+      [0, 1],
+      [INACTIVE_COLOR, ACTIVE_COLOR],
+    ),
+  }));
 
   return (
-    <Animated.View style={animatedStyle}>
-      <Ionicons
-        name={iconName}
-        size={22}
-        color={focused ? ACTIVE_COLOR : INACTIVE_COLOR}
-      />
-    </Animated.View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={isFocused ? { selected: true } : {}}
+      accessibilityLabel={options.tabBarAccessibilityLabel}
+      testID={options.tabBarButtonTestID}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      onPressIn={() => {
+        press.value = withTiming(TAB_PRESS_SCALE, TAB_PRESS_IN_TIMING);
+      }}
+      onPressOut={() => {
+        press.value = withSpring(1, TAB_PRESS_OUT_SPRING);
+      }}
+      className="flex-1 items-center justify-center"
+    >
+      <Animated.View style={[styles.tabContent, pressStyle]}>
+        {options.tabBarIcon?.({
+          focused: isFocused,
+          color: isFocused ? ACTIVE_COLOR : INACTIVE_COLOR,
+          size: ICON_SIZE,
+        })}
+        <Animated.Text
+          numberOfLines={1}
+          style={[
+            styles.tabLabel,
+            { fontWeight: isFocused ? "600" : "400" },
+            labelStyle,
+          ]}
+        >
+          {label}
+        </Animated.Text>
+      </Animated.View>
+    </Pressable>
   );
 };
 
@@ -119,41 +215,24 @@ const FloatingTabBar = ({
         }}
       >
         {visibleRoutes.map((route) => {
-          const { options } = descriptors[route.key];
-          const isFocused = route.key === focusedKey;
-          const color = isFocused ? ACTIVE_COLOR : INACTIVE_COLOR;
-          const label =
-            typeof options.title === "string" ? options.title : route.name;
-
           if (route.name === CENTER_ROUTE) {
             return <View key={route.key} className="flex-1" />;
           }
 
           const { onPress, onLongPress } = createPressHandlers(
             route,
-            isFocused,
+            route.key === focusedKey,
           );
 
           return (
-            <Pressable
+            <TabButton
               key={route.key}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
-              accessibilityLabel={options.tabBarAccessibilityLabel}
-              testID={options.tabBarButtonTestID}
+              route={route}
+              descriptor={descriptors[route.key]}
+              isFocused={route.key === focusedKey}
               onPress={onPress}
               onLongPress={onLongPress}
-              className="flex-1 items-center justify-center gap-1"
-            >
-              {options.tabBarIcon?.({ focused: isFocused, color, size: 22 })}
-              <Text
-                numberOfLines={1}
-                className="text-[11px]"
-                style={{ color, fontWeight: isFocused ? "600" : "400" }}
-              >
-                {label}
-              </Text>
-            </Pressable>
+            />
           );
         })}
       </View>
@@ -166,7 +245,7 @@ const TabLayout = () => {
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={TAB_SCREEN_OPTIONS}
     >
       <Tabs.Screen
         name="home"
@@ -221,3 +300,17 @@ const TabLayout = () => {
 };
 
 export default TabLayout;
+
+const styles = StyleSheet.create({
+  icon: { width: ICON_SIZE, height: ICON_SIZE },
+  // Both glyph layers centre on the same point, so the outline and filled
+  // variants sit exactly on top of one another through the cross-fade — their
+  // natural advance widths differ slightly and would otherwise drift.
+  iconLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabContent: { alignItems: "center", justifyContent: "center", gap: 4 },
+  tabLabel: { fontSize: 11 },
+});

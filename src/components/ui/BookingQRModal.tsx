@@ -1,15 +1,10 @@
 import { Download, QrCode as QrCodeIcon, X } from "lucide-react-native";
 import React, { useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { captureRef } from "react-native-view-shot";
+
+import { CenterModal } from "./CenterModal";
 
 type Props = {
   visible: boolean;
@@ -70,75 +65,12 @@ export function BookingQRModal({ visible, onClose, reference, subtitle }: Props)
   };
 
   return (
-    <Modal
+    <CenterModal
       visible={visible}
-      transparent
-      statusBarTranslucent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View
-        className="flex-1 items-center justify-center px-8"
-        style={{ backgroundColor: "rgba(20,20,20,0.6)" }}
-      >
-        <Pressable className="absolute inset-0" onPress={onClose} />
-
-        <View className="w-full max-w-sm bg-white dark:bg-neutral-900 rounded-3xl p-6 items-center">
-          <Pressable
-            onPress={onClose}
-            className="absolute right-4 top-4 p-1 z-10"
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-          >
-            <X size={20} color="#9ca3af" />
-          </Pressable>
-
-          <View className="w-11 h-11 rounded-2xl bg-[#0644C7]/10 items-center justify-center mb-3">
-            <QrCodeIcon size={22} color="#0644C7" />
-          </View>
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            Booking QR Code
-          </Text>
-          {subtitle ? (
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5 text-center">
-              {subtitle}
-            </Text>
-          ) : null}
-
-          {/* White plate keeps the QR scannable in dark mode too. */}
-          <View className="bg-white rounded-2xl p-4 my-5 border border-gray-100">
-            <QRCode
-              value={reference}
-              size={200}
-              backgroundColor="#FFFFFF"
-              color="#111827"
-            />
-          </View>
-
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-            {reference}
-          </Text>
-
-          <Pressable
-            onPress={handleSave}
-            disabled={saving}
-            className="w-full py-3 rounded-xl bg-[#0644C7] items-center flex-row justify-center gap-2 active:opacity-80"
-          >
-            {saving ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <>
-                <Download size={16} color="#fff" />
-                <Text className="text-sm font-semibold text-white">
-                  Save to Gallery
-                </Text>
-              </>
-            )}
-          </Pressable>
-        </View>
-
-        {/* Off-screen: the exact image that gets saved (dark frame + white card
-            with the QR and reference number). Kept laid out but out of view. */}
+      onClose={onClose}
+      offscreen={
+        // Off-screen: the exact image that gets saved (dark frame + white card
+        // with the QR and reference number). Kept laid out but out of view.
         <View
           ref={cardRef}
           collapsable={false}
@@ -173,7 +105,61 @@ export function BookingQRModal({ visible, onClose, reference, subtitle }: Props)
             </View>
           </View>
         </View>
+      }
+    >
+      <View className="bg-white dark:bg-neutral-900 rounded-3xl p-6 items-center">
+        <Pressable
+          onPress={onClose}
+          className="absolute right-4 top-4 p-1 z-10"
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        >
+          <X size={20} color="#9ca3af" />
+        </Pressable>
+
+        <View className="w-11 h-11 rounded-2xl bg-[#0644C7]/10 items-center justify-center mb-3">
+          <QrCodeIcon size={22} color="#0644C7" />
+        </View>
+        <Text className="text-lg font-bold text-gray-900 dark:text-white">
+          Booking QR Code
+        </Text>
+        {subtitle ? (
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5 text-center">
+            {subtitle}
+          </Text>
+        ) : null}
+
+        {/* White plate keeps the QR scannable in dark mode too. */}
+        <View className="bg-white rounded-2xl p-4 my-5 border border-gray-100">
+          <QRCode
+            value={reference}
+            size={200}
+            backgroundColor="#FFFFFF"
+            color="#111827"
+          />
+        </View>
+
+        <Text className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+          {reference}
+        </Text>
+
+        <Pressable
+          onPress={handleSave}
+          disabled={saving}
+          className="w-full py-3 rounded-xl bg-[#0644C7] items-center flex-row justify-center gap-2 active:opacity-80"
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <>
+              <Download size={16} color="#fff" />
+              <Text className="text-sm font-semibold text-white">
+                Save to Gallery
+              </Text>
+            </>
+          )}
+        </Pressable>
       </View>
-    </Modal>
+    </CenterModal>
   );
 }
