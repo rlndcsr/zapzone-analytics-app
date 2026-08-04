@@ -17,8 +17,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import {
+  FilterPill,
+  PillDivider,
+  PillSegment,
+} from "../../components/ui/FilterPill";
 import { SelectField } from "../../components/ui/FormControls";
+import {
+  EMPTY_PAYMENT_FILTERS,
+  PaymentFiltersSheet,
+  countActivePaymentFilters,
+  type PaymentFilterValues,
+} from "../../components/ui/PaymentFiltersSheet";
 import { Pagination } from "../../components/ui/Pagination";
 import {
   DEFAULT_PAYMENT_COLUMNS,
@@ -77,8 +87,6 @@ function fmtDateTime(iso: string | null): string {
   const min = `${d.getMinutes()}`.padStart(2, "0");
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${h}:${min} ${mer}`;
 }
-
-const STATUS_FILTERS = ["All", "Completed", "Pending", "Refunded", "Voided", "Failed"];
 
 /** Pill classes for a payment status. */
 function statusPill(status: string): { pill: string; text: string } {
@@ -191,7 +199,12 @@ const Payments = () => {
     activeLocation.id === "all" ? null : activeLocation.id;
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  // Every list filter lives in one object behind the toolbar's "Filters"
+  // segment (the web's filter panel), instead of a row of status chips.
+  const [filters, setFilters] = useState<PaymentFilterValues>(
+    EMPTY_PAYMENT_FILTERS,
+  );
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   // Presentation layout only — table by default, card view on toggle. Both read
@@ -200,6 +213,8 @@ const Payments = () => {
 
   const [showInvoices, setShowInvoices] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
+  // Header "more" menu (mirrors the Attractions header ActionMenu).
+  const [showMoreSheet, setShowMoreSheet] = useState(false);
 
   // Table selection (checkbox column) — ids, so it survives re-sorts and paging.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -319,19 +334,19 @@ const Payments = () => {
         p.statusLabel.toLowerCase().includes(q) ||
         p.amount.toFixed(2).includes(q);
       const matchesStatus =
-        statusFilter === "All" || p.status === statusFilter.toLowerCase();
+        filters.status === "all" || p.status === filters.status;
       const matchesLocation =
         activeLocationId == null || p.locationId === activeLocationId;
       return matchesSearch && matchesStatus && matchesLocation;
     });
-  }, [payments, search, statusFilter, activeLocationId]);
+  }, [payments, search, filters, activeLocationId]);
 
   // Reset to page 1 whenever the filters change the result set. Selection is
   // cleared too — keeping ids that are no longer on screen reads as a bug.
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [search, statusFilter, activeLocationId]);
+  }, [search, filters, activeLocationId]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage));
   const currentPage = Math.min(page, pageCount);
@@ -484,6 +499,36 @@ const Payments = () => {
     [downloadInvoice],
   );
 
+  const activeFilterCount = countActivePaymentFilters(filters);
+
+  // Header "more" menu entries — the two page-level actions that used to sit as
+  // buttons above the list (same shape as the Attractions header menu).
+  const moreActions: {
+    label: string;
+    icon: React.ComponentProps<typeof Feather>["name"];
+    hint: string;
+    onPress: () => void;
+  }[] = [
+    {
+      label: "Package Invoices",
+      icon: "package",
+      hint: "Export all invoices for a package",
+      onPress: () => {
+        setShowMoreSheet(false);
+        setShowInvoices(true);
+      },
+    },
+    {
+      label: "View Deleted",
+      icon: "trash-2",
+      hint: "Restore or permanently remove deleted payments",
+      onPress: () => {
+        setShowMoreSheet(false);
+        setShowDeleted(true);
+      },
+    },
+  ];
+
   const showInitialLoader = loading && payments.length === 0;
   const showError = !loading && !!error && payments.length === 0;
 
@@ -501,13 +546,16 @@ const Payments = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">Payments</Text>
+          {/* Page-level "More" menu (mirrors the Attractions header menu):
+              hosts Package Invoices / View Deleted. Refreshing stays on
+              pull-to-refresh. */}
           <Pressable
-            onPress={onRefresh}
+            onPress={() => setShowMoreSheet(true)}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
             accessibilityRole="button"
-            accessibilityLabel="Refresh"
+            accessibilityLabel="More actions"
           >
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
+            <Feather name="more-horizontal" size={20} color={headerIcon} />
           </Pressable>
         </View>
       </View>
@@ -525,28 +573,6 @@ const Payments = () => {
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               View and manage all payment transactions
             </Text>
-          </View>
-
-          {/* Invoices / deleted actions */}
-          <View className="flex-row flex-wrap gap-2">
-            <Pressable
-              onPress={() => setShowInvoices(true)}
-              className="flex-row items-center gap-1.5 bg-white dark:bg-neutral-900 px-3 py-2 rounded-xl border border-gray-200 dark:border-neutral-800"
-            >
-              <Feather name="package" size={13} color="#6B7280" />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                Package Invoices
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setShowDeleted(true)}
-              className="flex-row items-center gap-1.5 bg-white dark:bg-neutral-900 px-3 py-2 rounded-xl border border-gray-200 dark:border-neutral-800"
-            >
-              <Feather name="trash-2" size={13} color="#6B7280" />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                View Deleted
-              </Text>
-            </Pressable>
           </View>
 
           {/* Skeleton (first load) */}
@@ -593,46 +619,35 @@ const Payments = () => {
                 )}
               </View>
 
-              {/* Status chips */}
-              <View className="flex-row flex-wrap gap-2">
-                {STATUS_FILTERS.map((s) => {
-                  const active = statusFilter === s;
-                  return (
-                    <Pressable
-                      key={s}
-                      onPress={() => setStatusFilter(s)}
-                      className={`px-3.5 py-2 rounded-lg border ${
-                        active
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-medium ${
-                          active ? "text-white" : "text-gray-700 dark:text-gray-200"
-                        }`}
-                      >
-                        {s}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {/* Columns — only meaningful for the table layout, so it's
-                  hidden in Cards (mirrors the web table toolbar). */}
-              {viewMode === "table" && (
-                <FilterPill>
-                  <PillSegment
-                    label="Columns"
-                    active={showColumns}
-                    onPress={() => setShowColumns(true)}
-                    renderIcon={(c) => (
-                      <Feather name="columns" size={15} color={c} />
-                    )}
-                  />
-                </FilterPill>
-              )}
+              {/* Filters + Columns — one toolbar pill, mirroring the web
+                  table toolbar's button pair. Every list filter lives behind
+                  the Filters sheet; Columns only applies to the table layout,
+                  so it's hidden in Cards. */}
+              <FilterPill>
+                <PillSegment
+                  label={
+                    activeFilterCount > 0
+                      ? `Filters (${activeFilterCount})`
+                      : "Filters"
+                  }
+                  active={showFilterSheet || activeFilterCount > 0}
+                  onPress={() => setShowFilterSheet(true)}
+                  renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
+                />
+                {viewMode === "table" && (
+                  <>
+                    <PillDivider />
+                    <PillSegment
+                      label="Columns"
+                      active={showColumns}
+                      onPress={() => setShowColumns(true)}
+                      renderIcon={(c) => (
+                        <Feather name="columns" size={15} color={c} />
+                      )}
+                    />
+                  </>
+                )}
+              </FilterPill>
 
               {/* List header + layout toggle (Table default / Cards) */}
               <View className="flex-row items-center justify-between gap-2">
@@ -752,6 +767,47 @@ const Payments = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Header "more" menu — page-level actions (mirrors the Attractions
+          header menu's list style). */}
+      <BottomSheet
+        visible={showMoreSheet}
+        onClose={() => setShowMoreSheet(false)}
+        title="More"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {moreActions.map((action) => (
+            <Pressable
+              key={action.label}
+              onPress={action.onPress}
+              style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
+              className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
+            >
+              <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
+                <Feather name={action.icon} size={18} color="#374151" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
+                  {action.label}
+                </Text>
+                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  {action.hint}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color="#9CA3AF" />
+            </Pressable>
+          ))}
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Full filter panel — every list filter in one sheet. */}
+      <PaymentFiltersSheet
+        visible={showFilterSheet}
+        values={filters}
+        onChange={setFilters}
+        onClear={() => setFilters(EMPTY_PAYMENT_FILTERS)}
+        onClose={() => setShowFilterSheet(false)}
+      />
 
       <ColumnsSheet
         visible={showColumns}

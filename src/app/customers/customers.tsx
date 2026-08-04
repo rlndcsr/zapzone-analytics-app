@@ -174,6 +174,8 @@ const Customers = () => {
     EMPTY_CAMPAIGN_EXPORT_FILTERS,
   );
   const [campaignExporting, setCampaignExporting] = useState(false);
+  // Header "more" menu, hosting both export actions.
+  const [showMoreSheet, setShowMoreSheet] = useState(false);
 
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(PAGE_SIZE);
@@ -620,6 +622,36 @@ const Customers = () => {
     }
   }, [companyId, user?.location_id, campaignFilters, shareCsv]);
 
+  // Header "more" menu entries — the two export actions that used to sit as
+  // buttons above the list (same shape as the Attractions / Payments menus).
+  const moreActions: {
+    label: string;
+    icon: React.ComponentProps<typeof Feather>["name"];
+    hint: string;
+    onPress: () => void;
+  }[] = [
+    {
+      label: "Export CSV",
+      icon: "download",
+      hint: exportingCsv
+        ? "Exporting…"
+        : `All ${filtered.length} filtered ${filtered.length === 1 ? "row" : "rows"} as a spreadsheet`,
+      onPress: () => {
+        setShowMoreSheet(false);
+        exportCsv();
+      },
+    },
+    {
+      label: "Campaign Export",
+      icon: "send",
+      hint: "Build a mailing list by tag and status",
+      onPress: () => {
+        setShowMoreSheet(false);
+        setShowCampaignSheet(true);
+      },
+    },
+  ];
+
   // Show the page skeleton on initial load AND pull-to-refresh (not just when empty).
   const showSkeleton = loading && !error;
   const showError = !loading && !!error && allRows.length === 0;
@@ -640,7 +672,16 @@ const Customers = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Customers
           </Text>
-          <View style={{ width: 36 }} />
+          {/* Page-level "More" menu (mirrors the Attractions header menu):
+              hosts Export CSV / Campaign Export. */}
+          <Pressable
+            onPress={() => setShowMoreSheet(true)}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            accessibilityRole="button"
+            accessibilityLabel="More actions"
+          >
+            <Feather name="more-horizontal" size={20} color={headerIcon} />
+          </Pressable>
         </View>
       </View>
 
@@ -713,42 +754,8 @@ const Customers = () => {
             </View>
           ) : null}
 
-          {/* Export CSV + Campaign Export, then Add Customer — same order as web. */}
-          <View className="flex-row items-center gap-3">
-            <Pressable
-              onPress={exportCsv}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-              accessibilityRole="button"
-              accessibilityLabel="Export CSV"
-            >
-              {exportingCsv ? (
-                <ActivityIndicator size="small" color="#6B7280" />
-              ) : (
-                <Feather name="download" size={16} color="#6B7280" />
-              )}
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                Export CSV
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setShowCampaignSheet(true)}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-              accessibilityRole="button"
-              accessibilityLabel="Campaign Export"
-            >
-              <Feather name="send" size={16} color="#6B7280" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                Campaign Export
-              </Text>
-            </Pressable>
-          </View>
-
+          {/* Add Customer — the primary CTA. Both exports live in the header
+              menu. */}
           <Pressable
             onPress={() => setSheetContact(null)}
             className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
@@ -1089,6 +1096,37 @@ const Customers = () => {
         onClose={closeCreatedDate}
         onApply={applyCreatedDate}
       />
+
+      {/* Header "more" menu — page-level export actions. */}
+      <BottomSheet
+        visible={showMoreSheet}
+        onClose={() => setShowMoreSheet(false)}
+        title="More"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {moreActions.map((action) => (
+            <Pressable
+              key={action.label}
+              onPress={action.onPress}
+              style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
+              className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
+            >
+              <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
+                <Feather name={action.icon} size={18} color="#374151" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
+                  {action.label}
+                </Text>
+                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  {action.hint}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color="#9CA3AF" />
+            </Pressable>
+          ))}
+        </ScrollView>
+      </BottomSheet>
 
       <CampaignExportSheet
         visible={showCampaignSheet}

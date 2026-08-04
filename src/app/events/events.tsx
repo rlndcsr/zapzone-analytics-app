@@ -501,7 +501,21 @@ const Events = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Events
           </Text>
-          <View style={{ width: 36 }} />
+          {/* Export CSV — icon-only in the header, so the list actions below
+              are just the primary "New Event" CTA. */}
+          <Pressable
+            onPress={exportCsv}
+            disabled={exporting}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            accessibilityRole="button"
+            accessibilityLabel="Export CSV"
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color={headerIcon} />
+            ) : (
+              <Feather name="download" size={20} color={headerIcon} />
+            )}
+          </Pressable>
         </View>
       </View>
 
@@ -542,39 +556,15 @@ const Events = () => {
             />
           </View>
 
-          {/* Secondary "Export CSV" + primary "Create New Event" on one row
-              (~50/50). Export stays outlined/secondary; Create is the primary
-              filled CTA. */}
-          <View className="flex-row items-center gap-3 mb-5 mt-5">
-            <Pressable
-              onPress={exportCsv}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              {exporting ? (
-                <ActivityIndicator size="small" color="#6B7280" />
-              ) : (
-                <Feather name="download" size={16} color="#6B7280" />
-              )}
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                Export CSV
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/events/create-event")}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-white"
-              >
-                New Event
-              </Text>
-            </Pressable>
-          </View>
+          {/* New Event — the primary filled CTA, full width (same as the
+              Attractions module). Export CSV lives in the header. */}
+          <Pressable
+            onPress={() => router.push("/events/create-event")}
+            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5 mt-5"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New Event</Text>
+          </Pressable>
 
           {/* Error state */}
           {!loading && error && (

@@ -632,7 +632,21 @@ const FeeSupport = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Fee Supports
           </Text>
-          <View style={{ width: 36 }} />
+          {/* Export CSV — icon-only in the header, so the action below is just
+              the primary "Fee Support" CTA. */}
+          <Pressable
+            onPress={exportCsv}
+            disabled={exporting}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            accessibilityRole="button"
+            accessibilityLabel="Export CSV"
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color={headerIcon} />
+            ) : (
+              <Feather name="download" size={20} color={headerIcon} />
+            )}
+          </Pressable>
         </View>
       </View>
 
@@ -653,37 +667,17 @@ const FeeSupport = () => {
         }
       >
         <View className="px-5">
-          {/* Export CSV sits beside Create Fee Support, as on the web. */}
-          <View className="flex-row items-center gap-3 mt-5 mb-3">
-            <Pressable
-              onPress={exportCsv}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              {exporting ? (
-                <ActivityIndicator size="small" color="#6B7280" />
-              ) : (
-                <Feather name="download" size={16} color="#6B7280" />
-              )}
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                Export CSV
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/pricing/create-fee-support")}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-white"
-              >
-                Fee Support
-              </Text>
-            </Pressable>
-          </View>
+          {/* Fee Support — the primary filled CTA, full width. Export CSV
+              lives in the header. */}
+          <Pressable
+            onPress={() => router.push("/pricing/create-fee-support")}
+            className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 mt-5 mb-3"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Fee Support
+            </Text>
+          </Pressable>
 
           {/* Controls — segmented pill (Filters · Columns) */}
           <FilterPill>

@@ -1208,7 +1208,9 @@ const Bookings = () => {
               <>
                 {/* Table (default) and card layouts render from the same
                     `paged` slice — switching is instant and never refetches.
-                    The deleted list keeps cards (its own restore actions). */}
+                    The deleted list keeps cards (its own restore actions).
+                    Table rows are inert: Details / Edit are reached from the
+                    Actions cell, so a stray tap can't open a booking. */}
                 {!showDeleted && viewMode === "table" ? (
                   <BookingsTable
                     bookings={paged}
@@ -1216,7 +1218,6 @@ const Bookings = () => {
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
-                    onRowPress={rowHandlers.onView}
                     handlers={rowHandlers}
                     visibleColumns={visibleColumns}
                   />

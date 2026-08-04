@@ -628,8 +628,9 @@ export const allBookingColumnKeys = (showLocation: boolean): Set<string> =>
 /**
  * Table layout for the bookings list. Thin wrapper over the generic
  * SelectableTable, defining the web-parity booking columns plus the inline
- * row actions. Tapping a row opens Booking Details; the checkbox, status pill
- * and action icons handle their own touches.
+ * row actions. Rows themselves are inert — Details and Edit are reached only
+ * from the Actions cell, so a stray tap while scrolling can't open a booking.
+ * The checkbox, status pill and action icons own their touches.
  */
 export function BookingsTable({
   bookings,
@@ -637,7 +638,6 @@ export function BookingsTable({
   selectedIds,
   onToggleRow,
   onToggleAll,
-  onRowPress,
   handlers,
   visibleColumns,
 }: {
@@ -646,8 +646,6 @@ export function BookingsTable({
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
-  /** Row tap — opens the booking's detail sheet. */
-  onRowPress: (booking: CalendarBooking) => void;
   /** Per-row action handlers behind the inline icons. */
   handlers: BookingRowHandlers;
   /**
@@ -668,7 +666,6 @@ export function BookingsTable({
       columns={columns}
       rows={bookings}
       rowId={(b) => b.id}
-      onRowPress={onRowPress}
       selectedIds={selectedIds}
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}

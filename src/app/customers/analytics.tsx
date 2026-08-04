@@ -323,13 +323,20 @@ const CustomersAnalytics = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Customer Analytics
           </Text>
+          {/* Export — icon-only in the header. Refreshing stays on
+              pull-to-refresh. */}
           <Pressable
-            onPress={onRefresh}
+            onPress={() => setShowExportSheet(true)}
+            disabled={exporting}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
             accessibilityRole="button"
-            accessibilityLabel="Refresh"
+            accessibilityLabel="Export analytics"
           >
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
+            {exporting ? (
+              <ActivityIndicator size="small" color={headerIcon} />
+            ) : (
+              <Feather name="download" size={20} color={headerIcon} />
+            )}
           </Pressable>
         </View>
       </View>
@@ -353,31 +360,14 @@ const CustomersAnalytics = () => {
             </Text>
           </View>
 
-          {/* Period picker + Export, side by side like the web header. */}
-          <View className="flex-row items-center gap-3">
-            <View className="flex-1">
-              <SheetSelect
-                icon="calendar"
-                title="Period"
-                value={dateRange}
-                options={PERIOD_OPTIONS}
-                onSelect={(v) => setDateRange(v as CustomerDateRange)}
-              />
-            </View>
-            <Pressable
-              onPress={() => setShowExportSheet(true)}
-              className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-5 py-3.5 rounded-xl active:opacity-90"
-              accessibilityRole="button"
-              accessibilityLabel="Export analytics"
-            >
-              {exporting ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Feather name="download" size={16} color="#FFFFFF" />
-              )}
-              <Text className="text-sm font-semibold text-white">Export</Text>
-            </Pressable>
-          </View>
+          {/* Period picker — full width now that Export sits in the header. */}
+          <SheetSelect
+            icon="calendar"
+            title="Period"
+            value={dateRange}
+            options={PERIOD_OPTIONS}
+            onSelect={(v) => setDateRange(v as CustomerDateRange)}
+          />
 
           {/* Custom range trigger */}
           {dateRange === "custom" && (
