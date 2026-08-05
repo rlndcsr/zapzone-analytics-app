@@ -37,7 +37,9 @@ type RawFeeSupport = {
   fee_amount?: number | string | null;
   fee_calculation_type?: string | null;
   fee_application_type?: string | null;
-  entity_ids?: number[] | null;
+  /** `json` column cast to `array` by the model, so normally a real array — but
+   *  see {@link parseEntityIds} for the string form we tolerate. */
+  entity_ids?: number[] | string | null;
   entity_type?: string | null;
   is_active?: boolean | null;
   created_at?: string | null;
@@ -82,6 +84,37 @@ function normalizeEntityType(
   return "attraction";
 }
 
+/**
+ * The ids a fee is applied to. The `entity_ids` column is `json` and the model
+ * casts it to `array`, so this is normally already an array — but a row written
+ * outside Eloquent can come back as the raw JSON string, and treating that as
+ * "no entities" would silently show `0 items` for a fee that has plenty. Parse
+ * the string form too rather than under-reporting.
+ */
+function parseEntityIds(raw: number[] | string | null | undefined): number[] {
+  if (Array.isArray(raw)) return raw.map(Number).filter((n) => !Number.isNaN(n));
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map(Number).filter((n) => !Number.isNaN(n));
+      }
+    } catch {
+      // Not JSON — fall through to "none".
+    }
+  }
+  return [];
+}
+
+/**
+ * Location shown for a fee. A fee with no `location_id` is company-wide, which
+ * the web labels "All Locations" — so never substitute the company name for a
+ * missing location, or a company-wide fee reads as location-scoped.
+ */
+export function feeSupportLocationLabel(row: FeeSupportRow): string {
+  return row.locationName || "All Locations";
+}
+
 function amountLabel(amount: number, type: FeeCalculationType): string {
   if (type === "percentage") {
     // Drop trailing zeros where present: 4.87 -> "4.87%", 5.00 -> "5%".
@@ -104,7 +137,7 @@ function mapFeeSupport(raw: RawFeeSupport): FeeSupportRow {
     applicationType: normalizeApplicationType(raw.fee_application_type),
     amountLabel: amountLabel(feeAmount, calculationType),
     entityType: normalizeEntityType(raw.entity_type),
-    entityCount: Array.isArray(raw.entity_ids) ? raw.entity_ids.length : 0,
+    entityCount: parseEntityIds(raw.entity_ids).length,
     status: raw.is_active ? "active" : "inactive",
     locationId: raw.location?.id ?? raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
@@ -245,9 +278,7 @@ export async function fetchFeeSupport(
       if (t === "attraction" || t === "event" || t === "membership") return t;
       return "package";
     })(),
-    entityIds: Array.isArray(r.entity_ids)
-      ? (r.entity_ids as unknown[]).map((x) => Number(x))
-      : [],
+    entityIds: parseEntityIds(r.entity_ids as number[] | string | null),
     isActive: r.is_active == null ? true : !!r.is_active,
   };
 }

@@ -14,6 +14,7 @@ import { fetchAttractions } from "../../services/attractionsService";
 import { fetchPackages } from "../../services/bookingsService";
 import { fetchEvents } from "../../services/eventsService";
 import {
+  feeSupportLocationLabel,
   fetchFeeSupport,
   type FeeSupportDetail,
   type FeeSupportEntityType,
@@ -223,10 +224,7 @@ export function FeeSupportDetailSheet({
   // The detail payload is authoritative for the count; the row is the fallback.
   const entityCount = detail?.entityIds.length ?? row.entityCount;
 
-  const location =
-    row.locationName && row.companyName
-      ? `${row.locationName} | ${row.companyName}`
-      : row.locationName || row.companyName || "All Locations";
+  const location = feeSupportLocationLabel(row);
 
   return (
     <BottomSheet

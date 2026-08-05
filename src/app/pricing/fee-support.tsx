@@ -44,6 +44,7 @@ import {
 import { getToken } from "../../lib/session";
 import {
   deleteFeeSupport,
+  feeSupportLocationLabel,
   toggleFeeSupportStatus,
   type FeeSupportEntityType,
   type FeeSupportRow,
@@ -200,10 +201,7 @@ const FeeSupportCard = ({
 }) => {
   const entity = ENTITY_META[row.entityType];
   const isPercent = row.calculationType === "percentage";
-  const locationLabel =
-    row.locationName && row.companyName
-      ? `${row.locationName} | ${row.companyName}`
-      : row.locationName || row.companyName || "All Locations";
+  const locationLabel = feeSupportLocationLabel(row);
   return (
     <View
       className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
@@ -504,7 +502,7 @@ const FeeSupport = () => {
           f.applicationType,
           f.entityType,
           f.entityCount,
-          f.locationName,
+          feeSupportLocationLabel(f),
           f.status,
         ]
           .map(esc)
@@ -823,7 +821,7 @@ const FeeSupport = () => {
                     `paged` slice — switching is instant and never refetches. */}
                 {viewMode === "table" ? (
                   <FeeSupportTable
-                    onRowPress={setDetailRow}
+                    onView={setDetailRow}
                     rows={paged}
                     cols={cols}
                     busyId={busyId}

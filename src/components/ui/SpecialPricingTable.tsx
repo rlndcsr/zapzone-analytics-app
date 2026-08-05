@@ -116,6 +116,8 @@ type Column = {
 
 type RowContext = {
   busy: boolean;
+  /** Opens the detail sheet — the row itself isn't tappable. */
+  onView: () => void;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -213,9 +215,17 @@ const COLUMNS: Column[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 110,
+    width: 150,
     render: (_row, ctx) => (
       <View className="flex-row items-center gap-2">
+        <Pressable
+          onPress={ctx.onView}
+          className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center"
+          accessibilityRole="button"
+          accessibilityLabel="View special pricing details"
+        >
+          <Feather name="eye" size={15} color="#6B7280" />
+        </Pressable>
         <Pressable
           onPress={ctx.onEdit}
           className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center"
@@ -242,14 +252,16 @@ const COLUMNS: Column[] = [
  * horizontally (fixed per-column widths keep header + rows aligned); columns
  * respect the same visibility toggles as the card view. Renders from the same
  * `SpecialPricingRow[]` — no separate data source, no refetch on layout switch.
- * Tapping a row opens its detail sheet; the status pill and the Actions cell
- * own their own presses, so those never double-fire the row tap.
+ * Rows are deliberately NOT tappable — a whole-row target makes it too easy to
+ * open the detail sheet while scrolling the table sideways, so viewing happens
+ * through the eye button in the trailing Actions cell (same as the Templates and
+ * Attractions tables).
  */
 export const SpecialPricingTable = memo(function SpecialPricingTable({
   rows,
   cols,
   busyId,
-  onRowPress,
+  onView,
   onToggle,
   onEdit,
   onDelete,
@@ -257,7 +269,7 @@ export const SpecialPricingTable = memo(function SpecialPricingTable({
   rows: SpecialPricingRow[];
   cols: SpCols;
   busyId: number | null;
-  onRowPress: (row: SpecialPricingRow) => void;
+  onView: (row: SpecialPricingRow) => void;
   onToggle: (row: SpecialPricingRow) => void;
   onEdit: (row: SpecialPricingRow) => void;
   onDelete: (row: SpecialPricingRow) => void;
@@ -297,25 +309,23 @@ export const SpecialPricingTable = memo(function SpecialPricingTable({
           {rows.map((row, i) => {
             const ctx: RowContext = {
               busy: busyId === row.id,
+              onView: () => onView(row),
               onToggle: () => onToggle(row),
               onEdit: () => onEdit(row),
               onDelete: () => onDelete(row),
             };
             return (
-              <Pressable
+              // Inert row — details open from the eye action only, so the cells
+              // (status pill, actions) own every touch.
+              <View
                 key={row.id}
-                onPress={() => onRowPress(row)}
-                accessibilityRole="button"
-                accessibilityLabel={`View ${row.name}`}
+                accessibilityLabel={row.name}
                 className={`flex-row items-center ${
                   i < rows.length - 1
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={({ pressed }) => ({
-                  minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                style={{ minHeight: ROW_MIN_HEIGHT }}
               >
                 {visible.map((col) => (
                   <View
@@ -326,7 +336,7 @@ export const SpecialPricingTable = memo(function SpecialPricingTable({
                     {col.render(row, ctx)}
                   </View>
                 ))}
-              </Pressable>
+              </View>
             );
           })}
         </View>

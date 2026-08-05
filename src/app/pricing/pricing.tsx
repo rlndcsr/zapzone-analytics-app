@@ -848,7 +848,7 @@ const Pricing = () => {
                     rows={paged}
                     cols={cols}
                     busyId={busyId}
-                    onRowPress={setDetailRow}
+                    onView={setDetailRow}
                     onToggle={handleToggle}
                     onEdit={handleEdit}
                     onDelete={handleDelete}

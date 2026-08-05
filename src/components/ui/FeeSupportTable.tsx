@@ -2,9 +2,10 @@ import { Feather } from "@expo/vector-icons";
 import { memo, type ComponentProps, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
-import type {
-  FeeSupportEntityType,
-  FeeSupportRow,
+import {
+  feeSupportLocationLabel,
+  type FeeSupportEntityType,
+  type FeeSupportRow,
 } from "../../services/feeSupportService";
 
 const CARD_SHADOW = {
@@ -21,14 +22,40 @@ const ROW_MIN_HEIGHT = 64;
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
+/** Per-entity icon, label and badge tint. Colors mirror the web's Entity Type
+ *  pill: amber for events, purple for memberships, theme blue otherwise. */
 const ENTITY_META: Record<
   FeeSupportEntityType,
-  { icon: ComponentIconName; label: string }
+  { icon: ComponentIconName; label: string; bg: string; text: string; tint: string }
 > = {
-  package: { icon: "package", label: "Package" },
-  attraction: { icon: "zap", label: "Attraction" },
-  event: { icon: "calendar", label: "Event" },
-  membership: { icon: "credit-card", label: "Membership" },
+  package: {
+    icon: "package",
+    label: "Package",
+    bg: "bg-blue-50 dark:bg-blue-900/30",
+    text: "text-[#0644C7] dark:text-blue-300",
+    tint: "#0644C7",
+  },
+  attraction: {
+    icon: "zap",
+    label: "Attraction",
+    bg: "bg-blue-50 dark:bg-blue-900/30",
+    text: "text-[#0644C7] dark:text-blue-300",
+    tint: "#0644C7",
+  },
+  event: {
+    icon: "calendar",
+    label: "Event",
+    bg: "bg-amber-100 dark:bg-amber-900/30",
+    text: "text-amber-800 dark:text-amber-300",
+    tint: "#92400E",
+  },
+  membership: {
+    icon: "credit-card",
+    label: "Membership",
+    bg: "bg-purple-100 dark:bg-purple-900/30",
+    text: "text-purple-800 dark:text-purple-300",
+    tint: "#6B21A8",
+  },
 };
 
 /** Interactive status pill — same behaviour as the card's status toggle. */
@@ -85,13 +112,10 @@ export type FeeCols = Record<FeeColKey, boolean>;
 
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 
-const locationLabel = (row: FeeSupportRow) =>
-  row.locationName && row.companyName
-    ? `${row.locationName} | ${row.companyName}`
-    : row.locationName || row.companyName || "All Locations";
-
 type RowContext = {
   busy: boolean;
+  /** Opens the detail sheet — the row itself isn't tappable. */
+  onView: () => void;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -164,9 +188,14 @@ const COLUMNS: Column[] = [
     render: (row) => {
       const entity = ENTITY_META[row.entityType];
       return (
-        <View className="flex-row items-center gap-1.5">
-          <Feather name={entity.icon} size={13} color="#9CA3AF" />
-          <Text numberOfLines={1} className={CELL_TEXT}>
+        <View
+          className={`flex-row items-center gap-1 self-start px-2.5 py-1 rounded-full ${entity.bg}`}
+        >
+          <Feather name={entity.icon} size={11} color={entity.tint} />
+          <Text
+            numberOfLines={1}
+            className={`text-xs font-medium ${entity.text}`}
+          >
             {entity.label}
           </Text>
         </View>
@@ -193,7 +222,7 @@ const COLUMNS: Column[] = [
       <View className="flex-row items-center gap-1.5">
         <Feather name="map-pin" size={13} color="#9CA3AF" />
         <Text numberOfLines={2} className={CELL_TEXT}>
-          {locationLabel(row)}
+          {feeSupportLocationLabel(row)}
         </Text>
       </View>
     ),
@@ -210,9 +239,17 @@ const COLUMNS: Column[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 110,
+    width: 150,
     render: (_row, ctx) => (
       <View className="flex-row items-center gap-2">
+        <Pressable
+          onPress={ctx.onView}
+          className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center"
+          accessibilityRole="button"
+          accessibilityLabel="View fee support details"
+        >
+          <Feather name="eye" size={15} color="#6B7280" />
+        </Pressable>
         <Pressable
           onPress={ctx.onEdit}
           className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center"
@@ -239,14 +276,16 @@ const COLUMNS: Column[] = [
  * (fixed per-column widths keep header + rows aligned); columns respect the
  * same visibility toggles as the card view. Renders from the same
  * `FeeSupportRow[]` — no separate data source, no refetch on layout switch.
- * Tapping a row opens its detail sheet; the status pill and the Actions cell
- * own their own presses, so those never double-fire the row tap.
+ * Rows are deliberately NOT tappable — a whole-row target makes it too easy to
+ * open the detail sheet while scrolling the table sideways, so viewing happens
+ * through the eye button in the trailing Actions cell (same as the Templates and
+ * Attractions tables).
  */
 export const FeeSupportTable = memo(function FeeSupportTable({
   rows,
   cols,
   busyId,
-  onRowPress,
+  onView,
   onToggle,
   onEdit,
   onDelete,
@@ -254,7 +293,7 @@ export const FeeSupportTable = memo(function FeeSupportTable({
   rows: FeeSupportRow[];
   cols: FeeCols;
   busyId: number | null;
-  onRowPress: (row: FeeSupportRow) => void;
+  onView: (row: FeeSupportRow) => void;
   onToggle: (row: FeeSupportRow) => void;
   onEdit: (row: FeeSupportRow) => void;
   onDelete: (row: FeeSupportRow) => void;
@@ -294,25 +333,23 @@ export const FeeSupportTable = memo(function FeeSupportTable({
           {rows.map((row, i) => {
             const ctx: RowContext = {
               busy: busyId === row.id,
+              onView: () => onView(row),
               onToggle: () => onToggle(row),
               onEdit: () => onEdit(row),
               onDelete: () => onDelete(row),
             };
             return (
-              <Pressable
+              // Inert row — details open from the eye action only, so the cells
+              // (status pill, actions) own every touch.
+              <View
                 key={row.id}
-                onPress={() => onRowPress(row)}
-                accessibilityRole="button"
-                accessibilityLabel={`View ${row.feeName}`}
+                accessibilityLabel={row.feeName}
                 className={`flex-row items-center ${
                   i < rows.length - 1
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={({ pressed }) => ({
-                  minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                style={{ minHeight: ROW_MIN_HEIGHT }}
               >
                 {visible.map((col) => (
                   <View
@@ -323,7 +360,7 @@ export const FeeSupportTable = memo(function FeeSupportTable({
                     {col.render(row, ctx)}
                   </View>
                 ))}
-              </Pressable>
+              </View>
             );
           })}
         </View>

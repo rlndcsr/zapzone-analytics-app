@@ -16,7 +16,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { GroupInvitesTable } from "../../components/ui/GroupInvitesTable";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
 import {
   consumeGroupInvitesStale,
@@ -137,6 +139,10 @@ const GroupInvites = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [actionsInvite, setActionsInvite] = useState<GroupInvite | null>(null);
   const [busy, setBusy] = useState(false);
+  // Presentation layout only — table by default, card view on toggle, mirroring
+  // the web admin's Group Invites table (Chaperone / Template / Date / Contacts
+  // / Shareable) and the same pattern used across the app's other list screens.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   const { invites, loading, error, refetch } = useGroupInvites();
 
@@ -283,15 +289,21 @@ const GroupInvites = () => {
           )}
 
           {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4">
-              <Text className="shrink text-lg font-bold text-gray-900 dark:text-white">
-                All Invites
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  {filtered.length}
+            <View className="flex-row items-center justify-between gap-2 mb-4">
+              <View className="flex-row items-center gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                >
+                  All Invites
                 </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {filtered.length}
+                  </Text>
+                </View>
               </View>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
             </View>
           )}
 
@@ -313,12 +325,21 @@ const GroupInvites = () => {
             </View>
           ) : (
             !error &&
-            filtered.map((invite) => (
-              <InviteCard
-                key={invite.id}
-                invite={invite}
-                onMore={() => setActionsInvite(invite)}
+            (viewMode === "table" ? (
+              <GroupInvitesTable
+                invites={filtered}
+                canManage={canManage}
+                onRowPress={(invite) => setActionsInvite(invite)}
+                onResend={onResend}
               />
+            ) : (
+              filtered.map((invite) => (
+                <InviteCard
+                  key={invite.id}
+                  invite={invite}
+                  onMore={() => setActionsInvite(invite)}
+                />
+              ))
             ))
           )}
         </View>
