@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Tabs } from "expo-router";
+import { useColorScheme } from "nativewind";
 import { useEffect, type ComponentProps } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import Animated, {
@@ -22,8 +23,8 @@ import {
   TAB_PRESS_IN_TIMING,
   TAB_PRESS_OUT_SPRING,
   TAB_PRESS_SCALE,
-  TAB_SCREEN_OPTIONS,
   TAB_STATE_TIMING,
+  tabScreenOptions,
 } from "../../components/navigation/navMotion";
 import { getRoleTabs } from "../../lib/navigation/navConfig";
 import { getCurrentUser } from "../../lib/session";
@@ -242,10 +243,13 @@ const FloatingTabBar = ({
 
 const TabLayout = () => {
   if (__DEV__) console.count("[render] TabLayout");
+  // Opaque scene backing per theme — see tabScreenOptions. Uses NativeWind's
+  // scheme so it tracks the in-app Settings switch, not the OS setting.
+  const { colorScheme } = useColorScheme();
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={TAB_SCREEN_OPTIONS}
+      screenOptions={tabScreenOptions(colorScheme)}
     >
       <Tabs.Screen
         name="home"

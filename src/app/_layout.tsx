@@ -2,6 +2,7 @@ import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
+import { useColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
@@ -9,7 +10,7 @@ import { AppUpdateGate } from "../components/AppUpdateGate";
 import { AuthGuard } from "../components/AuthGuard";
 import {
   AUTH_SCREEN_OPTIONS,
-  STACK_SCREEN_OPTIONS,
+  stackScreenOptions,
 } from "../components/navigation/navMotion";
 import { QuickNavFab } from "../components/navigation/QuickNavFab";
 import { screenEnterLayout } from "../components/navigation/ScreenEnter";
@@ -33,6 +34,10 @@ export default function RootLayout() {
   if (__DEV__) console.count("[render] RootLayout");
   const [sessionRestored, setSessionRestored] = useState(false);
   const [fontsLoaded] = useFonts(montserratFonts);
+  // NativeWind's scheme, not the OS one — the in-app Settings switch is
+  // authoritative here (see lib/theme.ts). Drives the opaque backing colour the
+  // navigator puts under every screen.
+  const { colorScheme } = useColorScheme();
 
   useEffect(() => {
     if (__DEV__) console.log("[RootLayout] restore effect run");
@@ -59,7 +64,10 @@ export default function RootLayout() {
           inherit STACK_SCREEN_OPTIONS — every nested flow slides identically
           without being listed here. screenLayout gives each of them the same
           content entrance for the same reason. */}
-      <Stack screenOptions={STACK_SCREEN_OPTIONS} screenLayout={screenEnterLayout}>
+      <Stack
+        screenOptions={stackScreenOptions(colorScheme)}
+        screenLayout={screenEnterLayout}
+      >
         {/* The auth boundary cross-fades rather than sliding: these three are
             router.replace() hand-offs between full-screen surfaces, not pushes. */}
         <Stack.Screen name="splash" options={AUTH_SCREEN_OPTIONS} />

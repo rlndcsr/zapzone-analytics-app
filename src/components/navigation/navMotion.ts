@@ -12,10 +12,53 @@
 //
 // Everything here is native-driver or worklet driven; nothing animates on the JS
 // thread.
+//
+// ── The one rule every transition here obeys ───────────────────────────────────
+//
+// A screen transition must never animate `opacity` on a full-screen container,
+// and must never *offset* one either. Both make the screen underneath visible:
+// at opacity `a` exactly `(1 - a)` of the previous screen composites through,
+// and a translate leaves an uncovered strip at the edge. Either way you get two
+// screens on screen at once — the "gray ghost / double render" artifact.
+//
+// So screen-level motion is expressed as `scale` and nothing else, always
+// clamped to >= 1. A view scaled up can only ever cover MORE than the viewport,
+// never less, so the topmost screen is guaranteed opaque edge-to-edge on every
+// frame and every screen size. Overscan is clipped by the navigator's
+// `overflow: hidden` container.
+//
+// Fades and offsets are fine on things that are not full-screen containers
+// (icons, labels, sheet cards, dialog cards) — those have something opaque
+// behind them by construction.
 
 import type { BottomTabNavigationOptions } from "@react-navigation/bottom-tabs";
 import { Easing } from "react-native";
 import { Easing as WorkletEasing } from "react-native-reanimated";
+
+/* ------------------------------------------------------------------ *
+ * Surfaces
+ * ------------------------------------------------------------------ */
+
+/**
+ * The opaque colour sitting under every screen, per theme.
+ *
+ * Screens paint their own root background (`bg-gray-50 dark:bg-black` and
+ * friends), so this is normally never seen — it is the safety net that stops a
+ * screen which forgets to set one from becoming a window onto the screen behind
+ * it. It also replaces React Navigation's default theme background, which is the
+ * light gray that used to show through transparent containers.
+ *
+ * Matched to the dominant screen surface so it is seamless if it ever does show.
+ */
+export const SURFACE = {
+  light: "#F9FAFB", // gray-50
+  dark: "#000000",
+} as const;
+
+export type ThemeName = keyof typeof SURFACE;
+
+export const surfaceFor = (theme: ThemeName | null | undefined) =>
+  SURFACE[theme === "dark" ? "dark" : "light"];
 
 /* ------------------------------------------------------------------ *
  * Durations
@@ -46,6 +89,11 @@ export const UI_REACTION_DURATION = 180;
  * identical to forward and needs no extra config), while on Android it replaces
  * the OS default with that same iOS-style slide. One motion, both platforms.
  *
+ * `contentStyle` gives every pushed screen an opaque backing. react-native-screens
+ * composites the outgoing and incoming screens during a push, so a screen whose
+ * content view has no background is a hole onto the one behind it. Screens set
+ * their own root background too; this guarantees it navigator-wide.
+ *
  * There is intentionally no `animationDuration` here. It is iOS-only *and*
  * explicitly not customisable for `default`/`ios_from_right` screens, so setting
  * it did nothing on either platform; it is only honoured on the fade screens
@@ -54,10 +102,12 @@ export const UI_REACTION_DURATION = 180;
  * `gestureEnabled` is left at its `true` default (iOS-only in native-stack;
  * Android uses the system back gesture).
  */
-export const STACK_SCREEN_OPTIONS = {
-  headerShown: false,
-  animation: "ios_from_right",
-} as const;
+export const stackScreenOptions = (theme: ThemeName | null | undefined) =>
+  ({
+    headerShown: false,
+    animation: "ios_from_right",
+    contentStyle: { backgroundColor: surfaceFor(theme) },
+  }) as const;
 
 /**
  * The auth boundary. splash → login → app are all `router.replace` hand-offs
@@ -82,43 +132,39 @@ type SceneStyleInterpolator = NonNullable<
   BottomTabNavigationOptions["sceneStyleInterpolator"]
 >;
 
-/** How far a scene sits off-centre while it waits its turn. */
-const TAB_SCENE_SHIFT = 12;
+/** How far past the viewport a scene sits before it settles. Always > 1. */
+const TAB_SCENE_SCALE = 1.03;
 
 /**
- * Opacity curve for the tab cross-fade, shaped to stay *high* rather than
- * ramping linearly.
+ * Tab scene motion: the arriving scene settles down from a hair over full size.
  *
- * A linear `[0, 1, 0]` cross-fade (bottom-tabs' own `shift`/`fade` presets) puts
- * both scenes at 0.5 mid-transition, so ~25% of React Navigation's theme
- * background bleeds through — very visible against the blue DashboardHeader that
- * tops every tab screen. Because the outgoing scene is always at `progress - 1`
- * of the incoming one, composite coverage here never drops below ~96% at any
- * point in the transition, whatever easing is used.
- */
-const SCENE_OPACITY_INPUT = [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1];
-const SCENE_OPACITY_OUTPUT = [0, 0.5, 0.8, 0.95, 1, 0.95, 0.8, 0.5, 0];
-
-/**
- * Tab scene motion: a high-alpha cross-fade plus a small directional shift, so
- * you can feel *which way* you moved without the screen travelling far enough to
- * read as a page swipe.
+ * Transform only, and scale only — see the rule at the top of this file. This
+ * used to be an opacity cross-fade plus a 12px shift, which is what produced the
+ * gray ghost of the previous tab: bottom-tabs keeps both scenes mounted and
+ * stacked for the length of the transition, so a partially transparent incoming
+ * scene composites the outgoing one straight through it, and a shifted one leaves
+ * an uncovered strip at the screen edge.
  *
- * `progress` is -1 for scenes left of the active tab, 0 for the active one and
- * +1 for scenes to its right — matching the tab order, so the shift direction is
- * correct for both role-specific tab sets.
+ * Why this version cannot ghost, on any device:
+ *   • bottom-tabs gives the focused scene `zIndex: 0` and every blurred scene
+ *     `zIndex: -1`, and `state.index` flips on the first frame — so the arriving
+ *     scene is on top for the entire transition.
+ *   • its `backgroundColor` (see `tabScreenOptions`) makes it opaque.
+ *   • its scale never drops below 1, so it always covers at least the full
+ *     viewport; the 3% overscan is clipped by the scene container's
+ *     `overflow: hidden`.
+ * Opaque + on top + full coverage on every frame ⇒ exactly one visible screen.
+ *
+ * The V-shaped output range means the same settle plays whichever direction you
+ * move between tabs, so Home→Location and Location→Home feel identical.
  */
 export const forTabScene: SceneStyleInterpolator = ({ current }) => ({
   sceneStyle: {
-    opacity: current.progress.interpolate({
-      inputRange: SCENE_OPACITY_INPUT,
-      outputRange: SCENE_OPACITY_OUTPUT,
-    }),
     transform: [
       {
-        translateX: current.progress.interpolate({
+        scale: current.progress.interpolate({
           inputRange: [-1, 0, 1],
-          outputRange: [-TAB_SCENE_SHIFT, 0, TAB_SCENE_SHIFT],
+          outputRange: [TAB_SCENE_SCALE, 1, TAB_SCENE_SCALE],
         }),
       },
     ],
@@ -128,20 +174,27 @@ export const forTabScene: SceneStyleInterpolator = ({ current }) => ({
 /**
  * Shared options for every tab screen.
  *
- * `freezeOnBlur` is the one perf setting here: inactive tab screens are already
- * detached from the native view hierarchy, but without this they still re-render
- * on every store/poll tick in the background (the Home dashboard is the
- * expensive one). Freezing is scoped to screens react-native-screens has already
- * marked inactive — a scene mid-transition is never frozen — and a frozen screen
- * re-renders the instant it unfreezes, so navigation state and effects are
- * unaffected. Remove this line to revert.
+ * `sceneStyle` is what makes the guarantee in `forTabScene` hold: bottom-tabs
+ * keeps the previous scene mounted and stacked underneath for the duration of
+ * the transition, so the arriving scene has to be opaque in its own right.
+ * Screens paint their own root background as well — this makes it a navigator
+ * invariant rather than something each screen has to remember.
+ *
+ * `freezeOnBlur` is deliberately NOT set. `detachInactiveScreens` (on by default
+ * for iOS and Android) already takes blurred scenes out of the native view
+ * hierarchy, which is where the real cost is; freezing only adds JS re-render
+ * savings, and in exchange a tab you return to has to unfreeze and re-render,
+ * which can cost a paint on the very first frame of the transition. Not a trade
+ * worth making when the requirement is zero visual artifacts.
  *
  * `lazy` is intentionally left at its `true` default: tabs mount on first visit
  * and then stay mounted, which is what preserves their state.
  */
-export const TAB_SCREEN_OPTIONS: BottomTabNavigationOptions = {
+export const tabScreenOptions = (
+  theme: ThemeName | null | undefined,
+): BottomTabNavigationOptions => ({
   headerShown: false,
-  freezeOnBlur: true,
+  sceneStyle: { backgroundColor: surfaceFor(theme) },
   transitionSpec: {
     animation: "timing",
     config: {
@@ -151,7 +204,7 @@ export const TAB_SCREEN_OPTIONS: BottomTabNavigationOptions = {
     },
   },
   sceneStyleInterpolator: forTabScene,
-};
+});
 
 /* ------------------------------------------------------------------ *
  * Tab bar — worklet-driven, so it never competes with the scene change
@@ -181,19 +234,21 @@ export const TAB_PRESS_OUT_SPRING = {
  * ------------------------------------------------------------------ */
 
 /**
- * The content of a newly pushed screen lifts into place instead of arriving
- * pre-settled.
+ * A newly pushed screen settles into place instead of arriving pre-settled.
  *
- * Kept deliberately shallow. The stack's own slide is the real entrance; this
- * only adds the last few pixels of settle on top of it. The opacity floor is
- * 0.85 rather than 0 for a concrete reason: during an `ios_from_right` push the
- * incoming screen is drawn *over* the outgoing one, so a full fade-in would show
- * the previous screen straight through the new one. At 0.85 the arriving content
- * reads as soft, not transparent.
+ * Deliberately shallow — the stack's own slide is the real entrance; this adds
+ * the last touch of settle on top of it.
+ *
+ * Scale, from >= 1, for the same reason as `forTabScene`. This was previously a
+ * 12px lift at 0.85 opacity, and both halves of that were wrong on a full-screen
+ * container: the opacity showed 15% of the outgoing screen straight through the
+ * arriving one, and the lift opened a 12px strip along the top edge — which on
+ * these screens sits under the status bar, right where the blue DashboardHeader
+ * has to reach the top. Scaling from 1.02 down to 1 can only ever cover more than
+ * the viewport, so it exposes nothing at any point.
  */
 export const SCREEN_ENTER = {
-  translateY: 12,
-  fromOpacity: 0.85,
+  fromScale: 1.02,
   timing: {
     duration: SCREEN_ENTER_DURATION,
     easing: WorkletEasing.out(WorkletEasing.cubic),
