@@ -5,6 +5,7 @@ import { type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 
 import { getCurrentUser } from "../../lib/session";
+import { InitialsAvatar } from "./InitialsAvatar";
 
 /** Friendly labels for the backend staff roles. */
 const ROLE_LABELS: Record<string, string> = {
@@ -63,11 +64,7 @@ export function DashboardHeader({
       <View className="flex-row items-center justify-between">
         {/* Left: avatar + greeting */}
         <View className="flex-row items-center gap-3 flex-1 mr-3">
-          <View className="w-11 h-11 rounded-full bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-            <Text className="text-sm font-bold text-[#2563EB] dark:text-blue-300">
-              {initials}
-            </Text>
-          </View>
+          <InitialsAvatar initials={initials} />
           <View className="flex-1">
             <Text
               className="text-[15px] font-bold text-gray-900 dark:text-white"

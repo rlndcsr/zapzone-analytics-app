@@ -26,8 +26,9 @@ import {
   TAB_STATE_TIMING,
   tabScreenOptions,
 } from "../../components/navigation/navMotion";
+import { QuickNavFab } from "../../components/navigation/QuickNavFab";
 import { getRoleTabs } from "../../lib/navigation/navConfig";
-import { getCurrentUser } from "../../lib/session";
+import { useCurrentUserRole } from "../../lib/session";
 
 const ACTIVE_COLOR = "#0644C7";
 const INACTIVE_COLOR = "#9AA0A6";
@@ -35,7 +36,7 @@ const INACTIVE_COLOR = "#9AA0A6";
 const ICON_SIZE = 22;
 
 // The center "navigation" slot is left empty here: the elevated Quick Navigation
-// FAB that fills it is mounted app-wide in app/_layout.tsx (QuickNavFab), which
+// FAB that fills it is rendered by TabLayout below, as a sibling of <Tabs>, and
 // positions itself over this notch from the shared fabLayout geometry.
 const CENTER_ROUTE = "navigation";
 
@@ -164,6 +165,10 @@ const FloatingTabBar = ({
 }: BottomTabBarProps) => {
   if (__DEV__) console.count("[render] FloatingTabBar");
   const insets = useSafeAreaInsets();
+  // Reactive, not a getCurrentUser() snapshot: switching accounts remounts this
+  // tree anyway, but signing into a different role in place (add-account) does
+  // not, and a stale tab set would then belong to the previous account.
+  const role = useCurrentUserRole();
 
   const createPressHandlers = (
     route: BottomTabBarProps["state"]["routes"][number],
@@ -186,7 +191,7 @@ const FloatingTabBar = ({
 
   // Which tabs this role sees, and in what order — driven by navConfig, not
   // hardcoded here. All screens stay registered; we simply render the subset.
-  const tabOrder = getRoleTabs(getCurrentUser()?.role);
+  const tabOrder = getRoleTabs(role);
   const focusedKey = state.routes[state.index]?.key;
   const visibleRoutes = tabOrder
     .map((name) => state.routes.find((r) => r.name === name))
@@ -197,9 +202,9 @@ const FloatingTabBar = ({
       pointerEvents="box-none"
       className="absolute inset-x-0 bottom-0 px-4"
       style={{
-        // Top inset is the strip the app-wide FAB overhangs into; it stays
-        // reserved (and touch-transparent) even though the FAB is no longer a
-        // child here.
+        // Top inset is the strip the FAB overhangs into; it stays reserved (and
+        // touch-transparent) even though the FAB is a sibling of <Tabs> rather
+        // than a child here.
         paddingTop: TAB_BAR_TOP_INSET,
         paddingBottom: tabBarBottomPadding(insets.bottom),
       }}
@@ -247,59 +252,69 @@ const TabLayout = () => {
   // scheme so it tracks the in-app Settings switch, not the OS setting.
   const { colorScheme } = useColorScheme();
   return (
-    <Tabs
-      tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={tabScreenOptions(colorScheme)}
-    >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="home" focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="location"
-        options={{
-          title: "Location",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="location" focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="activity"
-        options={{
-          title: "Activity",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="receipt" focused={focused} />
-          ),
-        }}
-      />
-      {/* Registered so the tab bar can reserve its center slot; the app-wide
-          QuickNavFab draws over it, so this screen has no icon or label. */}
-      <Tabs.Screen name="navigation" options={{ title: "" }} />
-      <Tabs.Screen
-        name="calendar"
-        options={{
-          title: "Calendar",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="calendar" focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="person" focused={focused} />
-          ),
-        }}
-      />
-    </Tabs>
+    // The FAB is a sibling of <Tabs>, inside this screen, so the native stack
+    // transition that carries the tab bar carries the FAB in the same frames —
+    // they are one moving thing, not two animations kept in step. It also means
+    // the FAB is simply absent from anything pushed above (tabs): Edit Profile,
+    // Settings, Saved Accounts and every module screen.
+    <View className="flex-1">
+      <Tabs
+        tabBar={(props) => <FloatingTabBar {...props} />}
+        screenOptions={tabScreenOptions(colorScheme)}
+      >
+        <Tabs.Screen
+          name="home"
+          options={{
+            title: "Home",
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name="home" focused={focused} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="location"
+          options={{
+            title: "Location",
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name="location" focused={focused} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="activity"
+          options={{
+            title: "Activity",
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name="receipt" focused={focused} />
+            ),
+          }}
+        />
+        {/* Registered so the tab bar can reserve its center slot; the
+            QuickNavFab below draws over it, so this screen has no icon or label. */}
+        <Tabs.Screen name="navigation" options={{ title: "" }} />
+        <Tabs.Screen
+          name="calendar"
+          options={{
+            title: "Calendar",
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name="calendar" focused={focused} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: "Profile",
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name="person" focused={focused} />
+            ),
+          }}
+        />
+      </Tabs>
+
+      {/* After <Tabs> so it draws over the bar it sits in the notch of. */}
+      <QuickNavFab />
+    </View>
   );
 };
 

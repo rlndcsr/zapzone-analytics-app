@@ -13,7 +13,7 @@ import { ApiError } from "../../lib/api";
 import { restoreTimeframeSelection } from "../../lib/dashboard/timeframeStore";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { setSession } from "../../lib/session";
-import { login } from "../../services/auth";
+import { login, type AuthUser } from "../../services/auth";
 import { InputField } from "../ui/InputField";
 import { PasswordInput } from "../ui/PasswordInput";
 
@@ -28,11 +28,27 @@ type FormErrors = {
   password?: string;
 };
 
-export function LoginForm() {
+type LoginFormProps = {
+  /**
+   * Email to start with — a saved account whose token has been revoked, so the
+   * user only has to supply the password. The screen remounts this form when
+   * the target changes, so seeding from props here is enough.
+   */
+  initialEmail?: string;
+  /**
+   * Takes over the post-sign-in navigation. Adding an account has a different
+   * destination from a cold-start sign-in — it has a live stack to tear down
+   * first — and that is the screen's business, not the form's. Left out, the
+   * form keeps its own `replace("/home")`.
+   */
+  onSuccess?: (user: AuthUser) => void;
+};
+
+export function LoginForm({ initialEmail, onSuccess }: LoginFormProps = {}) {
   const router = useRouter();
   const passwordRef = useRef<TextInput>(null);
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail ?? "");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -81,9 +97,13 @@ export function LoginForm() {
       // dashboard initialises, so a fresh sign-in must not inherit whatever
       // window the previous account had in memory.
       await restoreTimeframeSelection();
-      if (__DEV__) console.log('[LoginForm] router.replace("/home")');
-      router.replace("/home");
-      if (__DEV__) console.log("[LoginForm] router.replace returned");
+      if (onSuccess) {
+        onSuccess(result.user);
+      } else {
+        if (__DEV__) console.log('[LoginForm] router.replace("/home")');
+        router.replace("/home");
+        if (__DEV__) console.log("[LoginForm] router.replace returned");
+      }
     } catch (error) {
       if (
         error instanceof ApiError &&
@@ -164,7 +184,9 @@ export function LoginForm() {
         onSubmitEditing={handleSubmit}
         editable={!submitting}
         containerClassName="mb-4"
-       
+        // Arriving with the email already filled means the password is the only
+        // thing left to do.
+        autoFocus={!!initialEmail}
       />
 
       <View className="mb-7 flex-row items-center justify-between">

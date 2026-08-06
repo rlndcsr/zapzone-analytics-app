@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProfileSkeleton } from "../../components/ui/skeleton/ProfileSkeleton";
+import { useSavedAccounts } from "../../lib/accounts/savedAccountsStore";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { getCurrentUser } from "../../lib/session";
 import { signOut } from "../../services/auth";
@@ -132,6 +133,7 @@ const Profile = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, stats, loading, error, refresh } = useProfile();
+  const savedAccounts = useSavedAccounts();
   const [loggingOut, setLoggingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -229,6 +231,16 @@ const Profile = () => {
               icon="settings"
               label="Settings"
               onPress={() => router.push("/settings/settings")}
+            />
+            <View className="h-px bg-gray-100 dark:bg-neutral-800/60 ml-14" />
+            <MenuRow
+              icon="users"
+              label={
+                savedAccounts.length > 1
+                  ? `Saved Accounts (${savedAccounts.length})`
+                  : "Saved Accounts"
+              }
+              onPress={() => router.push("/profile/saved-accounts")}
             />
             <View className="h-px bg-gray-100 dark:bg-neutral-800/60 ml-14" />
             <MenuRow

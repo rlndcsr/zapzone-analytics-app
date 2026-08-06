@@ -12,9 +12,9 @@ import {
   AUTH_SCREEN_OPTIONS,
   stackScreenOptions,
 } from "../components/navigation/navMotion";
-import { QuickNavFab } from "../components/navigation/QuickNavFab";
 import { screenEnterLayout } from "../components/navigation/ScreenEnter";
 import "../global.css";
+import { restoreSavedAccounts } from "../lib/accounts/savedAccountsStore";
 import { restoreTimeframeSelection } from "../lib/dashboard/timeframeStore";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
 import { restoreActiveLocation } from "../lib/location/activeLocationStore";
@@ -42,10 +42,15 @@ export default function RootLayout() {
   useEffect(() => {
     if (__DEV__) console.log("[RootLayout] restore effect run");
     Promise.all([
-      restoreSession().then(async (restored) => {
-        await restoreTimeframeSelection();
-        return restored ? validateStoredSession() : undefined;
-      }),
+      // Saved accounts before the session: `restoreSession` upserts the
+      // restored account, so the list must already be in memory or that write
+      // would land on an empty index and drop the others.
+      restoreSavedAccounts().then(() =>
+        restoreSession().then(async (restored) => {
+          await restoreTimeframeSelection();
+          return restored ? validateStoredSession() : undefined;
+        }),
+      ),
       applyStoredTheme(),
       restoreActiveLocation(),
     ]).finally(() => setSessionRestored(true));
@@ -73,12 +78,19 @@ export default function RootLayout() {
         <Stack.Screen name="splash" options={AUTH_SCREEN_OPTIONS} />
         <Stack.Screen name="index" options={AUTH_SCREEN_OPTIONS} />
         <Stack.Screen name="(tabs)" options={AUTH_SCREEN_OPTIONS} />
+        {/* Account switching crosses the same boundary: it replaces the stack
+            root (which is what unmounts (tabs) and its per-account state), so
+            it fades like the others. Not dismissable — it owns the transition
+            until it hands off to /home. */}
+        <Stack.Screen
+          name="switch-account"
+          options={{ ...AUTH_SCREEN_OPTIONS, gestureEnabled: false }}
+        />
       </Stack>
-      {/* The app's one Quick Navigation FAB. Rendered after the Stack so it
-          floats above every authenticated screen the navigator pushes — screens
-          inherit it without knowing about it. It hides itself on the public
-          screens (login/splash). */}
-      <QuickNavFab />
+      {/* The Quick Navigation FAB is NOT mounted here. It lives inside
+          app/(tabs)/_layout.tsx, alongside the tab bar it sits in the notch of,
+          so the stack transition carries them together instead of the FAB
+          having to animate itself in afterwards. */}
       {/* Launch version check. Mounted here (after session restore, once for
           the whole app) so it runs a single request per launch and its blocking
           form can cover every screen — including login. */}

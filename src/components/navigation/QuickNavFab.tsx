@@ -1,5 +1,4 @@
 import { Image } from "expo-image";
-import { usePathname } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Keyboard, Pressable, View } from "react-native";
 import Animated, {
@@ -10,8 +9,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { isPublicRoute } from "../../lib/navigation/publicRoutes";
-import { useAuthStatus } from "../../lib/session";
 import { fabBottomOffset } from "./fabLayout";
 import {
   FAB_PRESS_IN,
@@ -44,11 +41,21 @@ function useKeyboardVisible(): boolean {
   return visible;
 }
 
-// quick navigation FAB for the whole authenticated app
+/**
+ * The elevated centre button of the floating tab bar.
+ *
+ * Mounted by app/(tabs)/_layout.tsx as a sibling of `<Tabs>`, so it lives
+ * inside the (tabs) screen and the native stack transition moves it and the tab
+ * bar in the same frames. Nothing here decides *where* it shows: being a child
+ * of that screen is what keeps it off everything pushed above it — Edit
+ * Profile, Settings, Saved Accounts, and the module screens — and off the
+ * login/splash surfaces, which (tabs) is never mounted behind.
+ *
+ * The only thing left to hide it for is the keyboard, which can rise over a tab
+ * screen while it is on top.
+ */
 export function QuickNavFab() {
   const insets = useSafeAreaInsets();
-  const authed = useAuthStatus();
-  const pathname = usePathname();
   const keyboardVisible = useKeyboardVisible();
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -100,7 +107,7 @@ export function QuickNavFab() {
     fabScale.value = withSpring(1, FAB_PRESS_OUT_SPRING);
   };
 
-  const hidden = !authed || isPublicRoute(pathname) || keyboardVisible;
+  const hidden = keyboardVisible;
 
   useEffect(() => {
     if (!hidden) return;

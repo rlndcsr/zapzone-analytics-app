@@ -2,6 +2,11 @@ import * as SecureStore from "expo-secure-store";
 import { useSyncExternalStore } from "react";
 
 import type { AuthUser, UserRole } from "../services/auth";
+import { metricsCacheService } from "../services/metricsCacheService";
+import {
+  markAccountSignInRequired,
+  upsertSavedAccount,
+} from "./accounts/savedAccountsStore";
 import { resetActiveLocation } from "./location/activeLocationStore";
 
 const TOKEN_KEY = "zapzone_auth_token";
@@ -41,10 +46,25 @@ function notify(): void {
   listeners.forEach((l) => l());
 }
 
+/**
+ * What gets written to SecureStore for the signed-in user. `profile_path` can
+ * hold ~27 MB of base64 (UserController::update validates `max:27262976`), and
+ * nothing reads it off the session — every avatar comes from a fresh profile
+ * fetch — so it is dropped rather than pushed through a keychain write that
+ * large payloads can fail outright. The in-memory user keeps every field.
+ */
+function persistableUser(user: AuthUser): AuthUser {
+  const { profile_path: _dropped, ...rest } = user;
+  return rest as AuthUser;
+}
+
 // Saves the session after login and starts the inactivity timer
 export async function setSession(token: string, user: AuthUser): Promise<void> {
   if (__DEV__) console.log("[SESSION] setSession() begin");
   const now = Date.now();
+  // Captured before the swap: any incoming user that isn't the one already in
+  // memory means the *account* changed, not just the token.
+  const accountChanged = authUser?.id !== user.id;
   authToken = token;
   authUser = user;
   expiresAt = now + SESSION_TTL_MS;
@@ -52,10 +72,24 @@ export async function setSession(token: string, user: AuthUser): Promise<void> {
   // A brand-new session clears the involuntary-logout latch so authenticated
   // requests are allowed again (the previous 401, if any, is fully behind us).
   sessionInvalidated = false;
+
+  // Per-account global state must not survive an account change. `clearSession`
+  // covers the logout→login path, but adding or switching accounts never clears
+  // — without this, the previous admin's workspace location would silently
+  // scope the new account's data. A signed-out cold start counts as a change
+  // too (the persisted location belongs to whoever last chose it).
+  if (accountChanged) {
+    resetActiveLocation();
+    void metricsCacheService.clearAllCaches();
+  }
+  // Every route into a session — login, add-account, switch — records the
+  // account here, so there is no path that forgets to save one.
+  void upsertSavedAccount(token, user);
+
   try {
     await Promise.all([
       SecureStore.setItemAsync(TOKEN_KEY, token),
-      SecureStore.setItemAsync(USER_KEY, JSON.stringify(user)),
+      SecureStore.setItemAsync(USER_KEY, JSON.stringify(persistableUser(user))),
       SecureStore.setItemAsync(EXPIRY_KEY, String(expiresAt)),
     ]);
     // Record the persist so the first post-login `touchSession` doesn't rewrite
@@ -85,6 +119,9 @@ export async function restoreSession(): Promise<boolean> {
       lastExpiryPersistAt = 0;
       // Start clean so an earlier latch (dev fast refresh) can't block requests.
       sessionInvalidated = false;
+      // Self-heal installs that predate saved accounts: the session already on
+      // the device becomes its first saved account on this launch.
+      void upsertSavedAccount(token, authUser);
       return true;
     }
 
@@ -151,6 +188,12 @@ export function isAuthenticated(): boolean {
   return authToken !== null && expiresAt != null && Date.now() < expiresAt;
 }
 
+/**
+ * Tear down the active session. Deliberately neutral about saved accounts: it
+ * never adds, downgrades or removes an entry. Each caller layers its own effect
+ * on top (see the teardown matrix in `invalidateSession` and `signOut`), so one
+ * behaviour belongs to one call site instead of a flag threaded through here.
+ */
 export async function clearSession(): Promise<void> {
   authToken = null;
   authUser = null;
@@ -173,6 +216,15 @@ function invalidateSession(reason: Exclude<SessionEndReason, null>): void {
   if (sessionInvalidated) return; // one logout flow, regardless of the count
   sessionInvalidated = true;
   endReason = reason;
+  // Read before clearSession() nulls it.
+  const userId = authUser?.id ?? null;
+  // "unauthorized" means the token is dead server-side, so drop the credential
+  // — but keep the account, because only an explicit Remove erases one. An
+  // "expired" window is different: the app locked itself while the token stayed
+  // valid, so that account remains one tap away.
+  if (reason === "unauthorized" && userId != null) {
+    void markAccountSignInRequired(userId);
+  }
   void clearSession();
 }
 
@@ -212,6 +264,15 @@ export function useAuthStatus(): boolean {
   useSyncExternalStore(subscribeAuth, getAuthSnapshot, getAuthSnapshot);
   if (__DEV__) console.count("[render] useAuthStatus consumer tick");
   return isAuthenticated();
+}
+
+function getUserIdSnapshot(): number | null {
+  return authUser?.id ?? null;
+}
+
+/** Reactive id of the signed-in user — which saved account is the live one. */
+export function useCurrentUserId(): number | null {
+  return useSyncExternalStore(subscribeAuth, getUserIdSnapshot, getUserIdSnapshot);
 }
 
 function getRoleSnapshot(): UserRole | null {
