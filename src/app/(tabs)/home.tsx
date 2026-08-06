@@ -12,6 +12,7 @@ import {
   CreditCard,
   DollarSign,
   Eye,
+  FileSignature,
   Info,
   LayoutGrid,
   LayoutList,
@@ -94,12 +95,7 @@ import type {
 } from "../../services/metricsService";
 
 type DateFilterType =
-  | "today"
-  | "last_24h"
-  | "last_7d"
-  | "last_30d"
-  | "all_time"
-  | "custom";
+  "today" | "last_24h" | "last_7d" | "last_30d" | "all_time" | "custom";
 
 const ICON_MAP: { [key: string]: any } = {
   "group.png": Users,
@@ -121,6 +117,7 @@ const ICON_MAP: { [key: string]: any } = {
   "sparkles.png": Sparkles,
   "alert-triangle.png": AlertTriangle,
   "trending-up.png": TrendingUp,
+  "file-signature.png": FileSignature,
 };
 
 const getIcon = (iconName: string) => ICON_MAP[iconName] || null;
@@ -374,119 +371,148 @@ const formatTime = (value: string | null) => {
   });
 };
 
+// Equal-width cell so figures line up in the same column down the whole list.
+const PurchaseStat = ({
+  label,
+  value,
+  valueClass = "text-gray-900 dark:text-white",
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+}) => (
+  <View className="flex-1">
+    <Text className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-0.5">
+      {label}
+    </Text>
+    <Text className={`text-sm font-bold ${valueClass}`} numberOfLines={1}>
+      {value}
+    </Text>
+  </View>
+);
+
 const EventPurchaseRow = ({
   row,
+  accent,
   isLast,
 }: {
   row: RecentEventPurchase;
+  accent: string;
   isLast: boolean;
-}) => (
-  <View
-    className={`flex-row items-center py-3.5 px-2 ${
-      isLast ? "" : "border-b border-gray-50 dark:border-neutral-800/50"
-    }`}
-  >
-    <View className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-900/20 dark:to-blue-900/10 items-center justify-center mr-3">
-      <Ticket size={18} color="#0644C7" strokeWidth={1.75} />
-    </View>
+}) => {
+  const paidInFull =
+    Number(row.amount_paid ?? 0) >= Number(row.total_amount ?? 0);
+  const stamp = row.purchase_date ?? row.created_at;
 
-    <View className="flex-1 mr-3">
-      <View className="flex-row items-center gap-2">
-        <Text
-          className="text-sm font-semibold text-gray-900 dark:text-white"
-          numberOfLines={1}
-        >
-          {row.customer_name?.trim() || "Guest"}
-        </Text>
-        <View className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600" />
-        <Text className="text-xs text-gray-400 dark:text-gray-500">
-          #{row.id != null ? String(row.id).slice(0, 8) : "—"}
-        </Text>
-      </View>
-      <Text
-        className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-        numberOfLines={1}
-      >
-        {row.event_name?.trim() || "—"}
-      </Text>
-      <View className="flex-row items-center gap-3 mt-1">
-        <View className="flex-row items-center gap-1">
-          <Calendar size={11} color="#9CA3AF" />
-          <Text className="text-[10px] text-gray-400 dark:text-gray-500">
-            {formatPurchaseDate(row.purchase_date ?? row.created_at)}
+  return (
+    <View
+      className={`px-4 py-3.5 ${
+        isLast ? "" : "border-b border-gray-100 dark:border-neutral-800"
+      }`}
+    >
+      {/* Who + what + status */}
+      <View className="flex-row items-center">
+        <View className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/30 items-center justify-center mr-3">
+          <Ticket size={17} color={accent} strokeWidth={1.75} />
+        </View>
+        <View className="flex-1 mr-2">
+          <Text
+            className="text-sm font-semibold text-gray-900 dark:text-white"
+            numberOfLines={1}
+          >
+            {row.customer_name?.trim() || "Guest"}
+          </Text>
+          <Text
+            className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
+            numberOfLines={1}
+          >
+            {row.event_name?.trim() || "—"}
           </Text>
         </View>
-        <View className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
-        <View className="flex-row items-center gap-1">
-          <Clock size={11} color="#9CA3AF" />
-          <Text className="text-[10px] text-gray-400 dark:text-gray-500">
-            {formatTime(row.purchase_date ?? row.created_at)}
-          </Text>
-        </View>
-        <View className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
-        <Text className="text-[10px] text-gray-400 dark:text-gray-500">
-          Qty {row.quantity}
-        </Text>
+        <StatusBadge status={row.status} palette="event" />
       </View>
-    </View>
 
-    <View className="items-end">
-      <Text className="text-sm font-bold text-gray-900 dark:text-white">
-        {formatMoney(row.total_amount)}
-      </Text>
-      <Text className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 mb-1.5">
-        Paid {formatMoney(row.amount_paid)}
-      </Text>
-      <StatusBadge status={row.status} palette="event" />
-    </View>
-  </View>
-);
-
-const RecentEventPurchases = ({ rows }: { rows: RecentEventPurchase[] }) => (
-  <View className="mt-5">
-    {/* Modern Header */}
-    <View className="flex-row items-center justify-between mb-3 px-1">
-      <View className="flex-row items-center gap-2.5 flex-1">
-        <View className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-900/20 dark:to-blue-900/10 items-center justify-center">
-          <Ticket size={18} color="#0644C7" strokeWidth={1.75} />
-        </View>
-        <Text
-          className="text-base font-bold text-gray-900 dark:text-white flex-1"
-          numberOfLines={1}
-        >
-          Recent Purchases
-        </Text>
-        <View className="bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
-          <Text className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-            {rows.length}
-          </Text>
-        </View>
-      </View>
-      <Pressable
-        onPress={() => router.push("/events/purchases" as never)}
-        className="flex-row items-center gap-1 active:opacity-80"
-        accessibilityRole="button"
-        accessibilityLabel="View all event purchases"
-      >
-        <Text className="text-xs font-semibold text-blue-600 dark:text-blue-400">
-          View All
-        </Text>
-        <ChevronRight size={14} color="#0644C7" />
-      </Pressable>
-    </View>
-
-    {/* Modern Cards List - No background */}
-    <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-100 dark:border-neutral-800 overflow-hidden">
-      {rows.map((row, index) => (
-        <EventPurchaseRow
-          key={row.id}
-          row={row}
-          isLast={index === rows.length - 1}
+      <View className="flex-row items-center mt-3 pt-3 border-t border-gray-50 dark:border-neutral-800/60">
+        <PurchaseStat label="Qty" value={String(row.quantity ?? 0)} />
+        <PurchaseStat label="Amount" value={formatMoney(row.total_amount)} />
+        <PurchaseStat
+          label="Paid"
+          value={formatMoney(row.amount_paid)}
+          valueClass={
+            paidInFull
+              ? "text-green-600 dark:text-green-400"
+              : "text-amber-600 dark:text-amber-400"
+          }
         />
-      ))}
+      </View>
+
+      <View className="flex-row items-center justify-between mt-2.5">
+        <View className="flex-row items-center gap-1.5 flex-1 mr-2">
+          <Clock size={11} color="#9CA3AF" />
+          <Text
+            className="text-[11px] text-gray-400 dark:text-gray-500"
+            numberOfLines={1}
+          >
+            {formatPurchaseDate(stamp)} · {formatTime(stamp)}
+          </Text>
+        </View>
+        <Text className="text-[11px] text-gray-400 dark:text-gray-500">
+          #{row.id ?? "—"}
+        </Text>
+      </View>
     </View>
-  </View>
-);
+  );
+};
+
+const RecentEventPurchases = ({ rows }: { rows: RecentEventPurchase[] }) => {
+  const { colorScheme } = useColorScheme();
+  const accent = colorScheme === "dark" ? "#60A5FA" : "#0644C7";
+
+  return (
+    <View className="mt-6">
+      <View className="flex-row items-center justify-between mb-3 px-1">
+        <View className="flex-row items-center gap-2.5 flex-1 mr-3">
+          <View className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/30 items-center justify-center">
+            <Ticket size={18} color={accent} strokeWidth={1.75} />
+          </View>
+          <Text
+            className="text-base font-bold text-gray-900 dark:text-white"
+            numberOfLines={1}
+          >
+            Recent Purchases
+          </Text>
+          <View className="bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">
+            <Text className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+              {rows.length}
+            </Text>
+          </View>
+        </View>
+        <Pressable
+          onPress={() => router.push("/events/purchases" as never)}
+          className="flex-row items-center gap-1 active:opacity-80"
+          accessibilityRole="button"
+          accessibilityLabel="View all event purchases"
+        >
+          <Text className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+            View All
+          </Text>
+          <ChevronRight size={14} color={accent} />
+        </Pressable>
+      </View>
+
+      <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-100 dark:border-neutral-800 overflow-hidden">
+        {rows.map((row, index) => (
+          <EventPurchaseRow
+            key={row.id}
+            row={row}
+            accent={accent}
+            isLast={index === rows.length - 1}
+          />
+        ))}
+      </View>
+    </View>
+  );
+};
 
 const Home = () => {
   if (__DEV__) console.count("[render] Home");
@@ -656,10 +682,21 @@ const Home = () => {
     currentMetric?.breakdownKey && dashboardConfig.showBreakdowns
       ? (data?.breakdowns?.[currentMetric.breakdownKey] ?? [])
       : [];
-  const currentStatusBreakdown =
-    currentMetric?.statusBreakdownKey && dashboardConfig.showBreakdowns
-      ? (data?.breakdowns?.[currentMetric.statusBreakdownKey] ?? [])
-      : [];
+  // Extra sections above the main breakdown; empty ones are dropped.
+  const currentSecondaryBreakdowns = useMemo(() => {
+    if (
+      !currentMetric?.secondaryBreakdowns ||
+      !dashboardConfig.showBreakdowns
+    ) {
+      return [];
+    }
+    return currentMetric.secondaryBreakdowns
+      .map((section) => ({
+        label: section.label,
+        items: data?.breakdowns?.[section.key] ?? [],
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [currentMetric, dashboardConfig.showBreakdowns, data]);
   const isBreakdownEmpty = currentBreakdown.length === 0;
   const currentTotal = currentMetric
     ? resolveMetricValue(data?.metrics, currentMetric)
@@ -910,14 +947,17 @@ const Home = () => {
                   style={{ maxHeight: breakdownMaxHeight }}
                   showsVerticalScrollIndicator={false}
                 >
-                  {currentStatusBreakdown.length > 0 && (
-                    <View className="pb-3 mb-3 border-b border-gray-100 dark:border-neutral-800">
+                  {currentSecondaryBreakdowns.map((section) => (
+                    <View
+                      key={section.label}
+                      className="pb-3 mb-3 border-b border-gray-100 dark:border-neutral-800"
+                    >
                       <BreakdownSection
-                        label={currentMetric.statusSectionLabel}
-                        items={currentStatusBreakdown}
+                        label={section.label}
+                        items={section.items}
                       />
                     </View>
-                  )}
+                  ))}
 
                   {isBreakdownEmpty ? (
                     <View className="justify-center items-center py-12">

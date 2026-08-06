@@ -24,11 +24,10 @@ export type MetricCardDef = {
   fallbackField?: keyof DashboardTotals;
   format: MetricFormat;
   breakdownKey?: BreakdownKey;
-  /** Secondary breakdown rendered above the main one (the web's "By status"
-   *  block on Packages). */
-  statusBreakdownKey?: BreakdownKey;
-  /** Section headings, shown only when a card has two breakdown sections. */
-  statusSectionLabel?: string;
+  /** Extra breakdowns rendered above the main one, in order (the web's "By
+   *  status" block on Packages, status + age brackets on Waivers). */
+  secondaryBreakdowns?: { key: BreakdownKey; label: string }[];
+  /** Heading for the main breakdown, shown when a card has several sections. */
   breakdownSectionLabel?: string;
   subtitle?: SubtitleFn;
   icon: string;
@@ -58,6 +57,9 @@ const eventTicketsPart: SubtitleFn = (m) => `${m.totalEventTickets} tickets`;
 // Attractions "Sold" counts tickets; the sub-line shows how many orders they
 // came from (matches the web's `${totalPurchases} orders`).
 const attractionOrdersPart: SubtitleFn = (m) => `${m.totalPurchases} orders`;
+// Waivers sub-line: "N signed · M pending" (web wording).
+const signedPendingPart: SubtitleFn = (m) =>
+  `${m.completedWaivers ?? 0} signed · ${m.pendingWaivers ?? 0} pending`;
 
 // Manager Total Revenue: "Bkgs: $X • Tix: $Y[ • Events: $Z]" (rounded).
 const managerRevenuePart: SubtitleFn = (m) => {
@@ -102,8 +104,9 @@ export const METRIC_CARDS = {
     valueField: "totalBookings",
     format: "number",
     breakdownKey: "packageBreakdown",
-    statusBreakdownKey: "packageStatusBreakdown",
-    statusSectionLabel: "By status",
+    secondaryBreakdowns: [
+      { key: "packageStatusBreakdown", label: "By status" },
+    ],
     breakdownSectionLabel: "By package",
     subtitle: participantsPart,
     icon: "box.png",
@@ -200,6 +203,23 @@ export const METRIC_CARDS = {
     gradient: ["#047857", "#10B981"],
     info: "All confirmed sales in the period combined by quantity: package bookings + event tickets + attraction tickets, matching the counts on the sold cards. Sales that progressed to checked-in or completed still count as confirmed. Open the card for the split by type.",
   },
+  waivers: {
+    key: "waivers",
+    title: "Waivers",
+    valueField: "totalWaivers",
+    format: "number",
+    breakdownKey: "waiverBreakdown",
+    secondaryBreakdowns: [
+      { key: "waiverStatusBreakdown", label: "By status" },
+      { key: "waiverAgeBreakdown", label: "Adult age brackets (signed)" },
+    ],
+    breakdownSectionLabel: "By source",
+    subtitle: signedPendingPart,
+    icon: "file-signature.png",
+    color: "#4338CA",
+    gradient: ["#4338CA", "#6366F1"],
+    info: 'Waivers created in the selected period (by creation date), scoped to the selected location. "Signed" are completed waivers; pending are not yet signed. Open the card for the split by status, by source, adults vs minors covered, and the adult age brackets.',
+  },
   revenue: {
     key: "revenue",
     title: "Total Revenue",
@@ -289,6 +309,7 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
       "memberships",
       "customers",
       "confirmedSales",
+      "waivers",
     ],
     showLocationSelector: true,
     showBreakdowns: true,

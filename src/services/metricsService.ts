@@ -32,7 +32,10 @@ export type BreakdownKey =
   | "eventBreakdown"
   | "membershipBreakdown"
   | "customerBreakdown"
-  | "confirmedBreakdown";
+  | "confirmedBreakdown"
+  | "waiverBreakdown"
+  | "waiverStatusBreakdown"
+  | "waiverAgeBreakdown";
 
 export type DashboardBreakdowns = Record<BreakdownKey, BreakdownItem[]>;
 
@@ -62,6 +65,12 @@ export type DashboardTotals = {
   totalMemberships: number;
   activeMemberships: number;
   newMemberships: number;
+  totalWaivers: number;
+  completedWaivers: number;
+  pendingWaivers: number;
+  checkedInWaivers: number;
+  adultWaivers: number;
+  minorWaivers: number;
   [key: string]: number;
 };
 
