@@ -2,15 +2,18 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   Activity,
+  Baby,
   Boxes,
   Building2,
   CalendarDays,
   Clock,
   DollarSign,
+  FileSignature,
   MapPin,
   Package,
   Ticket,
   TrendingUp,
+  UserCheck,
   Users,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -72,6 +75,14 @@ const money = (n: number) =>
 const count = (n: number) =>
   n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
+/** Waiver tiles carry a plain gray sub-line — a key metric with only `info`. */
+const noteMetric = (info: string): KeyMetric => ({
+  value: 0,
+  change: null,
+  info,
+  trend: null,
+});
+
 /**
  * One `key_metrics` card, laid out like the web's: label, big value, then the
  * change line (green when it contains "+", red otherwise) or the gray info
@@ -81,11 +92,14 @@ function MetricCard({
   icon: Icon,
   label,
   value,
+  valueSuffix,
   metric,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
+  /** Muted continuation of the value, e.g. the " / 1,518" on Adults / Minors. */
+  valueSuffix?: string;
   metric: KeyMetric;
 }) {
   const changeColor =
@@ -112,6 +126,11 @@ function MetricCard({
               adjustsFontSizeToFit
             >
               {value}
+              {valueSuffix ? (
+                <Text className="font-normal text-gray-400 dark:text-gray-500">
+                  {valueSuffix}
+                </Text>
+              ) : null}
             </Text>
             {metric.change ? (
               <Text className={`text-xs mt-1 ${changeColor}`} numberOfLines={2}>
@@ -569,6 +588,38 @@ const PerformanceAnalytics = () => {
                     metric={report.keyMetrics.activeEvents}
                   />
                 )}
+                {/* Waiver tiles — hidden when the response omits the block. */}
+                {!!report.waivers && (
+                  <MetricCard
+                    icon={FileSignature}
+                    label="Waivers Signed"
+                    value={count(report.waivers.summary.completed)}
+                    metric={noteMetric(
+                      `${count(report.waivers.summary.total)} total · ${count(report.waivers.summary.pending)} pending`,
+                    )}
+                  />
+                )}
+                {!!report.waivers && (
+                  <MetricCard
+                    icon={Baby}
+                    label="Adults / Minors"
+                    value={count(report.waivers.summary.adultSigners)}
+                    valueSuffix={` / ${count(report.waivers.summary.minorsCovered)}`}
+                    metric={noteMetric(
+                      `${count(report.waivers.summary.peopleCovered)} people covered`,
+                    )}
+                  />
+                )}
+                {!!report.waivers && (
+                  <MetricCard
+                    icon={UserCheck}
+                    label="Checked In"
+                    value={count(report.waivers.summary.checkedIn)}
+                    metric={noteMetric(
+                      `${count(report.waivers.summary.signedNotCheckedIn)} signed, not checked in`,
+                    )}
+                  />
+                )}
               </View>
 
               {/* Revenue & Package Bookings */}
@@ -715,6 +766,73 @@ const PerformanceAnalytics = () => {
                   }))}
                 />
               </Panel>
+
+              {/* Waivers Per Day */}
+              {!!report.waivers && (
+                <Panel
+                  icon={FileSignature}
+                  title="Waivers Per Day"
+                  info="Waivers created per day across the selected period and locations. Longer ranges are grouped by month."
+                >
+                  {report.waivers.perDay.length === 0 ? (
+                    <Text className="text-sm text-gray-400 dark:text-gray-500">
+                      No data.
+                    </Text>
+                  ) : (
+                    <AreaChart
+                      height={220}
+                      dark={scheme === "dark"}
+                      labels={report.waivers.perDay.map((d) => d.label)}
+                      series={[
+                        {
+                          label: "Waivers",
+                          color: PRIMARY,
+                          data: report.waivers.perDay.map((d) => d.count),
+                        },
+                      ]}
+                    />
+                  )}
+                </Panel>
+              )}
+
+              {/* Adult Age Brackets */}
+              {!!report.waivers && (
+                <Panel
+                  icon={Users}
+                  title="Adult Age Brackets"
+                  info="Age distribution of adult signers, computed from the date of birth on signed waivers."
+                >
+                  {report.waivers.ageBrackets.length === 0 ? (
+                    <Text className="text-sm text-gray-400 dark:text-gray-500">
+                      No data.
+                    </Text>
+                  ) : (
+                    <BarChart
+                      data={report.waivers.ageBrackets.map((b) => ({
+                        label: b.bracket,
+                        value: b.count,
+                      }))}
+                      height={200}
+                    />
+                  )}
+                </Panel>
+              )}
+
+              {/* Waivers by Source */}
+              {!!report.waivers && report.waivers.bySource.length > 0 && (
+                <Panel
+                  icon={Boxes}
+                  title="Waivers by Source"
+                  info="Where waivers in the period originated: kiosk, email, SMS, staff-sent, bulk invite, or checkout."
+                >
+                  <PieChart
+                    data={report.waivers.bySource.map((s) => ({
+                      label: `${s.source}: ${s.count}`,
+                      value: s.count,
+                    }))}
+                  />
+                </Panel>
+              )}
 
               {/* Top Locations by Revenue — the web shows its first 6 rows. */}
               <TableCard

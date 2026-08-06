@@ -376,6 +376,31 @@ export type KeyMetrics = {
   activeEvents: KeyMetric | null;
 };
 
+/** The backend `waivers` block: KPI summary plus the three chart series. */
+export type WaiverAnalytics = {
+  summary: WaiverSummary;
+  /** Waivers created per bucket; longer ranges are grouped by month. */
+  perDay: { label: string; count: number }[];
+  ageBrackets: { bracket: string; count: number }[];
+  bySource: { source: string; count: number }[];
+};
+
+/** Backend `waivers.summary`; the whole block is absent when waivers are unused. */
+export type WaiverSummary = {
+  total: number;
+  completed: number;
+  pending: number;
+  checkedIn: number;
+  signedNotCheckedIn: number;
+  adultSigners: number;
+  minorsCovered: number;
+  peopleCovered: number;
+  withMinors: number;
+  adultsOnly: number;
+  marketingOptedIn: number;
+  expired: number;
+};
+
 export type PerformanceReport = {
   /** Company header — drives the "All N locations" subtitle. */
   company: { id: number | null; name: string; totalLocations: number };
@@ -394,6 +419,8 @@ export type PerformanceReport = {
   topAttractions: { name: string; ticketsSold: number; revenue: number }[];
   /** Only present once the company has event sales. */
   topEvents: { name: string; ticketsSold: number; revenue: number }[];
+  /** Null when the response omits the block — the waiver tiles/charts then hide. */
+  waivers: WaiverAnalytics | null;
 };
 
 /** Read one `key_metrics` entry; absent blocks become null so cards can hide. */
@@ -512,6 +539,45 @@ export async function fetchCompanyAnalytics({
       name: String(r.name ?? "—"),
       ticketsSold: num(r.tickets_sold),
       revenue: num(r.revenue),
+    })),
+    waivers: mapWaivers(res.waivers),
+  };
+}
+
+/** Read the `waivers` block; absent → null so the tiles/charts hide (web `waivers &&`). */
+function mapWaivers(raw: unknown): WaiverAnalytics | null {
+  if (!raw || typeof raw !== "object") return null;
+  const w = raw as Record<string, unknown>;
+  if (!w.summary || typeof w.summary !== "object") return null;
+  const s = w.summary as Record<string, unknown>;
+  const list = (key: string): Record<string, unknown>[] =>
+    ((w[key] ?? []) as Record<string, unknown>[]) ?? [];
+  return {
+    summary: {
+      total: num(s.total),
+      completed: num(s.completed),
+      pending: num(s.pending),
+      checkedIn: num(s.checked_in),
+      signedNotCheckedIn: num(s.signed_not_checked_in),
+      adultSigners: num(s.adult_signers),
+      minorsCovered: num(s.minors_covered),
+      peopleCovered: num(s.people_covered),
+      withMinors: num(s.with_minors),
+      adultsOnly: num(s.adults_only),
+      marketingOptedIn: num(s.marketing_opted_in),
+      expired: num(s.expired),
+    },
+    perDay: list("per_day").map((r) => ({
+      label: String(r.label ?? r.date ?? ""),
+      count: num(r.count),
+    })),
+    ageBrackets: list("age_brackets").map((r) => ({
+      bracket: String(r.bracket ?? "—"),
+      count: num(r.count),
+    })),
+    bySource: list("by_source").map((r) => ({
+      source: String(r.source ?? "—"),
+      count: num(r.count),
     })),
   };
 }
