@@ -21,7 +21,11 @@ import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
 import { formatDateET, formatDateTimeET } from "../../lib/date/venueTime";
-import { useActivityLogs, useActivityStats } from "../../lib/hooks/useActivityLogs";
+import {
+  useActivityFilterOptions,
+  useActivityLogs,
+  useActivityStats,
+} from "../../lib/hooks/useActivityLogs";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -709,7 +713,7 @@ const ActivityLogs = () => {
   const [dateRange, setDateRange] = useState("all");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [sheet, setSheet] = useState<null | "filters">(null);
+  const [sheet, setSheet] = useState<null | "filters" | "export">(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [refreshing, setRefreshing] = useState(false);
@@ -725,6 +729,13 @@ const ActivityLogs = () => {
     });
   }, []);
   const [exporting, setExporting] = useState(false);
+  // Export filters are independent of the list's own filters (as on the web).
+  const [exportSearch, setExportSearch] = useState("");
+  const [exportAction, setExportAction] = useState("all");
+  const [exportResourceType, setExportResourceType] = useState("all");
+  const [exportDateRange, setExportDateRange] = useState("all");
+  const [exportUserIds, setExportUserIds] = useState<Set<number>>(new Set());
+  const [exportUserSearch, setExportUserSearch] = useState("");
 
   // Location comes from the global workspace selector (shown below the header),
   // so Activity Log follows the active location like every other module.
@@ -779,6 +790,7 @@ const ActivityLogs = () => {
     perPage,
   });
   const { stats } = useActivityStats(activeLocationId, statsNonce);
+  const optionSample = useActivityFilterOptions(activeLocationId, statsNonce);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -790,20 +802,22 @@ const ActivityLogs = () => {
     }
   }, [refetch]);
 
-  // Filter options derived from the loaded page (mirrors the web's
-  // getUniqueActions / getUniqueResourceTypes / getUniqueAttendants).
+  // Options come from a fixed window, not the visible page, so a small
+  // rows-per-page can't hide users/actions the web admin offers.
+  const optionLogs = optionSample.length > 0 ? optionSample : logs;
+
   const actionOptions = useMemo<{ label: string; value: string }[]>(() => {
     const set = new Set<string>();
-    for (const l of logs) if (l.action) set.add(l.action);
+    for (const l of optionLogs) if (l.action) set.add(l.action);
     return [
       { label: "All Actions", value: "all" },
       ...[...set].map((a) => ({ label: formatActionLabel(a), value: a })),
     ];
-  }, [logs]);
+  }, [optionLogs]);
 
   const resourceTypeOptions = useMemo<{ label: string; value: string }[]>(() => {
     const set = new Set<string>();
-    for (const l of logs) {
+    for (const l of optionLogs) {
       const rt = l.category || l.entityType;
       if (rt) set.add(rt);
     }
@@ -811,32 +825,94 @@ const ActivityLogs = () => {
       { label: "All Types", value: "all" },
       ...[...set].map((t) => ({ label: capitalize(t), value: t })),
     ];
-  }, [logs]);
+  }, [optionLogs]);
 
   const attendantOptions = useMemo<{ label: string; value: string }[]>(() => {
     const map = new Map<string, string>();
-    for (const l of logs) {
+    for (const l of optionLogs) {
       if (l.actor.id != null) map.set(String(l.actor.id), l.actor.name);
     }
     return [
       { label: "All Attendants", value: "all" },
       ...[...map].map(([id, name]) => ({ label: name, value: id })),
     ];
-  }, [logs]);
+  }, [optionLogs]);
+
+  // Export user picker — the attendant options minus the leading "All" entry,
+  // narrowed by the sheet's own search box.
+  const exportUserOptions = useMemo(() => {
+    const q = exportUserSearch.trim().toLowerCase();
+    return attendantOptions
+      .filter((o) => o.value !== "all")
+      .map((o) => ({ id: Number(o.value), name: o.label }))
+      .filter((u) => !q || u.name.toLowerCase().includes(q));
+  }, [attendantOptions, exportUserSearch]);
+
+  const allExportUsersSelected =
+    exportUserOptions.length > 0 &&
+    exportUserOptions.every((u) => exportUserIds.has(u.id));
+
+  const toggleExportUser = useCallback((id: number) => {
+    setExportUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAllExportUsers = useCallback(() => {
+    setExportUserIds((prev) => {
+      const all = exportUserOptions.every((u) => prev.has(u.id));
+      return all ? new Set() : new Set(exportUserOptions.map((u) => u.id));
+    });
+  }, [exportUserOptions]);
+
+  // Open with everything reset — the web's modal always starts at "all".
+  const openExport = useCallback(() => {
+    setExportSearch("");
+    setExportAction("all");
+    setExportResourceType("all");
+    setExportDateRange("all");
+    setExportUserIds(new Set());
+    setExportUserSearch("");
+    setSheet("export");
+  }, []);
+
+  const exportFilters = useMemo<ActivityFilters>(() => {
+    const range = dateRangeToFilter(exportDateRange);
+    return {
+      search: exportSearch.trim() || undefined,
+      action: exportAction === "all" ? undefined : exportAction,
+      category: exportResourceType === "all" ? undefined : exportResourceType,
+      userId: exportUserIds.size > 0 ? [...exportUserIds] : undefined,
+      locationId: activeLocationId,
+      dateFrom: range.dateFrom,
+      dateTo: range.dateTo,
+    };
+  }, [
+    exportSearch,
+    exportAction,
+    exportResourceType,
+    exportDateRange,
+    exportUserIds,
+    activeLocationId,
+  ]);
 
   const exportCsv = useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setExporting(true);
     try {
-      const all = await fetchAllActivityLogs(token, filters);
+      const all = await fetchAllActivityLogs(token, exportFilters);
       if (all.length === 0) {
         Alert.alert(
           "Nothing to export",
-          "No activity matches the current filters.",
+          "No activity matches the selected filters.",
         );
         return;
       }
+      setSheet(null);
       const csv = buildActivityCsv(all);
       // Loaded lazily so these native modules never run at app startup.
       const FileSystem = await import("expo-file-system/legacy");
@@ -863,7 +939,7 @@ const ActivityLogs = () => {
     } finally {
       setExporting(false);
     }
-  }, [filters]);
+  }, [exportFilters]);
 
   // Reset every filter to its default (mirrors the web `clearFilters`). The
   // filter-state changes drive useActivityLogs to refetch and reset the page.
@@ -901,22 +977,8 @@ const ActivityLogs = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Activity Log
           </Text>
-          {/* Export CSV lives in the header as an icon-only action. */}
-          <Pressable
-            onPress={exportCsv}
-            disabled={exporting}
-            className={`bg-gray-100 dark:bg-neutral-800 p-2 rounded-full ${
-              exporting ? "opacity-60" : ""
-            }`}
-            accessibilityRole="button"
-            accessibilityLabel="Export CSV"
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
-          </Pressable>
+          {/* Balances the back button; Export CSV sits in the intro card below. */}
+          <View className="w-9" />
         </View>
       </View>
 
@@ -958,6 +1020,27 @@ const ActivityLogs = () => {
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
+
+          {/* Export CSV — opens the filter sheet, like the web's export modal. */}
+          <Pressable
+            onPress={openExport}
+            disabled={exporting}
+            className={`flex-row items-center justify-center gap-2 px-4 py-3.5 rounded-xl mb-5 active:opacity-90 ${
+              exporting ? "opacity-60" : ""
+            }`}
+            style={{ backgroundColor: PRIMARY }}
+            accessibilityRole="button"
+            accessibilityLabel="Export CSV"
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Feather name="download" size={16} color="#FFFFFF" />
+            )}
+            <Text className="text-sm font-semibold text-white">
+              {exporting ? "Exporting…" : "Export CSV"}
+            </Text>
+          </Pressable>
 
           {/* KPI cards — mirror the web getLocationMetrics summary */}
           <View className="flex-row flex-wrap -mx-1.5 mb-3">
@@ -1177,6 +1260,158 @@ const ActivityLogs = () => {
         </ScrollView>
       </BottomSheet>
 
+      {/* Export — mirrors the web "Export Activity Logs" modal: its own filter
+          set, independent of the list's, applied when Export CSV is pressed. */}
+      <BottomSheet
+        visible={sheet === "export"}
+        onClose={() => (exporting ? undefined : setSheet(null))}
+        title="Export Activity Logs"
+      >
+        <ScrollView
+          className="px-5"
+          contentContainerStyle={{ paddingBottom: 28 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text className="text-sm text-gray-500 dark:text-gray-400 pt-1 mb-4">
+            Configure filters to export specific activity logs. All matching
+            records will be included in the CSV file.
+          </Text>
+
+          <View className="gap-4">
+            <View>
+              <Text className="text-sm font-medium text-gray-800 dark:text-gray-100 mb-2">
+                Users
+              </Text>
+              <View className="border border-gray-200 dark:border-neutral-700 rounded-xl p-3">
+                <TextInput
+                  value={exportUserSearch}
+                  onChangeText={setExportUserSearch}
+                  placeholder="Search users..."
+                  placeholderTextColor="#9CA3AF"
+                  className="bg-gray-50 dark:bg-neutral-800 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white mb-2"
+                />
+
+                <Pressable
+                  onPress={toggleAllExportUsers}
+                  className="flex-row items-center gap-2 pb-2 mb-1 border-b border-gray-100 dark:border-neutral-800"
+                >
+                  <Feather
+                    name={
+                      allExportUsersSelected ? "check-square" : "square"
+                    }
+                    size={18}
+                    color={allExportUsersSelected ? PRIMARY : "#9CA3AF"}
+                  />
+                  <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1">
+                    Select All ({exportUserOptions.length})
+                  </Text>
+                  {exportUserIds.size > 0 && (
+                    <View className="bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">
+                      <Text className="text-[11px] font-medium text-blue-700 dark:text-blue-300">
+                        {exportUserIds.size} selected
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+
+                <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                  {exportUserOptions.length === 0 ? (
+                    <Text className="text-sm text-gray-400 dark:text-gray-500 text-center py-3">
+                      {exportUserSearch
+                        ? "No users found matching your search"
+                        : "No users available"}
+                    </Text>
+                  ) : (
+                    exportUserOptions.map((u) => {
+                      const checked = exportUserIds.has(u.id);
+                      return (
+                        <Pressable
+                          key={u.id}
+                          onPress={() => toggleExportUser(u.id)}
+                          className="flex-row items-center gap-2 py-2"
+                        >
+                          <Feather
+                            name={checked ? "check-square" : "square"}
+                            size={18}
+                            color={checked ? PRIMARY : "#9CA3AF"}
+                          />
+                          <Text
+                            numberOfLines={1}
+                            className="text-sm text-gray-700 dark:text-gray-200 flex-1"
+                          >
+                            {u.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+
+            <View>
+              <Text className="text-sm font-medium text-gray-800 dark:text-gray-100 mb-2">
+                Search
+              </Text>
+              <TextInput
+                value={exportSearch}
+                onChangeText={setExportSearch}
+                placeholder="Search activities, users, or details..."
+                placeholderTextColor="#9CA3AF"
+                className="bg-gray-50 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-3 text-sm text-gray-900 dark:text-white"
+              />
+            </View>
+
+            <SelectField
+              label="Action"
+              value={exportAction}
+              options={actionOptions as SelectOption[]}
+              onSelect={(v) => setExportAction(String(v))}
+            />
+            <SelectField
+              label="Resource Type"
+              value={exportResourceType}
+              options={resourceTypeOptions as SelectOption[]}
+              onSelect={(v) => setExportResourceType(String(v))}
+            />
+            <SelectField
+              label="Date Range"
+              value={exportDateRange}
+              options={DATE_RANGE_OPTIONS as SelectOption[]}
+              onSelect={(v) => setExportDateRange(String(v))}
+            />
+
+            <View className="flex-row gap-3 mt-2">
+              <Pressable
+                onPress={() => setSheet(null)}
+                disabled={exporting}
+                className="flex-1 h-12 rounded-xl items-center justify-center border border-gray-200 dark:border-neutral-700 active:opacity-70"
+              >
+                <Text className="text-gray-700 dark:text-gray-200 font-semibold text-base">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={exportCsv}
+                disabled={exporting}
+                className={`flex-1 h-12 rounded-xl flex-row items-center justify-center gap-2 bg-[#0644C7] active:opacity-90 ${
+                  exporting ? "opacity-60" : ""
+                }`}
+              >
+                {exporting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Feather name="download" size={16} color="#FFFFFF" />
+                )}
+                <Text className="text-white font-semibold text-base">
+                  {exporting ? "Exporting…" : "Export CSV"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 };

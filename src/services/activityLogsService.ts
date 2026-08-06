@@ -152,8 +152,8 @@ export type ActivityFilters = {
   category?: string;
   /** Action filter → `action` query param. */
   action?: string;
-  /** Attendant filter → `user_id[]` query param (single id). */
-  userId?: number;
+  /** Attendant filter → `user_id[]` query param (one id, or many for export). */
+  userId?: number | number[];
   locationId?: number;
   /** Inclusive `created_at >=` date (YYYY-MM-DD). */
   dateFrom?: string;
@@ -183,7 +183,8 @@ function buildParams(
   if (filters.category) params.append("category", filters.category);
   if (filters.action?.trim()) params.append("action", filters.action.trim());
   if (filters.userId != null)
-    params.append("user_id[]", String(filters.userId));
+    for (const id of [filters.userId].flat())
+      params.append("user_id[]", String(id));
   if (filters.locationId != null)
     params.append("location_id", String(filters.locationId));
   if (filters.dateFrom) params.append("date_from", filters.dateFrom);

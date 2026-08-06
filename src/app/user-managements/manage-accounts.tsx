@@ -649,7 +649,13 @@ const ManageAccounts = () => {
         { sortBy: "created_at", sortOrder: "desc" },
         signal,
       );
-      setAccounts(users);
+      // Web ManageAccounts defaults an unset department to "Administration".
+      setAccounts(
+        users.map((u) => ({
+          ...u,
+          department: u.department ?? "Administration",
+        })),
+      );
     } catch (err) {
       if (signal?.aborted) return;
       setError(err instanceof Error ? err.message : "Could not load accounts.");

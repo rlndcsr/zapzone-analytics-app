@@ -187,3 +187,42 @@ export function useActivityStats(locationId: number | undefined, nonce = 0) {
 
   return { stats, loading };
 }
+
+// Window the filter/export pickers are built from. The web derives its option
+// lists from its loaded page (a fixed 20); mobile's page size is user-chosen and
+// defaults to 5, which would hide users the web offers — so read a fixed, wider
+// window instead of whatever page the list happens to be showing.
+const OPTIONS_SAMPLE_SIZE = 100;
+
+/**
+ * Newest logs used only to populate filter and export pickers (actions,
+ * resource types, users). Independent of the list's pagination so the options
+ * don't change as the user pages or switches rows-per-page.
+ */
+export function useActivityFilterOptions(
+  locationId: number | undefined,
+  nonce = 0,
+) {
+  const [logs, setLogs] = useState<ActivityLogEntry[]>([]);
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    const requestId = ++requestIdRef.current;
+    const token = getToken();
+    if (!token) return;
+
+    fetchActivityLogs(token, { locationId }, 1, OPTIONS_SAMPLE_SIZE)
+      .then((res) => {
+        if (requestId === requestIdRef.current) setLogs(res.logs);
+      })
+      .catch(() => {
+        /* Best-effort: the pickers fall back to the loaded page. */
+      });
+
+    return () => {
+      requestIdRef.current++;
+    };
+  }, [locationId, nonce]);
+
+  return logs;
+}

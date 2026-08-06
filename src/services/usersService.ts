@@ -36,6 +36,22 @@ export function roleLabel(role: string | null | undefined): string {
   return ROLE_LABELS[role] ?? role;
 }
 
+/**
+ * Months of service since a hire date — the web's `getExperience`. Counts
+ * calendar months crossed (year/month difference only), so a May 20 hire reads
+ * as 3 months on Aug 6; day-of-month is deliberately ignored.
+ */
+export function experienceMonths(hireDate: string | null): number {
+  if (!hireDate) return 0;
+  const hire = new Date(hireDate);
+  if (Number.isNaN(hire.getTime())) return 0;
+  const today = new Date();
+  const months =
+    (today.getFullYear() - hire.getFullYear()) * 12 +
+    (today.getMonth() - hire.getMonth());
+  return Math.max(0, months);
+}
+
 /* ---------------------------------------------------------------- domain -- */
 
 export type StaffUser = {
@@ -108,11 +124,15 @@ function dateOnly(value: string | null | undefined): string | null {
 }
 
 /**
- * The web admin never renders these four columns blank — it derives a value
- * from what it does know (`ManageAccounts.tsx`'s row mapper). Mirror that here
- * so the app's table, filters and detail sheet read identically to the web:
- * an unset employee id becomes ZAP-{id}, an unset department "Administration",
- * an unset position the role's label, and an unset hire date the created date.
+ * The web admin never renders these columns blank — it derives a value from
+ * what it does know (`ManageAccounts.tsx`'s row mapper). Mirror that here so the
+ * app's table, filters and detail sheet read identically to the web: an unset
+ * employee id becomes ZAP-{id}, an unset position the role's label, and an unset
+ * hire date the created date.
+ *
+ * Department is deliberately left null: the two web pages default it
+ * differently (Manage Accounts "Administration", Manage Attendants "Guest
+ * Services"), so each screen applies its own on load.
  */
 function mapUser(raw: RawUser): StaffUser {
   const role = raw.role ?? "attendant";
@@ -128,7 +148,7 @@ function mapUser(raw: RawUser): StaffUser {
     companyId: raw.company_id ?? null,
     locationId: raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || null,
-    department: raw.department?.trim() || "Administration",
+    department: raw.department?.trim() || null,
     position: raw.position?.trim() || roleLabel(role),
     employeeId: raw.employee_id?.trim() || `ZAP-${raw.id}`,
     shift: raw.shift?.trim() || null,
