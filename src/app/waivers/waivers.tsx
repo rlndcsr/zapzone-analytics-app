@@ -25,8 +25,6 @@ import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
-import { StatusBadge } from "../../components/ui/StatusBadge";
-import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
   countActiveWaiverFilters,
   EMPTY_WAIVER_FILTERS,
@@ -220,141 +218,6 @@ const KpiCard = ({
   </View>
 );
 
-const WaiverCard = ({
-  waiver,
-  showLocation,
-  cols,
-  onPress,
-}: {
-  waiver: Waiver;
-  showLocation: boolean;
-  cols: WCols;
-  onPress: () => void;
-}) => {
-  const linkedTo = waiver.bookingReference
-    ? `#${waiver.bookingReference}`
-    : waiver.eventName
-      ? waiver.eventName
-      : waiver.attractionPurchaseId
-        ? `AP-${waiver.attractionPurchaseId}`
-        : null;
-
-  return (
-    <Pressable
-      onPress={onPress}
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
-      style={CARD_SHADOW}
-      accessibilityRole="button"
-      accessibilityLabel={`View waiver for ${waiver.adultName}`}
-    >
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {waiver.adultName}
-          </Text>
-          {!!waiver.adultEmail && (
-            <Text
-              className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
-              numberOfLines={1}
-            >
-              {waiver.adultEmail}
-            </Text>
-          )}
-        </View>
-        {cols.status && <StatusBadge status={waiver.status} />}
-      </View>
-
-      {cols.template && (
-        <View className="flex-row items-center gap-1.5">
-          <Feather name="file-text" size={12} color="#9CA3AF" />
-          <Text
-            className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
-            numberOfLines={1}
-          >
-            {waiver.templateTitle ?? "—"}
-          </Text>
-        </View>
-      )}
-
-      {(cols.date || cols.source) && (
-        <View className="flex-row items-center gap-1.5 mt-1">
-          <Feather name="calendar" size={12} color="#9CA3AF" />
-          <Text
-            className="text-xs text-gray-500 dark:text-gray-400"
-            numberOfLines={1}
-          >
-            {[
-              cols.date ? formatDate(waiver.selectedDate) : null,
-              cols.source ? SOURCE_LABELS[waiver.source] ?? waiver.source : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </Text>
-        </View>
-      )}
-
-      {cols.submitted && !!waiver.submittedAt && (
-        <View className="flex-row items-center gap-1.5 mt-1">
-          <Feather name="clock" size={12} color="#9CA3AF" />
-          <Text
-            className="text-xs text-gray-500 dark:text-gray-400"
-            numberOfLines={1}
-          >
-            Submitted {formatDateET(waiver.submittedAt, { month: "short" })}
-          </Text>
-        </View>
-      )}
-
-      {cols.location && showLocation && !!waiver.locationName && (
-        <View className="flex-row items-center gap-1.5 mt-1">
-          <Feather name="map-pin" size={12} color="#9CA3AF" />
-          <Text
-            className="text-xs text-gray-500 dark:text-gray-400"
-            numberOfLines={1}
-          >
-            {waiver.locationName}
-          </Text>
-        </View>
-      )}
-
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center gap-1.5">
-          {cols.minors && (
-            <>
-              <Feather name="users" size={12} color="#9CA3AF" />
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
-                {waiver.minorsCount} minor{waiver.minorsCount === 1 ? "" : "s"}
-              </Text>
-            </>
-          )}
-        </View>
-        <View className="flex-row items-center gap-2">
-          {cols.marketing && waiver.marketingConsentStatus === "opted_in" && (
-            <View className="bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
-              <Text className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                Opted in
-              </Text>
-            </View>
-          )}
-          {cols.linked && !!linkedTo && (
-            <View className="bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
-              <Text
-                className="text-[10px] font-medium text-blue-700 dark:text-blue-400"
-                numberOfLines={1}
-              >
-                {linkedTo}
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
-    </Pressable>
-  );
-};
-
 const Waivers = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -380,7 +243,7 @@ const Waivers = () => {
     (role === "location_manager" && (settings?.managerPrintExportEnabled ?? false));
 
   const [statusFilter, setStatusFilter] = useState<WaiverStatus>("completed");
-  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("today");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sheet, setSheet] = useState<null | "status" | "date" | "manage">(null);
@@ -389,9 +252,6 @@ const Waivers = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [statsNonce, setStatsNonce] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  // Presentation layout only — table by default, card view on toggle. Both
-  // layouts read the same `displayed` list, so switching never refetches.
-  const [viewMode, setViewMode] = useState<ViewMode>("table");
   // Which row has an inline table action (check-in / print / delete) in flight.
   const [busyRowId, setBusyRowId] = useState<number | null>(null);
 
@@ -487,7 +347,7 @@ const Waivers = () => {
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "Completed";
   const dateLabel =
-    DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
+    DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "Today";
 
   // Template + location choices derived from the loaded page, exactly as the
   // web builds its Template / Location filter options.
@@ -875,21 +735,18 @@ const Waivers = () => {
           {/* List header + top pagination (below the title, same state as bottom) */}
           {!loading && !error && (
             <View className="mb-4">
-              <View className="flex-row items-center justify-between gap-2">
-                <View className="flex-row items-center gap-2 shrink">
-                  <Text
-                    numberOfLines={1}
-                    className="shrink text-lg font-bold text-gray-900 dark:text-white"
-                  >
-                    Waivers
+              <View className="flex-row items-center gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                >
+                  Waivers
+                </Text>
+                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {total}
                   </Text>
-                  <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                    <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                      {total}
-                    </Text>
-                  </View>
                 </View>
-                <ViewToggle mode={viewMode} onChange={setViewMode} />
               </View>
             </View>
           )}
@@ -912,33 +769,19 @@ const Waivers = () => {
           ) : (
             !error && (
               <>
-                {/* Table (default) and card layouts render from the same
-                    `displayed` list — switching is instant and never refetches. */}
-                {viewMode === "table" ? (
-                  <WaiversTable
-                    waivers={displayed}
-                    cols={cols}
-                    showLocation={isCompanyAdmin}
-                    canCheckIn={canCheckIn}
-                    canPrint={canPrint}
-                    canDelete={canDelete}
-                    busyId={busyRowId}
-                    onRowPress={(w) => setSelectedId(w.id)}
-                    onCheckIn={handleCheckIn}
-                    onPrint={handlePrint}
-                    onDelete={handleDelete}
-                  />
-                ) : (
-                  displayed.map((w) => (
-                    <WaiverCard
-                      key={w.id}
-                      waiver={w}
-                      showLocation={isCompanyAdmin}
-                      cols={cols}
-                      onPress={() => setSelectedId(w.id)}
-                    />
-                  ))
-                )}
+                <WaiversTable
+                  waivers={displayed}
+                  cols={cols}
+                  showLocation={isCompanyAdmin}
+                  canCheckIn={canCheckIn}
+                  canPrint={canPrint}
+                  canDelete={canDelete}
+                  busyId={busyRowId}
+                  onRowPress={(w) => setSelectedId(w.id)}
+                  onCheckIn={handleCheckIn}
+                  onPrint={handlePrint}
+                  onDelete={handleDelete}
+                />
 
                 {/* Pagination (bottom, server-side) — same state as the top */}
                 <PaginationControls
