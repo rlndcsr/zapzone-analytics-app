@@ -1,10 +1,11 @@
 import { usePathname } from "expo-router";
-import { useState } from "react";
-import { Alert, Linking } from "react-native";
+import { useEffect, useState } from "react";
 
 import { AppUpdateDialog } from "./ui/AppUpdateDialog";
+import { useApkInstall } from "../lib/hooks/useApkInstall";
 import { useAppUpdateCheck } from "../lib/hooks/useAppUpdateCheck";
 import { isPublicRoute } from "../lib/navigation/publicRoutes";
+import { sweepStaleApks } from "../services/appUpdateInstaller";
 
 /**
  * The app's one version-update gate.
@@ -22,27 +23,25 @@ import { isPublicRoute } from "../lib/navigation/publicRoutes";
  *  • Optional update — held back until the user is past the public screens, so
  *    it never lands on top of the login form, and only when there is actually
  *    something to download.
+ *
+ * The update itself is downloaded and installed in-app (services/
+ * appUpdateInstaller.ts). Nothing here ever opens a browser.
  */
 export function AppUpdateGate() {
   const status = useAppUpdateCheck();
   const pathname = usePathname();
   const [dismissed, setDismissed] = useState(false);
+  const install = useApkInstall();
 
-  const openDownload = async () => {
-    const url = status?.apkUrl;
-    if (!url) return;
-    try {
-      await Linking.openURL(url);
-      // An optional prompt has done its job once the download is handed off —
-      // don't greet the user with it again when they come back to the app.
-      if (!status?.requiresUpdate) setDismissed(true);
-    } catch (error) {
-      console.warn("[app-update] could not open the download link:", error);
-      Alert.alert(
-        "Couldn't open the download link",
-        "Please try again, or download the latest version from your administrator.",
-      );
-    }
+  // Clear APKs left behind by earlier launches. Once per launch, and never for
+  // the build we are about to install.
+  useEffect(() => {
+    void sweepStaleApks(status?.latestVersion ?? null);
+  }, [status?.latestVersion]);
+
+  const startUpdate = () => {
+    if (!status?.apkUrl) return;
+    install.start(status.apkUrl, status.latestVersion ?? "latest");
   };
 
   if (!status) return null;
@@ -51,8 +50,11 @@ export function AppUpdateGate() {
     // Never over the splash animation — it hands off to a real screen in ~1.5s.
     if (pathname.startsWith("/splash")) return null;
   } else {
-    if (dismissed) return null;
-    if (isPublicRoute(pathname)) return null;
+    // `install.busy` keeps an in-flight download on screen: without it, walking
+    // onto a public route (or a stale dismiss) would unmount the dialog and
+    // orphan the transfer it owns.
+    if (dismissed && !install.busy) return null;
+    if (isPublicRoute(pathname) && !install.busy) return null;
     // Nothing to act on: don't nag with a prompt whose button can't do anything.
     if (!status.apkUrl) return null;
   }
@@ -61,7 +63,8 @@ export function AppUpdateGate() {
     <AppUpdateDialog
       visible
       status={status}
-      onUpdate={openDownload}
+      install={install}
+      onUpdate={startUpdate}
       onLater={() => setDismissed(true)}
     />
   );

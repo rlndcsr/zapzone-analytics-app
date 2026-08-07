@@ -308,3 +308,30 @@ export const MODAL_CLOSE_TIMING = {
   duration: 160,
   easing: WorkletEasing.in(WorkletEasing.quad),
 } as const;
+
+/* ------------------------------------------------------------------ *
+ * Update download progress — components/ui/UpdateProgressBar.tsx
+ * ------------------------------------------------------------------ */
+
+/**
+ * How the filled portion of the progress bar catches up to a new value.
+ *
+ * Longer than `UI_REACTION_DURATION` on purpose: progress arrives in throttled
+ * steps (see useApkInstall), so each update is a jump of a percent or more. A
+ * decelerating glide over that gap reads as continuous motion, where a snappier
+ * curve would land early and leave the bar visibly stepping.
+ */
+export const PROGRESS_FILL_TIMING = {
+  duration: 240,
+  easing: WorkletEasing.out(WorkletEasing.cubic),
+} as const;
+
+/**
+ * One sweep of the indeterminate bar, used when the server sends no
+ * Content-Length and there is no percentage to show. Slow enough to read as
+ * "working", not as a glitch.
+ */
+export const PROGRESS_INDETERMINATE_DURATION = 1100;
+
+/** Width of the travelling indeterminate segment, as a share of the track. */
+export const PROGRESS_INDETERMINATE_RATIO = 0.4;
