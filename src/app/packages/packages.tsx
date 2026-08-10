@@ -578,7 +578,16 @@ const Packages = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Packages
           </Text>
-          <View style={{ width: 36 }} />
+          {/* More actions — icon only, taking the slot the spacer held so the
+              title stays centred between two equal-width round buttons. */}
+          <Pressable
+            onPress={() => setShowMoreSheet(true)}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            accessibilityRole="button"
+            accessibilityLabel="More actions"
+          >
+            <Feather name="more-horizontal" size={20} color={headerIcon} />
+          </Pressable>
         </View>
       </View>
 
@@ -643,19 +652,11 @@ const Packages = () => {
             )}
           </View>
 
-          {/* Controls — full-width segmented pill (More · Sort) with a compact
-              sort-direction toggle. Location is set via the global workspace
-              selector at the top of the screen. */}
+          {/* Controls — full-width segmented pill (Sort) with a compact
+              sort-direction toggle. "More" lives in the header; location is set
+              via the global workspace selector at the top of the screen. */}
           <View className="mt-3">
             <FilterPill>
-              <PillSegment
-                label="More"
-                active={showMoreSheet}
-                onPress={() => setShowMoreSheet(true)}
-                renderIcon={(c) => (
-                  <Feather name="more-horizontal" size={15} color={c} />
-                )}
-              />
               <PillSegment
                 label={`Sort: ${sortKey}`}
                 active={showSortSheet}

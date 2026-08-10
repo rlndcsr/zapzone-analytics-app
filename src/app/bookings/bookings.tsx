@@ -399,6 +399,12 @@ const NAV_ROWS: {
     desc: "Review location change requests",
     route: "/bookings/location-requests",
   },
+  {
+    icon: "calendar",
+    title: "Calendar View",
+    desc: "Browse bookings on a calendar",
+    route: "/bookings/calendar",
+  },
 ];
 
 const NAV_CARD_SHADOW = {
@@ -993,32 +999,18 @@ const Bookings = () => {
             </Text>
           </Pressable>
 
-          {/* Secondary "Calendar View" (the web's list↔calendar toggle) +
-              "Create Booking" (the step-by-step wizard) on one row, equal width.
-              The calendar cross-link stays outlined/secondary; "Create Booking"
-              is an outlined-primary CTA so the filled Manual Booking above leads. */}
-          <View className="flex-row items-center gap-3 mb-5">
-            <Pressable
-              onPress={() => router.push("/bookings/calendar" as never)}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-              accessibilityRole="button"
-              accessibilityLabel="Open calendar view"
-            >
-              <Feather name="calendar" size={16} color="#6B7280" />
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Calendar View
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/bookings/create-booking")}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-[#0644C7] bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              <Feather name="plus" size={16} color={PRIMARY} />
-              <Text className="text-sm font-semibold text-[#0644C7]">
-                Create Booking
-              </Text>
-            </Pressable>
-          </View>
+          {/* "Create Booking" (the step-by-step wizard) — an outlined-primary
+              CTA, so the filled Manual Booking above still leads. The calendar
+              cross-link sits with the other sub-page rows above. */}
+          <Pressable
+            onPress={() => router.push("/bookings/create-booking")}
+            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-[#0644C7] bg-white dark:bg-neutral-900 active:opacity-70 mb-5"
+          >
+            <Feather name="plus" size={16} color={PRIMARY} />
+            <Text className="text-sm font-semibold text-[#0644C7]">
+              Create Booking
+            </Text>
+          </Pressable>
 
           {/* Error state */}
           {!loading && error && (

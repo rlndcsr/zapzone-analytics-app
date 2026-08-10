@@ -10,8 +10,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SettingsAccountSkeleton } from "../../components/ui/skeleton/SettingsAccountSkeleton";
+import { useAppUpdateStatus } from "../../lib/hooks/useAppUpdateCheck";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { saveTheme } from "../../lib/theme";
+import { getInstalledAppVersion } from "../../services/appUpdateService";
 
 const SettingRow = ({
   icon,
@@ -76,6 +78,10 @@ const Settings = () => {
   const { user, stats, loading } = useProfile();
   const { colorScheme, setColorScheme } = useColorScheme();
   const isDark = colorScheme === "dark";
+  // The version footer reads the installed binary, and the launch check (already
+  // deduped in the service — this adds no request) supplies the published one.
+  const installedVersion = getInstalledAppVersion();
+  const updateStatus = useAppUpdateStatus();
 
   const toggleDarkMode = (enabled: boolean) => {
     const next = enabled ? "dark" : "light";
@@ -194,11 +200,23 @@ const Settings = () => {
             />
           </View>
 
-          {/* Version Info */}
+          {/* Version Info — the installed build, read from the binary itself so
+              it tracks every update instead of drifting from a literal. When
+              the backend publishes a newer build, its version is named here
+              too; the download prompt itself stays with AppUpdateGate. */}
           <View className="mt-8 items-center">
             <Text className="text-xs text-gray-400 dark:text-gray-500">
-              Version 1.0.0
+              {installedVersion ? `Version ${installedVersion}` : "Version unavailable"}
             </Text>
+            {updateStatus?.hasUpdate && updateStatus.latestVersion ? (
+              <Text className="text-xs font-medium text-[#0644C7] mt-1">
+                Version {updateStatus.latestVersion} available
+              </Text>
+            ) : updateStatus && !updateStatus.hasUpdate ? (
+              <Text className="text-xs text-gray-300 dark:text-gray-600 mt-1">
+                You&apos;re up to date
+              </Text>
+            ) : null}
             <Text className="text-xs text-gray-300 dark:text-gray-600 mt-1">
               © 2026 ZapZone. All rights reserved.
             </Text>
