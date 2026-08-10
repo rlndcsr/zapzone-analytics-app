@@ -1,13 +1,10 @@
-import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   Text,
   View,
@@ -15,6 +12,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { InputField } from "../../components/ui/InputField";
 import { PrimaryButton } from "../../components/ui/PrimaryButton";
+import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { EditProfileSkeleton } from "../../components/ui/skeleton/EditProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { getToken } from "../../lib/session";
@@ -34,8 +32,6 @@ const SectionHeader = ({ title }: { title: string }) => (
 const EditProfile = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const { user, loading, refresh } = useProfile();
   const [saving, setSaving] = useState(false);
 
@@ -148,25 +144,8 @@ const EditProfile = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Cream hero — back + serif title, then centered avatar / name */}
-      <View
-        className="bg-[#0644C7]/5 dark:bg-neutral-900 rounded-b-[32px] px-5 pb-8"
-        style={{ paddingTop: insets.top + 10 }}
-      >
-        <View className="flex-row items-center gap-3">
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            className="h-9 w-9 items-center justify-center rounded-full bg-black/5 dark:bg-neutral-800 active:opacity-80"
-          >
-            <Feather name="chevron-left" size={22} color={headerIcon} />
-          </Pressable>
-          <Text className="text-[26px] font-bold text-gray-900 dark:text-white">
-            Edit Profile
-          </Text>
-        </View>
-
+      {/* Cream hero — centered title, then centered avatar / name */}
+      <ScreenHeader title="Edit Profile" className="pb-8">
         <View className="items-center mt-5">
           <View className="h-24 w-24 rounded-full bg-white dark:bg-neutral-800 items-center justify-center overflow-hidden border border-black/5 dark:border-white/10">
             <Image
@@ -179,7 +158,7 @@ const EditProfile = () => {
             {displayName}
           </Text>
         </View>
-      </View>
+      </ScreenHeader>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}

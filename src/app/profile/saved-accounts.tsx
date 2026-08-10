@@ -1,12 +1,12 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ConfirmationModal } from "../../components/ui/ConfirmationModal";
 import { SavedAccountRow } from "../../components/ui/SavedAccountRow";
+import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import {
   getSavedAccountToken,
   isSavedAccountsFull,
@@ -23,8 +23,6 @@ import { revokeToken } from "../../services/auth";
 const SavedAccounts = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   const accounts = useSavedAccounts();
   const activeId = useCurrentUserId();
@@ -115,27 +113,11 @@ const SavedAccounts = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      <View
-        className="bg-[#0644C7]/5 dark:bg-neutral-900 rounded-b-[32px] px-5 pb-7"
-        style={{ paddingTop: insets.top + 10 }}
-      >
-        <View className="flex-row items-center gap-3">
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            className="h-9 w-9 items-center justify-center rounded-full bg-black/5 dark:bg-neutral-800 active:opacity-80"
-          >
-            <Feather name="chevron-left" size={22} color={headerIcon} />
-          </Pressable>
-          <Text className="text-[26px] font-bold text-gray-900 dark:text-white">
-            Saved Accounts
-          </Text>
-        </View>
-        <Text className="mt-2 ml-12 text-sm text-gray-500 dark:text-gray-400">
-          Switch between your accounts without signing in again.
-        </Text>
-      </View>
+      <ScreenHeader
+        title="Saved Accounts"
+        subtitle="Switch between your accounts without signing in again."
+        className="pb-7"
+      />
 
       <ScrollView
         className="flex-1"

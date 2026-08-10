@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { SettingsAccountSkeleton } from "../../components/ui/skeleton/SettingsAccountSkeleton";
 import { useAppUpdateStatus } from "../../lib/hooks/useAppUpdateCheck";
 import { useProfile } from "../../lib/hooks/useProfile";
@@ -91,20 +92,14 @@ const Settings = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Gradient Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-4 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center gap-3 relative z-10 ">
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            className="w-10 h-10 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center active:opacity-80"
-          >
-            <Feather name="chevron-left" size={22} color={isDark ? "#FFFFFF" : "#111827"} />
-          </Pressable>
-          <Text className="text-xl font-bold text-gray-900 dark:text-white">Settings</Text>
-        </View>
-      </View>
+      {/* Centered title hero, matching Edit Profile / Saved Accounts. The old
+          "Settings" welcome card lived here too; its subtitle now sits under
+          the header title rather than repeating the screen name twice. */}
+      <ScreenHeader
+        title="Settings"
+        subtitle="Manage your account and preferences"
+        className="pb-7"
+      />
 
       <ScrollView
         className="flex-1"
@@ -112,16 +107,6 @@ const Settings = () => {
         contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
       >
         <View className="px-5 pt-0">
-          {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            Settings
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Manage your account and preferences
-            </Text>
-          </View>
-
           {/* Account Section */}
           <SectionTitle>Account</SectionTitle>
           <View className="overflow-hidden rounded-2xl bg-white dark:bg-neutral-900 shadow-sm border border-gray-100 dark:border-neutral-800">
