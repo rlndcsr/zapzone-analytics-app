@@ -369,10 +369,12 @@ export function MorphingFabMenu({
     }
   };
 
+  // Fixed column gap, not justify-between: a partial last row must pack left
+  // instead of spreading its items to both edges.
   const grid = (
     <View
-      className="flex-row flex-wrap justify-between"
-      style={{ marginBottom: -ROW_GAP }}
+      className="flex-row flex-wrap"
+      style={{ marginBottom: -ROW_GAP, columnGap: COLUMN_GAP }}
     >
       {items.map((item, i) => (
         <GridItem

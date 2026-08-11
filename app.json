@@ -51,7 +51,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow ZapZone to access your camera to scan ticket QR codes for check-in.",
+          "cameraPermission": "Allow ZapZone to access your camera to scan ticket QR codes for check-in and to take customer photos.",
           "recordAudioAndroid": false
         }
       ],

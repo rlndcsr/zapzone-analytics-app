@@ -52,6 +52,12 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
     route: "/waivers/waivers",
   },
   {
+    key: "photos",
+    label: "Photos",
+    icon: "camera",
+    route: "/photos/photos",
+  },
+  {
     key: "customers",
     label: "Customers",
     icon: "users",
