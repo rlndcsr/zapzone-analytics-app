@@ -42,6 +42,9 @@ import {
 
 const PRIMARY = "#0644C7";
 
+/** Buttons and fields on this screen share one soft — not pill — radius. */
+const CONTROL_RADIUS = 12;
+
 /** Earliest selectable schedule day — the web's datetime-local has no floor. */
 const MIN_SCHEDULE_DATE = "2020-01-01";
 
@@ -145,7 +148,7 @@ function ScheduleField({
       <View className="flex-row items-center gap-2">
         <Pressable
           onPress={onPickDate}
-          className="flex-1 flex-row items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900"
+          className="flex-1 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900"
           accessibilityRole="button"
           accessibilityLabel={`${label} date`}
         >
@@ -160,7 +163,7 @@ function ScheduleField({
         <Pressable
           onPress={onPickTime}
           disabled={!date}
-          className={`w-28 flex-row items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900 ${
+          className={`w-28 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900 ${
             date ? "" : "opacity-40"
           }`}
           accessibilityRole="button"
@@ -475,7 +478,7 @@ export default function PhotoOverlaysScreen() {
 
           <Pressable
             onPress={() => setShowForm(true)}
-            className="mb-4 h-12 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] active:opacity-90"
+            className="mb-4 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
@@ -580,7 +583,7 @@ export default function PhotoOverlaysScreen() {
                     <Pressable
                       onPress={() => void toggleEnabled(overlay)}
                       disabled={busy}
-                      className={`flex-1 items-center rounded-lg border border-gray-200 py-2.5 dark:border-neutral-700 ${
+                      className={`flex-1 items-center rounded-xl border border-gray-200 py-2.5 dark:border-neutral-700 ${
                         busy ? "opacity-40" : "active:opacity-70"
                       }`}
                       accessibilityRole="button"
@@ -592,7 +595,7 @@ export default function PhotoOverlaysScreen() {
                     <Pressable
                       onPress={() => setConfirmDelete(overlay)}
                       disabled={busy}
-                      className={`flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-4 py-2.5 dark:border-neutral-700 ${
+                      className={`flex-row items-center justify-center gap-1.5 rounded-xl border border-gray-200 px-4 py-2.5 dark:border-neutral-700 ${
                         busy ? "opacity-40" : "active:opacity-70"
                       }`}
                       accessibilityRole="button"
@@ -635,7 +638,7 @@ export default function PhotoOverlaysScreen() {
             maxLength={120}
             placeholder="Summer frame"
             placeholderTextColor="#9CA3AF"
-            className="mb-4 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
+            className="mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
           />
 
           <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
@@ -643,7 +646,7 @@ export default function PhotoOverlaysScreen() {
           </Text>
           <Pressable
             onPress={() => void pickImage()}
-            className="mb-4 flex-row items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 dark:border-neutral-700 dark:bg-neutral-900"
+            className="mb-4 flex-row items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white px-3 py-3 dark:border-neutral-700 dark:bg-neutral-900"
             accessibilityRole="button"
             accessibilityLabel="Choose the overlay image"
           >
@@ -660,7 +663,7 @@ export default function PhotoOverlaysScreen() {
           </Pressable>
 
           {file ? (
-            <View className="mb-4 aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-gray-100 dark:border-neutral-800">
+            <View className="mb-4 aspect-video w-full items-center justify-center overflow-hidden rounded-xl border border-gray-100 dark:border-neutral-800">
               <Checkerboard id="overlay-form-preview" />
               <Image
                 source={{ uri: file.uri }}
@@ -704,7 +707,7 @@ export default function PhotoOverlaysScreen() {
             keyboardType="number-pad"
             placeholder="0"
             placeholderTextColor="#9CA3AF"
-            className="mb-5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
+            className="mb-5 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
           />
 
           <View className="mb-8">
@@ -713,6 +716,7 @@ export default function PhotoOverlaysScreen() {
               onPress={() => void create()}
               loading={busy}
               disabled={!file || name.trim().length === 0}
+              style={{ borderRadius: CONTROL_RADIUS }}
             />
           </View>
         </ScrollView>

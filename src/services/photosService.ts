@@ -1,4 +1,4 @@
-import { apiRequest, apiUrl } from "../lib/api";
+import { ApiError, apiRequest, apiUrl } from "../lib/api";
 
 export type PhotoSessionStatus =
   "in_progress" | "awaiting_preview" | "processing" | "ready";
@@ -729,6 +729,455 @@ export async function deleteLibraryPhotos(
     { method: "POST", token, body: { photo_ids: photoIds } },
   );
   return res.message ?? "Photos deleted.";
+}
+
+/* ---------------------------------------------------------- delivery log -- */
+
+/**
+ * What produced the send. The two schedules a waiver message can carry, plus
+ * `kiosk` — a kiosk link is sent as soon as the guest asks for it, so it is a
+ * kind of delivery rather than a schedule.
+ */
+export type PhotoDeliveryKind = PhotoDeliverySchedule | "kiosk";
+
+/** One row of the delivery log — an email or SMS send, not a session. */
+export type PhotoDeliveryLogRow = {
+  id: number;
+  sessionId: number | null;
+  /** How the session that produced the link was started. */
+  sessionSource: PhotoSessionSource | null;
+  locationName: string | null;
+  channel: PhotoChannel;
+  destinationMasked: string;
+  recipientName: string | null;
+  /** Immediate, held for 9:00 AM the next day, or kiosk (the "kind" column). */
+  kind: PhotoDeliveryKind | null;
+  status: PhotoDeliveryStatus;
+  /** When this row last moved — sent, else scheduled for, else created. */
+  occurredAt: string | null;
+  /** The customer followed the link at least once. */
+  linkOpened: boolean;
+  /** Same destination as an earlier row — recorded, but not sent twice. */
+  isDuplicate: boolean;
+  duplicateOfId: number | null;
+  failureReason: string | null;
+};
+
+export type PhotoDeliveryLog = {
+  rows: PhotoDeliveryLogRow[];
+  total: number;
+  /** The server capped the result set. */
+  truncated: boolean;
+};
+
+export type PhotoDeliveryLogFilters = {
+  /**
+   * Narrow to one location. Omitted when the workspace is on All Locations —
+   * the log is company-wide, like the web page, which has no location filter and
+   * prints the location on every row instead.
+   */
+  locationId?: number | null;
+  status?: PhotoDeliveryStatus;
+  channel?: PhotoChannel;
+  kind?: PhotoDeliveryKind;
+  /** Send-date bounds, YYYY-MM-DD. */
+  from?: string;
+  to?: string;
+  /** The web's "Show deduplicated waiver links" — include suppressed dupes. */
+  includeDuplicates?: boolean;
+};
+
+type ApiDeliveryLogRow = Partial<ApiDelivery> & {
+  session_id?: number | null;
+  session?: {
+    id?: number | null;
+    source?: PhotoSessionSource | null;
+    location_name?: string | null;
+    location?: { name?: string | null } | null;
+  } | null;
+  session_source?: PhotoSessionSource | null;
+  source?: PhotoSessionSource | null;
+  location_name?: string | null;
+  location?: { name?: string | null } | null;
+  /** Destination, whichever name the serializer used. */
+  destination?: string | null;
+  masked_destination?: string | null;
+  recipient?: string | null;
+  name?: string | null;
+  kind?: PhotoDeliveryKind | null;
+  delivery_schedule?: PhotoDeliverySchedule | null;
+  schedule?: PhotoDeliverySchedule | null;
+  sent_at?: string | null;
+  scheduled_for?: string | null;
+  scheduled_at?: string | null;
+  created_at?: string | null;
+  link_opened?: boolean;
+  link_opened_at?: string | null;
+  opened_at?: string | null;
+  failure_reason?: string | null;
+  error?: string | null;
+};
+
+/**
+ * Reads one row without assuming a single spelling. This endpoint has no local
+ * source to check against, so each field accepts the plausible aliases rather
+ * than rendering a blank cell when the serializer disagrees with the guess.
+ */
+function mapDeliveryLogRow(raw: ApiDeliveryLogRow): PhotoDeliveryLogRow {
+  return {
+    id: raw.id ?? 0,
+    channel: raw.channel ?? "email",
+    destinationMasked:
+      raw.destination_masked ??
+      raw.masked_destination ??
+      raw.destination ??
+      "—",
+    recipientName: raw.recipient_name ?? raw.recipient ?? raw.name ?? null,
+    status: raw.status ?? "queued",
+    isDuplicate: Boolean(raw.is_duplicate),
+    duplicateOfId: raw.duplicate_of_id ?? null,
+    sessionId: raw.session?.id ?? raw.session_id ?? null,
+    sessionSource: raw.session?.source ?? raw.session_source ?? raw.source ?? null,
+    locationName:
+      raw.session?.location_name ??
+      raw.session?.location?.name ??
+      raw.location_name ??
+      raw.location?.name ??
+      null,
+    kind: raw.kind ?? raw.delivery_schedule ?? raw.schedule ?? null,
+    // Whichever timestamp the row's status implies; the log sorts on this.
+    occurredAt:
+      raw.sent_at ??
+      raw.scheduled_for ??
+      raw.scheduled_at ??
+      raw.created_at ??
+      null,
+    linkOpened: Boolean(raw.link_opened ?? raw.link_opened_at ?? raw.opened_at),
+    failureReason: raw.failure_reason ?? raw.error ?? null,
+  };
+}
+
+/**
+ * Pulls the row array out of whatever envelope came back: a bare array, a
+ * Laravel paginator (`data.data`), or a named key. Returns [] when none matches,
+ * and says so in dev — an empty list and an unrecognised envelope look identical
+ * on screen otherwise, which is the hard part of diagnosing this remotely.
+ */
+function readDeliveryRows(payload: unknown): ApiDeliveryLogRow[] {
+  if (Array.isArray(payload)) return payload as ApiDeliveryLogRow[];
+  if (!payload || typeof payload !== "object") return [];
+
+  const bag = payload as Record<string, unknown>;
+  for (const key of ["deliveries", "rows", "data", "items", "results"]) {
+    if (Array.isArray(bag[key])) return bag[key] as ApiDeliveryLogRow[];
+  }
+  if (__DEV__) {
+    console.warn(
+      "[photoDeliveryLog] no row array found; envelope keys =",
+      Object.keys(bag),
+    );
+  }
+  return [];
+}
+
+/** The delivery-log collection route, with `{id}/retry` and `{id}/cancel`. */
+const DELIVERY_LOG_PATH = "/api/photo-deliveries";
+
+/** Grouping and masking make this a heavier response than a plain list. */
+const DELIVERY_LOG_TIMEOUT_MS = 30000;
+
+/**
+ * GET /api/photo-deliveries — every email and SMS row, newest first. Email and
+ * SMS are tracked separately, so one session appears twice with its own status
+ * per channel. Company-wide unless `locationId` narrows it.
+ */
+export async function fetchPhotoDeliveryLog(
+  token: string,
+  filters: PhotoDeliveryLogFilters = {},
+  signal?: AbortSignal,
+): Promise<PhotoDeliveryLog> {
+  const params = new URLSearchParams();
+  if (filters.locationId != null) {
+    params.append("location_id", String(filters.locationId));
+  }
+  if (filters.status) params.append("status", filters.status);
+  if (filters.channel) params.append("channel", filters.channel);
+  if (filters.kind) params.append("kind", filters.kind);
+  if (filters.from) params.append("from", filters.from);
+  if (filters.to) params.append("to", filters.to);
+  if (filters.includeDuplicates) params.append("include_duplicates", "1");
+
+  const query = params.toString();
+  const res = await apiRequest<Record<string, unknown>>(
+    query ? `${DELIVERY_LOG_PATH}?${query}` : DELIVERY_LOG_PATH,
+    { token, signal, timeoutMs: DELIVERY_LOG_TIMEOUT_MS },
+  );
+
+  // Rows may sit under `data` or at the top level; try both before giving up.
+  const envelope = (res?.data ?? res) as Record<string, unknown>;
+  const rawRows = readDeliveryRows(envelope);
+  const rows = rawRows.map(mapDeliveryLogRow);
+
+  const meta = Array.isArray(envelope)
+    ? {}
+    : ((envelope?.meta as Record<string, unknown>) ?? envelope ?? {});
+  const total = typeof meta.total === "number" ? meta.total : rows.length;
+
+  return { rows, total, truncated: Boolean(meta.truncated) };
+}
+
+/** POST /api/photo-deliveries/{id}/retry — sends the same link again. */
+export async function retryPhotoDelivery(
+  token: string,
+  deliveryId: number,
+): Promise<string> {
+  const res = await apiRequest<{ message?: string }>(
+    `${DELIVERY_LOG_PATH}/${deliveryId}/retry`,
+    { method: "POST", token },
+  );
+  return res.message ?? "That link was sent again.";
+}
+
+/** POST /api/photo-deliveries/{id}/cancel — drops a queued or scheduled send. */
+export async function cancelPhotoDelivery(
+  token: string,
+  deliveryId: number,
+): Promise<string> {
+  const res = await apiRequest<{ message?: string }>(
+    `${DELIVERY_LOG_PATH}/${deliveryId}/cancel`,
+    { method: "POST", token },
+  );
+  return res.message ?? "That delivery was canceled.";
+}
+
+/* -------------------------------------------------------- photo reports -- */
+
+/** One figure on a report — the server decides which, and in what order. */
+export type PhotoReportMetric = {
+  key: string;
+  /** "PHOTOS UPLOADED" from `photos_uploaded`, as the web renders it. */
+  label: string;
+  value: string;
+};
+
+/** One record in a list-shaped report (Audit log, Daily library, …). */
+export type PhotoReportRow = {
+  key: string;
+  fields: { key: string; label: string; value: string }[];
+};
+
+/**
+ * A block of a report: figures, records, or both. The root block holds the
+ * top-level figures; a nested object or list in the response becomes its own
+ * titled block, so a report is rendered from whatever it returns.
+ */
+export type PhotoReportSection = {
+  key: string;
+  /** null on the root block, which needs no heading. */
+  label: string | null;
+  metrics: PhotoReportMetric[];
+  rows: PhotoReportRow[];
+};
+
+export type PhotoReport = {
+  sections: PhotoReportSection[];
+  /** The zone the date bounds are read in, e.g. "America/Detroit". */
+  timezone: string | null;
+  /** The server's own sentence about that zone, when it sends one. */
+  timezoneNote: string | null;
+};
+
+export type PhotoReportInput = {
+  /** Which report to run — the URL segment, e.g. "photo-activity". */
+  report: string;
+  /** Omitted when the workspace is on All Locations. */
+  locationId?: number | null;
+  /** Inclusive date bounds, YYYY-MM-DD, read in the location's zone. */
+  from?: string;
+  to?: string;
+};
+
+/** Keys that describe the request, not a figure to put on a tile. */
+const REPORT_META_KEYS = new Set([
+  "report",
+  "label",
+  "timezone",
+  "timezone_note",
+  "location_id",
+  "location_name",
+  "from",
+  "to",
+  "range",
+  "generated_at",
+]);
+
+const metricLabel = (key: string): string =>
+  key.replace(/[_-]+/g, " ").trim().toUpperCase();
+
+/** Numbers get thousands separators; anything unrenderable is dropped. */
+function metricValue(raw: unknown): string | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw.toLocaleString();
+  }
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "boolean") return raw ? "Yes" : "No";
+  return null;
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** How deep to follow nested objects before treating them as unrenderable. */
+const REPORT_MAX_DEPTH = 2;
+
+function rowFrom(entry: unknown, index: number): PhotoReportRow | null {
+  if (isPlainObject(entry)) {
+    const fields = Object.entries(entry)
+      .map(([key, raw]) => ({
+        key,
+        label: metricLabel(key),
+        value: metricValue(raw),
+      }))
+      .filter((f): f is PhotoReportRow["fields"][number] => f.value !== null);
+    return fields.length ? { key: String(index), fields } : null;
+  }
+  const value = metricValue(entry);
+  return value === null
+    ? null
+    : { key: String(index), fields: [{ key: "value", label: "", value }] };
+}
+
+/**
+ * Walks a report response into flat, renderable blocks. The eight reports do not
+ * share a shape — some are counters, some are lists — and there is no local
+ * source for any of them, so nothing here is keyed to a known field name: every
+ * figure and record is whatever the server sent, in its order.
+ */
+function buildSections(
+  source: Record<string, unknown>,
+  keyPath: string,
+  label: string | null,
+  depth: number,
+  out: PhotoReportSection[],
+): void {
+  const section: PhotoReportSection = {
+    key: keyPath || "root",
+    label,
+    metrics: [],
+    rows: [],
+  };
+  out.push(section);
+
+  for (const [key, raw] of Object.entries(source)) {
+    // Only the root echoes the request back; a nested block's keys are data.
+    if (depth === 0 && REPORT_META_KEYS.has(key)) continue;
+
+    const scalar = metricValue(raw);
+    if (scalar !== null) {
+      section.metrics.push({ key, label: metricLabel(key), value: scalar });
+      continue;
+    }
+
+    if (Array.isArray(raw)) {
+      const rows = raw
+        .map(rowFrom)
+        .filter((row): row is PhotoReportRow => row !== null);
+      if (rows.length) {
+        out.push({
+          key: `${keyPath}${key}`,
+          label: metricLabel(key),
+          metrics: [],
+          rows,
+        });
+      }
+      continue;
+    }
+
+    if (isPlainObject(raw) && depth < REPORT_MAX_DEPTH) {
+      buildSections(raw, `${keyPath}${key}.`, metricLabel(key), depth + 1, out);
+    }
+  }
+}
+
+/**
+ * Which slug spelling the API accepted, per report label. The report is a URL
+ * segment on a wildcard route, so an unknown spelling cannot be told apart from
+ * a missing route until the request is made; the answer is remembered so the
+ * fallback below costs one request per session at most.
+ */
+const acceptedReportSlug = new Map<string, string>();
+
+/** "qr-codes" ⇄ "qr_codes" — the two conventions a Laravel route might use. */
+const alternateSlug = (slug: string): string =>
+  slug.includes("-") ? slug.replace(/-/g, "_") : slug.replace(/_/g, "-");
+
+/**
+ * GET /api/photo-reports/{report} — one report over a date range. Company-wide
+ * unless `locationId` narrows it.
+ */
+export async function fetchPhotoReport(
+  token: string,
+  input: PhotoReportInput,
+  signal?: AbortSignal,
+): Promise<PhotoReport> {
+  const params = new URLSearchParams();
+  if (input.locationId != null) {
+    params.append("location_id", String(input.locationId));
+  }
+  if (input.from) params.append("from", input.from);
+  if (input.to) params.append("to", input.to);
+  const query = params.toString();
+
+  const request = async (slug: string): Promise<PhotoReport> => {
+    const path = `/api/photo-reports/${slug}${query ? `?${query}` : ""}`;
+    const res = await apiRequest<Record<string, unknown>>(path, {
+      token,
+      signal,
+    });
+
+    // Figures may sit under `data`, under `data.metrics`, or at the top level.
+    const body = (res?.data ?? res) as Record<string, unknown>;
+    const payload = isPlainObject(body.metrics)
+      ? (body.metrics as Record<string, unknown>)
+      : body;
+
+    const sections: PhotoReportSection[] = [];
+    buildSections(payload, "", null, 0, sections);
+
+    const timezone = (body.timezone ?? null) as string | null;
+    const timezoneNote = (body.timezone_note ?? null) as string | null;
+
+    if (__DEV__ && sections.every((s) => !s.metrics.length && !s.rows.length)) {
+      console.warn(
+        `[photoReport:${slug}] nothing renderable; payload keys =`,
+        Object.keys(body),
+      );
+    }
+
+    return {
+      sections: sections.filter((s) => s.metrics.length || s.rows.length),
+      timezone,
+      timezoneNote,
+    };
+  };
+
+  const primary = acceptedReportSlug.get(input.report) ?? input.report;
+  try {
+    const report = await request(primary);
+    acceptedReportSlug.set(input.report, primary);
+    return report;
+  } catch (e) {
+    const fallback = alternateSlug(primary);
+    const worthRetrying =
+      fallback !== primary &&
+      e instanceof ApiError &&
+      (e.status === 404 || e.status === 422);
+    if (!worthRetrying) throw e;
+
+    const report = await request(fallback);
+    acceptedReportSlug.set(input.report, fallback);
+    return report;
+  }
 }
 
 /* ------------------------------------------------------- slideshow queue -- */

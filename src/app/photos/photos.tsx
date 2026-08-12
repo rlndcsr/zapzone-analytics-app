@@ -52,7 +52,6 @@ const NAV_ROWS: PhotoNavRow[] = [
     title: "Delivery Log",
     desc: "Track every email and SMS photo link, retry or cancel",
     route: "/photos/delivery-log",
-    pending: true,
   },
   {
     icon: "bar-chart-2",
@@ -60,7 +59,6 @@ const NAV_ROWS: PhotoNavRow[] = [
     desc: "Capture, delivery, QR, kiosk and slideshow tracking",
     route: "/photos/reports",
     managerOnly: true,
-    pending: true,
   },
   {
     icon: "settings",

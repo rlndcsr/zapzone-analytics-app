@@ -1,8 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useState, type ComponentProps } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, Text } from "react-native";
 
-import { BottomSheet } from "./BottomSheet";
+import { FilterOptionSheet } from "./FilterOptionSheet";
 
 const PRIMARY = "#0644C7";
 
@@ -50,41 +50,14 @@ export function SheetSelect({
         <Feather name="chevron-down" size={14} color="#9CA3AF" />
       </Pressable>
 
-      <BottomSheet visible={open} onClose={() => setOpen(false)} title={title}>
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {options.map((option) => {
-            const isSelected = option.value === value;
-            return (
-              <Pressable
-                key={String(option.value)}
-                onPress={() => {
-                  onSelect(option.value);
-                  setOpen(false);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+      <FilterOptionSheet
+        visible={open}
+        title={title}
+        value={value}
+        options={options}
+        onSelect={onSelect}
+        onClose={() => setOpen(false)}
+      />
     </>
   );
 }

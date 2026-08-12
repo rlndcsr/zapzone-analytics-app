@@ -62,12 +62,14 @@ const FAB_COLOR = "#0644C7";
 const SURFACE_LIGHT = "#FFFFFF";
 const SURFACE_DARK = "#171717";
 
-const COLUMNS = 3;
-const COLUMN_GAP = 12;
-const ROW_GAP = 16;
+const COLUMNS = 4;
+const COLUMN_GAP = 8;
+const ROW_GAP = 14;
 const PANEL_PADDING = 16;
 const HEADER_HEIGHT = 52;
-const CELL_HEIGHT = 74;
+// icon tile (44) + label gap (6) + two label lines (2 * 14)
+const CELL_HEIGHT = 78;
+const LABEL_LINE_HEIGHT = 14;
 const MAX_PANEL_WIDTH = 440;
 
 export type FabRect = {
@@ -120,19 +122,23 @@ function GridItem({
   });
 
   return (
-    <Animated.View style={[{ width, marginBottom: ROW_GAP }, style]}>
+    <Animated.View
+      style={[{ width, height: CELL_HEIGHT, marginBottom: ROW_GAP }, style]}
+    >
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={item.label}
-        className="items-center active:opacity-70"
+        className="flex-1 items-center active:opacity-70"
       >
-        <View className="h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 dark:bg-blue-900/40">
-          <Feather name={item.icon} size={22} color={FAB_COLOR} />
+        <View className="h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 dark:bg-blue-900/40">
+          <Feather name={item.icon} size={20} color={FAB_COLOR} />
         </View>
         <Text
-          numberOfLines={1}
-          className="mt-1.5 text-xs text-gray-700 dark:text-gray-200"
+          numberOfLines={2}
+          adjustsFontSizeToFit={false}
+          style={{ lineHeight: LABEL_LINE_HEIGHT }}
+          className="mt-1.5 text-center text-[11px] text-gray-700 dark:text-gray-200"
         >
           {item.label}
         </Text>
@@ -201,7 +207,11 @@ export function MorphingFabMenu({
 
   const panelW = Math.min(screenW - 32, MAX_PANEL_WIDTH);
   const contentW = panelW - PANEL_PADDING * 2;
-  const cellW = (contentW - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS;
+  // Floor: an exact fractional fit rounds up on layout and drops the last
+  // column onto the next row.
+  const cellW = Math.floor(
+    (contentW - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS,
+  );
   const rows = Math.ceil(items.length / COLUMNS);
 
   const footerH = fabH + 24;
@@ -452,25 +462,20 @@ export function MorphingFabMenu({
                   </Text>
                 </View>
 
-                {/* Grid */}
-                {needsScroll ? (
-                  <ScrollView
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{ paddingTop: PANEL_PADDING }}
-                  >
-                    {grid}
-                  </ScrollView>
-                ) : (
-                  <View
-                    style={{
-                      flex: 1,
-                      justifyContent: "center",
-                      paddingTop: PANEL_PADDING,
-                    }}
-                  >
-                    {grid}
-                  </View>
-                )}
+                {/* Grid — centered when it fits, scrolls when it does not.
+                    A plain centered View overflows over the header if the
+                    measured content is taller than the estimate. */}
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  scrollEnabled={needsScroll}
+                  contentContainerStyle={{
+                    flexGrow: 1,
+                    justifyContent: "center",
+                    paddingTop: PANEL_PADDING,
+                  }}
+                >
+                  {grid}
+                </ScrollView>
               </View>
             </Animated.View>
 
