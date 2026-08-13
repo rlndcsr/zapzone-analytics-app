@@ -66,7 +66,6 @@ const NAV_ROWS: PhotoNavRow[] = [
     desc: "Kiosk and slideshow passcodes, date layer and retention",
     route: "/photos/settings",
     managerOnly: true,
-    pending: true,
   },
 ];
 

@@ -1,4 +1,4 @@
-import { apiRequest, apiUrl } from "../lib/api";
+import { ApiError, apiRequest, apiUrl } from "../lib/api";
 
 export type PhotoSessionStatus =
   "in_progress" | "awaiting_preview" | "processing" | "ready";
@@ -1463,4 +1463,385 @@ export async function deletePhotoOverlay(
     method: "DELETE",
     token,
   });
+}
+
+/* -------------------------------------------------------------- settings -- */
+
+/** LocationPhotoSetting::toAdminArray() — passcodes and device URLs included. */
+export type PhotoSettingRecord = {
+  id: number;
+  locationId: number;
+  kioskEnabled: boolean;
+  slideshowEnabled: boolean;
+  kioskCountdownSeconds: number;
+  slideshowDurationSeconds: number;
+  retentionDays: number;
+  dateFormat: string;
+  datePosition: string;
+  dateFontSize: number;
+  dateMargin: number;
+  dateBackground: string;
+  failureNotifyEmail: string | null;
+  kioskPasscode: string;
+  slideshowPasscode: string;
+  kioskUrl: string;
+  slideshowUrl: string;
+};
+
+/** Server-side constants the admin cannot change. */
+export type PhotoSettingsLocked = {
+  qrValidHours: number;
+  accessValidDays: number;
+  staffMaxPhotos: number;
+  kioskMaxPhotos: number;
+  kioskIdleSeconds: number;
+  operatingDayCutoffHour: number;
+  nextDayDeliveryHour: number;
+};
+
+export type PhotoSettingsOptions = {
+  dateFormats: { value: string; preview: string }[];
+  datePositions: string[];
+  dateBackgrounds: string[];
+  slideshowDurations: number[];
+  countdownOptions: number[];
+};
+
+export type PhotoSettings = {
+  setting: PhotoSettingRecord;
+  location: {
+    id: number;
+    name: string;
+    timezone: string;
+    timezoneStored: string | null;
+  };
+  locked: PhotoSettingsLocked;
+  /** Settings adds the photo-link base to the shared channel diagnostics. */
+  channels: PhotoChannelDiagnostics & {
+    photoLinkBase: string | null;
+    photoLinkNote: string | null;
+  };
+  options: PhotoSettingsOptions;
+};
+
+type ApiPhotoSetting = {
+  id: number;
+  location_id: number;
+  kiosk_enabled: boolean;
+  slideshow_enabled: boolean;
+  kiosk_countdown_seconds: number | null;
+  slideshow_duration_seconds: number | null;
+  retention_days: number | null;
+  date_format: string | null;
+  date_position: string | null;
+  date_font_size: number | null;
+  date_margin: number | null;
+  date_background: string | null;
+  failure_notify_email: string | null;
+  kiosk_passcode: string | null;
+  slideshow_passcode: string | null;
+  kiosk_url: string | null;
+  slideshow_url: string | null;
+};
+
+function mapPhotoSetting(raw: ApiPhotoSetting): PhotoSettingRecord {
+  return {
+    id: raw.id,
+    locationId: raw.location_id,
+    kioskEnabled: Boolean(raw.kiosk_enabled),
+    slideshowEnabled: Boolean(raw.slideshow_enabled),
+    kioskCountdownSeconds: raw.kiosk_countdown_seconds ?? 10,
+    slideshowDurationSeconds: raw.slideshow_duration_seconds ?? 8,
+    retentionDays: raw.retention_days ?? 90,
+    dateFormat: raw.date_format ?? "",
+    datePosition: raw.date_position ?? "",
+    dateFontSize: raw.date_font_size ?? 34,
+    dateMargin: raw.date_margin ?? 28,
+    dateBackground: raw.date_background ?? "",
+    failureNotifyEmail: raw.failure_notify_email ?? null,
+    kioskPasscode: raw.kiosk_passcode ?? "",
+    slideshowPasscode: raw.slideshow_passcode ?? "",
+    kioskUrl: raw.kiosk_url ?? "",
+    slideshowUrl: raw.slideshow_url ?? "",
+  };
+}
+
+/** GET /api/photo-settings?location_id= — one location's photo configuration. */
+export async function fetchPhotoSettings(
+  token: string,
+  locationId: number,
+  signal?: AbortSignal,
+): Promise<PhotoSettings> {
+  const res = await apiRequest<{
+    data: {
+      setting: ApiPhotoSetting;
+      location: {
+        id: number;
+        name: string;
+        timezone: string;
+        timezone_stored: string | null;
+      };
+      locked: {
+        qr_valid_hours: number;
+        access_valid_days: number;
+        staff_max_photos: number;
+        kiosk_max_photos: number;
+        kiosk_idle_seconds: number;
+        operating_day_cutoff_hour: number;
+        next_day_delivery_hour: number;
+      };
+      channels: {
+        sms_available: boolean;
+        email_available: boolean;
+        email_transport: string;
+        sms_note: string | null;
+        email_note: string | null;
+        photo_link_base: string | null;
+        photo_link_note: string | null;
+      };
+      options: {
+        date_formats: { value: string; preview: string }[];
+        date_positions: string[];
+        date_backgrounds: string[];
+        slideshow_durations: number[];
+        countdown_options: number[];
+      };
+    };
+  }>(`/api/photo-settings?location_id=${locationId}`, { token, signal });
+
+  const d = res.data;
+  return {
+    setting: mapPhotoSetting(d.setting),
+    location: {
+      id: d.location.id,
+      name: d.location.name,
+      timezone: d.location.timezone,
+      timezoneStored: d.location.timezone_stored,
+    },
+    locked: {
+      qrValidHours: d.locked.qr_valid_hours,
+      accessValidDays: d.locked.access_valid_days,
+      staffMaxPhotos: d.locked.staff_max_photos,
+      kioskMaxPhotos: d.locked.kiosk_max_photos,
+      kioskIdleSeconds: d.locked.kiosk_idle_seconds,
+      operatingDayCutoffHour: d.locked.operating_day_cutoff_hour,
+      nextDayDeliveryHour: d.locked.next_day_delivery_hour,
+    },
+    channels: {
+      smsAvailable: Boolean(d.channels.sms_available),
+      emailAvailable: Boolean(d.channels.email_available),
+      emailTransport: d.channels.email_transport,
+      smsNote: d.channels.sms_note,
+      emailNote: d.channels.email_note,
+      photoLinkBase: d.channels.photo_link_base ?? null,
+      photoLinkNote: d.channels.photo_link_note ?? null,
+    },
+    options: {
+      dateFormats: d.options.date_formats ?? [],
+      datePositions: d.options.date_positions ?? [],
+      dateBackgrounds: d.options.date_backgrounds ?? [],
+      slideshowDurations: d.options.slideshow_durations ?? [],
+      countdownOptions: d.options.countdown_options ?? [],
+    },
+  };
+}
+
+export type PhotoSettingsUpdate = {
+  locationId: number;
+  kioskEnabled: boolean;
+  slideshowEnabled: boolean;
+  kioskCountdownSeconds: number;
+  slideshowDurationSeconds: number;
+  retentionDays: number;
+  dateFormat: string;
+  datePosition: string;
+  dateFontSize: number;
+  dateMargin: number;
+  dateBackground: string;
+  /** null clears it — sent explicitly so the server unsets the address. */
+  failureNotifyEmail: string | null;
+};
+
+/** PUT /api/photo-settings — saves the editable fields for one location. */
+export async function updatePhotoSettings(
+  token: string,
+  input: PhotoSettingsUpdate,
+): Promise<PhotoSettingRecord> {
+  const res = await apiRequest<{ data: ApiPhotoSetting }>(
+    "/api/photo-settings",
+    {
+      method: "PUT",
+      token,
+      body: {
+        location_id: input.locationId,
+        kiosk_enabled: input.kioskEnabled,
+        slideshow_enabled: input.slideshowEnabled,
+        kiosk_countdown_seconds: input.kioskCountdownSeconds,
+        slideshow_duration_seconds: input.slideshowDurationSeconds,
+        retention_days: input.retentionDays,
+        date_format: input.dateFormat,
+        date_position: input.datePosition,
+        date_font_size: input.dateFontSize,
+        date_margin: input.dateMargin,
+        date_background: input.dateBackground,
+        failure_notify_email: input.failureNotifyEmail,
+      },
+    },
+  );
+  return mapPhotoSetting(res.data);
+}
+
+export type PhotoTestChannel = "email" | "sms";
+
+export type PhotoTestResult = { success: boolean; message: string };
+
+const firstFieldError = (e: ApiError): string | null =>
+  Object.values(e.fieldErrors ?? {})[0]?.[0] ?? null;
+
+/**
+ * POST /api/photo-settings/test-message — sends a sample photo link to one
+ * address. Resolves rather than throws, so the caller renders the outcome
+ * inline exactly as the web does.
+ */
+export async function sendPhotoTestMessage(
+  token: string,
+  input: {
+    locationId: number;
+    channel: PhotoTestChannel;
+    destination: string;
+  },
+): Promise<PhotoTestResult> {
+  try {
+    const res = await apiRequest<{ message?: string }>(
+      "/api/photo-settings/test-message",
+      {
+        method: "POST",
+        token,
+        body: {
+          location_id: input.locationId,
+          channel: input.channel,
+          destination: input.destination,
+        },
+      },
+    );
+    return { success: true, message: res?.message ?? "Test message sent." };
+  } catch (e) {
+    // First validation error, then the server's message — the web's order.
+    const fieldError = e instanceof ApiError ? firstFieldError(e) : null;
+    const message =
+      fieldError ??
+      (e instanceof Error && e.message
+        ? e.message
+        : "The test message could not be sent.");
+    return { success: false, message };
+  }
+}
+
+/** POST /api/photo-settings/passcode — issues a new device passcode. */
+export async function rotatePhotoPasscode(
+  token: string,
+  locationId: number,
+  mode: "kiosk" | "slideshow",
+): Promise<PhotoSettingRecord> {
+  const res = await apiRequest<{ data: ApiPhotoSetting }>(
+    "/api/photo-settings/passcode",
+    { method: "POST", token, body: { location_id: locationId, mode } },
+  );
+  return mapPhotoSetting(res.data);
+}
+
+/* ----------------------------------------------------- message templates -- */
+
+export type PhotoTemplateKind = "immediate" | "next_day" | "kiosk";
+
+export type PhotoMessageTemplate = {
+  id: number;
+  companyId: number | null;
+  kind: PhotoTemplateKind;
+  emailSubject: string;
+  emailBody: string;
+  smsBody: string;
+  isActive: boolean;
+};
+
+export type PhotoTemplates = {
+  templates: PhotoMessageTemplate[];
+  /** Placeholder names, without the braces the UI adds. */
+  variables: string[];
+  kinds: string[];
+};
+
+type ApiPhotoTemplate = {
+  id: number;
+  company_id: number | null;
+  kind: PhotoTemplateKind;
+  email_subject: string | null;
+  email_body: string | null;
+  sms_body: string | null;
+  is_active: boolean;
+};
+
+function mapPhotoTemplate(raw: ApiPhotoTemplate): PhotoMessageTemplate {
+  return {
+    id: raw.id,
+    companyId: raw.company_id ?? null,
+    kind: raw.kind,
+    emailSubject: raw.email_subject ?? "",
+    emailBody: raw.email_body ?? "",
+    smsBody: raw.sms_body ?? "",
+    isActive: Boolean(raw.is_active),
+  };
+}
+
+/** GET /api/photo-templates — company templates plus the variable names. */
+export async function fetchPhotoTemplates(
+  token: string,
+  signal?: AbortSignal,
+): Promise<PhotoTemplates> {
+  const res = await apiRequest<{
+    data: {
+      templates: ApiPhotoTemplate[];
+      variables: string[];
+      kinds: string[];
+    };
+  }>("/api/photo-templates", { token, signal });
+
+  return {
+    templates: (res.data.templates ?? []).map(mapPhotoTemplate),
+    variables: res.data.variables ?? [],
+    kinds: res.data.kinds ?? [],
+  };
+}
+
+/** PUT /api/photo-templates/{id} — saves one template's wording. */
+export async function updatePhotoTemplate(
+  token: string,
+  templateId: number,
+  input: { emailSubject: string; emailBody: string; smsBody: string },
+): Promise<PhotoMessageTemplate> {
+  const res = await apiRequest<{ data: ApiPhotoTemplate }>(
+    `/api/photo-templates/${templateId}`,
+    {
+      method: "PUT",
+      token,
+      body: {
+        email_subject: input.emailSubject,
+        email_body: input.emailBody,
+        sms_body: input.smsBody,
+      },
+    },
+  );
+  return mapPhotoTemplate(res.data);
+}
+
+/** POST /api/photo-templates/{id}/reset — restores the default wording. */
+export async function resetPhotoTemplate(
+  token: string,
+  templateId: number,
+): Promise<PhotoMessageTemplate> {
+  const res = await apiRequest<{ data: ApiPhotoTemplate }>(
+    `/api/photo-templates/${templateId}/reset`,
+    { method: "POST", token },
+  );
+  return mapPhotoTemplate(res.data);
 }
