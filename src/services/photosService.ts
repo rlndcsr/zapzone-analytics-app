@@ -1,4 +1,4 @@
-import { ApiError, apiRequest, apiUrl } from "../lib/api";
+import { apiRequest, apiUrl } from "../lib/api";
 
 export type PhotoSessionStatus =
   "in_progress" | "awaiting_preview" | "processing" | "ready";
@@ -979,8 +979,29 @@ export type PhotoReportSection = {
   rows: PhotoReportRow[];
 };
 
+/** A row of the Daily library report's `by_day` table. */
+export type PhotoReportDay = {
+  operatingDay: string;
+  photos: number;
+  downloads: number;
+};
+
+/** A row of the Audit log report's `entries` table. */
+export type PhotoReportAuditEntry = {
+  id: number;
+  action: string;
+  description: string | null;
+  userName: string | null;
+  locationName: string | null;
+  createdAt: string | null;
+};
+
 export type PhotoReport = {
   sections: PhotoReportSection[];
+  /** Daily library's `by_day`, newest operating day first (server order). */
+  byDay: PhotoReportDay[];
+  /** Audit log's `entries`, newest first (server order). */
+  auditEntries: PhotoReportAuditEntry[];
   /** The zone the date bounds are read in, e.g. "America/Detroit". */
   timezone: string | null;
   /** The server's own sentence about that zone, when it sends one. */
@@ -988,7 +1009,7 @@ export type PhotoReport = {
 };
 
 export type PhotoReportInput = {
-  /** Which report to run — the URL segment, e.g. "photo-activity". */
+  /** Which report to run — the URL segment, e.g. "activity". */
   report: string;
   /** Omitted when the workspace is on All Locations. */
   locationId?: number | null;
@@ -1000,8 +1021,10 @@ export type PhotoReportInput = {
 /** Keys that describe the request, not a figure to put on a tile. */
 const REPORT_META_KEYS = new Set([
   "report",
+  "type",
   "label",
   "timezone",
+  "business_timezone",
   "timezone_note",
   "location_id",
   "location_name",
@@ -1010,6 +1033,9 @@ const REPORT_META_KEYS = new Set([
   "range",
   "generated_at",
 ]);
+
+/** Lists with a dedicated table; the generic walker must leave them alone. */
+const REPORT_TABLE_KEYS = new Set(["by_day", "entries"]);
 
 const metricLabel = (key: string): string =>
   key.replace(/[_-]+/g, " ").trim().toUpperCase();
@@ -1070,7 +1096,8 @@ function buildSections(
 
   for (const [key, raw] of Object.entries(source)) {
     // Only the root echoes the request back; a nested block's keys are data.
-    if (depth === 0 && REPORT_META_KEYS.has(key)) continue;
+    if (depth === 0 && (REPORT_META_KEYS.has(key) || REPORT_TABLE_KEYS.has(key)))
+      continue;
 
     const scalar = metricValue(raw);
     if (scalar !== null) {
@@ -1099,21 +1126,39 @@ function buildSections(
   }
 }
 
-/**
- * Which slug spelling the API accepted, per report label. The report is a URL
- * segment on a wildcard route, so an unknown spelling cannot be told apart from
- * a missing route until the request is made; the answer is remembered so the
- * fallback below costs one request per session at most.
- */
-const acceptedReportSlug = new Map<string, string>();
+const asString = (v: unknown): string | null =>
+  typeof v === "string" && v.trim() ? v : null;
 
-/** "qr-codes" ⇄ "qr_codes" — the two conventions a Laravel route might use. */
-const alternateSlug = (slug: string): string =>
-  slug.includes("-") ? slug.replace(/-/g, "_") : slug.replace(/_/g, "-");
+const asCount = (v: unknown): number => {
+  const n = typeof v === "string" ? Number(v) : v;
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+};
+
+function mapReportDays(raw: unknown): PhotoReportDay[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isPlainObject).map((row) => ({
+    operatingDay: asString(row.operating_day) ?? "—",
+    photos: asCount(row.photos),
+    downloads: asCount(row.downloads),
+  }));
+}
+
+function mapAuditEntries(raw: unknown): PhotoReportAuditEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isPlainObject).map((row, i) => ({
+    id: asCount(row.id) || i,
+    action: asString(row.action) ?? "—",
+    description: asString(row.description),
+    userName: asString(row.user_name),
+    locationName: asString(row.location_name),
+    createdAt: asString(row.created_at),
+  }));
+}
 
 /**
- * GET /api/photo-reports/{report} — one report over a date range. Company-wide
- * unless `locationId` narrows it.
+ * GET /api/photo-reports/{type} — one report over a date range. Company-wide
+ * unless `locationId` narrows it. `type` must be one of the eight the server
+ * accepts; see REPORT_OPTIONS on the reports screen.
  */
 export async function fetchPhotoReport(
   token: string,
@@ -1128,56 +1173,38 @@ export async function fetchPhotoReport(
   if (input.to) params.append("to", input.to);
   const query = params.toString();
 
-  const request = async (slug: string): Promise<PhotoReport> => {
-    const path = `/api/photo-reports/${slug}${query ? `?${query}` : ""}`;
-    const res = await apiRequest<Record<string, unknown>>(path, {
-      token,
-      signal,
-    });
+  const path = `/api/photo-reports/${input.report}${query ? `?${query}` : ""}`;
+  const res = await apiRequest<Record<string, unknown>>(path, {
+    token,
+    signal,
+  });
 
-    // Figures may sit under `data`, under `data.metrics`, or at the top level.
-    const body = (res?.data ?? res) as Record<string, unknown>;
-    const payload = isPlainObject(body.metrics)
-      ? (body.metrics as Record<string, unknown>)
-      : body;
+  // Figures may sit under `data`, under `data.metrics`, or at the top level.
+  const body = (res?.data ?? res) as Record<string, unknown>;
+  const payload = isPlainObject(body.metrics)
+    ? (body.metrics as Record<string, unknown>)
+    : body;
 
-    const sections: PhotoReportSection[] = [];
-    buildSections(payload, "", null, 0, sections);
+  const sections: PhotoReportSection[] = [];
+  buildSections(payload, "", null, 0, sections);
 
-    const timezone = (body.timezone ?? null) as string | null;
-    const timezoneNote = (body.timezone_note ?? null) as string | null;
+  const timezone = (body.business_timezone ?? null) as string | null;
+  const timezoneNote = (body.timezone_note ?? null) as string | null;
 
-    if (__DEV__ && sections.every((s) => !s.metrics.length && !s.rows.length)) {
-      console.warn(
-        `[photoReport:${slug}] nothing renderable; payload keys =`,
-        Object.keys(body),
-      );
-    }
-
-    return {
-      sections: sections.filter((s) => s.metrics.length || s.rows.length),
-      timezone,
-      timezoneNote,
-    };
-  };
-
-  const primary = acceptedReportSlug.get(input.report) ?? input.report;
-  try {
-    const report = await request(primary);
-    acceptedReportSlug.set(input.report, primary);
-    return report;
-  } catch (e) {
-    const fallback = alternateSlug(primary);
-    const worthRetrying =
-      fallback !== primary &&
-      e instanceof ApiError &&
-      (e.status === 404 || e.status === 422);
-    if (!worthRetrying) throw e;
-
-    const report = await request(fallback);
-    acceptedReportSlug.set(input.report, fallback);
-    return report;
+  if (__DEV__ && sections.every((s) => !s.metrics.length && !s.rows.length)) {
+    console.warn(
+      `[photoReport:${input.report}] nothing renderable; payload keys =`,
+      Object.keys(body),
+    );
   }
+
+  return {
+    sections: sections.filter((s) => s.metrics.length || s.rows.length),
+    byDay: mapReportDays(payload.by_day),
+    auditEntries: mapAuditEntries(payload.entries),
+    timezone,
+    timezoneNote,
+  };
 }
 
 /* ------------------------------------------------------- slideshow queue -- */

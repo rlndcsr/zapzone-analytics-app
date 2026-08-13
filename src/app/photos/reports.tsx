@@ -21,7 +21,12 @@ import {
 } from "../../components/ui/FilterOptionSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import {
+  PhotoReportAuditSection,
+  PhotoReportDaysSection,
+} from "../../components/ui/PhotoReportTables";
 import { Toast, type ToastType } from "../../components/ui/Toast";
+import { type ViewMode } from "../../components/ui/ViewToggle";
 import {
   SkeletonBlock,
   usePulse,
@@ -47,21 +52,15 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-/**
- * Every report the web's selector offers, in its order. The value is the URL
- * segment on `/api/photo-reports/{report}`, spelled kebab-case like the rest of
- * this API's routes; the service retries the snake_case spelling once if the
- * server rejects it, so a mismatch self-corrects.
- */
 const REPORT_OPTIONS: FilterOption[] = [
-  { label: "Photo activity", value: "photo-activity" },
+  { label: "Photo activity", value: "activity" },
   { label: "Delivery", value: "delivery" },
-  { label: "QR codes", value: "qr-codes" },
+  { label: "QR codes", value: "qr" },
   { label: "Kiosk", value: "kiosk" },
   { label: "Slideshow", value: "slideshow" },
-  { label: "Daily library", value: "daily-library" },
-  { label: "Overlays", value: "overlays" },
-  { label: "Audit log", value: "audit-log" },
+  { label: "Daily library", value: "library" },
+  { label: "Overlays", value: "overlay" },
+  { label: "Audit log", value: "audit" },
 ];
 
 /** The web opens on the last 30 days, inclusive of today. */
@@ -77,21 +76,30 @@ const defaultRange = (): { from: string; to: string } => {
 const errorMessage = (e: unknown, fallback: string): string =>
   e instanceof Error && e.message ? e.message : fallback;
 
+const TILE_MIN_HEIGHT = 112;
+const TILE_LABEL_LINES = 3;
+
 /** Plain label-over-value tile, as the web renders it — no icon, no hint. */
 function MetricTile({ label, value }: { label: string; value: string }) {
+  const isFigure = value.length <= 12;
   return (
-    <View className="w-1/2 p-1.5">
+    <View className={`${isFigure ? "w-1/2" : "w-full"} p-1.5`}>
       <View
-        className="rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
-        style={CARD_SHADOW}
+        className="flex-1 justify-between rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+        style={[CARD_SHADOW, { minHeight: TILE_MIN_HEIGHT }]}
       >
-        <Text className="text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
+        <Text
+          className="text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
+          numberOfLines={TILE_LABEL_LINES}
+        >
           {label}
         </Text>
         <Text
-          className="mt-1.5 text-2xl font-bold text-gray-900 dark:text-white"
-          numberOfLines={1}
-          adjustsFontSizeToFit
+          className={`mt-1.5 font-bold text-gray-900 dark:text-white ${
+            isFigure ? "text-2xl" : "text-sm"
+          }`}
+          numberOfLines={isFigure ? 1 : 3}
+          adjustsFontSizeToFit={isFigure}
         >
           {value}
         </Text>
@@ -161,7 +169,10 @@ function ReportSkeleton() {
     <View className="-mx-1.5 flex-row flex-wrap">
       {Array.from({ length: 8 }).map((_, i) => (
         <View key={i} className="w-1/2 p-1.5">
-          <View className="gap-3 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+          <View
+            className="justify-between rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+            style={{ minHeight: TILE_MIN_HEIGHT }}
+          >
             <SkeletonBlock pulse={pulse} className="h-3 w-2/3" />
             <SkeletonBlock pulse={pulse} className="h-7 w-1/3" />
           </View>
@@ -189,9 +200,13 @@ export default function PhotoReportsScreen() {
     user?.role === "admin" ||
     user?.role === "location_manager";
 
-  const [report, setReport] = useState<string>(REPORT_OPTIONS[0].value as string);
+  const [report, setReport] = useState<string>(
+    REPORT_OPTIONS[0].value as string,
+  );
   const [range, setRange] = useState(defaultRange);
   const [sheet, setSheet] = useState<null | "report" | "date">(null);
+  const [daysMode, setDaysMode] = useState<ViewMode>("table");
+  const [auditMode, setAuditMode] = useState<ViewMode>("table");
 
   const [data, setData] = useState<PhotoReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -229,13 +244,8 @@ export default function PhotoReportsScreen() {
     }
   }, [canManage, effectiveLocationId, range.from, range.to, report, showToast]);
 
-  // First load, on a location change, and on picking a different report —
-  // otherwise the previous report's figures would sit under the new report's
-  // name until Run was pressed. Editing the dates still waits for Run, as on the
-  // web: that is a two-step choice, not one tap.
   useEffect(() => {
     void run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManage, effectiveLocationId, report]);
 
   const onRefresh = useCallback(async () => {
@@ -248,6 +258,16 @@ export default function PhotoReportsScreen() {
   }, [run]);
 
   const sections = data?.sections ?? [];
+  const byDay = data?.byDay ?? [];
+  const auditEntries = data?.auditEntries ?? [];
+  // The web shows the audit table (with its own empty state) for that report.
+  const showAudit = report === "audit" && loaded && !error;
+  const showEmpty =
+    loaded &&
+    !error &&
+    !showAudit &&
+    sections.length === 0 &&
+    byDay.length === 0;
 
   const reportLabel =
     REPORT_OPTIONS.find((o) => o.value === report)?.label ??
@@ -387,7 +407,7 @@ export default function PhotoReportsScreen() {
 
           {!loaded && loading && <ReportSkeleton />}
 
-          {loaded && !error && sections.length === 0 && (
+          {showEmpty && (
             <View className="items-center rounded-2xl border border-gray-100 bg-white p-8 dark:border-neutral-800 dark:bg-neutral-900">
               <Feather name="bar-chart-2" size={34} color="#D1D5DB" />
               <Text className="mt-3 font-bold text-gray-900 dark:text-white">
@@ -407,6 +427,22 @@ export default function PhotoReportsScreen() {
           {sections.map((section) => (
             <ReportSection key={section.key} section={section} />
           ))}
+
+          {byDay.length > 0 && (
+            <PhotoReportDaysSection
+              days={byDay}
+              mode={daysMode}
+              onModeChange={setDaysMode}
+            />
+          )}
+
+          {showAudit && (
+            <PhotoReportAuditSection
+              entries={auditEntries}
+              mode={auditMode}
+              onModeChange={setAuditMode}
+            />
+          )}
         </View>
       </ScrollView>
 
