@@ -2,7 +2,7 @@
   "expo": {
     "name": "ZapZone Admin",
     "slug": "zapzone-analytics-app",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/zapzone-assests/ZZ-icon.png",
     "scheme": "zapzoneanalyticsapp",
@@ -17,7 +17,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "versionCode": 4,
+      "versionCode": 5,
       "predictiveBackGestureEnabled": false,
       "package": "com.zapzone.analytics",
       "permissions": [
