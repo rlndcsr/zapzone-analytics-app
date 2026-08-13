@@ -6,6 +6,15 @@ import {
   type ViewStyle,
 } from "react-native";
 
+/**
+ * The soft — not pill — corner radius for buttons and fields on screens that
+ * have moved off the fully-rounded look. Pass it as `style={{ borderRadius:
+ * CONTROL_RADIUS }}`: NativeWind resolves conflicting utilities by CSS order,
+ * not string order, and `rounded-full` sorts after `rounded-xl`, so a className
+ * override would silently lose. The inline style wins.
+ */
+export const CONTROL_RADIUS = 12;
+
 type PrimaryButtonProps = {
   label: string;
   onPress: () => void;

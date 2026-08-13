@@ -24,7 +24,10 @@ import {
   type PhotoCameraState,
 } from "../../components/photos/PhotoCameraView";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { PrimaryButton } from "../../components/ui/PrimaryButton";
+import {
+  CONTROL_RADIUS,
+  PrimaryButton,
+} from "../../components/ui/PrimaryButton";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
@@ -652,6 +655,7 @@ export default function PhotoCaptureScreen() {
                 onPress={() => void startSession()}
                 disabled={!consent || busy}
                 loading={busy}
+                style={{ borderRadius: CONTROL_RADIUS }}
               />
             </Card>
           )}
@@ -673,7 +677,7 @@ export default function PhotoCaptureScreen() {
                 <Pressable
                   onPress={() => void takePhoto()}
                   disabled={cameraState !== "live" || atCap || busy}
-                  className={`h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] active:opacity-90 ${
+                  className={`h-14 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] active:opacity-90 ${
                     cameraState !== "live" || atCap || busy ? "opacity-60" : ""
                   }`}
                   accessibilityRole="button"
@@ -691,7 +695,7 @@ export default function PhotoCaptureScreen() {
                 <Pressable
                   onPress={() => void uploadPhoto()}
                   disabled={atCap || busy}
-                  className={`h-14 flex-row items-center justify-center gap-2 rounded-full border border-gray-200 bg-white active:opacity-80 dark:border-neutral-700 dark:bg-neutral-900 ${
+                  className={`h-14 flex-row items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white active:opacity-80 dark:border-neutral-700 dark:bg-neutral-900 ${
                     atCap || busy ? "opacity-60" : ""
                   }`}
                   accessibilityRole="button"
@@ -834,6 +838,7 @@ export default function PhotoCaptureScreen() {
                     label="Continue to delivery"
                     onPress={() => setStep("delivery")}
                     disabled={readyPhotos.length === 0 || busy}
+                    style={{ borderRadius: CONTROL_RADIUS }}
                   />
                 </View>
               </Card>
@@ -925,7 +930,7 @@ export default function PhotoCaptureScreen() {
                   </Text>
 
                   <View className="mb-4 flex-row items-center gap-2">
-                    <View className="h-12 flex-1 flex-row items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
+                    <View className="h-12 flex-1 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
                       <Feather name="search" size={16} color="#9CA3AF" />
                       <TextInput
                         value={query}
@@ -942,7 +947,7 @@ export default function PhotoCaptureScreen() {
                     <Pressable
                       onPress={() => void runSearch()}
                       disabled={query.trim().length < 2 || searching}
-                      className={`h-12 items-center justify-center rounded-lg bg-[#0644C7] px-5 active:opacity-90 ${
+                      className={`h-12 items-center justify-center rounded-xl bg-[#0644C7] px-5 active:opacity-90 ${
                         query.trim().length < 2 || searching ? "opacity-60" : ""
                       }`}
                       accessibilityRole="button"
@@ -1121,7 +1126,7 @@ export default function PhotoCaptureScreen() {
                 <Pressable
                   onPress={() => setStep("capture")}
                   disabled={busy}
-                  className="h-14 flex-1 flex-row items-center justify-center gap-2 rounded-full border border-gray-200 active:opacity-80 dark:border-neutral-700"
+                  className="h-14 flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-gray-200 active:opacity-80 dark:border-neutral-700"
                   accessibilityRole="button"
                 >
                   <Feather name="arrow-left" size={16} color={headerIcon} />
@@ -1141,6 +1146,7 @@ export default function PhotoCaptureScreen() {
                       busy ||
                       (method === "waiver_message" && selectableCount === 0)
                     }
+                    style={{ borderRadius: CONTROL_RADIUS }}
                   />
                 </View>
               </View>
@@ -1221,6 +1227,7 @@ export default function PhotoCaptureScreen() {
                   <PrimaryButton
                     label="Start a new session"
                     onPress={resetAll}
+                    style={{ borderRadius: CONTROL_RADIUS }}
                   />
                 </View>
               </Card>

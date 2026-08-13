@@ -7,7 +7,7 @@ import {
   WEEKDAYS_MIN as WEEKDAYS,
   WEEKDAY_NAMES_LOWER,
   addMonths,
-  buildMonthCells,
+  buildMonthWeeks,
   parseKey,
   toKey,
 } from "../../lib/date/calendar";
@@ -47,7 +47,9 @@ const LegendItem = ({ color, label }: { color: string; label: string }) => (
     <View
       style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: color }}
     />
-    <Text className="text-[11px] text-gray-500 dark:text-gray-400">{label}</Text>
+    <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+      {label}
+    </Text>
   </View>
 );
 
@@ -73,11 +75,7 @@ export function DatePickerSheet({
   const minKey = minDate ?? todayKey;
   // Availability mode = at least one availability set was supplied. Off for the
   // plain onsite-create calendar, which keeps its simple past-only disabling.
-  const availabilityMode = !!(
-    dayOffDates ||
-    limitedDates ||
-    availableWeekdays
-  );
+  const availabilityMode = !!(dayOffDates || limitedDates || availableWeekdays);
 
   // First day of the month currently shown in the grid.
   const [viewMonth, setViewMonth] = useState<Date>(() => new Date());
@@ -89,7 +87,7 @@ export function DatePickerSheet({
     setViewMonth(new Date(base.getFullYear(), base.getMonth(), 1));
   }, [visible, value, minKey]);
 
-  const cells = useMemo(() => buildMonthCells(viewMonth), [viewMonth]);
+  const weeks = useMemo(() => buildMonthWeeks(viewMonth), [viewMonth]);
 
   // Can't page earlier than the month that contains minKey.
   const minMonthStart = useMemo(() => {
@@ -155,120 +153,110 @@ export function DatePickerSheet({
           </Pressable>
         </View>
 
-        {/* Weekday header */}
+        {/* Weekday header — flex-1 columns, matching the grid below. */}
         <View className="flex-row mb-1">
-          {WEEKDAYS.map((w, i) => (
-            <View
-              key={i}
-              style={{ width: `${100 / 7}%` }}
-              className="items-center py-1"
-            >
+          {WEEKDAYS.map((w) => (
+            <View key={w} className="flex-1 items-center py-1">
               <Text className="text-[11px] font-medium text-gray-400">{w}</Text>
             </View>
           ))}
         </View>
 
-        {/* Day grid */}
-        <View className="flex-row flex-wrap">
-          {cells.map((key, i) => {
-            if (!key) {
+        {/* Day grid — one row per week so the seven columns always line up. */}
+        {weeks.map((week, wi) => (
+          <View key={`w${wi}`} className="flex-row">
+            {week.map((key, di) => {
+              if (!key) {
+                return <View key={`b${wi}-${di}`} className="flex-1 h-12" />;
+              }
+              const isSelected = key === value;
+              const isToday = key === todayKey;
+              const isPast = key < minKey;
+              const weekday = WEEKDAY_NAMES_LOWER[parseKey(key)!.getDay()];
+              const weekdayClosed =
+                !!availableWeekdays &&
+                availableWeekdays.size > 0 &&
+                !availableWeekdays.has(weekday);
+              const isFullDayOff = !!dayOffDates?.has(key);
+              const isLimited = !isFullDayOff && !!limitedDates?.has(key);
+              // Full day-off, past, and closed weekdays can't be tapped.
+              const disabled = isPast || weekdayClosed || isFullDayOff;
+              // Dot indicator colour (availability mode, selectable, non-selected).
+              const dotColor = isLimited
+                ? "#F59E0B"
+                : isToday
+                  ? PRIMARY
+                  : "#60A5FA";
+              const showDot = availabilityMode && !isSelected && !disabled;
               return (
                 <View
-                  key={`b${i}`}
-                  style={{ width: `${100 / 7}%` }}
-                  className="h-12"
-                />
-              );
-            }
-            const isSelected = key === value;
-            const isToday = key === todayKey;
-            const isPast = key < minKey;
-            const weekday = WEEKDAY_NAMES_LOWER[parseKey(key)!.getDay()];
-            const weekdayClosed =
-              !!availableWeekdays &&
-              availableWeekdays.size > 0 &&
-              !availableWeekdays.has(weekday);
-            const isFullDayOff = !!dayOffDates?.has(key);
-            const isLimited = !isFullDayOff && !!limitedDates?.has(key);
-            // Full day-off, past, and closed weekdays can't be tapped.
-            const disabled = isPast || weekdayClosed || isFullDayOff;
-            // Dot indicator colour (availability mode, selectable, non-selected).
-            const dotColor = isLimited
-              ? "#F59E0B"
-              : isToday
-                ? PRIMARY
-                : "#60A5FA";
-            const showDot =
-              availabilityMode && !isSelected && !disabled;
-            return (
-              <View
-                key={key}
-                style={{ width: `${100 / 7}%` }}
-                className="h-12 items-center justify-center"
-              >
-                <Pressable
-                  onPress={() => !disabled && onSelect(key)}
-                  disabled={disabled}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isSelected, disabled }}
-                  accessibilityLabel={key}
-                  className={`w-10 h-10 rounded-full items-center justify-center ${
-                    isSelected
-                      ? "bg-[#0644C7]"
-                      : isFullDayOff
-                        ? "bg-red-50 dark:bg-red-900/20"
-                        : isLimited
-                          ? "bg-amber-50 dark:bg-amber-900/20"
-                          : isToday
-                            ? "bg-blue-50 dark:bg-blue-900/20"
-                            : availabilityMode && !disabled
-                              ? "bg-blue-50/60 dark:bg-blue-900/10"
-                              : "active:bg-gray-100 dark:active:bg-neutral-800"
-                  }`}
-                  style={
-                    isSelected
-                      ? { backgroundColor: PRIMARY }
-                      : isLimited
-                        ? { borderWidth: 1, borderColor: "#FDE68A" }
-                        : isToday
-                          ? { borderWidth: 1, borderColor: "#93C5FD" }
-                          : undefined
-                  }
+                  key={key}
+                  className="flex-1 h-12 items-center justify-center"
                 >
-                  <Text
-                    className={`text-sm ${
+                  <Pressable
+                    onPress={() => !disabled && onSelect(key)}
+                    disabled={disabled}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected, disabled }}
+                    accessibilityLabel={key}
+                    className={`w-10 h-10 rounded-full items-center justify-center ${
                       isSelected
-                        ? "text-white font-bold"
+                        ? "bg-[#0644C7]"
                         : isFullDayOff
-                          ? "text-red-300 line-through"
-                          : disabled
-                            ? "text-gray-300 dark:text-neutral-700"
-                            : isLimited
-                              ? "text-amber-800 dark:text-amber-300 font-medium"
-                              : isToday
-                                ? "text-[#0644C7] dark:text-blue-300 font-bold"
-                                : "text-gray-800 dark:text-gray-100"
+                          ? "bg-red-50 dark:bg-red-900/20"
+                          : isLimited
+                            ? "bg-amber-50 dark:bg-amber-900/20"
+                            : isToday
+                              ? "bg-blue-50 dark:bg-blue-900/20"
+                              : availabilityMode && !disabled
+                                ? "bg-blue-50/60 dark:bg-blue-900/10"
+                                : "active:bg-gray-100 dark:active:bg-neutral-800"
                     }`}
+                    style={
+                      isSelected
+                        ? { backgroundColor: PRIMARY }
+                        : isLimited
+                          ? { borderWidth: 1, borderColor: "#FDE68A" }
+                          : isToday
+                            ? { borderWidth: 1, borderColor: "#93C5FD" }
+                            : undefined
+                    }
                   >
-                    {Number(key.substring(8, 10))}
-                  </Text>
-                  {showDot && (
-                    <View
-                      style={{
-                        position: "absolute",
-                        bottom: 3,
-                        width: 4,
-                        height: 4,
-                        borderRadius: 2,
-                        backgroundColor: dotColor,
-                      }}
-                    />
-                  )}
-                </Pressable>
-              </View>
-            );
-          })}
-        </View>
+                    <Text
+                      className={`text-sm ${
+                        isSelected
+                          ? "text-white font-bold"
+                          : isFullDayOff
+                            ? "text-red-300 line-through"
+                            : disabled
+                              ? "text-gray-300 dark:text-neutral-700"
+                              : isLimited
+                                ? "text-amber-800 dark:text-amber-300 font-medium"
+                                : isToday
+                                  ? "text-[#0644C7] dark:text-blue-300 font-bold"
+                                  : "text-gray-800 dark:text-gray-100"
+                      }`}
+                    >
+                      {Number(key.substring(8, 10))}
+                    </Text>
+                    {showDot && (
+                      <View
+                        style={{
+                          position: "absolute",
+                          bottom: 3,
+                          width: 4,
+                          height: 4,
+                          borderRadius: 2,
+                          backgroundColor: dotColor,
+                        }}
+                      />
+                    )}
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        ))}
 
         {/* Legend */}
         {availabilityMode ? (

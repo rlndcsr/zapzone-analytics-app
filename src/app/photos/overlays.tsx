@@ -20,7 +20,10 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { ConfirmationModal } from "../../components/ui/ConfirmationModal";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { PrimaryButton } from "../../components/ui/PrimaryButton";
+import {
+  CONTROL_RADIUS,
+  PrimaryButton,
+} from "../../components/ui/PrimaryButton";
 import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import {
@@ -41,9 +44,6 @@ import {
 } from "../../services/photosService";
 
 const PRIMARY = "#0644C7";
-
-/** Buttons and fields on this screen share one soft — not pill — radius. */
-const CONTROL_RADIUS = 12;
 
 /** Earliest selectable schedule day — the web's datetime-local has no floor. */
 const MIN_SCHEDULE_DATE = "2020-01-01";

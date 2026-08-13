@@ -91,3 +91,21 @@ export const buildMonthCells = (viewMonth: Date): (string | null)[] => {
   }
   return out;
 };
+
+/**
+ * The same month grid as rows of exactly seven cells, trailing row padded with
+ * `null`.
+ *
+ * Render a calendar week-by-week with `flex-1` cells, never as one wrapping row
+ * of `width: ${100 / 7}%` cells: 100/7 is not exactly representable, seven of
+ * them measure a hair over 100%, and the seventh cell wraps. That empties the
+ * Saturday column and shifts every following date one column left, which reads
+ * as a plausible calendar rather than an obviously broken one.
+ */
+export const buildMonthWeeks = (viewMonth: Date): (string | null)[][] => {
+  const cells = buildMonthCells(viewMonth);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (string | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+};

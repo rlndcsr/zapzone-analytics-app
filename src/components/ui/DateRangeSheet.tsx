@@ -5,12 +5,12 @@ import { Pressable, Text, View } from "react-native";
 import {
   MONTHS,
   WEEKDAYS_MIN as WEEKDAYS,
-  buildMonthCells,
+  buildMonthWeeks,
   formatShortDate,
   parseKey,
 } from "../../lib/date/calendar";
 import { BottomSheet } from "./BottomSheet";
-import { PrimaryButton } from "./PrimaryButton";
+import { CONTROL_RADIUS, PrimaryButton } from "./PrimaryButton";
 
 // Re-exported for the many screens that import it from here.
 export { formatShortDate } from "../../lib/date/calendar";
@@ -52,10 +52,7 @@ export function DateRangeSheet({
     setViewMonth(new Date(base.getFullYear(), base.getMonth(), 1));
   }, [visible, initialStart, initialEnd]);
 
-  const cells = useMemo<(string | null)[]>(
-    () => buildMonthCells(viewMonth),
-    [viewMonth],
-  );
+  const weeks = useMemo(() => buildMonthWeeks(viewMonth), [viewMonth]);
 
   const onTapDay = (key: string) => {
     // No start yet, or a complete range exists → begin a fresh range.
@@ -125,61 +122,69 @@ export function DateRangeSheet({
           </Pressable>
         </View>
 
-        {/* Weekday header */}
+        {/* Weekday header — flex-1 columns, matching the grid below. */}
         <View className="flex-row mb-1">
-          {WEEKDAYS.map((w, i) => (
-            <View key={i} style={{ width: `${100 / 7}%` }} className="items-center py-1">
+          {WEEKDAYS.map((w) => (
+            <View key={w} className="flex-1 items-center py-1">
               <Text className="text-[11px] font-medium text-gray-400">{w}</Text>
             </View>
           ))}
         </View>
 
-        {/* Day grid */}
-        <View className="flex-row flex-wrap">
-          {cells.map((key, i) => {
-            if (!key) {
-              return <View key={`b${i}`} style={{ width: `${100 / 7}%` }} className="h-11" />;
-            }
-            const isStart = key === start;
-            const isEnd = key === end;
-            const isEndpoint = isStart || isEnd;
-            const inRange = !!start && !!end && key > start && key < end;
-            return (
-              <View
-                key={key}
-                style={{ width: `${100 / 7}%` }}
-                className={`h-11 items-center justify-center ${
-                  inRange ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                } ${isStart && end ? "rounded-l-full bg-blue-50 dark:bg-blue-900/20" : ""} ${
-                  isEnd && start !== end ? "rounded-r-full bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Pressable
-                  onPress={() => onTapDay(key)}
-                  className={`w-9 h-9 rounded-full items-center justify-center ${
-                    isEndpoint ? "bg-[#0644C7]" : "active:bg-gray-100 dark:active:bg-neutral-800"
+        {/* Day grid — one row per week so the seven columns always line up. */}
+        {weeks.map((week, wi) => (
+          <View key={`w${wi}`} className="flex-row">
+            {week.map((key, di) => {
+              if (!key) {
+                return <View key={`b${wi}-${di}`} className="flex-1 h-11" />;
+              }
+              const isStart = key === start;
+              const isEnd = key === end;
+              const isEndpoint = isStart || isEnd;
+              const inRange = !!start && !!end && key > start && key < end;
+              return (
+                <View
+                  key={key}
+                  className={`flex-1 h-11 items-center justify-center ${
+                    inRange ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  } ${isStart && end ? "rounded-l-full bg-blue-50 dark:bg-blue-900/20" : ""} ${
+                    isEnd && start !== end
+                      ? "rounded-r-full bg-blue-50 dark:bg-blue-900/20"
+                      : ""
                   }`}
                 >
-                  <Text
-                    className={`text-sm ${
+                  <Pressable
+                    onPress={() => onTapDay(key)}
+                    className={`w-9 h-9 rounded-full items-center justify-center ${
                       isEndpoint
-                        ? "text-white font-bold"
-                        : "text-gray-800 dark:text-gray-100"
+                        ? "bg-[#0644C7]"
+                        : "active:bg-gray-100 dark:active:bg-neutral-800"
                     }`}
+                    accessibilityRole="button"
+                    accessibilityLabel={key}
                   >
-                    {Number(key.substring(8, 10))}
-                  </Text>
-                </Pressable>
-              </View>
-            );
-          })}
-        </View>
+                    <Text
+                      className={`text-sm ${
+                        isEndpoint
+                          ? "text-white font-bold"
+                          : "text-gray-800 dark:text-gray-100"
+                      }`}
+                    >
+                      {Number(key.substring(8, 10))}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        ))}
 
         <View className="mt-5">
           <PrimaryButton
             label="Apply Range"
             onPress={() => start && end && onApply(start, end)}
             disabled={!canApply}
+            style={{ borderRadius: CONTROL_RADIUS }}
           />
         </View>
       </View>
