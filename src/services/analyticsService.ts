@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/api";
+import { ApiError, apiRequest, apiUrl } from "../lib/api";
 
 /* ================================================================== */
 /* Shared                                                              */
@@ -542,6 +542,297 @@ export async function fetchCompanyAnalytics({
     })),
     waivers: mapWaivers(res.waivers),
   };
+}
+
+/* ================================================================== */
+/* Performance (location) Analytics                                    */
+/* ================================================================== */
+
+/**
+ * The web's `/manager/analytics` payload (`GET /api/analytics/location`) — a
+ * different report from the company one above: it is scoped to the manager's
+ * own location and carries hourly/weekly series the company report has no
+ * equivalent for.
+ */
+export type LocationReport = {
+  location: { id: number | null; name: string; fullAddress: string };
+  keyMetrics: {
+    locationRevenue: KeyMetric;
+    packageBookings: KeyMetric;
+    ticketSales: KeyMetric;
+    totalVisitors: KeyMetric;
+    activePackages: KeyMetric;
+    activeAttractions: KeyMetric;
+    /** Both only sent once the location has events, as on the web. */
+    eventTicketSales: KeyMetric | null;
+    activeEvents: KeyMetric | null;
+  };
+  hourlyRevenue: {
+    label: string;
+    revenue: number;
+    bookings: number;
+    attractionPurchases: number;
+    eventPurchases: number;
+  }[];
+  dailyRevenue: {
+    /** Short axis label ("Mon"); the full "Mon, Jan 5" is `fullLabel`. */
+    label: string;
+    fullLabel: string;
+    revenue: number;
+    bookings: number;
+    attractionPurchases: number;
+    participants: number;
+    eventPurchases: number;
+  }[];
+  weeklyTrend: {
+    week: string;
+    revenue: number;
+    bookings: number;
+    tickets: number;
+    eventTickets: number;
+  }[];
+  packagePerformance: {
+    name: string;
+    bookings: number;
+    revenue: number;
+    participants: number;
+    avgPartySize: number;
+  }[];
+  attractionPerformance: {
+    name: string;
+    ticketsSold: number;
+    revenue: number;
+  }[];
+  timeSlotPerformance: {
+    label: string;
+    totalRevenue: number;
+    bookings: number;
+    ticketsSold: number;
+    totalTransactions: number;
+  }[];
+  /** Absent/empty hides the Event Performance table, as the web card does. */
+  eventPerformance: {
+    name: string;
+    dateType: string;
+    purchases: number;
+    ticketsSold: number;
+    revenue: number;
+    price: number;
+  }[];
+};
+
+/**
+ * A period-over-period metric. The web appends "vs last period" to every
+ * `change` string on this page, so do it here rather than in the screen.
+ */
+function mapChangeMetric(raw: unknown): KeyMetric | null {
+  const m = mapKeyMetric(raw);
+  if (!m) return null;
+  return { ...m, change: m.change ? `${m.change} vs last period` : null };
+}
+
+/**
+ * An "N of M active" metric (active packages / attractions / events). The web
+ * shows that sentence in the change slot and always colors it green.
+ */
+function mapActiveMetric(raw: unknown): KeyMetric | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const value = num(r.value);
+  return {
+    value,
+    change: `${count(value)} of ${count(num(r.total))} active`,
+    info: r.info != null ? String(r.info) : null,
+    trend: "up",
+  };
+}
+
+/** Thousands-separated, matching the screens' own formatting. */
+const count = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+/** "Mon, Jan 5" — the web's `displayDate` for the Daily Performance axis. */
+function dailyLabel(day: string, date: string): string {
+  const [y, m, d] = String(date).split("-").map(Number);
+  if (!y || !m || !d) return day;
+  const shown = new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  return `${day}, ${shown}`;
+}
+
+export async function fetchLocationAnalytics({
+  token,
+  locationId,
+  dateRange = "30d",
+  startDate,
+  endDate,
+}: {
+  token: string;
+  locationId: number;
+  dateRange?: string;
+  /** Only sent for dateRange "custom", matching the web request. */
+  startDate?: string;
+  endDate?: string;
+}): Promise<LocationReport> {
+  const qs = new URLSearchParams({
+    location_id: String(locationId),
+    date_range: dateRange,
+  });
+  if (dateRange === "custom" && startDate) qs.append("start_date", startDate);
+  if (dateRange === "custom" && endDate) qs.append("end_date", endDate);
+
+  const res = await apiRequest<Record<string, unknown>>(
+    `/api/analytics/location?${qs.toString()}`,
+    { token },
+  );
+  const rows = (key: string): Record<string, unknown>[] =>
+    ((res[key] ?? []) as Record<string, unknown>[]) ?? [];
+
+  const location = (res.location ?? {}) as Record<string, unknown>;
+  const km = (res.key_metrics ?? {}) as Record<string, unknown>;
+
+  return {
+    location: {
+      id: location.id != null ? Number(location.id) : null,
+      name: String(location.name ?? ""),
+      fullAddress: String(location.full_address ?? location.address ?? ""),
+    },
+    keyMetrics: {
+      locationRevenue: mapChangeMetric(km.location_revenue) ?? EMPTY_METRIC,
+      packageBookings: mapChangeMetric(km.package_bookings) ?? EMPTY_METRIC,
+      ticketSales: mapChangeMetric(km.ticket_sales) ?? EMPTY_METRIC,
+      totalVisitors: mapChangeMetric(km.total_visitors) ?? EMPTY_METRIC,
+      activePackages: mapActiveMetric(km.active_packages) ?? EMPTY_METRIC,
+      activeAttractions: mapActiveMetric(km.active_attractions) ?? EMPTY_METRIC,
+      eventTicketSales: mapChangeMetric(km.event_ticket_sales),
+      activeEvents: mapActiveMetric(km.active_events),
+    },
+    hourlyRevenue: rows("hourly_revenue").map((r) => ({
+      label: String(r.label ?? ""),
+      revenue: num(r.revenue),
+      bookings: num(r.bookings),
+      attractionPurchases: num(r.attraction_purchases),
+      eventPurchases: num(r.event_purchases),
+    })),
+    dailyRevenue: rows("daily_revenue").map((r) => {
+      const day = String(r.day ?? "");
+      return {
+        label: day.slice(0, 3),
+        fullLabel: dailyLabel(day, String(r.date ?? "")),
+        revenue: num(r.revenue),
+        bookings: num(r.bookings),
+        attractionPurchases: num(r.attraction_purchases),
+        participants: num(r.participants),
+        eventPurchases: num(r.event_purchases),
+      };
+    }),
+    weeklyTrend: rows("weekly_trend").map((r) => ({
+      week: String(r.week ?? ""),
+      revenue: num(r.revenue),
+      bookings: num(r.bookings),
+      tickets: num(r.tickets),
+      eventTickets: num(r.event_tickets),
+    })),
+    packagePerformance: rows("package_performance").map((r) => ({
+      name: String(r.name ?? "—"),
+      bookings: num(r.bookings),
+      revenue: num(r.revenue),
+      participants: num(r.participants),
+      avgPartySize: num(r.avg_party_size),
+    })),
+    attractionPerformance: rows("attraction_performance").map((r) => ({
+      name: String(r.name ?? "—"),
+      ticketsSold: num(r.tickets_sold),
+      revenue: num(r.revenue),
+    })),
+    timeSlotPerformance: rows("time_slot_performance").map((r) => ({
+      label: String(r.label ?? ""),
+      totalRevenue: num(r.total_revenue),
+      bookings: num(r.bookings),
+      ticketsSold: num(r.tickets_sold),
+      totalTransactions: num(r.total_transactions),
+    })),
+    eventPerformance: rows("event_performance").map((r) => ({
+      name: String(r.name ?? "—"),
+      dateType: String(r.date_type ?? ""),
+      purchases: num(r.purchases),
+      ticketsSold: num(r.tickets_sold),
+      revenue: num(r.revenue),
+      price: num(r.price),
+    })),
+  };
+}
+
+/** The web's export modal sections, same ids and order. */
+export type LocationExportSection =
+  | "metrics"
+  | "revenue"
+  | "packages"
+  | "attractions"
+  | "timeslots"
+  | "events";
+
+/**
+ * POST /api/analytics/location/export — returns the raw file body. Bypasses
+ * {@link apiRequest} because a CSV export is not JSON, and the caller writes
+ * the text straight to a file to share.
+ */
+export async function exportLocationAnalytics({
+  token,
+  locationId,
+  dateRange,
+  format,
+  sections,
+  startDate,
+  endDate,
+}: {
+  token: string;
+  locationId: number;
+  dateRange: string;
+  format: "json" | "csv";
+  sections: LocationExportSection[];
+  startDate?: string;
+  endDate?: string;
+}): Promise<string> {
+  const res = await fetch(apiUrl("/api/analytics/location/export"), {
+    method: "POST",
+    headers: {
+      Accept: format === "csv" ? "text/csv" : "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      location_id: locationId,
+      date_range: dateRange,
+      format,
+      sections,
+      ...(dateRange === "custom" && startDate ? { start_date: startDate } : {}),
+      ...(dateRange === "custom" && endDate ? { end_date: endDate } : {}),
+    }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    let message = "Failed to export analytics. Please try again.";
+    try {
+      const parsed = JSON.parse(text) as { message?: string };
+      if (parsed?.message) message = parsed.message;
+    } catch {
+      // Non-JSON error body — keep the generic message.
+    }
+    throw new ApiError(message, res.status);
+  }
+
+  // Pretty-print JSON so the shared file is readable; CSV passes through.
+  if (format === "json") {
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return text;
+    }
+  }
+  return text;
 }
 
 /** Read the `waivers` block; absent → null so the tiles/charts hide (web `waivers &&`). */
