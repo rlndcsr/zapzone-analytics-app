@@ -788,6 +788,8 @@ export type PhotoDeliveryLogFilters = {
 };
 
 type ApiDeliveryLogRow = Partial<ApiDelivery> & {
+  /** What the log endpoint actually sends (`presentDelivery`). */
+  photo_session_id?: number | null;
   session_id?: number | null;
   session?: {
     id?: number | null;
@@ -836,7 +838,7 @@ function mapDeliveryLogRow(raw: ApiDeliveryLogRow): PhotoDeliveryLogRow {
     status: raw.status ?? "queued",
     isDuplicate: Boolean(raw.is_duplicate),
     duplicateOfId: raw.duplicate_of_id ?? null,
-    sessionId: raw.session?.id ?? raw.session_id ?? null,
+    sessionId: raw.photo_session_id ?? raw.session?.id ?? raw.session_id ?? null,
     sessionSource: raw.session?.source ?? raw.session_source ?? raw.source ?? null,
     locationName:
       raw.session?.location_name ??
