@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
 import { EmailCampaignsTable } from "../../components/ui/EmailCampaignsTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { NavTileCard } from "../../components/ui/NavTileCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -334,19 +335,28 @@ const EmailCampaigns = () => {
             </Text>
           </View>
 
-          {/* Nav: Templates · Notifications pill */}
-          <FilterPill>
-            <PillSegment
-              label="Templates"
-              onPress={() => router.push("/email-campaign/email-templates")}
-              renderIcon={(c) => <Feather name="mail" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Notifications"
-              onPress={() => router.push("/email-campaign/email-notification")}
-              renderIcon={(c) => <Feather name="bell" size={15} color={c} />}
-            />
-          </FilterPill>
+          {/* Nav: Templates · Notifications — side-by-side square cards, the
+              same design the other modules' sub-page shortcuts use. */}
+          <View className="flex-row items-stretch gap-3">
+            <View className="flex-1">
+              <NavTileCard
+                icon="mail"
+                title="Email Templates"
+                desc="Reusable email templates"
+                cta="View Templates"
+                onPress={() => router.push("/email-campaign/email-templates")}
+              />
+            </View>
+            <View className="flex-1">
+              <NavTileCard
+                icon="bell"
+                title="Notifications"
+                desc="Automated booking & payment emails"
+                cta="View Notifications"
+                onPress={() => router.push("/email-campaign/email-notification")}
+              />
+            </View>
+          </View>
 
           <Pressable
             onPress={() => router.push("/email-campaign/create-campaign")}

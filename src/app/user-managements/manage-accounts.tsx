@@ -32,7 +32,7 @@ import {
 } from "../../components/ui/FormControls";
 import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { NavRowCard } from "../../components/ui/NavRowCard";
+import { NavTileCard } from "../../components/ui/NavTileCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -442,10 +442,10 @@ const ActionButton = ({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      className={`h-12 rounded-xl items-center justify-center flex-row gap-2 mb-3 ${
+      className={`flex-1 h-12 rounded-xl items-center justify-center flex-row gap-2 ${
         primary
           ? "bg-[#0644C7] active:opacity-90"
-          : "border border-gray-200 dark:border-neutral-700"
+          : "border border-gray-200 dark:border-neutral-700 active:opacity-70"
       }`}
     >
       <Feather
@@ -1368,40 +1368,48 @@ const ManageAccounts = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Page actions — the same full-width NavRowCard the Bookings module
-              uses for Space Schedule, stacked above the primary button. */}
-          <View className="gap-3 mb-3">
-            <NavRowCard
-              icon="activity"
-              title="Activity Log"
-              desc="Review staff account activity"
-              onPress={() =>
-                router.push("/user-managements/activity-logs" as never)
-              }
-            />
-            <NavRowCard
-              icon="calendar"
-              title="Day Offs"
-              desc="Manage blocked dates and holidays"
-              onPress={() => router.push("/user-managements/day-offs" as never)}
-            />
-            {canManage && (
-              <NavRowCard
-                icon="send"
-                title="Send Invitation"
-                desc="Invite a new staff member by email"
-                onPress={openInvite}
+          {/* Page actions — a 2-column grid of square cards, the same design
+              the Bookings / Packages / Waivers modules use. */}
+          <View className="-mx-1.5 flex-row flex-wrap">
+            <View className="mb-3 w-1/2 px-1.5">
+              <NavTileCard
+                icon="activity"
+                title="Activity Log"
+                desc="Review staff account activity"
+                cta="View Log"
+                onPress={() =>
+                  router.push("/user-managements/activity-logs" as never)
+                }
               />
-            )}
+            </View>
+            <View className="mb-3 w-1/2 px-1.5">
+              <NavTileCard
+                icon="calendar"
+                title="Day Offs"
+                desc="Blocked dates and holidays"
+                cta="Manage Day Offs"
+                onPress={() =>
+                  router.push("/user-managements/day-offs" as never)
+                }
+              />
+            </View>
           </View>
 
+          {/* The two write actions, side by side above the list. */}
           {canManage && (
-            <ActionButton
-              icon="user-plus"
-              label="Create Staff Account"
-              onPress={openCreate}
-              variant="primary"
-            />
+            <View className="flex-row items-stretch gap-3 mb-3">
+              <ActionButton
+                icon="send"
+                label="Send Invitation"
+                onPress={openInvite}
+              />
+              <ActionButton
+                icon="plus"
+                label="Staff Account"
+                onPress={openCreate}
+                variant="primary"
+              />
+            </View>
           )}
 
           {/* Error state */}

@@ -28,6 +28,7 @@ import {
   TextField,
 } from "../../components/ui/FormControls";
 import { KpiCard } from "../../components/ui/KpiCard";
+import { NavTileCard } from "../../components/ui/NavTileCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -1401,86 +1402,84 @@ const ManageAttendants = () => {
             </View>
           )}
 
-          {/* Sub-navigation */}
-          <View className="flex-row gap-3 mb-3">
-            <Pressable
-              onPress={() =>
-                router.push("/user-managements/activity-logs" as never)
-              }
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="activity" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                Activity Log
-              </Text>
-              <Feather name="chevron-right" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
-              onPress={() => router.push("/user-managements/day-offs" as never)}
-              className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
-            >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                Day Offs
-              </Text>
-              <Feather name="chevron-right" size={14} color="#9CA3AF" />
-            </Pressable>
+          {/* Sub-navigation — square cards, the same design the other modules
+              use for their sub-page shortcuts. */}
+          <View className="-mx-1.5 flex-row flex-wrap">
+            <View className="mb-3 w-1/2 px-1.5">
+              <NavTileCard
+                icon="activity"
+                title="Activity Log"
+                desc="Review staff account activity"
+                cta="View Log"
+                onPress={() =>
+                  router.push("/user-managements/activity-logs" as never)
+                }
+              />
+            </View>
+            <View className="mb-3 w-1/2 px-1.5">
+              <NavTileCard
+                icon="calendar"
+                title="Day Offs"
+                desc="Blocked dates and holidays"
+                cta="Manage Day Offs"
+                onPress={() =>
+                  router.push("/user-managements/day-offs" as never)
+                }
+              />
+            </View>
           </View>
 
-          {/* Primary action — Create New Staff */}
+          {/* The two write actions, side by side. */}
           {canManage && (
-            <Pressable
-              onPress={openCreate}
-              className="h-12 rounded-xl items-center justify-center flex-row gap-2 bg-[#0644C7] mb-3"
-              accessibilityRole="button"
-              accessibilityLabel="Create New Staff"
-            >
-              <Feather name="user-plus" size={18} color="#FFFFFF" />
-              <Text
-                numberOfLines={1}
-                className="text-white font-semibold text-base"
-              >
-                Create New Staff
-              </Text>
-            </Pressable>
-          )}
-
-          {/* Secondary actions */}
-          {canManage && (
-            <View className="flex-row gap-3 mb-5">
+            <View className="flex-row items-stretch gap-3 mb-3">
               <Pressable
                 onPress={openInvite}
-                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+                className="flex-1 h-12 flex-row items-center justify-center gap-2 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+                accessibilityRole="button"
+                accessibilityLabel="Send Invitation"
               >
                 <Feather name="send" size={16} color={PRIMARY} />
                 <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                   numberOfLines={1}
+                  className="text-sm font-semibold text-gray-700 dark:text-gray-200"
                 >
                   Send Invitation
                 </Text>
               </Pressable>
 
               <Pressable
-                onPress={exportCsv}
-                className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+                onPress={openCreate}
+                className="flex-1 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] active:opacity-90"
+                accessibilityRole="button"
+                accessibilityLabel="New Staff"
               >
-                <Feather name="download" size={16} color={PRIMARY} />
+                <Feather name="plus" size={18} color="#FFFFFF" />
                 <Text
-                  className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
                   numberOfLines={1}
+                  className="text-white font-semibold text-base"
                 >
-                  Export CSV
+                  New Staff
                 </Text>
               </Pressable>
             </View>
+          )}
+
+          {/* Export */}
+          {canManage && (
+            <Pressable
+              onPress={exportCsv}
+              className="h-12 flex-row items-center justify-center gap-2 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70 mb-5"
+              accessibilityRole="button"
+              accessibilityLabel="Export CSV"
+            >
+              <Feather name="download" size={16} color={PRIMARY} />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Export CSV
+              </Text>
+            </Pressable>
           )}
 
           {/* Error state */}

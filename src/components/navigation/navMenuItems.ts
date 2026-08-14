@@ -73,7 +73,7 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
     key: "email",
     label: "Email Campaign",
     icon: "mail",
-    route: "/email-campaign/email-templates",
+    route: "/email-campaign/campaigns",
   },
   {
     key: "payments",

@@ -23,7 +23,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
-import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import {
   countActiveWaiverFilters,
@@ -70,38 +69,112 @@ const CARD_SHADOW = {
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
-/** Sub-page shortcuts, one full-width row each (see {@link NavRowCard}). */
-const NAV_ITEMS: {
+type NavItem = {
   label: string;
   desc: string;
+  cta: string;
   icon: ComponentIconName;
   route: string;
-}[] = [
+};
+
+/** Sub-page shortcuts, rendered as a 2-column grid of square cards (the same
+ *  design the Packages / Attractions / Events / Bookings modules use). */
+const NAV_ITEMS: NavItem[] = [
   {
     label: "Templates",
     desc: "Waiver templates",
+    cta: "View Templates",
     icon: "file-text",
     route: "/waivers/templates",
   },
   {
     label: "Groups Invite",
     desc: "Invite groups to your space",
+    cta: "Invite Groups",
     icon: "users",
     route: "/waivers/group-invites",
   },
   {
     label: "Reports",
     desc: "View waiver reports",
+    cta: "View Reports",
     icon: "bar-chart-2",
     route: "/waivers/reports",
   },
   {
     label: "Deletion Log",
     desc: "View deletion log",
+    cta: "View Log",
     icon: "trash-2",
     route: "/waivers/deletion-log",
   },
 ];
+
+/** Appended to the grid for company admins only. */
+const SETTINGS_NAV_ITEM: NavItem = {
+  label: "Settings",
+  desc: "Company-wide waiver defaults",
+  cta: "Open Settings",
+  icon: "settings",
+  route: "/waivers/waiver-settings",
+};
+
+const NAV_CARD_SHADOW = {
+  shadowColor: "#424242",
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.04,
+  shadowRadius: 6,
+  elevation: 1,
+} as const;
+
+/** One square shortcut tile in the grid above the waiver records. */
+const NavSquareCard = ({
+  icon,
+  title,
+  desc,
+  cta,
+  onPress,
+}: {
+  icon: ComponentIconName;
+  title: string;
+  desc: string;
+  cta: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+    style={NAV_CARD_SHADOW}
+    accessibilityRole="button"
+    accessibilityLabel={title}
+  >
+    <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+      <Feather name={icon} size={20} color={PRIMARY} />
+    </View>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+    >
+      {title}
+    </Text>
+    <Text
+      numberOfLines={2}
+      style={{ minHeight: 28 }}
+      className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+    >
+      {desc}
+    </Text>
+    <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+      <Text
+        numberOfLines={1}
+        className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+      >
+        {cta}
+      </Text>
+      <Feather name="chevron-right" size={16} color={PRIMARY} />
+    </View>
+  </Pressable>
+);
 
 // Statuses the backend supports on the Records filter (mirrors the web select;
 // there is no "all statuses" fetch, so one status is always active).
@@ -619,28 +692,23 @@ const Waivers = () => {
         }
       >
         <View className="px-5 mt-5">
-          {/* Sub-page shortcuts — one full-width row per item, the same design
-              the Packages / Attractions / Events modules use. */}
-          <View className="gap-3 mb-3">
-            {NAV_ITEMS.map((item) => (
-              <NavRowCard
-                key={item.route}
-                icon={item.icon}
-                title={item.label}
-                desc={item.desc}
-                onPress={() => router.push(item.route as never)}
-              />
+          {/* Sub-page shortcuts — a 2-column grid of square cards. Settings is
+              company-admin only, so the grid is 4 or 5 cards long. */}
+          <View className="flex-row flex-wrap -mx-1.5">
+            {(isCompanyAdmin
+              ? [...NAV_ITEMS, SETTINGS_NAV_ITEM]
+              : NAV_ITEMS
+            ).map((item) => (
+              <View key={item.route} className="w-1/2 px-1.5 mb-3">
+                <NavSquareCard
+                  icon={item.icon}
+                  title={item.label}
+                  desc={item.desc}
+                  cta={item.cta}
+                  onPress={() => router.push(item.route as never)}
+                />
+              </View>
             ))}
-            {isCompanyAdmin && (
-              <NavRowCard
-                icon="settings"
-                title="Settings"
-                desc="Company-wide waiver defaults"
-                onPress={() =>
-                  router.push("/waivers/waiver-settings" as never)
-                }
-              />
-            )}
           </View>
 
           <Pressable

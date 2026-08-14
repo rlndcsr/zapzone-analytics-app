@@ -44,7 +44,6 @@ import {
   PillSegment,
 } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { NavRowCard } from "../../components/ui/NavRowCard";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { ProcessPaymentSheet } from "../../components/ui/ProcessPaymentSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
@@ -379,30 +378,41 @@ const BookingCard = ({
   );
 };
 
-/** Sub-page shortcuts, one full-width row each (same design as Packages'
- *  Space / Add-ons / Promos). Check-in keeps its own card above. */
-const NAV_ROWS: {
+/** Module shortcuts, rendered as a 2-column grid of square cards (the same
+ *  design the Attractions / Events modules use). */
+const NAV_CARDS: {
   icon: ComponentIconName;
   title: string;
   desc: string;
+  cta: string;
   route: string;
 }[] = [
+  {
+    icon: "camera",
+    title: "Check-in",
+    desc: "Checking in customers",
+    cta: "Scan QR Code",
+    route: "/bookings/check-in",
+  },
   {
     icon: "grid",
     title: "Space Schedule",
     desc: "View all customer bookings",
+    cta: "View Schedule",
     route: "/bookings/space-schedule",
   },
   {
     icon: "map-pin",
     title: "Location Requests",
     desc: "Review location change requests",
+    cta: "Review Requests",
     route: "/bookings/location-requests",
   },
   {
     icon: "calendar",
     title: "Calendar View",
     desc: "Browse bookings on a calendar",
+    cta: "Open Calendar",
     route: "/bookings/calendar",
   },
 ];
@@ -414,6 +424,55 @@ const NAV_CARD_SHADOW = {
   shadowRadius: 6,
   elevation: 1,
 } as const;
+
+/** One square shortcut tile in the grid above the KPIs. */
+const NavSquareCard = ({
+  icon,
+  title,
+  desc,
+  cta,
+  onPress,
+}: {
+  icon: ComponentIconName;
+  title: string;
+  desc: string;
+  cta: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+    style={NAV_CARD_SHADOW}
+    accessibilityRole="button"
+    accessibilityLabel={title}
+  >
+    <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+      <Feather name={icon} size={20} color={PRIMARY} />
+    </View>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+    >
+      {title}
+    </Text>
+    <Text
+      numberOfLines={2}
+      style={{ minHeight: 28 }}
+      className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+    >
+      {desc}
+    </Text>
+    <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+      <Text
+        numberOfLines={1}
+        className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+      >
+        {cta}
+      </Text>
+      <Feather name="chevron-right" size={16} color={PRIMARY} />
+    </View>
+  </Pressable>
+);
 
 type KpiTone = { bg: string; tint: string };
 
@@ -943,74 +1002,52 @@ const Bookings = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Check-in card — the module's headline action, kept as a card. */}
-          <View className="flex-row items-stretch gap-3 mb-3">
-            <Pressable
-              onPress={() => router.push("/bookings/check-in" as never)}
-              className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-              style={NAV_CARD_SHADOW}
-              accessibilityRole="button"
-              accessibilityLabel="Check-in"
-            >
-              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                <Feather name="camera" size={20} color={PRIMARY} />
+          {/* Module shortcuts — a 2-column grid of square cards. */}
+          <View className="flex-row flex-wrap -mx-1.5">
+            {NAV_CARDS.map((item) => (
+              <View key={item.route} className="w-1/2 px-1.5 mb-3">
+                <NavSquareCard
+                  icon={item.icon}
+                  title={item.title}
+                  desc={item.desc}
+                  cta={item.cta}
+                  onPress={() => router.push(item.route as never)}
+                />
               </View>
-              <Text className="text-sm font-bold text-gray-900 dark:text-white mb-1">
-                Check-in
-              </Text>
-              <Text
-                numberOfLines={2}
-                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-              >
-                Checking in customers
-              </Text>
-              <View className="flex-row items-center mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                  Scan QR Code
-                </Text>
-                <Feather name="chevron-right" size={16} color={PRIMARY} />
-              </View>
-            </Pressable>
-          </View>
-
-          {/* Sub-page shortcuts — one full-width row per item, all the same. */}
-          <View className="gap-3 mb-3">
-            {NAV_ROWS.map((item) => (
-              <NavRowCard
-                key={item.route}
-                icon={item.icon}
-                title={item.title}
-                desc={item.desc}
-                onPress={() => router.push(item.route as never)}
-              />
             ))}
           </View>
 
-          {/* Manual Booking — a single-page manual entry flow (mirrors the web
-              admin's Manual Booking) with Standard (availability-validated) and
-              Flexible (past dates allowed) modes. */}
-          <Pressable
-            onPress={() => router.push("/bookings/manual-booking")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-3"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Manual Booking
-            </Text>
-          </Pressable>
+          {/* The two entry points, side by side: Manual Booking (a single-page
+              manual entry flow mirroring the web admin, with Standard and
+              Flexible modes) leads as the filled CTA, and Create Booking (the
+              step-by-step wizard) sits beside it as the outlined one. */}
+          <View className="flex-row items-stretch gap-3 mb-5">
+            <Pressable
+              onPress={() => router.push("/bookings/manual-booking")}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-white"
+              >
+                Manual Booking
+              </Text>
+            </Pressable>
 
-          {/* "Create Booking" (the step-by-step wizard) — an outlined-primary
-              CTA, so the filled Manual Booking above still leads. The calendar
-              cross-link sits with the other sub-page rows above. */}
-          <Pressable
-            onPress={() => router.push("/bookings/create-booking")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-[#0644C7] bg-white dark:bg-neutral-900 active:opacity-70 mb-5"
-          >
-            <Feather name="plus" size={16} color={PRIMARY} />
-            <Text className="text-sm font-semibold text-[#0644C7]">
-              Create Booking
-            </Text>
-          </Pressable>
+            <Pressable
+              onPress={() => router.push("/bookings/create-booking")}
+              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-[#0644C7] bg-white dark:bg-neutral-900 active:opacity-70"
+            >
+              <Feather name="plus" size={16} color={PRIMARY} />
+              <Text
+                numberOfLines={1}
+                className="text-sm font-semibold text-[#0644C7]"
+              >
+                Create Booking
+              </Text>
+            </Pressable>
+          </View>
 
           {/* Error state */}
           {!loading && error && (

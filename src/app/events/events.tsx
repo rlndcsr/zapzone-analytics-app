@@ -30,7 +30,6 @@ import {
 } from "../../components/ui/EventFiltersSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { NavRowCard } from "../../components/ui/NavRowCard";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
 import { formatDateTimeET } from "../../lib/date/venueTime";
@@ -539,21 +538,84 @@ const Events = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Sub-page shortcuts — one full-width row per item, the same design
-              the Packages / Attractions modules use. */}
-          <View className="gap-3">
-            <NavRowCard
-              icon="shopping-bag"
-              title="Event Purchases"
-              desc="View all customer purchases"
+          {/* Sub-page shortcuts — side-by-side square cards, the same design
+              the Attractions module uses. */}
+          <View className="flex-row items-stretch gap-3">
+            <Pressable
               onPress={() => router.push("/events/purchases")}
-            />
-            <NavRowCard
-              icon="plus-circle"
-              title="Onsite Purchase"
-              desc="Create walk-in ticket purchase"
+              className="flex-1 aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="shopping-bag" size={20} color="#0644C7" />
+              </View>
+              <Text
+                numberOfLines={1}
+                className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+              >
+                Event Purchases
+              </Text>
+              <Text
+                numberOfLines={2}
+                style={{ minHeight: 28 }}
+                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+              >
+                View all customer purchases
+              </Text>
+              <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text
+                  numberOfLines={1}
+                  className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+                >
+                  View Purchases
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
+            </Pressable>
+
+            <Pressable
               onPress={() => router.push("/events/create-purchase")}
-            />
+              className="flex-1 aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+              style={{
+                shadowColor: "#424242",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
+            >
+              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+                <Feather name="plus-circle" size={20} color="#0644C7" />
+              </View>
+              <Text
+                numberOfLines={1}
+                className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+              >
+                Onsite Purchase
+              </Text>
+              <Text
+                numberOfLines={2}
+                style={{ minHeight: 28 }}
+                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+              >
+                Create walk-in ticket purchase
+              </Text>
+              <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+                <Text
+                  numberOfLines={1}
+                  className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+                >
+                  Create Purchase
+                </Text>
+                <Feather name="chevron-right" size={16} color="#0644C7" />
+              </View>
+            </Pressable>
           </View>
 
           {/* New Event — the primary filled CTA, full width (same as the

@@ -15,55 +15,64 @@ type PhotoNavRow = {
   icon: ComponentIconName;
   title: string;
   desc: string;
+  cta: string;
   route: string;
   managerOnly?: boolean;
   pending?: boolean;
 };
 
-/** Labels, descriptions and order all follow the web admin's Photos section. */
+/** Labels, descriptions and order all follow the web admin's Photos section.
+ *  Descriptions are kept to the two lines the square tile shows. */
 const NAV_ROWS: PhotoNavRow[] = [
   {
     icon: "camera",
     title: "Take Photos",
-    desc: "Capture up to three photos and send them to a waiver or a QR code",
+    desc: "Capture and send customer photos",
+    cta: "Open Camera",
     route: "/photos/capture",
   },
   {
     icon: "image",
     title: "Photo Library",
-    desc: "Browse, download and resend photos grouped by operating day",
+    desc: "Browse, download and resend",
+    cta: "View Library",
     route: "/photos/library",
   },
   {
     icon: "monitor",
     title: "Slideshow Queue",
-    desc: "Manage what the venue screen is showing right now",
+    desc: "What the venue screen is showing",
+    cta: "Manage Queue",
     route: "/photos/slideshow-queue",
   },
   {
     icon: "layers",
     title: "Overlays",
-    desc: "Upload and schedule the branded frame applied to photos",
+    desc: "Branded frame applied to photos",
+    cta: "Manage Overlays",
     route: "/photos/overlays",
     managerOnly: true,
   },
   {
     icon: "send",
     title: "Delivery Log",
-    desc: "Track every email and SMS photo link, retry or cancel",
+    desc: "Every email and SMS photo link",
+    cta: "View Log",
     route: "/photos/delivery-log",
   },
   {
     icon: "bar-chart-2",
     title: "Photo Reports",
-    desc: "Capture, delivery, QR, kiosk and slideshow tracking",
+    desc: "Capture, delivery, QR and kiosk stats",
+    cta: "View Reports",
     route: "/photos/reports",
     managerOnly: true,
   },
   {
     icon: "settings",
     title: "Photo Settings",
-    desc: "Kiosk and slideshow passcodes, date layer and retention",
+    desc: "Passcodes, date layer and retention",
+    cta: "Open Settings",
     route: "/photos/settings",
     managerOnly: true,
   },
@@ -116,13 +125,15 @@ export default function PhotosScreen() {
             <LocationWorkspaceSelector />
           </View>
 
+          {/* Sub-page shortcuts — a 2-column grid of square cards. */}
           <View className="-mx-1.5 mb-2 flex-row flex-wrap">
             {rows.map((row) => (
-              <View key={row.route} className="w-1/2">
+              <View key={row.route} className="mb-3 w-1/2 px-1.5">
                 <NavTileCard
                   icon={row.icon}
                   title={row.title}
                   desc={row.desc}
+                  cta={row.cta}
                   disabled={row.pending}
                   badge={row.pending ? "Coming soon" : undefined}
                   onPress={() => router.push(row.route as never)}

@@ -25,7 +25,6 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { NavRowCard } from "../../components/ui/NavRowCard";
 import { Pagination } from "../../components/ui/Pagination";
 import {
   consumePackagesStale,
@@ -76,44 +75,108 @@ function formatDate(iso: string | null): string | null {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
-/** Sub-page shortcuts, one full-width row each (see {@link NavRowCard}). */
-const NAV_ROWS: {
+/** Sub-page shortcuts, rendered as a 2-column grid of square cards (the same
+ *  design the Attractions / Events / Bookings modules use). */
+const NAV_CARDS: {
   icon: ComponentIconName;
   title: string;
   desc: string;
+  cta: string;
   route: string;
 }[] = [
   {
     icon: "package",
     title: "Custom Packages",
     desc: "Custom packages & their details",
+    cta: "View Packages",
     route: "/packages/custom-packages",
   },
   {
     icon: "gift",
     title: "Gift Cards",
     desc: "Manage and view all gift cards",
+    cta: "View Gift Cards",
     route: "/packages/gift-cards",
   },
   {
     icon: "home",
     title: "Space",
     desc: "Rooms & availability",
+    cta: "View Rooms",
     route: "/packages/space",
   },
   {
     icon: "coffee",
     title: "Add-ons",
     desc: "Food, beverage & extras",
+    cta: "View Add-ons",
     route: "/packages/add-ons",
   },
   {
     icon: "tag",
     title: "Promos",
     desc: "Promotional codes",
+    cta: "View Promos",
     route: "/packages/promos",
   },
 ];
+
+const NAV_CARD_SHADOW = {
+  shadowColor: "#424242",
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.04,
+  shadowRadius: 6,
+  elevation: 1,
+} as const;
+
+/** One square shortcut tile in the grid above the package list. */
+const NavSquareCard = ({
+  icon,
+  title,
+  desc,
+  cta,
+  onPress,
+}: {
+  icon: ComponentIconName;
+  title: string;
+  desc: string;
+  cta: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+    style={NAV_CARD_SHADOW}
+    accessibilityRole="button"
+    accessibilityLabel={title}
+  >
+    <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+      <Feather name={icon} size={20} color={PRIMARY} />
+    </View>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+    >
+      {title}
+    </Text>
+    <Text
+      numberOfLines={2}
+      style={{ minHeight: 28 }}
+      className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+    >
+      {desc}
+    </Text>
+    <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+      <Text
+        numberOfLines={1}
+        className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+      >
+        {cta}
+      </Text>
+      <Feather name="chevron-right" size={16} color={PRIMARY} />
+    </View>
+  </Pressable>
+);
 
 // Sort options mirror the web /packages dropdown exactly (Name / Price /
 // Category / Display Order). "Date" is not a web option and was removed.
@@ -605,16 +668,18 @@ const Packages = () => {
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Sub-page shortcuts — one full-width row per item, all the same. */}
-          <View className="gap-3 mb-2">
-            {NAV_ROWS.map((item) => (
-              <NavRowCard
-                key={item.route}
-                icon={item.icon}
-                title={item.title}
-                desc={item.desc}
-                onPress={() => router.push(item.route as never)}
-              />
+          {/* Sub-page shortcuts — a 2-column grid of square cards. */}
+          <View className="flex-row flex-wrap -mx-1.5 mb-2">
+            {NAV_CARDS.map((item) => (
+              <View key={item.route} className="w-1/2 px-1.5 mb-3">
+                <NavSquareCard
+                  icon={item.icon}
+                  title={item.title}
+                  desc={item.desc}
+                  cta={item.cta}
+                  onPress={() => router.push(item.route as never)}
+                />
+              </View>
             ))}
           </View>
 
