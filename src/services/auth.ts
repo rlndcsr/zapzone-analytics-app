@@ -1,5 +1,6 @@
 import { markAccountSignInRequired } from "../lib/accounts/savedAccountsStore";
 import { apiRequest, apiUrl } from "../lib/api";
+import { unregisterCurrentPushDevice } from "../lib/notifications/pushDevice";
 import {
   clearSession,
   getCurrentUser,
@@ -213,12 +214,20 @@ export async function revokeToken(token: string): Promise<void> {
  * Sign out of the active account. Revokes its token and ends the session, but
  * *keeps* the saved account — it simply asks for a password next time. Only
  * "Remove account" erases one.
+ *
+ * Push deregistration runs first and only because of ordering: the endpoint is
+ * authenticated, so it has to spend the bearer before `revokeToken` kills it.
+ * It cannot fail the sign-out — it swallows its own errors and is capped by its
+ * own timeout, so nothing here can strand the user in the logged-in state.
  */
 export async function signOut(): Promise<void> {
   const token = getToken();
   const userId = getCurrentUser()?.id ?? null;
 
-  if (token) await revokeToken(token);
+  if (token) {
+    await unregisterCurrentPushDevice(token);
+    await revokeToken(token);
+  }
   if (userId != null) await markAccountSignInRequired(userId);
 
   await clearSession();

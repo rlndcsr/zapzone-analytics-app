@@ -17,6 +17,7 @@ import {
 } from "../../lib/accounts/savedAccountsStore";
 import { prepareAccountSwitch } from "../../lib/accounts/switchAccount";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
+import { unregisterCurrentPushDevice } from "../../lib/notifications/pushDevice";
 import { clearSession, getToken, useCurrentUserId } from "../../lib/session";
 import { revokeToken } from "../../services/auth";
 
@@ -81,7 +82,11 @@ const SavedAccounts = () => {
         : account.tokenState === "linked"
           ? await getSavedAccountToken(account.userId)
           : null;
-      if (token) await revokeToken(token);
+
+      if (token) {
+        if (isActive) await unregisterCurrentPushDevice(token);
+        await revokeToken(token);
+      }
 
       await removeSavedAccount(account.userId);
 
