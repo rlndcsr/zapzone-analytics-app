@@ -975,10 +975,26 @@ const ActivityLogs = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Activity Log
+            Location Activity Log
           </Text>
-          {/* Balances the back button; Export CSV sits in the intro card below. */}
-          <View className="w-9" />
+          {/* Export CSV — icon only, mirroring the back button's dimensions so
+              the title stays centered. Opens the web's export filter modal. */}
+          <Pressable
+            onPress={openExport}
+            disabled={exporting}
+            className={`bg-gray-100 dark:bg-neutral-800 p-2 rounded-full ${
+              exporting ? "opacity-60" : "active:opacity-70"
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel="Export CSV"
+            accessibilityState={{ disabled: exporting }}
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color={PRIMARY} />
+            ) : (
+              <Feather name="download" size={20} color={headerIcon} />
+            )}
+          </Pressable>
         </View>
       </View>
 
@@ -1000,7 +1016,7 @@ const ActivityLogs = () => {
           {/* Intro */}
           <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Activity Log
+              Location Activity Log
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Track activities across managers and attendants
@@ -1020,27 +1036,6 @@ const ActivityLogs = () => {
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
-
-          {/* Export CSV — opens the filter sheet, like the web's export modal. */}
-          <Pressable
-            onPress={openExport}
-            disabled={exporting}
-            className={`flex-row items-center justify-center gap-2 px-4 py-3.5 rounded-xl mb-5 active:opacity-90 ${
-              exporting ? "opacity-60" : ""
-            }`}
-            style={{ backgroundColor: PRIMARY }}
-            accessibilityRole="button"
-            accessibilityLabel="Export CSV"
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Feather name="download" size={16} color="#FFFFFF" />
-            )}
-            <Text className="text-sm font-semibold text-white">
-              {exporting ? "Exporting…" : "Export CSV"}
-            </Text>
-          </Pressable>
 
           {/* KPI cards — mirror the web getLocationMetrics summary */}
           <View className="flex-row flex-wrap -mx-1.5 mb-3">

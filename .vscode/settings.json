@@ -4,5 +4,16 @@
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
   },
-  "js/ts.tsdk.path": "node_modules\\typescript\\lib"
+  "js/ts.tsdk.path": "node_modules\\typescript\\lib",
+
+  // Keep node_modules out of the editor. Every Expo package ships its own
+  // dev-time tsconfig.json that extends "expo-module-scripts/tsconfig.base" —
+  // a devDependency of that package, absent from a consumer install. Open a
+  // file under one of them and the TS server adopts that unresolvable config,
+  // then flags the whole package ("Cannot find module 'expo-modules-core'",
+  // @types/node conflicts). None of it affects this app: Metro never reads
+  // those files, and `npx tsc --noEmit` (which excludes node_modules) passes.
+  "files.exclude": { "**/node_modules": true },
+  "search.exclude": { "**/node_modules": true },
+  "files.watcherExclude": { "**/node_modules/**": true }
 }

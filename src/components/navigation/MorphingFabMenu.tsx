@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Modal,
   Platform,
@@ -57,6 +57,7 @@ import {
   SHADOW_RADIUS_RANGE,
 } from "./fabMenuMotion";
 import { getNavMenuItems, type NavMenuItem } from "./navMenuItems";
+import { QUICK_ACTION_ITEMS, type QuickActionItem } from "./quickActionItems";
 
 const FAB_COLOR = "#0644C7";
 const SURFACE_LIGHT = "#FFFFFF";
@@ -66,7 +67,11 @@ const COLUMNS = 4;
 const COLUMN_GAP = 8;
 const ROW_GAP = 14;
 const PANEL_PADDING = 16;
-const HEADER_HEIGHT = 52;
+// A section is its label, the gap under it, then the grid. SECTION_GAP is the
+// space between the two sections themselves.
+const SECTION_TITLE_HEIGHT = 36;
+const SECTION_TITLE_GAP = 16;
+const SECTION_GAP = 16;
 // icon tile (44) + label gap (6) + two label lines (2 * 14)
 const CELL_HEIGHT = 78;
 const LABEL_LINE_HEIGHT = 14;
@@ -89,21 +94,26 @@ type MorphingFabMenuProps = {
 
 const moreIcon = require("../../../assets/zapzone-assests/icon/more.png");
 
-type GridItemProps = {
-  item: NavMenuItem;
+type MenuCellProps = {
+  label: string;
+  /** Pre-rendered glyph — Feather for nav items, lucide for quick actions. */
+  icon: ReactNode;
   index: number;
   width: number;
   onPress: () => void;
   itemsProgress: SharedValue<number>;
 };
 
-function GridItem({
-  item,
+/** One tile in either grid: icon chip + up-to-two-line label. Both sections
+ *  render through this, so their buttons cannot drift apart. */
+function MenuCell({
+  label,
+  icon,
   index,
   width,
   onPress,
   itemsProgress,
-}: GridItemProps) {
+}: MenuCellProps) {
   const style = useAnimatedStyle(() => {
     const start = Math.min(index * ITEM_STAGGER, 1 - ITEM_WINDOW);
     const local = interpolate(
@@ -128,11 +138,11 @@ function GridItem({
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
-        accessibilityLabel={item.label}
+        accessibilityLabel={label}
         className="flex-1 items-center active:opacity-70"
       >
         <View className="h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 dark:bg-blue-900/40">
-          <Feather name={item.icon} size={20} color={FAB_COLOR} />
+          {icon}
         </View>
         <Text
           numberOfLines={2}
@@ -140,7 +150,7 @@ function GridItem({
           style={{ lineHeight: LABEL_LINE_HEIGHT }}
           className="mt-1.5 text-center text-[11px] text-gray-700 dark:text-gray-200"
         >
-          {item.label}
+          {label}
         </Text>
       </Pressable>
     </Animated.View>
@@ -212,15 +222,24 @@ export function MorphingFabMenu({
   const cellW = Math.floor(
     (contentW - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS,
   );
-  const rows = Math.ceil(items.length / COLUMNS);
+  const actionRows = Math.ceil(QUICK_ACTION_ITEMS.length / COLUMNS);
+  const navRows = Math.ceil(items.length / COLUMNS);
 
   const footerH = fabH + 24;
 
-  const naturalPanelH =
-    HEADER_HEIGHT +
-    PANEL_PADDING +
+  // The grid's own negative bottom margin cancels the last row's ROW_GAP, so a
+  // section measures exactly its label, the gap under it, and its rows.
+  const sectionH = (rows: number) =>
+    SECTION_TITLE_HEIGHT +
+    SECTION_TITLE_GAP +
     rows * CELL_HEIGHT +
-    (rows - 1) * ROW_GAP +
+    (rows - 1) * ROW_GAP;
+
+  const naturalPanelH =
+    PANEL_PADDING +
+    sectionH(actionRows) +
+    SECTION_GAP +
+    sectionH(navRows) +
     footerH;
 
   const maxPanelH = fab ? fabBottom - (insets.top + 8) : naturalPanelH;
@@ -369,7 +388,7 @@ export function MorphingFabMenu({
 
   if (!mounted || !fab) return null;
 
-  const handleSelect = (item: NavMenuItem) => {
+  const handleSelect = (item: NavMenuItem | QuickActionItem) => {
     onClose();
     if (!item.route) return;
     if (item.mode === "navigate") {
@@ -381,22 +400,52 @@ export function MorphingFabMenu({
 
   // Fixed column gap, not justify-between: a partial last row must pack left
   // instead of spreading its items to both edges.
-  const grid = (
+  const gridWrapper = (children: ReactNode) => (
     <View
       className="flex-row flex-wrap"
       style={{ marginBottom: -ROW_GAP, columnGap: COLUMN_GAP }}
     >
-      {items.map((item, i) => (
-        <GridItem
-          key={item.key}
-          item={item}
-          index={i}
-          width={cellW}
-          onPress={() => handleSelect(item)}
-          itemsProgress={itemsProgress}
-        />
-      ))}
+      {children}
     </View>
+  );
+
+  const sectionTitle = (title: string) => (
+    <View
+      style={{ height: SECTION_TITLE_HEIGHT, justifyContent: "center" }}
+    >
+      <Text className="text-base font-semibold text-gray-900 dark:text-white">
+        {title}
+      </Text>
+    </View>
+  );
+
+  const actionGrid = gridWrapper(
+    QUICK_ACTION_ITEMS.map((item, i) => (
+      <MenuCell
+        key={item.key}
+        label={item.label}
+        icon={<item.icon size={20} color={FAB_COLOR} />}
+        index={i}
+        width={cellW}
+        onPress={() => handleSelect(item)}
+        itemsProgress={itemsProgress}
+      />
+    )),
+  );
+
+  // Stagger continues from the actions above so the panel reveals as one list.
+  const navGrid = gridWrapper(
+    items.map((item, i) => (
+      <MenuCell
+        key={item.key}
+        label={item.label}
+        icon={<Feather name={item.icon} size={20} color={FAB_COLOR} />}
+        index={QUICK_ACTION_ITEMS.length + i}
+        width={cellW}
+        onPress={() => handleSelect(item)}
+        itemsProgress={itemsProgress}
+      />
+    )),
   );
 
   return (
@@ -451,30 +500,28 @@ export function MorphingFabMenu({
                   paddingBottom: footerH,
                 }}
               >
-                <View
-                  style={{
-                    height: HEADER_HEIGHT - PANEL_PADDING,
-                    justifyContent: "center",
-                  }}
-                >
-                  <Text className="text-base font-semibold text-gray-900 dark:text-white">
-                    Quick Navigation
-                  </Text>
-                </View>
-
-                {/* Grid — centered when it fits, scrolls when it does not.
-                    A plain centered View overflows over the header if the
-                    measured content is taller than the estimate. */}
+                {/* Both sections scroll together — the panel is clamped to the
+                    space above the FAB, and with two grids the content is
+                    taller than that on most phones. Centered while it fits. */}
                 <ScrollView
                   showsVerticalScrollIndicator={false}
                   scrollEnabled={needsScroll}
                   contentContainerStyle={{
                     flexGrow: 1,
                     justifyContent: "center",
-                    paddingTop: PANEL_PADDING,
                   }}
                 >
-                  {grid}
+                  {sectionTitle("Quick Actions")}
+                  <View style={{ marginTop: SECTION_TITLE_GAP }}>
+                    {actionGrid}
+                  </View>
+
+                  <View style={{ marginTop: SECTION_GAP }}>
+                    {sectionTitle("Quick Navigation")}
+                    <View style={{ marginTop: SECTION_TITLE_GAP }}>
+                      {navGrid}
+                    </View>
+                  </View>
                 </ScrollView>
               </View>
             </Animated.View>

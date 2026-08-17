@@ -1,6 +1,6 @@
+import { isRunningInExpoGo } from "expo";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
-import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import { getInstalledAppVersion } from "../../services/appUpdateService";
@@ -47,6 +47,21 @@ function devLog(message: string, error?: unknown): void {
   );
 }
 
+type NotificationsModule = typeof import("expo-notifications");
+
+let notificationsModule: NotificationsModule | null = null;
+
+/** Remote push left Expo Go on Android in SDK 53, and `expo-notifications`
+ *  registers a device-token listener from its own module body — which *throws*
+ *  there. So the import has to stay lazy: a top-level one crashes the bundle in
+ *  Expo Go on Android before any runtime guard can run. iOS Expo Go only warns. */
+function loadNotifications(): NotificationsModule | null {
+  if (Platform.OS === "android" && isRunningInExpoGo()) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  notificationsModule ??= require("expo-notifications") as NotificationsModule;
+  return notificationsModule;
+}
+
 function currentPlatform(): PushPlatform | null {
   if (Platform.OS === "android") return "android";
   if (Platform.OS === "ios") return "ios";
@@ -68,7 +83,9 @@ function permissionFlags(response: unknown): {
   return { granted: r.granted === true, canAskAgain: r.canAskAgain !== false };
 }
 
-async function ensurePermission(): Promise<boolean> {
+async function ensurePermission(
+  Notifications: NotificationsModule,
+): Promise<boolean> {
   if (permissionRefused) return false;
 
   // Android 13+ shows no permission prompt until a channel exists.
@@ -94,7 +111,9 @@ async function ensurePermission(): Promise<boolean> {
   return requested.granted;
 }
 
-async function acquireExpoToken(): Promise<string | null> {
+async function acquireExpoToken(
+  Notifications: NotificationsModule,
+): Promise<string | null> {
   if (cachedExpoToken) return cachedExpoToken;
 
   const projectId = easProjectId();
@@ -125,9 +144,8 @@ async function runSync(): Promise<void> {
     return;
   }
 
-  // Remote push left Expo Go on Android in SDK 53 (iOS Expo Go still works), so
-  // the token call throws there — skip it rather than log a failure every launch.
-  if (platform === "android" && Constants.expoGoConfig != null) {
+  const Notifications = loadNotifications();
+  if (!Notifications) {
     devLog("Expo Go on Android — push registration needs a development build");
     return;
   }
@@ -141,11 +159,11 @@ async function runSync(): Promise<void> {
 
   let expoPushToken: string | null;
   try {
-    if (!(await ensurePermission())) {
+    if (!(await ensurePermission(Notifications))) {
       devLog("notification permission not granted");
       return;
     }
-    expoPushToken = await acquireExpoToken();
+    expoPushToken = await acquireExpoToken(Notifications);
   } catch (error) {
     devLog("could not obtain an Expo push token", error);
     return;

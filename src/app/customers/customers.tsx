@@ -37,6 +37,7 @@ import {
 } from "../../components/ui/CustomersTable";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { NavTileCard } from "../../components/ui/NavTileCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { type SheetSelectOption } from "../../components/ui/SheetSelect";
 import { StatTile } from "../../components/ui/StatTile";
@@ -694,25 +695,19 @@ const Customers = () => {
         }
       >
         <View className="px-5 gap-4">
-          {/* Analytics link */}
-          <Pressable
-            onPress={() => router.push("/customers/analytics")}
-            className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 mt-6"
-            style={CARD_SHADOW}
-          >
-            <View className="w-10 h-10 rounded-xl bg-[#0644C7]/10 items-center justify-center">
-              <Feather name="pie-chart" size={18} color={PRIMARY} />
+          {/* Analytics link — a square shortcut tile at half width, so it
+              matches the Manage Purchases card in the Attractions module. */}
+          <View className="mt-6 flex-row items-stretch">
+            <View className="w-1/2 pr-1.5">
+              <NavTileCard
+                icon="pie-chart"
+                title="Customer Analytics"
+                desc="KPIs, trends, top customers, and segments"
+                cta="View Analytics"
+                onPress={() => router.push("/customers/analytics")}
+              />
             </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                Customer Analytics
-              </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                KPIs, trends, top customers, and segments
-              </Text>
-            </View>
-            <Feather name="chevron-right" size={20} color="#9CA3AF" />
-          </Pressable>
+          </View>
 
           {/* KPI cards — skeleton while loading (tiles match StatTile exactly). */}
           {showSkeleton ? (
