@@ -47,15 +47,19 @@ function devLog(message: string, error?: unknown): void {
   );
 }
 
-type NotificationsModule = typeof import("expo-notifications");
+export type NotificationsModule = typeof import("expo-notifications");
 
 let notificationsModule: NotificationsModule | null = null;
 
 /** Remote push left Expo Go on Android in SDK 53, and `expo-notifications`
  *  registers a device-token listener from its own module body — which *throws*
  *  there. So the import has to stay lazy: a top-level one crashes the bundle in
- *  Expo Go on Android before any runtime guard can run. iOS Expo Go only warns. */
-function loadNotifications(): NotificationsModule | null {
+ *  Expo Go on Android before any runtime guard can run. iOS Expo Go only warns.
+ *
+ *  Exported because the notification-tap router needs the same guarded access —
+ *  one accessor, so there is a single place that decides whether this build can
+ *  touch `expo-notifications` at all. */
+export function loadNotifications(): NotificationsModule | null {
   if (Platform.OS === "android" && isRunningInExpoGo()) return null;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   notificationsModule ??= require("expo-notifications") as NotificationsModule;

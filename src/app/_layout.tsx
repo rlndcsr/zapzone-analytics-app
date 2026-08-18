@@ -14,6 +14,7 @@ import {
 } from "../components/navigation/navMotion";
 import { screenEnterLayout } from "../components/navigation/ScreenEnter";
 import { PushDeviceRegistrar } from "../components/PushDeviceRegistrar";
+import { PushNotificationRouter } from "../components/PushNotificationRouter";
 import "../global.css";
 import { restoreSavedAccounts } from "../lib/accounts/savedAccountsStore";
 import { restoreTimeframeSelection } from "../lib/dashboard/timeframeStore";
@@ -62,6 +63,9 @@ export default function RootLayout() {
       <AuthGuard />
       {/* Registers this device for push once an eligible staff account is live. */}
       <PushDeviceRegistrar />
+      {/* Opens the destination behind a tapped push notification, once the
+          session is restored and the navigator has settled. */}
+      <PushNotificationRouter />
 
       <Stack
         screenOptions={stackScreenOptions(colorScheme)}
