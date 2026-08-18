@@ -2,6 +2,7 @@ import { usePathname, useRootNavigationState, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef } from "react";
 
 import { isPublicRoute } from "../lib/navigation/publicRoutes";
+import { foregroundNotificationBehavior } from "../lib/notifications/foregroundPresentation";
 import {
   pushDataToNotification,
   resolveNotificationRoute,
@@ -52,6 +53,11 @@ export function PushNotificationRouter() {
   useEffect(() => {
     const Notifications = loadNotifications();
     if (!Notifications) return;
+
+    Notifications.setNotificationHandler({
+      handleNotification: async (notification) =>
+        foregroundNotificationBehavior(notification),
+    });
 
     let cancelled = false;
     const onTap = (response: unknown) => handleTapRef.current(response);
