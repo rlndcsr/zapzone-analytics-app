@@ -96,17 +96,10 @@ const Notification = () => {
       markAsRead(item.id);
     }
 
-    const fallback = {
-      pathname: "/notification/notification-details",
-      params: { id: String(item.id), title: item.title, message: item.message },
-    } as never;
-
-    try {
-      const route = resolveNotificationRoute(item);
-      router.push(route ? (route as never) : fallback);
-    } catch {
-      router.push(fallback);
-    }
+    // The resolver always returns a route — falling back to the details screen
+    // itself — and never throws, so there is no second fallback to keep in step
+    // with it here.
+    router.push(resolveNotificationRoute(item) as never);
   };
 
   const renderNotification = (item: AppNotification) => (
