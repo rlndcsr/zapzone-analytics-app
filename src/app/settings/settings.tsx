@@ -9,6 +9,8 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GoogleCalendarCard } from "../../components/settings/GoogleCalendarCard";
+import { PaymentIntegrationCard } from "../../components/settings/PaymentIntegrationCard";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { SettingsAccountSkeleton } from "../../components/ui/skeleton/SettingsAccountSkeleton";
 import { useAppUpdateStatus } from "../../lib/hooks/useAppUpdateCheck";
@@ -166,6 +168,14 @@ const Settings = () => {
                 />
               }
             />
+          </View>
+
+          {/* Integrations — the web Settings page's Payment Integration and
+              Google Calendar cards, reading the same endpoints. */}
+          <SectionTitle>Integrations</SectionTitle>
+          <View className="gap-4">
+            <PaymentIntegrationCard />
+            <GoogleCalendarCard />
           </View>
 
           {/* General Section */}
