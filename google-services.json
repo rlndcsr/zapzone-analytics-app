@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "103952824246",
+    "project_id": "zapzone-analytics",
+    "storage_bucket": "zapzone-analytics.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:103952824246:android:c969bfad3072d5804ef317",
+        "android_client_info": {
+          "package_name": "com.zapzone.analytics"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCIUVa3Vt7mmGWNlMrjDR6fAZfIfqAUE6M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -20,6 +20,7 @@
       "versionCode": 5,
       "predictiveBackGestureEnabled": false,
       "package": "com.zapzone.analytics",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
