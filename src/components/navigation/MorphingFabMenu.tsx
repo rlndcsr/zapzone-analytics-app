@@ -95,8 +95,10 @@ const CARD_GAP = 14;
 const CARD_RADIUS = 26;
 const MAX_CONTENT_WIDTH = 440;
 
-const CHIP_SIZE = 50;
-const CHIP_ICON_SIZE = 21;
+const CHIP_SIZE = 44;
+/** Rounded square, matching `rounded-xl` on the icon tiles in the app's cards. */
+const CHIP_RADIUS = 12;
+const CHIP_ICON_SIZE = 19;
 const LABEL_GAP = 8;
 const LABEL_LINE_HEIGHT = 14;
 /** chip + gap + two label lines — every tile measures the same. */
@@ -191,7 +193,7 @@ function MenuCell({
           style={{
             width: CHIP_SIZE,
             height: CHIP_SIZE,
-            borderRadius: CHIP_SIZE / 2,
+            borderRadius: CHIP_RADIUS,
           }}
         >
           {icon}
