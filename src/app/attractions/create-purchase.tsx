@@ -947,6 +947,15 @@ const CreatePurchaseScreen = () => {
   const cardLegBlocked =
     paymentMethod === "authorize.net" && (cardIncomplete || authorizeUnavailable);
 
+  /** A named customer is required on both paths — an id from the lookup counts. */
+  const customerReady = Boolean(selectedCustomerId || customerName.trim());
+  /** The card leg's own blocker, told apart so the copy is actionable. */
+  const cardBlocker = !cardLegBlocked
+    ? null
+    : authorizeUnavailable
+      ? "Card payments are unavailable for this location — choose another payment method."
+      : "Complete the card details.";
+
   /**
    * Why "Create order" is not available yet, in the web's order of precedence —
    * the first one is what the panel shows. An order needs a name (the receipt
@@ -957,15 +966,36 @@ const CreatePurchaseScreen = () => {
   if (orderLines.length === 0 && !currentLine) {
     orderBlockers.push("Add at least one item to the order.");
   }
-  if (!selectedCustomerId && !customerName.trim()) {
-    orderBlockers.push("Enter the customer name.");
-  }
-  if (cardLegBlocked) orderBlockers.push("Complete the card details.");
+  if (!customerReady) orderBlockers.push("Enter the customer name.");
+  if (cardBlocker) orderBlockers.push(cardBlocker);
 
+  /**
+   * The same list for a single purchase, in the web's order (`submitBlockers`
+   * there): the item and its schedule, the customer, the receipt address, then
+   * the card. Every one of these is already enforced when the button is pressed
+   * — stating them up front is what stops a purchase being attempted with
+   * details missing, instead of failing on an alert afterwards.
+   */
+  const purchaseBlockers: string[] = [];
+  if (!selected) {
+    purchaseBlockers.push("Pick an attraction to purchase.");
+  } else if (!scheduledDate || !scheduledTime) {
+    // Split out of the web's single "pick an attraction and set its date & time"
+    // line: by the time this panel is on screen an attraction IS picked, so the
+    // only useful half is where to go next.
+    purchaseBlockers.push("Set the visit date & time in Purchase Details.");
+  }
+  if (!customerReady) purchaseBlockers.push("Enter the customer name.");
+  if (sendEmail && !customerEmail.trim()) {
+    purchaseBlockers.push(
+      'Add an email for the receipt, or untick "Send email receipt".',
+    );
+  }
+  if (cardBlocker) purchaseBlockers.push(cardBlocker);
+
+  const blockers = orderMode ? orderBlockers : purchaseBlockers;
   const submitDisabled =
-    submitting ||
-    isProcessingPayment ||
-    (orderMode ? orderBlockers.length > 0 : !selected || cardLegBlocked);
+    submitting || isProcessingPayment || blockers.length > 0;
 
   /**
    * Card pre-flight — the web's validation order, run before anything is
@@ -1591,64 +1621,6 @@ const CreatePurchaseScreen = () => {
             )}
           </Section>
 
-          {/* Customer */}
-          <Section title="Customer Information">
-            <View className="mb-1">
-              <InputField
-                label={selectedCustomerId ? "Email  (Customer Found)" : "Email"}
-                value={customerEmail}
-                onChangeText={(t) => {
-                  setCustomerEmail(t);
-                  setSelectedCustomerId(null);
-                }}
-                onFocus={() => foundCustomers.length > 0 && setShowCustomerList(true)}
-                placeholder="customer@example.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                rightAccessory={
-                  searchingCustomer ? (
-                    <ActivityIndicator size="small" color="#9CA3AF" />
-                  ) : selectedCustomerId ? (
-                    <Feather name="check-circle" size={18} color="#22C55E" />
-                  ) : undefined
-                }
-              />
-            </View>
-            {showCustomerList && foundCustomers.length > 0 && (
-              <View className="border border-gray-200 dark:border-neutral-700 rounded-2xl mb-3 overflow-hidden">
-                {foundCustomers.slice(0, 5).map((c) => (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => selectCustomer(c)}
-                    className="px-4 py-3 border-b border-gray-100 dark:border-neutral-800"
-                  >
-                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                      {c.firstName} {c.lastName}
-                    </Text>
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {c.email}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-
-            <InputField
-              label="Customer Name"
-              value={customerName}
-              onChangeText={setCustomerName}
-              placeholder="Walk-in Customer"
-              containerClassName="mb-4 mt-3"
-            />
-            <InputField
-              label="Phone"
-              value={customerPhone}
-              onChangeText={setCustomerPhone}
-              placeholder="(555) 123-4567"
-              keyboardType="phone-pad"
-            />
-          </Section>
-
           {/* Purchase details belong to an attraction line; an event line is
               configured entirely in the picker above (web parity). */}
           {selected && itemTab === "attractions" && (
@@ -1776,6 +1748,66 @@ const CreatePurchaseScreen = () => {
               </Section>
             </>
           )}
+
+          {/* Customer — sits directly after the item's own details, and stays
+              outside the block above so it shows for an event line and before
+              anything is picked (web parity). */}
+          <Section title="Customer Information">
+            <View className="mb-1">
+              <InputField
+                label={selectedCustomerId ? "Email  (Customer Found)" : "Email"}
+                value={customerEmail}
+                onChangeText={(t) => {
+                  setCustomerEmail(t);
+                  setSelectedCustomerId(null);
+                }}
+                onFocus={() => foundCustomers.length > 0 && setShowCustomerList(true)}
+                placeholder="customer@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                rightAccessory={
+                  searchingCustomer ? (
+                    <ActivityIndicator size="small" color="#9CA3AF" />
+                  ) : selectedCustomerId ? (
+                    <Feather name="check-circle" size={18} color="#22C55E" />
+                  ) : undefined
+                }
+              />
+            </View>
+            {showCustomerList && foundCustomers.length > 0 && (
+              <View className="border border-gray-200 dark:border-neutral-700 rounded-2xl mb-3 overflow-hidden">
+                {foundCustomers.slice(0, 5).map((c) => (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => selectCustomer(c)}
+                    className="px-4 py-3 border-b border-gray-100 dark:border-neutral-800"
+                  >
+                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                      {c.firstName} {c.lastName}
+                    </Text>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      {c.email}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            <InputField
+              label="Customer Name"
+              value={customerName}
+              onChangeText={setCustomerName}
+              placeholder="Walk-in Customer"
+              containerClassName="mb-4 mt-3"
+            />
+            <InputField
+              label="Phone"
+              value={customerPhone}
+              onChangeText={setCustomerPhone}
+              placeholder="(555) 123-4567"
+              keyboardType="phone-pad"
+            />
+          </Section>
 
           {/* Payment covers whatever is being sold — an attraction, an event, or
               a whole order. */}
@@ -2324,6 +2356,14 @@ const CreatePurchaseScreen = () => {
                     </>
                   )}
                 </Pressable>
+
+                {/* What is still missing, one step at a time — the web's
+                    `submitBlockers[0]` under its own submit button. */}
+                {purchaseBlockers.length > 0 && !submitting && (
+                  <Text className="mt-2 text-center text-[11px] text-amber-700 dark:text-amber-400">
+                    {purchaseBlockers[0]}
+                  </Text>
+                )}
               </>
             ) : (
               <View className="items-center py-8">

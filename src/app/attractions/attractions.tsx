@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useColorScheme } from "nativewind";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,10 +13,15 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColorScheme } from "nativewind";
 
 import { AttractionActionsSheet } from "../../components/ui/AttractionActionsSheet";
 import { AttractionCard } from "../../components/ui/AttractionCard";
+import {
+  AttractionFiltersSheet,
+  EMPTY_ATTRACTION_FILTERS,
+  countActiveAttractionFilters,
+  type AttractionFilterValues,
+} from "../../components/ui/AttractionFiltersSheet";
 import {
   AttractionsBulkBar,
   type BulkAction,
@@ -28,14 +34,8 @@ import {
   allAttractionColumnKeys,
   defaultAttractionColumnKeys,
 } from "../../components/ui/AttractionsTable";
-import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
-import {
-  AttractionFiltersSheet,
-  EMPTY_ATTRACTION_FILTERS,
-  countActiveAttractionFilters,
-  type AttractionFilterValues,
-} from "../../components/ui/AttractionFiltersSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import {
   FilterPill,
@@ -50,11 +50,6 @@ import {
   AttractionsListSkeleton,
 } from "../../components/ui/skeleton/AttractionsSkeleton";
 import {
-  consumeAttractionsStale,
-  markAttractionsStale,
-  useAttractions,
-} from "../../lib/hooks/useAttractions";
-import {
   CARD_SHADOW,
   formatMoney,
   type FeatherIconName,
@@ -64,6 +59,11 @@ import {
   buildAttractionsCsv,
 } from "../../lib/attractions/attractionsCsv";
 import { openPurchasePage } from "../../lib/attractions/purchaseLink";
+import {
+  consumeAttractionsStale,
+  markAttractionsStale,
+  useAttractions,
+} from "../../lib/hooks/useAttractions";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
 import {
@@ -574,7 +574,10 @@ const Attractions = () => {
    */
   const exportCsv = useCallback(async () => {
     if (filtered.length === 0) {
-      Alert.alert("Nothing to export", "No attractions match the current filters.");
+      Alert.alert(
+        "Nothing to export",
+        "No attractions match the current filters.",
+      );
       return;
     }
     try {
@@ -585,7 +588,10 @@ const Attractions = () => {
         encoding: FileSystem.EncodingType.UTF8,
       });
       if (!(await Sharing.isAvailableAsync())) {
-        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+        Alert.alert(
+          "Sharing unavailable",
+          "Sharing isn't available on this device.",
+        );
         return;
       }
       await Sharing.shareAsync(uri, {
@@ -703,12 +709,10 @@ const Attractions = () => {
         }
       >
         <View className="px-5 mt-5">
-        
           {/* Global workspace location selector (company-admin only). */}
           <View className="mb-5">
             <LocationWorkspaceSelector />
           </View>
-          
 
           {/* Check-in, Manage Purchases and Create Purchase — the module's
               shortcuts as equal square cards, two per row. */}
@@ -742,7 +746,7 @@ const Attractions = () => {
           {/* New Attraction — the primary filled CTA, full width. */}
           <Pressable
             onPress={() => router.push("/attractions/create-attraction")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5"
+            className="mt-4 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
             <Text className="text-sm font-semibold text-white">
