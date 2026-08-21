@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -26,7 +27,9 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
+import { Toast, type ToastType } from "../../components/ui/Toast";
 import { mediaUrl } from "../../lib/api";
+import { convertTo12Hour } from "../../lib/time";
 import {
   availableTimeSlotsForDate,
   computeDayOffAvailability,
@@ -37,6 +40,7 @@ import {
 } from "../../lib/attractions/attractionDisplay";
 import { toKey } from "../../lib/date/calendar";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
+import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
 import {
   CARD_MONTHS,
@@ -51,6 +55,7 @@ import { getCurrentUser, getToken } from "../../lib/session";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
   attractionPurchaseQrValue,
+  ticketOrderQrValue,
   useQrDataUri,
 } from "../../lib/payments/useQrDataUri";
 import {
@@ -66,6 +71,7 @@ import {
   fetchDayOffsByLocation,
   type DayOff,
 } from "../../services/dayOffsService";
+import { fetchEvents, type EventRow } from "../../services/eventsService";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -73,8 +79,17 @@ import {
   fetchAuthorizeNetPublicKey,
   PAYMENT_TYPE,
   processCardPayment,
+  recordPayment,
   type AuthorizeNetPublicKey,
 } from "../../services/paymentsService";
+import {
+  checkoutTicketOrder,
+  quoteTicketOrder,
+  rollbackTicketOrder,
+  storeTicketOrderQrCode,
+  type CartItem,
+  type CartQuote,
+} from "../../services/ticketOrdersService";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -99,10 +114,13 @@ type PaymentMethod = "authorize.net" | "in-store" | "paylater";
 const Section = ({
   icon,
   title,
+  /** Trailing control in the card header — the item-type tabs use this. */
+  right,
   children,
 }: {
   icon?: IconName;
   title: string;
+  right?: React.ReactNode;
   children: React.ReactNode;
 }) => (
   <View
@@ -115,11 +133,56 @@ const Section = ({
           <Feather name={icon} size={16} color={PRIMARY} />
         </View>
       )}
-      <Text className="text-base font-bold text-gray-900 dark:text-white">
+      <Text className="flex-1 text-base font-bold text-gray-900 dark:text-white">
         {title}
       </Text>
+      {right}
     </View>
     {children}
+  </View>
+);
+
+/**
+ * The pill switch used for both "Single purchase / Bulk order" and
+ * "Attractions / Events" — the web's two segmented controls, same anatomy.
+ */
+const Segmented = <T extends string>({
+  options,
+  value,
+  onChange,
+  small,
+}: {
+  options: { key: T; label: string }[];
+  value: T;
+  onChange: (key: T) => void;
+  small?: boolean;
+}) => (
+  <View className="flex-row rounded-lg border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800/60 p-1">
+    {options.map((opt) => {
+      const active = value === opt.key;
+      return (
+        <Pressable
+          key={opt.key}
+          onPress={() => onChange(opt.key)}
+          accessibilityRole="button"
+          accessibilityState={active ? { selected: true } : {}}
+          className={`rounded-md ${small ? "px-3 py-1" : "px-4 py-1.5"} ${
+            active ? "bg-white dark:bg-neutral-900" : ""
+          }`}
+          style={active ? CARD_SHADOW : undefined}
+        >
+          <Text
+            className={`${small ? "text-xs" : "text-sm"} font-semibold ${
+              active
+                ? "text-[#0644C7] dark:text-blue-400"
+                : "text-gray-500 dark:text-gray-400"
+            }`}
+          >
+            {opt.label}
+          </Text>
+        </Pressable>
+      );
+    })}
   </View>
 );
 
@@ -286,6 +349,45 @@ const AttractionCard = ({
   );
 };
 
+/** The event equivalent of {@link AttractionCard}: name, run of dates, price. */
+const EventCard = ({
+  event,
+  onPress,
+}: {
+  event: EventRow;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    className="rounded-xl border border-gray-200 dark:border-neutral-700 p-4 mb-3 active:border-[#0644C7]/50"
+  >
+    <View className="flex-row items-start gap-3">
+      <Thumb uri={mediaUrl(event.images[0])} size={56} />
+      <View className="flex-1">
+        <Text
+          className="font-semibold text-gray-900 dark:text-white"
+          numberOfLines={2}
+        >
+          {event.name}
+        </Text>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
+          {event.startDate}
+          {event.endDate && event.endDate !== event.startDate
+            ? ` – ${event.endDate}`
+            : ""}
+        </Text>
+        <Text className="text-lg font-bold text-[#0644C7] dark:text-blue-400">
+          {money(event.price)}
+          <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
+            {" "}
+            /ticket
+          </Text>
+        </Text>
+      </View>
+    </View>
+  </Pressable>
+);
+
 const CreatePurchaseScreen = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -355,10 +457,48 @@ const CreatePurchaseScreen = () => {
   const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [sheet, setSheet] = useState<null | "month" | "year">(null);
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(
+    null,
+  );
+
+  /*
+   * Bulk order mode (web `bulkMode`). A single purchase writes one attraction
+   * purchase and charges it; an order collects many lines — attraction *and*
+   * event tickets — into one ticket order with one payment and one QR code. The
+   * server prices an order, so the local pricing pipeline below only ever drives
+   * the single-purchase path.
+   */
+  const [bulkMode, setBulkMode] = useState(false);
+  const [itemTab, setItemTab] = useState<"attractions" | "events">("attractions");
+  const [orderLines, setOrderLines] = useState<CartItem[]>([]);
+  const [orderQuote, setOrderQuote] = useState<CartQuote | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<EventRow | null>(null);
+  const [eventQty, setEventQty] = useState(1);
+  const [eventDate, setEventDate] = useState("");
+  const [eventsCatalog, setEventsCatalog] = useState<EventRow[]>([]);
+  const [eventsCatalogKey, setEventsCatalogKey] = useState<number | null>(null);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+
+  /** Web parity: lines already on the order keep order mode on after a switch. */
+  const orderMode = bulkMode || orderLines.length > 0;
+
+  /**
+   * The location everything in this transaction belongs to (web
+   * `gatewayLocationId` / `orderLocationId`): the order's own location once it
+   * has a line, otherwise whichever item is being configured. It picks the
+   * merchant account for the card leg and scopes the event catalog.
+   */
+  const orderLocationId =
+    orderLines[0]?.locationId ??
+    selected?.locationId ??
+    selectedEvent?.locationId ??
+    null;
   const submitLockRef = useRef(false);
   /** Web parity (`lastSubmitTimeRef`): a 3s cooldown after any submit, so a
    *  double-tap can never produce a second card charge. */
   const lastSubmitAtRef = useRef(0);
+  /** Monotonic suffix that keeps two identical order lines distinguishable. */
+  const lineSeqRef = useRef(0);
 
   // Debounced customer lookup by email (mirrors the web).
   useEffect(() => {
@@ -418,8 +558,8 @@ const CreatePurchaseScreen = () => {
   // Accept.js credentials for the attraction's location (web parity: fetched
   // as soon as the card method is active so the form can tokenize).
   useEffect(() => {
-    if (paymentMethod !== "authorize.net" || !selected) return;
-    const locationId = selected.locationId;
+    if (paymentMethod !== "authorize.net") return;
+    const locationId = orderLocationId;
     if (locationId == null) return;
     const token = getToken();
     if (!token) return;
@@ -435,7 +575,7 @@ const CreatePurchaseScreen = () => {
         setAuthorizeUnavailable(true);
       });
     return () => controller.abort();
-  }, [paymentMethod, selected]);
+  }, [paymentMethod, orderLocationId]);
 
   const selectCustomer = (c: CustomerHit) => {
     setSelectedCustomerId(c.id);
@@ -545,15 +685,287 @@ const CreatePurchaseScreen = () => {
   const setAddon = (id: number, n: number) =>
     setAddonQty((prev) => ({ ...prev, [id]: n }));
 
+  /* ------------------------------------------------------- bulk ordering -- */
+
+  /**
+   * The event catalog for the order's location. Loaded lazily — only order mode
+   * and the Events tab can sell an event — and cached per location, so switching
+   * tabs does not re-fetch. With no location fixed yet the API's own scoping
+   * decides what the user may sell.
+   */
+  useEffect(() => {
+    if (!orderMode && itemTab !== "events") return;
+    const key = orderLocationId ?? 0;
+    if (eventsCatalogKey === key) return;
+    const token = getToken();
+    if (!token || !user?.id) return;
+    const controller = new AbortController();
+    setLoadingEvents(true);
+    fetchEvents({
+      token,
+      userId: user.id,
+      locationId: orderLocationId ?? undefined,
+      signal: controller.signal,
+    })
+      .then((rows) => {
+        setEventsCatalog(rows.filter((e) => e.status === "active"));
+        setEventsCatalogKey(key);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingEvents(false);
+      });
+    return () => controller.abort();
+  }, [orderMode, itemTab, orderLocationId, eventsCatalogKey, user?.id]);
+
+  /** The dates an event ticket may be sold for — the web's date input range. */
+  const eventDateOptions = useMemo(() => {
+    if (!selectedEvent?.startDate) return [];
+    const out: string[] = [];
+    const cursor = new Date(`${selectedEvent.startDate}T00:00:00`);
+    const last = new Date(
+      `${selectedEvent.endDate ?? selectedEvent.startDate}T00:00:00`,
+    );
+    while (cursor <= last && out.length < 60) {
+      out.push(toKey(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return out;
+  }, [selectedEvent]);
+
+  /**
+   * The item currently being configured, as an order line — or null while it is
+   * still incomplete (an attraction with no visit date and time cannot be sold).
+   * It is quoted and checked out alongside the committed lines, so staff never
+   * have to press "Add item to order" for the last item.
+   */
+  const currentLine = useMemo<CartItem | null>(() => {
+    if (itemTab === "events") {
+      if (!selectedEvent || selectedEvent.locationId == null) return null;
+      const date = eventDate || selectedEvent.startDate;
+      if (!date) return null;
+      return {
+        key: `event-${selectedEvent.id}-${date}-${orderLines.length}`,
+        type: "event",
+        id: selectedEvent.id,
+        name: selectedEvent.name,
+        image: selectedEvent.images[0] ?? null,
+        locationId: selectedEvent.locationId,
+        unitPrice: selectedEvent.price,
+        quantity: eventQty,
+        scheduledDate: date,
+        scheduledTime: null,
+        addOns: [],
+      };
+    }
+    if (!selected || selected.locationId == null) return null;
+    if (!scheduledDate || !scheduledTime) return null;
+    return {
+      key: `attraction-${selected.id}-${scheduledDate}-${scheduledTime}-${orderLines.length}`,
+      type: "attraction",
+      id: selected.id,
+      name: selected.name,
+      image: selected.images[0] ?? null,
+      locationId: selected.locationId,
+      unitPrice: selected.price,
+      quantity,
+      scheduledDate,
+      scheduledTime,
+      addOns: orderedAddOns
+        .filter((a) => (addonQty[a.id] ?? 0) > 0)
+        .map((a) => ({
+          id: a.id,
+          name: a.name,
+          price: a.price,
+          quantity: addonQty[a.id],
+        })),
+    };
+  }, [
+    itemTab,
+    selectedEvent,
+    eventDate,
+    eventQty,
+    selected,
+    scheduledDate,
+    scheduledTime,
+    quantity,
+    orderedAddOns,
+    addonQty,
+    orderLines.length,
+  ]);
+
+  /**
+   * Server-side pricing for the order, debounced. Every line's special pricing,
+   * fees and discounts come from here — the app deliberately does not recompute
+   * an order total locally, so what staff read is what will be charged.
+   */
+  useEffect(() => {
+    if (!orderMode) {
+      setOrderQuote(null);
+      return;
+    }
+    const items = currentLine ? [...orderLines, currentLine] : orderLines;
+    if (items.length === 0) {
+      setOrderQuote(null);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      quoteTicketOrder(token, items, controller.signal)
+        .then(setOrderQuote)
+        .catch(() => {});
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [orderMode, orderLines, currentLine]);
+
+  const resetItemForm = useCallback(() => {
+    setSelected(null);
+    setSelectedEvent(null);
+    setQuantity(1);
+    setEventQty(1);
+    setEventDate("");
+    setScheduledDate("");
+    setScheduledTime("");
+    setAddonQty({});
+    setSearch("");
+  }, []);
+
+  const addCurrentToOrder = () => {
+    if (!currentLine) {
+      setToast({
+        message:
+          itemTab === "events"
+            ? "Pick an event first."
+            : "Pick an attraction with a visit date and time first.",
+        type: "error",
+      });
+      return;
+    }
+    // The line's own key describes its contents, which two lines can share
+    // (the same attraction, date and time twice). A counter makes the committed
+    // key unique, so removing one line can never take its twin with it.
+    lineSeqRef.current += 1;
+    const line = { ...currentLine, key: `${currentLine.key}#${lineSeqRef.current}` };
+    setOrderLines((prev) => [...prev, line]);
+    resetItemForm();
+    setToast({
+      message: `${currentLine.quantity}× ${currentLine.name} added — configure the next item or create the order.`,
+      type: "success",
+    });
+  };
+
+  const removeOrderLine = (key: string) =>
+    setOrderLines((prev) => prev.filter((l) => l.key !== key));
+
+  /**
+   * Pulls a line back off the order and into the form above. The line is removed
+   * first, so pressing "Add item to order" afterwards puts it back rather than
+   * duplicating it (web `editOrderLine`).
+   */
+  const editOrderLine = (key: string) => {
+    const line = orderLines.find((l) => l.key === key);
+    if (!line) return;
+
+    if (line.type === "event") {
+      const event = eventsCatalog.find((e) => e.id === line.id);
+      if (!event) {
+        setToast({
+          message: `${line.name} is no longer in the catalog here — remove the line instead if it should not be sold.`,
+          type: "error",
+        });
+        return;
+      }
+      setOrderLines((prev) => prev.filter((l) => l.key !== key));
+      setItemTab("events");
+      setSelected(null);
+      setSelectedEvent(event);
+      setEventQty(line.quantity);
+      setEventDate(line.scheduledDate ?? "");
+    } else {
+      const attraction = attractions.find((a) => a.id === line.id);
+      if (!attraction) {
+        setToast({
+          message: `${line.name} is no longer in the catalog here — remove the line instead if it should not be sold.`,
+          type: "error",
+        });
+        return;
+      }
+      setOrderLines((prev) => prev.filter((l) => l.key !== key));
+      setItemTab("attractions");
+      setSelectedEvent(null);
+      setSelected(attraction);
+      setQuantity(line.quantity);
+      setScheduledDate(line.scheduledDate ?? "");
+      setScheduledTime(line.scheduledTime ?? "");
+      setAddonQty(
+        line.addOns.reduce<Record<number, number>>((acc, a) => {
+          acc[a.id] = a.quantity;
+          return acc;
+        }, {}),
+      );
+    }
+
+    setToast({
+      message: `Editing ${line.name} — adjust it above, then press "Add item to order" to put it back.`,
+      type: "info",
+    });
+  };
+
+  const setMode = (next: "single" | "bulk") => {
+    if (next === "bulk") {
+      setBulkMode(true);
+      return;
+    }
+    const leave = () => {
+      setBulkMode(false);
+      setOrderLines([]);
+      setSelectedEvent(null);
+      setItemTab("attractions");
+    };
+    if (orderLines.length > 0) {
+      Alert.alert(
+        "Switch to single purchase?",
+        "The items on this order will be discarded.",
+        [
+          { text: "Keep order", style: "cancel" },
+          { text: "Discard", style: "destructive", onPress: leave },
+        ],
+      );
+      return;
+    }
+    leave();
+  };
+
   const cardValid = validateCardNumber(cardNumber);
   const cardIncomplete =
     !cardNumber || !cardMonth || !cardYear || !cardCVV || !cardValid;
+  const cardLegBlocked =
+    paymentMethod === "authorize.net" && (cardIncomplete || authorizeUnavailable);
+
+  /**
+   * Why "Create order" is not available yet, in the web's order of precedence —
+   * the first one is what the panel shows. An order needs a name (the receipt
+   * email is optional there, unlike a single purchase, because the order's own
+   * receipt only goes out when there is an address on file).
+   */
+  const orderBlockers: string[] = [];
+  if (orderLines.length === 0 && !currentLine) {
+    orderBlockers.push("Add at least one item to the order.");
+  }
+  if (!selectedCustomerId && !customerName.trim()) {
+    orderBlockers.push("Enter the customer name.");
+  }
+  if (cardLegBlocked) orderBlockers.push("Complete the card details.");
+
   const submitDisabled =
     submitting ||
     isProcessingPayment ||
-    !selected ||
-    (paymentMethod === "authorize.net" &&
-      (cardIncomplete || authorizeUnavailable));
+    (orderMode ? orderBlockers.length > 0 : !selected || cardLegBlocked);
 
   /**
    * Card pre-flight — the web's validation order, run before anything is
@@ -570,7 +982,192 @@ const CreatePurchaseScreen = () => {
     return null;
   };
 
+  /**
+   * An order writes one attraction purchase and/or event purchase per line, so
+   * both lists have to re-read after it lands.
+   */
+  const markOrderListsStale = () => {
+    markAttractionPurchasesStale();
+    markEventPurchasesStale();
+  };
+
+  /**
+   * The bulk path: create the order, attach its QR, then settle it.
+   *
+   * Same two-step shape as a single purchase — the order is written unpaid so the
+   * charge has a payable to point at — and the same safety rule: a proven
+   * failure rolls the order back, an *unknown* outcome never does, because a
+   * card that may have been charged must not lose its order.
+   */
+  const submitOrder = async (token: string) => {
+    const items = currentLine ? [...orderLines, currentLine] : [...orderLines];
+    if (items.length === 0) {
+      setToast({
+        message: "Add at least one configured item to the order first.",
+        type: "error",
+      });
+      return;
+    }
+
+    const isCardPayment = paymentMethod === "authorize.net";
+    if (isCardPayment) {
+      const reason = cardPreflightError();
+      if (reason) {
+        setPaymentError(reason);
+        return;
+      }
+      setPaymentError("");
+    }
+
+    const order = await checkoutTicketOrder(token, items, {
+      customer_id: selectedCustomerId ?? undefined,
+      guest_name: customerName.trim() || "Walk-in Customer",
+      guest_email: customerEmail.trim() || undefined,
+      guest_phone: customerPhone.trim() || undefined,
+      payment_method: paymentMethod,
+      notes:
+        notes.trim() ||
+        `Staff order — ${items.length} item${items.length > 1 ? "s" : ""}`,
+    });
+
+    // One code admits the whole order, so it is stored on the order itself
+    // rather than per line.
+    const qrCode = await qr.generate(ticketOrderQrValue(order.id));
+    if (qrCode) {
+      await storeTicketOrderQrCode(token, order.id, qrCode, order.qrToken);
+    }
+
+    if (isCardPayment) {
+      let response;
+      try {
+        response = await processCardPayment(
+          token,
+          {
+            cardNumber: cardNumber.replace(/\s/g, ""),
+            month: cardMonth,
+            year: cardYear,
+            cardCode: cardCVV,
+          },
+          authorizeCredentials!,
+          {
+            location_id: order.locationId,
+            amount: order.totalAmount,
+            order_id: order.referenceNumber.slice(0, 20),
+            description: `Ticket order ${order.referenceNumber}`,
+            customer_id: selectedCustomerId ?? undefined,
+            payable_id: order.id,
+            payable_type: PAYMENT_TYPE.TICKET_ORDER,
+            // The order sends its own receipt, and its QR is already stored on
+            // the order above; a second receipt from the charge would double up
+            // (web parity).
+            send_email: false,
+            customer: {
+              first_name: customerName.trim().split(/\s+/)[0] || "",
+              last_name:
+                customerName.trim().split(/\s+/).slice(1).join(" ") || "",
+              email: customerEmail.trim(),
+              phone: customerPhone.trim(),
+            },
+          },
+        );
+      } catch (payErr) {
+        if (chargeOutcomeUnknown(payErr)) {
+          setPaymentError(CHARGE_UNKNOWN_MESSAGE);
+          Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+          return;
+        }
+        await rollbackTicketOrder(token, order.id);
+        setPaymentError(getPaymentErrorMessage(payErr));
+        Alert.alert(
+          "Payment failed",
+          `${getPaymentErrorMessage(payErr)}\n\nThe order has been cancelled and no charges were made.`,
+        );
+        return;
+      }
+
+      if (!response.success) {
+        await rollbackTicketOrder(token, order.id);
+        const message = declineMessage(response.message, "purchase");
+        setPaymentError(message);
+        Alert.alert("Payment declined", message);
+        return;
+      }
+      setPaymentError("");
+    } else if (paymentMethod === "in-store") {
+      // Cash honours the typed amount, capped at the order total; blank means
+      // the whole total was collected.
+      const typed = Number(amountPaid);
+      const collected =
+        typed > 0 ? Math.min(typed, order.totalAmount) : order.totalAmount;
+      try {
+        await recordPayment(token, {
+          payable_id: order.id,
+          payable_type: PAYMENT_TYPE.TICKET_ORDER,
+          amount: collected,
+          method: "in-store",
+          status: "completed",
+          location_id: order.locationId,
+          customer_id: selectedCustomerId ?? undefined,
+          notes: `Collected at creation for order ${order.referenceNumber}`,
+        });
+      } catch {
+        // The order exists and must not be rolled back over a bookkeeping
+        // failure — staff finish it from Payments (web parity).
+        markOrderListsStale();
+        Alert.alert(
+          "Order created, payment not recorded",
+          `Order ${order.referenceNumber} was created, but recording the ${money(collected)} payment failed. Record it against the order from Payments.`,
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+        return;
+      }
+    }
+
+    markOrderListsStale();
+    Alert.alert(
+      "Order created",
+      `${order.referenceNumber}\n${money(order.totalAmount)} · ${items.length} item${items.length > 1 ? "s" : ""}${
+        paymentMethod === "paylater" ? "\nNothing collected — payment is due later." : ""
+      }`,
+      [{ text: "OK", onPress: () => router.back() }],
+    );
+  };
+
   const handleSubmit = async () => {
+    if (orderMode) {
+      if (orderBlockers.length > 0) {
+        setToast({ message: orderBlockers[0], type: "error" });
+        return;
+      }
+      if (submitLockRef.current) return;
+      const startedAt = Date.now();
+      if (startedAt - lastSubmitAtRef.current < 3000) return;
+      lastSubmitAtRef.current = startedAt;
+
+      const orderToken = getToken();
+      if (!orderToken) {
+        Alert.alert("Not authenticated", "Please sign in again.");
+        return;
+      }
+
+      submitLockRef.current = true;
+      setSubmitting(true);
+      setIsProcessingPayment(paymentMethod === "authorize.net");
+      try {
+        await submitOrder(orderToken);
+      } catch (err) {
+        Alert.alert(
+          "Couldn't create order",
+          err instanceof Error ? err.message : "Please try again.",
+        );
+      } finally {
+        setSubmitting(false);
+        setIsProcessingPayment(false);
+        submitLockRef.current = false;
+      }
+      return;
+    }
+
     if (!selected) {
       Alert.alert("Select an attraction", "Choose an attraction to purchase.");
       return;
@@ -803,9 +1400,152 @@ const CreatePurchaseScreen = () => {
         >
           
 
-          {/* Select attraction */}
-          <Section title="Select Attraction">
-            {selected ? (
+          {/* Single purchase / Bulk order */}
+          <View className="mb-4 self-start">
+            <Segmented
+              options={[
+                { key: "single", label: "Single purchase" },
+                { key: "bulk", label: "Bulk order" },
+              ]}
+              value={orderMode ? "bulk" : "single"}
+              onChange={setMode}
+            />
+          </View>
+
+          {orderMode && (
+            <View className="mb-4 flex-row gap-3 rounded-lg border border-blue-200 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20 p-4">
+              <Feather name="shopping-cart" size={18} color={PRIMARY} />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                  Bulk order mode
+                </Text>
+                <Text className="mt-1 text-xs text-blue-700 dark:text-blue-400">
+                  Configure an item below, press &quot;Add item to order&quot; in
+                  the Order panel, repeat for every ticket, then press &quot;Create
+                  order&quot; — one order, one payment, one QR code.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Select attraction / event */}
+          <Section
+            title={itemTab === "events" ? "Select Event" : "Select Attraction"}
+            right={
+              orderMode ? (
+                <Segmented
+                  small
+                  options={[
+                    { key: "attractions", label: "Attractions" },
+                    { key: "events", label: "Events" },
+                  ]}
+                  value={itemTab}
+                  onChange={setItemTab}
+                />
+              ) : undefined
+            }
+          >
+            {itemTab === "events" ? (
+              selectedEvent ? (
+                <View className="rounded-xl border border-[#0644C7] bg-[#0644C7]/5 dark:bg-blue-900/20 p-4">
+                  <View className="flex-row items-start gap-3">
+                    <Thumb uri={mediaUrl(selectedEvent.images[0])} size={56} />
+                    <View className="flex-1">
+                      <Text
+                        className="font-semibold text-gray-900 dark:text-white"
+                        numberOfLines={2}
+                      >
+                        {selectedEvent.name}
+                      </Text>
+                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Event
+                      </Text>
+                      <Text className="mt-1 text-lg font-bold text-[#0644C7] dark:text-blue-400">
+                        {money(selectedEvent.price)}
+                        <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                          {" "}
+                          /ticket
+                        </Text>
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => setSelectedEvent(null)}
+                      hitSlop={8}
+                      accessibilityLabel="Clear selected event"
+                    >
+                      <Feather name="x" size={18} color="#9CA3AF" />
+                    </Pressable>
+                  </View>
+
+                  <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+                    Event date
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    className="-mx-1"
+                  >
+                    {eventDateOptions.map((date) => {
+                      const active =
+                        (eventDate || selectedEvent.startDate) === date;
+                      return (
+                        <Pressable
+                          key={date}
+                          onPress={() => setEventDate(date)}
+                          className={`mx-1 rounded-lg border px-3 py-2 ${
+                            active
+                              ? "border-[#0644C7] bg-[#0644C7]"
+                              : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                          }`}
+                        >
+                          <Text
+                            className={`text-xs font-semibold ${
+                              active
+                                ? "text-white"
+                                : "text-gray-700 dark:text-gray-200"
+                            }`}
+                          >
+                            {date}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+                    Tickets
+                  </Text>
+                  <Stepper value={eventQty} onChange={setEventQty} min={1} />
+                </View>
+              ) : loadingEvents ? (
+                <View className="py-8 items-center">
+                  <ActivityIndicator color={PRIMARY} />
+                </View>
+              ) : eventsCatalog.length === 0 ? (
+                <Text className="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">
+                  No active events at this location.
+                </Text>
+              ) : (
+                <ScrollView
+                  style={{ maxHeight: ATTRACTION_LIST_MAX_HEIGHT }}
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator
+                >
+                  {eventsCatalog.map((e) => (
+                    <EventCard
+                      key={e.id}
+                      event={e}
+                      onPress={() => {
+                        setSelectedEvent(e);
+                        setEventQty(1);
+                        setEventDate(e.startDate);
+                      }}
+                    />
+                  ))}
+                </ScrollView>
+              )
+            ) : selected ? (
               <AttractionCard
                 attraction={selected}
                 selected
@@ -909,7 +1649,9 @@ const CreatePurchaseScreen = () => {
             />
           </Section>
 
-          {selected && (
+          {/* Purchase details belong to an attraction line; an event line is
+              configured entirely in the picker above (web parity). */}
+          {selected && itemTab === "attractions" && (
             <>
               {/* Purchase details — quantity / discount / paid / notes, then
                   add-ons and the schedule, matching the web card. */}
@@ -925,14 +1667,18 @@ const CreatePurchaseScreen = () => {
                   </Text>
                 </View>
 
-                <InputField
-                  label="Discount ($)"
-                  value={discount}
-                  onChangeText={setDiscount}
-                  placeholder="0"
-                  keyboardType="decimal-pad"
-                  containerClassName="mb-4"
-                />
+                {/* An order is priced by the server, so a manual per-line
+                    discount has nowhere to go there (web hides it too). */}
+                {!orderMode && (
+                  <InputField
+                    label="Discount ($)"
+                    value={discount}
+                    onChangeText={setDiscount}
+                    placeholder="0"
+                    keyboardType="decimal-pad"
+                    containerClassName="mb-4"
+                  />
+                )}
 
                 <InputField
                   label={
@@ -1028,7 +1774,13 @@ const CreatePurchaseScreen = () => {
                   </View>
                 )}
               </Section>
+            </>
+          )}
 
+          {/* Payment covers whatever is being sold — an attraction, an event, or
+              a whole order. */}
+          {(selected || selectedEvent || orderLines.length > 0) && (
+            <>
               {/* Payment */}
               <Section icon="credit-card" title="Payment">
                 <View className="flex-row gap-2 mb-4">
@@ -1203,7 +1955,215 @@ const CreatePurchaseScreen = () => {
             </>
           )}
 
-          {/* Order summary */}
+          {/* The order panel replaces the single-purchase summary: its lines and
+              totals are the server's quote, not a local calculation. */}
+          {orderMode ? (
+            <Section title="Order">
+              <View className="mb-4 overflow-hidden rounded-lg border border-gray-100 dark:border-neutral-800">
+                {orderLines.length === 0 && !currentLine && (
+                  <Text className="p-4 text-center text-sm text-gray-400 dark:text-gray-500">
+                    No items yet — pick an attraction or event above to start the
+                    order.
+                  </Text>
+                )}
+
+                {orderLines.map((line, i) => {
+                  const priced = orderQuote?.lines.find(
+                    (l) => l.position === i + 1,
+                  );
+                  return (
+                    <View
+                      key={line.key}
+                      className="flex-row items-center gap-2 border-b border-gray-100 dark:border-neutral-800 p-3"
+                    >
+                      <View className="flex-1">
+                        <Text
+                          className="text-sm font-medium text-gray-900 dark:text-white"
+                          numberOfLines={1}
+                        >
+                          {line.quantity}× {line.name}
+                        </Text>
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          {line.scheduledDate ?? ""}
+                          {line.scheduledTime
+                            ? ` · ${convertTo12Hour(line.scheduledTime)}`
+                            : ""}
+                        </Text>
+                      </View>
+                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {priced ? money(priced.totalAmount) : "—"}
+                      </Text>
+                      <Pressable
+                        onPress={() => editOrderLine(line.key)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${line.name}`}
+                        className="p-1"
+                      >
+                        <Feather name="edit-2" size={14} color={PRIMARY} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => removeOrderLine(line.key)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${line.name}`}
+                        className="p-1"
+                      >
+                        <Feather name="x" size={14} color="#EF4444" />
+                      </Pressable>
+                    </View>
+                  );
+                })}
+
+                {/* The item still being configured is quoted and sold with the
+                    rest, so it is shown as a pending line rather than omitted. */}
+                {!!currentLine && (
+                  <View className="flex-row items-center gap-2 bg-blue-50 dark:bg-blue-900/20 p-3">
+                    <View className="flex-1">
+                      <Text
+                        className="text-sm font-medium text-gray-900 dark:text-white"
+                        numberOfLines={1}
+                      >
+                        {currentLine.quantity}× {currentLine.name}
+                      </Text>
+                      <Text className="text-xs text-blue-700 dark:text-blue-400">
+                        configuring above — included when you create the order
+                      </Text>
+                    </View>
+                    <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {(() => {
+                        const priced = orderQuote?.lines.find(
+                          (l) => l.position === orderLines.length + 1,
+                        );
+                        return priced ? money(priced.totalAmount) : "—";
+                      })()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {orderQuote && (
+                <View className="mb-4">
+                  <View className="flex-row justify-between mb-1.5">
+                    <Text className="text-sm text-gray-500 dark:text-gray-400">
+                      Subtotal
+                    </Text>
+                    <Text className="text-sm text-gray-900 dark:text-white">
+                      {money(orderQuote.subtotal)}
+                    </Text>
+                  </View>
+                  {orderQuote.discountAmount > 0 && (
+                    <View className="flex-row justify-between mb-1.5">
+                      <Text className="text-sm text-green-700 dark:text-green-400">
+                        Discounts
+                      </Text>
+                      <Text className="text-sm font-medium text-green-700 dark:text-green-400">
+                        −{money(orderQuote.discountAmount)}
+                      </Text>
+                    </View>
+                  )}
+                  {orderQuote.feeTotal > 0 && (
+                    <View className="flex-row justify-between mb-1.5">
+                      <Text className="text-sm text-gray-500 dark:text-gray-400">
+                        Fees
+                      </Text>
+                      <Text className="text-sm text-gray-900 dark:text-white">
+                        {money(orderQuote.feeTotal)}
+                      </Text>
+                    </View>
+                  )}
+                  <View className="flex-row justify-between border-t border-gray-200 dark:border-neutral-700 pt-3 mt-1">
+                    <Text className="text-base font-bold text-gray-900 dark:text-white">
+                      Total ({orderQuote.ticketCount} ticket
+                      {orderQuote.ticketCount === 1 ? "" : "s"})
+                    </Text>
+                    <Text className="text-base font-bold text-gray-900 dark:text-white">
+                      {money(orderQuote.totalAmount)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              <Pressable
+                onPress={addCurrentToOrder}
+                disabled={submitting || (itemTab === "events" ? !selectedEvent : !selected)}
+                className={`mb-2 h-12 flex-row items-center justify-center gap-2 rounded-lg border-2 border-dashed ${
+                  currentLine
+                    ? "border-[#0644C7] bg-[#0644C7]/5"
+                    : "border-blue-300 dark:border-blue-900/60"
+                } ${
+                  submitting || (itemTab === "events" ? !selectedEvent : !selected)
+                    ? "opacity-40"
+                    : "active:opacity-70"
+                }`}
+              >
+                <Feather name="plus" size={16} color={PRIMARY} />
+                <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-400">
+                  Add item to order
+                </Text>
+              </Pressable>
+
+              {itemTab === "attractions" &&
+                selected &&
+                (!scheduledDate || !scheduledTime) && (
+                  <Text className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+                    Needs a visit date &amp; time — set them in Purchase Details.
+                  </Text>
+                )}
+
+              <View className="mb-3 flex-row items-start gap-2">
+                <Feather name="mail" size={13} color="#9CA3AF" />
+                <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+                  The receipt emails automatically when the customer has an email
+                  on file.
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={handleSubmit}
+                disabled={submitDisabled}
+                className={`h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] ${
+                  submitDisabled ? "opacity-50" : "active:opacity-90"
+                }`}
+              >
+                {submitting || isProcessingPayment ? (
+                  <>
+                    <ActivityIndicator color="#FFFFFF" />
+                    <Text className="text-base font-semibold text-white">
+                      Processing...
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Feather name="shopping-cart" size={18} color="#FFFFFF" />
+                    <Text className="text-base font-semibold text-white">
+                      Create order
+                      {orderQuote ? ` · ${money(orderQuote.totalAmount)}` : ""}
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+
+              {orderBlockers.length > 0 && !submitting && (
+                <Text className="mt-2 text-center text-[11px] text-amber-700 dark:text-amber-400">
+                  {orderBlockers[0]}
+                </Text>
+              )}
+
+              {orderLines.length > 0 && (
+                <Pressable
+                  onPress={() => setOrderLines([])}
+                  className="mt-3 items-center py-2 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-xs text-gray-400 dark:text-gray-500">
+                    Clear order
+                  </Text>
+                </Pressable>
+              )}
+            </Section>
+          ) : (
+          /* Order summary */
           <Section title="Order Summary">
             {selected ? (
               <>
@@ -1374,8 +2334,17 @@ const CreatePurchaseScreen = () => {
               </View>
             )}
           </Section>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {!!toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
 
       {/* Card expiry pickers */}
       <BottomSheet

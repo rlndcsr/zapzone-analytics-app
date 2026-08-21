@@ -344,6 +344,8 @@ export const PAYMENT_TYPE = {
   BOOKING: "booking",
   ATTRACTION_PURCHASE: "attraction_purchase",
   EVENT_PURCHASE: "event_purchase",
+  /** A multi-item ticket order — one charge covers all of its lines. */
+  TICKET_ORDER: "ticket_order",
 } as const;
 
 export type PaymentPayableType =
@@ -516,6 +518,36 @@ export function declineMessage(
   if (raw.includes("cvv") || raw.includes("security code"))
     return `Invalid security code (CVV). ${cancelled} Please check the code on the card and try again.`;
   return `Payment could not be processed. ${cancelled} Please check the card details and try again.`;
+}
+
+/** POST /api/payments body for money taken at the counter (web `createPayment`). */
+export type RecordPaymentInput = {
+  payable_id: number;
+  payable_type: PaymentPayableType;
+  amount: number;
+  /** The counter methods; a card goes through {@link processCardPayment}. */
+  method: "cash" | "in-store";
+  status?: "pending" | "completed";
+  location_id?: number;
+  customer_id?: number;
+  notes?: string;
+};
+
+/**
+ * POST /api/payments — records a payment the gateway was not involved in, which
+ * is how an in-store ticket order gets its money booked against it. Distinct
+ * from {@link chargePayment}: nothing is tokenized and nothing is charged, the
+ * row simply states what was collected.
+ */
+export async function recordPayment(
+  token: string,
+  input: RecordPaymentInput,
+): Promise<void> {
+  await apiRequest("/api/payments", {
+    method: "POST",
+    token,
+    body: { currency: "USD", status: "completed", ...input },
+  });
 }
 
 /** Filters for the Package Invoices PDF export. */

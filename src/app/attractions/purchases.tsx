@@ -788,7 +788,21 @@ const ManagePurchases = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Manage Purchases
           </Text>
-          <View style={{ width: 36 }} />
+          {/* Export lives in the header as an icon — it mirrors the back button
+              on the other side, so the title stays centred either way. */}
+          <Pressable
+            onPress={exportCsv}
+            disabled={exporting}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full active:opacity-70"
+            accessibilityRole="button"
+            accessibilityLabel="Export CSV"
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color={headerIcon} />
+            ) : (
+              <Feather name="download" size={20} color={headerIcon} />
+            )}
+          </Pressable>
         </View>
       </View>
 
@@ -807,40 +821,6 @@ const ManagePurchases = () => {
         }
       >
         <View className="px-5 mt-5">
-          {/* Secondary "Export CSV" + primary "New Purchase" on one row (~50/50)
-              to save vertical space. Export stays outlined/secondary; New
-              Purchase remains the primary filled CTA. */}
-          <View className="flex-row items-center gap-3 mb-5">
-            <Pressable
-              onPress={exportCsv}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              {exporting ? (
-                <ActivityIndicator size="small" color="#6B7280" />
-              ) : (
-                <Feather name="download" size={16} color="#6B7280" />
-              )}
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-              >
-                Export CSV
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/attractions/create-purchase")}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-white"
-              >
-                New Purchase
-              </Text>
-            </Pressable>
-          </View>
-
           {/* Error state */}
           {!listLoading && listError && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">

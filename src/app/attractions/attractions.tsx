@@ -118,6 +118,71 @@ const KpiCard = ({
   </View>
 );
 
+/**
+ * One of the module's square shortcut cards (Check-in, Manage Purchases, Create
+ * Purchase). They wrap two-per-row, so the cards are sized by their container
+ * rather than their content and every one of them is built from here — a third
+ * shortcut cannot drift from the first two.
+ */
+const ShortcutCard = ({
+  icon,
+  title,
+  subtitle,
+  action,
+  route,
+}: {
+  icon: FeatherIconName;
+  title: string;
+  subtitle: string;
+  /** The blue call to action in the card's footer. */
+  action: string;
+  route: string;
+}) => (
+  <Pressable
+    onPress={() => router.push(route as never)}
+    accessibilityRole="button"
+    accessibilityLabel={title}
+    className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+    style={{
+      // Structural, so it is a style and not a `w-[48%]` class: a utility that
+      // has not made it into the generated stylesheet yet would collapse the
+      // card to its content width and break the grid.
+      width: "48%",
+      shadowColor: "#424242",
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
+      elevation: 1,
+    }}
+  >
+    <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+      <Feather name={icon} size={20} color={PRIMARY} />
+    </View>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+    >
+      {title}
+    </Text>
+    <Text
+      numberOfLines={2}
+      style={{ minHeight: 28 }}
+      className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+    >
+      {subtitle}
+    </Text>
+    <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+      <Text
+        numberOfLines={1}
+        className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+      >
+        {action}
+      </Text>
+      <Feather name="chevron-right" size={16} color={PRIMARY} />
+    </View>
+  </Pressable>
+);
+
 const Attractions = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -645,84 +710,33 @@ const Attractions = () => {
           </View>
           
 
-          {/* Check-in + Manage Purchases — the module's two shortcuts, shown
-              side by side as equal-height square cards. */}
-          <View className="flex-row items-stretch gap-3 mb-3">
-            <Pressable
-              onPress={() => router.push("/attractions/check-in")}
-              className="flex-1 aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-              style={{
-                shadowColor: "#424242",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.04,
-                shadowRadius: 6,
-                elevation: 1,
-              }}
-            >
-              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                <Feather name="camera" size={20} color="#0644C7" />
-              </View>
-              <Text
-                numberOfLines={1}
-                className="text-sm font-bold text-gray-900 dark:text-white mb-1"
-              >
-                Check-in
-              </Text>
-              <Text
-                numberOfLines={2}
-                style={{ minHeight: 28 }}
-                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-              >
-                Checking in customers
-              </Text>
-              <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text
-                  numberOfLines={1}
-                  className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
-                >
-                  Scan QR Code
-                </Text>
-                <Feather name="chevron-right" size={16} color="#0644C7" />
-              </View>
-            </Pressable>
-
-            <Pressable
-              onPress={() => router.push("/attractions/purchases")}
-              className="flex-1 aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-              style={{
-                shadowColor: "#424242",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.04,
-                shadowRadius: 6,
-                elevation: 1,
-              }}
-            >
-              <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-                <Feather name="shopping-bag" size={20} color="#0644C7" />
-              </View>
-              <Text
-                numberOfLines={1}
-                className="text-sm font-bold text-gray-900 dark:text-white mb-1"
-              >
-                Manage Purchases
-              </Text>
-              <Text
-                numberOfLines={2}
-                style={{ minHeight: 28 }}
-                className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-              >
-                Attraction ticket purchases
-              </Text>
-              <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text
-                  numberOfLines={1}
-                  className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
-                >
-                  View Purchases
-                </Text>
-                <Feather name="chevron-right" size={16} color="#0644C7" />
-              </View>
-            </Pressable>
+          {/* Check-in, Manage Purchases and Create Purchase — the module's
+              shortcuts as equal square cards, two per row. */}
+          <View
+            className="flex-row flex-wrap justify-between mb-3"
+            style={{ rowGap: 12 }}
+          >
+            <ShortcutCard
+              icon="camera"
+              title="Check-in"
+              subtitle="Checking in customers"
+              action="Scan QR Code"
+              route="/attractions/check-in"
+            />
+            <ShortcutCard
+              icon="shopping-bag"
+              title="Manage Purchases"
+              subtitle="Attraction ticket purchases"
+              action="View Purchases"
+              route="/attractions/purchases"
+            />
+            <ShortcutCard
+              icon="shopping-cart"
+              title="Create Purchase"
+              subtitle="On-site tickets and bulk orders"
+              action="New Purchase"
+              route="/attractions/create-purchase"
+            />
           </View>
 
           {/* New Attraction — the primary filled CTA, full width. */}

@@ -100,3 +100,10 @@ export function useQrDataUri(): QrDataUri {
 /** QR payload for an attraction ticket (web `generatePurchaseQRData`). */
 export const attractionPurchaseQrValue = (purchaseId: number): string =>
   JSON.stringify({ type: "attraction_purchase", id: purchaseId });
+
+/**
+ * QR payload for a multi-item ticket order (web `generateOrderQRData`). One code
+ * admits the whole order, so check-in scans this instead of each line.
+ */
+export const ticketOrderQrValue = (orderId: number): string =>
+  JSON.stringify({ type: "ticket_order", id: orderId });
