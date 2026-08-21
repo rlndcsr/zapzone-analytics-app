@@ -12,6 +12,7 @@ export type NavigationGate = {
 export type PendingNotificationTap = {
   key: string;
   route: NotificationRoute;
+  attempts: number;
 };
 
 /** The pieces of a tapped notification this app cares about. */
@@ -25,6 +26,8 @@ export type TappedNotification = {
 
 const HANDLED_KEY_LIMIT = 50;
 const handledKeys = new Set<string>();
+
+const MAX_DELIVERY_ATTEMPTS = 3;
 
 let pending: PendingNotificationTap | null = null;
 
@@ -95,10 +98,9 @@ export function isInternalRoute(route: NotificationRoute | null): boolean {
 export function offerNotificationTap(
   key: string,
   route: NotificationRoute | null,
-  gate: NavigationGate,
-): NotificationRoute | null {
-  if (handledKeys.has(key)) return null;
-  if (!isInternalRoute(route) || !route) return null;
+): boolean {
+  if (handledKeys.has(key)) return false;
+  if (!isInternalRoute(route) || !route) return false;
 
   handledKeys.add(key);
   if (handledKeys.size > HANDLED_KEY_LIMIT) {
@@ -106,21 +108,39 @@ export function offerNotificationTap(
     if (oldest !== undefined) handledKeys.delete(oldest);
   }
 
-  if (gate.authed && gate.ready) return route;
-
-  pending = { key, route };
-  return null;
+  pending = { key, route, attempts: 0 };
+  return true;
 }
 
-export function flushPendingNotificationTap(
+export function claimPendingNotificationTap(
   gate: NavigationGate,
 ): NotificationRoute | null {
   if (!pending) return null;
   if (!gate.authed || !gate.ready) return null;
 
-  const { route } = pending;
+  if (pending.attempts >= MAX_DELIVERY_ATTEMPTS) {
+    pending = null;
+    return null;
+  }
+
+  pending.attempts += 1;
+  return pending.route;
+}
+
+export function settlePendingNotificationTap(pathname: string): boolean {
+  if (!pending || pending.attempts === 0) return false;
+  if (normalizePathname(pending.route.pathname) !== normalizePathname(pathname))
+    return false;
+
   pending = null;
-  return route;
+  return true;
+}
+
+/** Compare route paths without tripping over a trailing slash. */
+function normalizePathname(pathname: string): string {
+  if (typeof pathname !== "string") return "";
+  const path = pathname.trim();
+  return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
 export function hasPendingNotificationTap(): boolean {

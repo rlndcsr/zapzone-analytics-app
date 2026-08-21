@@ -1,5 +1,5 @@
 import { usePathname, useRootNavigationState, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { isPublicRoute } from "../lib/navigation/publicRoutes";
 import { foregroundNotificationBehavior } from "../lib/notifications/foregroundPresentation";
@@ -10,11 +10,12 @@ import {
 } from "../lib/notifications/notificationRouteMapper";
 import { loadNotifications } from "../lib/notifications/pushDevice";
 import {
+  claimPendingNotificationTap,
   discardPendingNotificationTap,
-  flushPendingNotificationTap,
   notificationTapKey,
   offerNotificationTap,
   readNotificationResponse,
+  settlePendingNotificationTap,
 } from "../lib/notifications/pushNavigationQueue";
 import { useAuthStatus, useCurrentUserId } from "../lib/session";
 
@@ -25,6 +26,8 @@ export function PushNotificationRouter() {
   const navState = useRootNavigationState();
   const router = useRouter();
   const ready = Boolean(navState?.key) && !isPublicRoute(pathname);
+
+  const [tapCount, setTapCount] = useState(0);
 
   const navigate = useCallback(
     (route: NotificationRoute) => {
@@ -43,11 +46,9 @@ export function PushNotificationRouter() {
         body: tapped.body,
       }),
     );
-    const immediate = offerNotificationTap(notificationTapKey(tapped), route, {
-      authed,
-      ready,
-    });
-    if (immediate) navigate(immediate);
+    if (offerNotificationTap(notificationTapKey(tapped), route)) {
+      setTapCount((count) => count + 1);
+    }
   };
 
   useEffect(() => {
@@ -82,8 +83,6 @@ export function PushNotificationRouter() {
     };
   }, []);
 
-  // Release a parked destination once the gate opens — and drop it instead when
-  // the session it belonged to has gone away.
   const lastUserId = useRef(userId);
   useEffect(() => {
     const switchedAccount =
@@ -92,15 +91,21 @@ export function PushNotificationRouter() {
       lastUserId.current !== userId;
     lastUserId.current = userId;
 
-    if (!authed || switchedAccount) {
-      discardPendingNotificationTap();
-      return;
-    }
-    if (!ready) return;
+    if (!authed || switchedAccount) discardPendingNotificationTap();
+  }, [authed, userId]);
 
-    const route = flushPendingNotificationTap({ authed, ready });
-    if (route) navigate(route);
-  }, [authed, userId, ready, navigate]);
+  useEffect(() => {
+    if (!authed || !ready) return;
+
+    // Arrived — stop tracking it.
+    if (settlePendingNotificationTap(pathname)) return;
+
+    const route = claimPendingNotificationTap({ authed, ready });
+    if (!route) return;
+    navigate(route);
+
+    settlePendingNotificationTap(pathname);
+  }, [authed, ready, pathname, tapCount, navigate]);
 
   return null;
 }

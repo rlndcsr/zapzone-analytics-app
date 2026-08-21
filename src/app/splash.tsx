@@ -1,10 +1,9 @@
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
-import Svg, { Defs, RadialGradient, Rect, Stop } from "react-native-svg";
 import Animated, {
   Easing,
   runOnJS,
@@ -14,6 +13,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
+import Svg, { Defs, RadialGradient, Rect, Stop } from "react-native-svg";
 
 import { markSplashPlayed } from "../lib/splashState";
 
@@ -24,11 +24,13 @@ const HOLD_MS = 1500;
 
 export default function Splash() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { width, height } = useWindowDimensions();
   const logoSize = Math.min(width * 0.28, 200);
 
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.82);
+  const handedOffRef = useRef(false);
 
   const logoStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -39,7 +41,11 @@ export default function Splash() {
     markSplashPlayed();
     SplashScreen.hideAsync().catch(() => {});
 
-    const goToLogin = () => router.replace("/");
+    const goToLogin = () => {
+      if (handedOffRef.current || !navigation.isFocused()) return;
+      handedOffRef.current = true;
+      router.replace("/");
+    };
 
     // Smooth entrance — fade + scale in immediately (no delay).
     opacity.value = withTiming(1, {
@@ -51,7 +57,10 @@ export default function Splash() {
       // Gentle, continuous breathe while we wait — reads as "alive", not delayed.
       withRepeat(
         withSequence(
-          withTiming(1.05, { duration: 750, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1.05, {
+            duration: 750,
+            easing: Easing.inOut(Easing.ease),
+          }),
           withTiming(1, { duration: 750, easing: Easing.inOut(Easing.ease) }),
         ),
         -1,
