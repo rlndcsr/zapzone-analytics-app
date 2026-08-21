@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { QrScannerView } from "../../components/checkin/QrScannerView";
+import { VerifyOrderDetails } from "../../components/checkin/VerifyOrderDetails";
 import { VerifyTicketDetails } from "../../components/checkin/VerifyTicketDetails";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
@@ -217,15 +218,30 @@ export default function AttractionCheckInScreen() {
     phase,
     review,
     waivers,
+    order,
+    orderBusy,
+    orderNotice,
     result,
     busy,
     handleScan,
     confirm,
+    checkInOrder,
+    closeOrder,
     cancelReview,
     startScanning,
     stopScanning,
     reset,
   } = useAttractionCheckIn();
+
+  // Mirrors the web's "Confirm Check-In (All)" gate: nothing in flight, at
+  // least one line still waiting, and no outstanding balance.
+  const orderAllCheckedIn =
+    !!order && order.lines.length > 0 && order.lines.every((l) => l.checkedInAt);
+  const orderAllDisabled =
+    !order ||
+    orderBusy !== null ||
+    orderAllCheckedIn ||
+    order.remainingBalance > 0;
 
   // "Upload Image" — pick a photo of a ticket and decode the QR out of it,
   // the mobile equivalent of the web's file input.
@@ -408,6 +424,21 @@ export default function AttractionCheckInScreen() {
             </View>
           )}
 
+          {/* Order — a scanned multi-item order and its lines */}
+          {phase === "order" && order && (
+            <View className="mt-1">
+              <Text className="mb-3 text-lg font-bold text-gray-800 dark:text-white">
+                Verify Order Details
+              </Text>
+              <VerifyOrderDetails
+                order={order}
+                busy={orderBusy}
+                notice={orderNotice}
+                onCheckInLine={(lineId) => checkInOrder([lineId])}
+              />
+            </View>
+          )}
+
           {/* Result — terminal outcome (success / blocked / error) */}
           {phase === "result" && result && (
             <View>
@@ -485,6 +516,50 @@ export default function AttractionCheckInScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Order footer — Close / Check In All, the web modal's footer pair */}
+      {phase === "order" && order && (
+        <View
+          className="flex-row gap-3 border-t border-gray-100 bg-white px-5 pt-3 dark:border-neutral-800 dark:bg-neutral-900"
+          style={{ paddingBottom: insets.bottom + 12 }}
+        >
+          <Pressable
+            onPress={closeOrder}
+            disabled={orderBusy !== null}
+            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white py-3.5 active:opacity-80 dark:border-neutral-700 dark:bg-neutral-900 ${
+              orderBusy !== null ? "opacity-60" : ""
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel="Close order"
+          >
+            <Feather name="x" size={16} color="#374151" />
+            <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Close
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => checkInOrder()}
+            disabled={orderAllDisabled}
+            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-green-600 py-3.5 active:opacity-90 ${
+              orderAllDisabled ? "opacity-50" : ""
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel="Check in the whole order"
+          >
+            {orderBusy === "all" ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <>
+                <Feather name="check-circle" size={16} color="#FFFFFF" />
+                <Text className="text-sm font-semibold text-white">
+                  {orderAllCheckedIn ? "All Checked In" : "Check In All"}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      )}
 
       {/* Verify footer — Deny / Approve, pinned like the web modal's footer */}
       {phase === "review" && review && (

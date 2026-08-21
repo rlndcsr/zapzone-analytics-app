@@ -83,12 +83,48 @@ export type TicketOrder = {
   amountPaid: number;
   itemCount: number;
   ticketCount: number;
-  /**
-   * Signature the public QR upload needs. Staff requests are authorized by the
-   * bearer token instead, so this is usually absent — carried anyway to keep the
-   * upload identical on both paths.
-   */
   qrToken: string | null;
+};
+
+export type TicketOrderLine = {
+  id: number;
+  type: CartItemType;
+  position: number;
+  name: string;
+  entityId: number;
+  quantity: number;
+  totalAmount: number;
+  amountPaid: number;
+  status: string;
+  checkedInAt: string | null;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+};
+
+/** A placed order with its lines — what the check-in scanner opens. */
+export type TicketOrderDetail = {
+  id: number;
+  referenceNumber: string;
+  status: string;
+  locationId: number;
+  customerName: string;
+  customerEmail: string | null;
+  itemCount: number;
+  ticketCount: number;
+  totalAmount: number;
+  amountPaid: number;
+  /** What is still owed. Gates check-in, exactly as on the web. */
+  remainingBalance: number;
+  paymentMethod: string | null;
+  notes: string | null;
+  lines: TicketOrderLine[];
+};
+
+/** What a check-in attempt actually did, per line (web `checkIn`). */
+export type TicketOrderCheckInResult = {
+  checkedIn: number;
+  /** Lines the server refused, each with its reason — unpaid, already in, … */
+  skipped: { id: number; reason: string }[];
 };
 
 export type TicketOrderCheckoutInput = {
@@ -156,6 +192,53 @@ const mapOrder = (raw: RawOrder, qrToken: string | null): TicketOrder => ({
   qrToken,
 });
 
+const mapOrderLine = (raw: Record<string, unknown>): TicketOrderLine => ({
+  id: num(raw.id),
+  type: raw.type === "event" ? "event" : "attraction",
+  position: num(raw.position),
+  name: typeof raw.name === "string" ? raw.name : "",
+  entityId: num(raw.entity_id),
+  quantity: num(raw.quantity),
+  totalAmount: num(raw.total_amount),
+  amountPaid: num(raw.amount_paid),
+  status: typeof raw.status === "string" ? raw.status : "pending",
+  checkedInAt: str(raw.checked_in_at),
+  scheduledDate: str(raw.scheduled_date),
+  scheduledTime: str(raw.scheduled_time),
+});
+
+const mapOrderDetail = (raw: RawOrder): TicketOrderDetail => {
+  const totalAmount = num(raw.total_amount);
+  const amountPaid = num(raw.amount_paid);
+  return {
+    id: num(raw.id),
+    referenceNumber:
+      typeof raw.reference_number === "string" ? raw.reference_number : "",
+    status: typeof raw.status === "string" ? raw.status : "pending",
+    locationId: num(raw.location_id),
+    customerName:
+      typeof raw.customer_name === "string" && raw.customer_name.trim()
+        ? raw.customer_name
+        : "Walk-in Customer",
+    customerEmail: str(raw.customer_email),
+    itemCount: num(raw.item_count),
+    ticketCount: num(raw.ticket_count),
+    totalAmount,
+    amountPaid,
+    // Trust the server's figure; derive it only when the field is absent, so a
+    // response without it still gates check-in instead of reading as paid.
+    remainingBalance:
+      raw.remaining_balance == null
+        ? Math.max(0, totalAmount - amountPaid)
+        : num(raw.remaining_balance),
+    paymentMethod: str(raw.payment_method),
+    notes: str(raw.notes),
+    lines: Array.isArray(raw.lines)
+      ? (raw.lines as Record<string, unknown>[]).map(mapOrderLine)
+      : [],
+  };
+};
+
 /** The cart as the controller's `items.*` rules expect it. */
 const toApiItems = (items: CartItem[]) =>
   items.map((item) => ({
@@ -217,6 +300,59 @@ export async function checkoutTicketOrder(
     data as RawOrder,
     typeof res.qr_token === "string" ? res.qr_token : null,
   );
+}
+
+/**
+ * GET /api/ticket-orders/{id} — one placed order with all of its lines. This is
+ * what a scanned order QR resolves to (web `ticketOrderService.get`).
+ */
+export async function fetchTicketOrder(
+  token: string,
+  orderId: number,
+  signal?: AbortSignal,
+): Promise<TicketOrderDetail> {
+  const res = await apiRequest<Envelope>(`/api/ticket-orders/${orderId}`, {
+    token,
+    signal,
+  });
+  const data = res?.data;
+  if (!data || typeof data !== "object") {
+    throw new Error("We could not load this order.");
+  }
+  return mapOrderDetail(data as RawOrder);
+}
+
+/**
+ * POST /api/ticket-orders/{id}/check-in — admits the order.
+ *
+ * Omitting `lineIds` checks in every eligible line; passing them checks in just
+ * those (web `checkIn(id, lineIds?)`). The server decides eligibility and
+ * reports what it refused in `skipped`, so unpaid or already-admitted lines are
+ * its call to make, not the app's.
+ */
+export async function checkInTicketOrder(
+  token: string,
+  orderId: number,
+  lineIds?: number[],
+): Promise<TicketOrderCheckInResult> {
+  const res = await apiRequest<Envelope>(
+    `/api/ticket-orders/${orderId}/check-in`,
+    {
+      method: "POST",
+      token,
+      body: lineIds && lineIds.length ? { line_ids: lineIds } : {},
+    },
+  );
+  const data = (res?.data ?? {}) as Record<string, unknown>;
+  return {
+    checkedIn: num(data.checked_in),
+    skipped: Array.isArray(data.skipped)
+      ? (data.skipped as Record<string, unknown>[]).map((s) => ({
+          id: num(s.id),
+          reason: typeof s.reason === "string" ? s.reason : "Not eligible",
+        }))
+      : [],
+  };
 }
 
 /**
