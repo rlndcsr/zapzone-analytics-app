@@ -245,6 +245,23 @@ export async function fetchPayments(token: string): Promise<PaymentList> {
   return { rows: rows.map(mapPayment), total };
 }
 
+/** GET /api/payments filtered to one payable (web `getPayments({payable_*})`). */
+export async function fetchPaymentsForPayable(
+  token: string,
+  payableType: PaymentPayableType,
+  payableId: number,
+  signal?: AbortSignal,
+): Promise<PaymentRow[]> {
+  const res = await apiRequest<unknown>(
+    `/api/payments?payable_type=${encodeURIComponent(payableType)}&payable_id=${payableId}&per_page=${PER_PAGE}`,
+    { token, signal },
+  );
+  const { rows } = extractPayments(res);
+  return rows
+    .map(mapPayment)
+    .filter((p) => p.payableId === payableId && p.payableType === payableType);
+}
+
 /** GET /api/payments/trashed — soft-deleted payments (the "View Deleted" list). */
 export async function fetchTrashedPayments(token: string): Promise<PaymentList> {
   const res = await apiRequest<unknown>(`/api/payments/trashed?per_page=${PER_PAGE}`, {

@@ -38,6 +38,7 @@ import {
   type EventPurchaseAddonInput,
   type EventPurchaseEditRecord,
   type EventPurchaseStatus,
+  type UpdateEventOrderLineInput,
   type UpdateEventPurchaseInput,
 } from "../../services/eventPurchasesService";
 import {
@@ -143,6 +144,8 @@ const backLabelFor = (from?: string) => {
       return "Payments";
     case "details":
       return "Purchase Details";
+    case "order":
+      return "Order Details";
     default:
       return "Event Purchases";
   }
@@ -175,13 +178,17 @@ const Section = ({
   icon,
   title,
   children,
+  locked,
 }: {
   icon?: IconName;
   title: string;
   children: React.ReactNode;
+  /** Managed on the bulk order instead — shown, but not editable. */
+  locked?: boolean;
 }) => (
   <View
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm"
+    pointerEvents={locked ? "none" : "auto"}
+    className={`bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm ${locked ? "opacity-50" : ""}`}
     style={CARD_SHADOW}
   >
     <View className="flex-row items-center gap-2 mb-4">
@@ -329,6 +336,7 @@ const EditEventPurchaseScreen = () => {
   const [discountAmount, setDiscountAmount] = useState("0");
 
   const submitLockRef = useRef(false);
+  const isOrderLine = record?.ticketOrderId != null;
 
   /* --- Load the purchase, then its event + bookable dates ------------------ */
 
@@ -638,7 +646,14 @@ const EditEventPurchaseScreen = () => {
       special_pricing_id: d.special_pricing_id,
     }));
 
-    const body: UpdateEventPurchaseInput = {
+    const body: UpdateEventPurchaseInput | UpdateEventOrderLineInput = isOrderLine
+      ? {
+          purchase_date: purchaseDate,
+          purchase_time: purchaseTime,
+          notes: notes || undefined,
+          special_requests: specialRequests || undefined,
+        }
+      : {
       guest_name: guestName || undefined,
       guest_email: guestEmail || undefined,
       guest_phone: guestPhone || undefined,
@@ -784,7 +799,33 @@ const EditEventPurchaseScreen = () => {
           }}
         >
           {/* Event — read-only */}
-          <Section icon="map-pin" title="Event">
+          {isOrderLine && (
+            <View className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-900/20">
+              <Text className="text-sm text-blue-900 dark:text-blue-200">
+                <Text className="font-bold">Part of bulk order</Text>
+                {record?.linePosition != null ? ` — line ${record.linePosition}` : ""}
+                . Only the visit schedule and notes can be changed here; tickets,
+                pricing, customer and status are managed on the order.
+              </Text>
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: "/attractions/order-details",
+                    params: { id: String(record?.ticketOrderId) },
+                  })
+                }
+                accessibilityRole="button"
+                className="mt-2 flex-row items-center gap-1.5 active:opacity-70"
+              >
+                <Feather name="external-link" size={13} color={PRIMARY} />
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-400">
+                  Open the order
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          <Section icon="map-pin" title="Event" locked={isOrderLine}>
             <View className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-4">
               <Text className="text-base font-semibold text-gray-900 dark:text-white">
                 {eventName}
@@ -825,7 +866,7 @@ const EditEventPurchaseScreen = () => {
           </Section>
 
           {/* Customer Information */}
-          <Section icon="user" title="Customer Information">
+          <Section icon="user" title="Customer Information" locked={isOrderLine}>
             {record.customerId != null && (
               <View className="mb-4 rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-3">
                 <Text className="text-sm text-gray-600 dark:text-gray-300">
@@ -901,7 +942,7 @@ const EditEventPurchaseScreen = () => {
 
           {/* Add-ons */}
           {availableAddOns.length > 0 && (
-            <Section icon="plus-circle" title="Add-ons">
+            <Section icon="plus-circle" title="Add-ons" locked={isOrderLine}>
               <Text className="text-sm text-gray-500 dark:text-gray-400 -mt-2 mb-3">
                 Add or adjust extras for this purchase. Changing add-ons updates
                 the total.
@@ -945,7 +986,7 @@ const EditEventPurchaseScreen = () => {
           )}
 
           {/* Fees */}
-          <Section icon="file-text" title="Fees">
+          <Section icon="file-text" title="Fees" locked={isOrderLine}>
             {appliedFees.map((fee, index) => (
               <View
                 key={`fee-${index}`}
@@ -1023,7 +1064,7 @@ const EditEventPurchaseScreen = () => {
           </Section>
 
           {/* Discounts */}
-          <Section icon="percent" title="Discounts">
+          <Section icon="percent" title="Discounts" locked={isOrderLine}>
             {appliedDiscounts.map((discount, index) => (
               <View
                 key={`discount-${index}`}
@@ -1126,7 +1167,7 @@ const EditEventPurchaseScreen = () => {
           </Section>
 
           {/* Status & Payment */}
-          <Section icon="dollar-sign" title="Status & Payment">
+          <Section icon="dollar-sign" title="Status & Payment" locked={isOrderLine}>
             <View className="mb-4">
               <SelectField
                 label="Status"

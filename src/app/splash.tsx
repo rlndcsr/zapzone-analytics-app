@@ -1,8 +1,8 @@
 import { Image } from "expo-image";
-import { useNavigation, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import Animated, {
   Easing,
@@ -24,13 +24,23 @@ const HOLD_MS = 1500;
 
 export default function Splash() {
   const router = useRouter();
-  const navigation = useNavigation();
   const { width, height } = useWindowDimensions();
   const logoSize = Math.min(width * 0.28, 200);
 
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.82);
   const handedOffRef = useRef(false);
+  const focusedRef = useRef(false);
+
+  // Which splash instance the user is actually looking at (see goToLogin).
+  useFocusEffect(
+    useCallback(() => {
+      focusedRef.current = true;
+      return () => {
+        focusedRef.current = false;
+      };
+    }, []),
+  );
 
   const logoStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -42,7 +52,7 @@ export default function Splash() {
     SplashScreen.hideAsync().catch(() => {});
 
     const goToLogin = () => {
-      if (handedOffRef.current || !navigation.isFocused()) return;
+      if (handedOffRef.current || !focusedRef.current) return;
       handedOffRef.current = true;
       router.replace("/");
     };

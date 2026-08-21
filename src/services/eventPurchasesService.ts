@@ -410,6 +410,9 @@ export type EventPurchaseAddOnPivot = {
  */
 export type EventPurchaseEditRecord = {
   id: number;
+  /** Set when this ticket is a line of a bulk order, which locks its edits. */
+  ticketOrderId: number | null;
+  linePosition: number | null;
   referenceNumber: string;
   eventId: number | null;
   customerId: number | null;
@@ -450,6 +453,8 @@ type RawEventEditPurchase = Omit<
   RawEventPurchaseDetail,
   "event" | "applied_fees" | "applied_discounts"
 > & {
+  ticket_order_id?: number | null;
+  line_position?: number | null;
   event_id?: number | null;
   customer_id?: number | null;
   event?: {
@@ -483,6 +488,8 @@ function mapEditRecord(raw: RawEventEditPurchase): EventPurchaseEditRecord {
   const payment = raw.payment_status ?? "pending";
   return {
     id: raw.id,
+    ticketOrderId: raw.ticket_order_id ?? null,
+    linePosition: raw.line_position ?? null,
     referenceNumber: raw.reference_number?.trim() || "",
     eventId: raw.event_id ?? raw.event?.id ?? null,
     customerId: raw.customer_id ?? null,
@@ -562,6 +569,17 @@ export async function fetchEventPurchaseForEdit(
  * `UpdateEventPurchaseData` the EditEventPurchase form submits. The event and
  * location are immutable on an existing purchase, so neither is sent.
  */
+/**
+ * The only fields a bulk-order line may change — pricing, customer and status
+ * belong to the order (web `EditEventPurchase` isOrderLine).
+ */
+export type UpdateEventOrderLineInput = {
+  purchase_date: string;
+  purchase_time: string;
+  notes?: string;
+  special_requests?: string;
+};
+
 export type UpdateEventPurchaseInput = {
   guest_name?: string;
   guest_email?: string;
@@ -590,7 +608,7 @@ export type UpdateEventPurchaseInput = {
 export async function updateEventPurchase(
   token: string,
   id: number,
-  input: UpdateEventPurchaseInput,
+  input: UpdateEventPurchaseInput | UpdateEventOrderLineInput,
 ): Promise<boolean> {
   const res = await apiRequest<{ success?: boolean } | null>(
     `/api/event-purchases/${id}`,

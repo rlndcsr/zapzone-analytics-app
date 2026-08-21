@@ -33,6 +33,9 @@ export type PurchaseRow = {
   scheduledDate: string | null;
   scheduledTime: string | null;
   locationId: number | null;
+  /** Set when this ticket is a line of a bulk order, which locks its edits. */
+  ticketOrderId: number | null;
+  linePosition: number | null;
   /** Soft-delete timestamp; only present for trashed purchases. */
   deletedAt: string | null;
 };
@@ -47,6 +50,8 @@ type RawPurchase = {
   created_at?: string | null;
   deleted_at?: string | null;
   location_id?: number | null;
+  ticket_order_id?: number | null;
+  line_position?: number | null;
   purchase_date?: string | null;
   notes?: string | null;
   scheduled_date?: string | null;
@@ -115,6 +120,8 @@ function mapPurchase(raw: RawPurchase): PurchaseRow {
     scheduledDate: raw.scheduled_date ?? null,
     scheduledTime: raw.scheduled_time ?? null,
     locationId: raw.location_id ?? null,
+    ticketOrderId: raw.ticket_order_id ?? null,
+    linePosition: raw.line_position ?? null,
     deletedAt: raw.deleted_at ?? null,
   };
 }
@@ -417,6 +424,9 @@ export type PurchaseAddOnPivot = {
  */
 export type AttractionPurchaseEditRecord = {
   id: number;
+  /** Set when this ticket is a line of a bulk order, which locks its edits. */
+  ticketOrderId: number | null;
+  linePosition: number | null;
   attractionId: number | null;
   customerId: number | null;
   /** "First Last" of the linked customer account, when there is one. */
@@ -451,6 +461,8 @@ export type AttractionPurchaseEditRecord = {
 };
 
 type RawEditPurchase = Omit<RawPurchaseDetail, "attraction"> & {
+  ticket_order_id?: number | null;
+  line_position?: number | null;
   attraction_id?: number | null;
   customer_id?: number | null;
   discount_amount?: number | string | null;
@@ -479,6 +491,8 @@ function mapEditRecord(raw: RawEditPurchase): AttractionPurchaseEditRecord {
   const customer = raw.customer;
   return {
     id: raw.id,
+    ticketOrderId: raw.ticket_order_id ?? null,
+    linePosition: raw.line_position ?? null,
     attractionId: raw.attraction_id ?? raw.attraction?.id ?? null,
     customerId: raw.customer_id ?? null,
     customerName: customer
@@ -570,11 +584,21 @@ export type UpdateAttractionPurchaseInput = {
   additional_addons?: PurchaseAddonInput[];
 };
 
+/**
+ * The only fields a bulk-order line may change — pricing, customer and status
+ * belong to the order (web `EditPurchase` isOrderLine).
+ */
+export type UpdateOrderLineInput = {
+  scheduled_date: string;
+  scheduled_time: string;
+  notes?: string;
+};
+
 /** PUT /api/attraction-purchases/{id} — save an edited purchase. */
 export async function updateAttractionPurchase(
   token: string,
   id: number,
-  input: UpdateAttractionPurchaseInput,
+  input: UpdateAttractionPurchaseInput | UpdateOrderLineInput,
 ): Promise<boolean> {
   const res = await apiRequest<{ success: boolean; message?: string }>(
     `/api/attraction-purchases/${id}`,

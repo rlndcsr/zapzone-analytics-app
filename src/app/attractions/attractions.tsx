@@ -741,6 +741,13 @@ const Attractions = () => {
               action="New Purchase"
               route="/attractions/create-purchase"
             />
+            <ShortcutCard
+              icon="layers"
+              title="Bulk Orders"
+              subtitle="Multi-item orders and check-in"
+              action="View Orders"
+              route="/attractions/orders"
+            />
           </View>
 
           {/* New Attraction — the primary filled CTA, full width. */}

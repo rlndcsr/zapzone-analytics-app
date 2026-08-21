@@ -86,6 +86,12 @@ export type TicketOrder = {
   qrToken: string | null;
 };
 
+export type TicketOrderLineAddOn = {
+  name: string;
+  quantity: number;
+  lineTotal: number;
+};
+
 export type TicketOrderLine = {
   id: number;
   type: CartItemType;
@@ -93,12 +99,18 @@ export type TicketOrderLine = {
   name: string;
   entityId: number;
   quantity: number;
+  unitPrice: number | null;
   totalAmount: number;
   amountPaid: number;
   status: string;
   checkedInAt: string | null;
   scheduledDate: string | null;
   scheduledTime: string | null;
+  /** The line's own ticket reference, when the server issues one. */
+  referenceNumber: string | null;
+  addOns: TicketOrderLineAddOn[];
+  /** Human labels for any special pricing applied to this line. */
+  discountLabels: string[];
 };
 
 /** A placed order with its lines — what the check-in scanner opens. */
@@ -107,17 +119,31 @@ export type TicketOrderDetail = {
   referenceNumber: string;
   status: string;
   locationId: number;
+  locationName: string | null;
   customerName: string;
   customerEmail: string | null;
+  customerPhone: string | null;
+  purchaseDate: string | null;
   itemCount: number;
   ticketCount: number;
+  subtotal: number;
+  discountAmount: number;
+  feeTotal: number;
   totalAmount: number;
   amountPaid: number;
   /** What is still owed. Gates check-in, exactly as on the web. */
   remainingBalance: number;
   paymentMethod: string | null;
+  transactionId: string | null;
   notes: string | null;
+  createdAt: string | null;
   lines: TicketOrderLine[];
+};
+
+export type TicketOrderListParams = {
+  locationId?: number | null;
+  page?: number;
+  perPage?: number;
 };
 
 /** What a check-in attempt actually did, per line (web `checkIn`). */
@@ -192,6 +218,28 @@ const mapOrder = (raw: RawOrder, qrToken: string | null): TicketOrder => ({
   qrToken,
 });
 
+const mapOrderLineAddOn = (
+  raw: Record<string, unknown>,
+): TicketOrderLineAddOn => {
+  const quantity = num(raw.quantity);
+  const unit = num(raw.price_at_purchase);
+  return {
+    name: typeof raw.name === "string" ? raw.name : "Add-on",
+    quantity,
+    lineTotal: raw.line_total == null ? unit * quantity : num(raw.line_total),
+  };
+};
+
+/** Web parity: `name` / `discount_name`, then the "(20% off)" suffix. */
+const mapDiscountLabel = (raw: Record<string, unknown>): string => {
+  const name =
+    (typeof raw.name === "string" && raw.name) ||
+    (typeof raw.discount_name === "string" && raw.discount_name) ||
+    "Special pricing";
+  const label = str(raw.discount_label);
+  return label ? `${name} (${label} off)` : name;
+};
+
 const mapOrderLine = (raw: Record<string, unknown>): TicketOrderLine => ({
   id: num(raw.id),
   type: raw.type === "event" ? "event" : "attraction",
@@ -199,12 +247,20 @@ const mapOrderLine = (raw: Record<string, unknown>): TicketOrderLine => ({
   name: typeof raw.name === "string" ? raw.name : "",
   entityId: num(raw.entity_id),
   quantity: num(raw.quantity),
+  unitPrice: raw.unit_price == null ? null : num(raw.unit_price),
   totalAmount: num(raw.total_amount),
   amountPaid: num(raw.amount_paid),
   status: typeof raw.status === "string" ? raw.status : "pending",
   checkedInAt: str(raw.checked_in_at),
   scheduledDate: str(raw.scheduled_date),
   scheduledTime: str(raw.scheduled_time),
+  referenceNumber: str(raw.reference_number),
+  addOns: Array.isArray(raw.add_ons)
+    ? (raw.add_ons as Record<string, unknown>[]).map(mapOrderLineAddOn)
+    : [],
+  discountLabels: Array.isArray(raw.applied_discounts)
+    ? (raw.applied_discounts as Record<string, unknown>[]).map(mapDiscountLabel)
+    : [],
 });
 
 const mapOrderDetail = (raw: RawOrder): TicketOrderDetail => {
@@ -216,13 +272,19 @@ const mapOrderDetail = (raw: RawOrder): TicketOrderDetail => {
       typeof raw.reference_number === "string" ? raw.reference_number : "",
     status: typeof raw.status === "string" ? raw.status : "pending",
     locationId: num(raw.location_id),
+    locationName: str(raw.location_name),
     customerName:
       typeof raw.customer_name === "string" && raw.customer_name.trim()
         ? raw.customer_name
         : "Walk-in Customer",
     customerEmail: str(raw.customer_email),
+    customerPhone: str(raw.customer_phone),
+    purchaseDate: str(raw.purchase_date),
     itemCount: num(raw.item_count),
     ticketCount: num(raw.ticket_count),
+    subtotal: num(raw.subtotal),
+    discountAmount: num(raw.discount_amount),
+    feeTotal: num(raw.fee_total),
     totalAmount,
     amountPaid,
     // Trust the server's figure; derive it only when the field is absent, so a
@@ -232,7 +294,9 @@ const mapOrderDetail = (raw: RawOrder): TicketOrderDetail => {
         ? Math.max(0, totalAmount - amountPaid)
         : num(raw.remaining_balance),
     paymentMethod: str(raw.payment_method),
+    transactionId: str(raw.transaction_id),
     notes: str(raw.notes),
+    createdAt: str(raw.created_at),
     lines: Array.isArray(raw.lines)
       ? (raw.lines as Record<string, unknown>[]).map(mapOrderLine)
       : [],
@@ -300,6 +364,44 @@ export async function checkoutTicketOrder(
     data as RawOrder,
     typeof res.qr_token === "string" ? res.qr_token : null,
   );
+}
+
+/**
+ * GET /api/ticket-orders — the Bulk Orders list, newest first once sorted by
+ * the screen. Each row already carries its lines, so "all checked in" is known
+ * without a second call (web `ticketOrderService.list`).
+ */
+export async function listTicketOrders(
+  token: string,
+  { locationId, page = 1, perPage = 1000 }: TicketOrderListParams = {},
+  signal?: AbortSignal,
+): Promise<TicketOrderDetail[]> {
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+  });
+  if (locationId != null) params.set("location_id", String(locationId));
+
+  const res = await apiRequest<Envelope>(
+    `/api/ticket-orders?${params.toString()}`,
+    { token, signal },
+  );
+  const rows = Array.isArray(res?.data) ? (res.data as RawOrder[]) : [];
+  return rows.map(mapOrderDetail);
+}
+
+/**
+ * POST /api/ticket-orders/{id}/cancel — cancels the order and every ticket on
+ * it (web `ticketOrderService.cancel`).
+ */
+export async function cancelTicketOrder(
+  token: string,
+  orderId: number,
+): Promise<void> {
+  await apiRequest(`/api/ticket-orders/${orderId}/cancel`, {
+    method: "POST",
+    token,
+  });
 }
 
 /**
