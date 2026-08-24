@@ -23,7 +23,7 @@ export type AttractionRow = {
   price: number;
   pricingType: string;
   maxCapacity: number;
-  /** 0 or null means "Unlimited". */
+  maxTicketsPerSlot: number | null;
   duration: number | null;
   durationUnit: string;
   status: AttractionStatus;
@@ -35,14 +35,10 @@ export type AttractionRow = {
   displayCapacityToCustomers: boolean;
   images: string[];
   addOns: AttractionAddOn[];
-  /** Preferred display order of add-ons, by name. */
   addOnsOrder: string[];
-  /** Open weekdays + daily hours. The list endpoint returns these too, so the
-   *  onsite purchase calendar can schedule straight off a list row. */
   availability: AvailabilitySchedule[];
 };
 
-/** Raw attraction as returned by GET /api/attractions (snake_case). */
 type RawAttraction = {
   id: number;
   name?: string | null;
@@ -51,6 +47,7 @@ type RawAttraction = {
   price?: number | string | null;
   pricing_type?: string | null;
   max_capacity?: number | string | null;
+  max_tickets_per_slot?: number | string | null;
   duration?: number | string | null;
   duration_unit?: string | null;
   is_active?: boolean | null;
@@ -95,6 +92,10 @@ const PER_PAGE = 100;
 
 function mapAttraction(raw: RawAttraction): AttractionRow {
   const durationRaw = raw.duration == null ? null : Number(raw.duration);
+  const capRaw =
+    raw.max_tickets_per_slot == null || raw.max_tickets_per_slot === ""
+      ? null
+      : Number(raw.max_tickets_per_slot);
   return {
     id: raw.id,
     name: raw.name?.trim() || "Untitled Attraction",
@@ -103,6 +104,7 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
     price: Number(raw.price ?? 0),
     pricingType: raw.pricing_type ?? "per_person",
     maxCapacity: Number(raw.max_capacity ?? 0),
+    maxTicketsPerSlot: capRaw != null && !Number.isNaN(capRaw) ? capRaw : null,
     duration: durationRaw && !Number.isNaN(durationRaw) ? durationRaw : null,
     durationUnit: raw.duration_unit ?? "minutes",
     status: raw.is_active ? "active" : "inactive",
@@ -112,7 +114,11 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
     updatedAt: raw.updated_at ?? null,
     displayOrder: Number(raw.display_order ?? 0),
     displayCapacityToCustomers: raw.display_capacity_to_customers ?? true,
-    images: raw.image ? (Array.isArray(raw.image) ? raw.image : [raw.image]) : [],
+    images: raw.image
+      ? Array.isArray(raw.image)
+        ? raw.image
+        : [raw.image]
+      : [],
     addOns: (raw.add_ons ?? []).map((a) => ({
       id: a.id,
       name: a.name?.trim() || "Add-on",
@@ -152,7 +158,7 @@ export type CreateAttractionInput = {
   price: number;
   pricing_type: string;
   max_capacity: number;
-  /** 0 means "unlimited". */
+  max_tickets_per_slot?: number | null;
   duration: number;
   duration_unit: "minutes" | "hours";
   availability: AvailabilitySchedule[];
@@ -184,14 +190,8 @@ export async function createAttraction(
   return mapAttraction(res.data);
 }
 
-/** Full attraction record as returned by GET /api/attractions/{id}. Identical
- *  in shape to a list row; kept as a named alias for the View / Edit /
- *  Duplicate call sites. */
 export type AttractionDetail = AttractionRow;
 
-/** Coerce the raw `availability` field into the array form the create/update
- *  endpoints expect. The API may return an array of schedules, a weekday->bool
- *  object (legacy), or null; anything non-array collapses to no schedules. */
 function mapAvailability(
   raw: RawAttraction["availability"],
 ): AvailabilitySchedule[] {
@@ -314,6 +314,7 @@ export async function duplicateAttraction(
     price: original.price,
     pricing_type: original.pricingType,
     max_capacity: original.maxCapacity,
+    max_tickets_per_slot: original.maxTicketsPerSlot,
     duration: original.duration ?? 0,
     duration_unit: original.durationUnit === "hours" ? "hours" : "minutes",
     availability: original.availability,
@@ -377,6 +378,75 @@ export async function bulkImportAttractions(
     imported: res.data?.imported_count ?? 0,
     failed: res.data?.failed_count ?? 0,
     errors: res.errors ?? [],
+  };
+}
+
+/**
+ * Live ticket availability for one attraction on one day, as returned by
+ * GET /api/attractions/{id}/slot-availability/{date}.
+ *
+ * `maxTicketsPerSlot === null` means the attraction is uncapped — the backend
+ * then sends no `remaining_by_slot` at all, and nothing should be displayed.
+ * When it IS capped, `remainingBySlot` only holds the slots that already have
+ * bookings; an untouched slot simply has the full cap left (see
+ * {@link remainingForSlot}).
+ */
+export type SlotAvailability = {
+  date: string;
+  maxTicketsPerSlot: number | null;
+  /** Seats already sold, keyed "HH:mm". */
+  bookedBySlot: Record<string, number>;
+  /** Seats still sellable, keyed "HH:mm"; null when the attraction is uncapped. */
+  remainingBySlot: Record<string, number> | null;
+};
+
+type RawSlotAvailability = {
+  success?: boolean;
+  data?: {
+    date?: string;
+    max_tickets_per_slot?: number | string | null;
+    booked_by_slot?: Record<string, number | string> | null;
+    remaining_by_slot?: Record<string, number | string> | null;
+  } | null;
+};
+
+const numberMap = (
+  raw: Record<string, number | string> | null | undefined,
+): Record<string, number> => {
+  const out: Record<string, number> = {};
+  Object.entries(raw ?? {}).forEach(([slot, value]) => {
+    const n = Number(value);
+    if (!Number.isNaN(n)) out[slot.substring(0, 5)] = n;
+  });
+  return out;
+};
+
+/**
+ * GET /api/attractions/{id}/slot-availability/{date} — the same endpoint the web
+ * admin's `attractionService.getSlotAvailability` calls, throttled to 120/min
+ * server-side. Cheap enough to refetch whenever the visit date changes.
+ */
+export async function fetchAttractionSlotAvailability(
+  token: string,
+  attractionId: number,
+  date: string,
+  signal?: AbortSignal,
+): Promise<SlotAvailability> {
+  const res = await apiRequest<RawSlotAvailability>(
+    `/api/attractions/${attractionId}/slot-availability/${date}`,
+    { token, signal },
+  );
+  const data = res?.data ?? {};
+  const cap =
+    data.max_tickets_per_slot == null || data.max_tickets_per_slot === ""
+      ? null
+      : Number(data.max_tickets_per_slot);
+  return {
+    date: data.date ?? date,
+    maxTicketsPerSlot: cap != null && !Number.isNaN(cap) ? cap : null,
+    bookedBySlot: numberMap(data.booked_by_slot),
+    remainingBySlot:
+      data.remaining_by_slot == null ? null : numberMap(data.remaining_by_slot),
   };
 }
 

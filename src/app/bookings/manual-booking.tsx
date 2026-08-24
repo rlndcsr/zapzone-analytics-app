@@ -46,6 +46,7 @@ import {
   processCardPayment,
   type AuthorizeNetPublicKey,
 } from "../../services/paymentsService";
+import { isLowRemaining } from "../../lib/ticketLimits";
 import {
   buildAppliedDiscounts,
   buildAppliedFees,
@@ -1322,6 +1323,19 @@ const ManualBookingScreen = () => {
                                 >
                                   {to12h(slot.startTime)}
                                 </Text>
+                                {/* Live seats left in this slot — amber at 3 or
+                                    fewer, else emerald (web ManualBooking). */}
+                                {slot.remainingTickets != null && (
+                                  <Text
+                                    className={`text-[10px] font-semibold ${
+                                      isLowRemaining(slot.remainingTickets)
+                                        ? "text-amber-600 dark:text-amber-400"
+                                        : "text-emerald-600 dark:text-emerald-400"
+                                    }`}
+                                  >
+                                    {slot.remainingTickets} left
+                                  </Text>
+                                )}
                                 {!!slot.roomName && (
                                   <Text className="text-[10px] text-gray-400" numberOfLines={1}>
                                     {slot.roomName}

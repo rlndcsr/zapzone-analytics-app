@@ -6,11 +6,7 @@ import type {
 
 /** Booking status enum exactly as stored by the backend. */
 export type BookingStatus =
-  | "pending"
-  | "confirmed"
-  | "checked-in"
-  | "completed"
-  | "cancelled";
+  "pending" | "confirmed" | "checked-in" | "completed" | "cancelled";
 
 /** Flattened booking row used by the calendar grid / agenda. */
 export type CalendarBooking = {
@@ -274,8 +270,10 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     packageName: raw.package?.name?.trim() || "Booking",
     packageCategory: raw.package?.category?.trim() || "",
     customerName: customerName(raw.customer, raw.guest_name),
-    customerEmail: raw.customer?.email?.trim() || raw.guest_email?.trim() || null,
-    customerPhone: raw.customer?.phone?.trim() || raw.guest_phone?.trim() || null,
+    customerEmail:
+      raw.customer?.email?.trim() || raw.guest_email?.trim() || null,
+    customerPhone:
+      raw.customer?.phone?.trim() || raw.guest_phone?.trim() || null,
     roomName: raw.room?.name?.trim() || "",
     duration:
       durationRaw != null && !Number.isNaN(durationRaw) ? durationRaw : null,
@@ -832,7 +830,9 @@ export type RoomInput = {
 
 function rawRoomToBreaks(r: RawRoom): SpaceBreak[] {
   return (r.break_time ?? []).map((b) => ({
-    days: Array.isArray(b.days) ? b.days.map((d) => String(d).toLowerCase()) : [],
+    days: Array.isArray(b.days)
+      ? b.days.map((d) => String(d).toLowerCase())
+      : [],
     startTime: toTime(b.start_time) ?? String(b.start_time ?? ""),
     endTime: toTime(b.end_time) ?? String(b.end_time ?? ""),
   }));
@@ -848,7 +848,8 @@ function mapSpaceRow(r: RawRoom): SpaceRow {
     name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
     capacity: r.capacity != null ? Number(r.capacity) : null,
     areaGroup,
-    bookingInterval: r.booking_interval != null ? Number(r.booking_interval) : null,
+    bookingInterval:
+      r.booking_interval != null ? Number(r.booking_interval) : null,
     isActive:
       r.is_active === true ||
       r.is_active === 1 ||
@@ -867,9 +868,7 @@ function mapSpaceRow(r: RawRoom): SpaceRow {
 }
 
 /** Serialize a SpaceRow's break windows back into the API's break_time shape. */
-export function breaksToPayload(
-  breaks: SpaceBreak[],
-): RoomInput["break_time"] {
+export function breaksToPayload(breaks: SpaceBreak[]): RoomInput["break_time"] {
   return breaks.map((b) => ({
     days: b.days,
     start_time: b.startTime,
@@ -909,7 +908,11 @@ export async function fetchSpaceList({
   return out;
 }
 
-type RoomMutationResponse = { success?: boolean; data?: RawRoom; message?: string };
+type RoomMutationResponse = {
+  success?: boolean;
+  data?: RawRoom;
+  message?: string;
+};
 
 /** POST /api/rooms — create a space/room. */
 export async function createRoom(
@@ -1112,6 +1115,7 @@ export type AvailableSlot = {
   endTime: string; // HH:MM
   roomId: number | null;
   roomName: string | null;
+  remainingTickets: number | null;
 };
 
 const WEEKDAY_NAMES = [
@@ -1206,12 +1210,17 @@ export async function fetchAvailableTimeSlots(
     { token },
   );
   const slots = res?.data?.available_slots ?? [];
-  return (Array.isArray(slots) ? slots : []).map((s: any) => ({
-    startTime: toTime(s.start_time) ?? String(s.start_time ?? ""),
-    endTime: toTime(s.end_time) ?? String(s.end_time ?? ""),
-    roomId: s.room_id ?? null,
-    roomName: s.room_name ?? null,
-  }));
+  return (Array.isArray(slots) ? slots : []).map((s: any) => {
+    const left =
+      s.remaining_tickets == null ? null : Number(s.remaining_tickets);
+    return {
+      startTime: toTime(s.start_time) ?? String(s.start_time ?? ""),
+      endTime: toTime(s.end_time) ?? String(s.end_time ?? ""),
+      roomId: s.room_id ?? null,
+      roomName: s.room_name ?? null,
+      remainingTickets: left != null && !Number.isNaN(left) ? left : null,
+    };
+  });
 }
 
 export type BookingUpdateInput = {
@@ -1515,6 +1524,15 @@ export type BookablePackage = {
   pricePerAdditional: number;
   minParticipants: number;
   maxParticipants: number;
+  /**
+   * Seats sellable per slot, when the package sets an explicit limit. null means
+   * the cap comes from elsewhere (a per-person package is capped by its own party
+   * size; a room-based one by room availability) — the live per-slot count on the
+   * availability endpoint is what the UI actually shows.
+   */
+  maxTicketsPerSlot: number | null;
+  /** What one seat is called ("player", "guest"…); blank falls back to "participant". */
+  participantLabel: string;
   duration: number;
   durationUnit: "hours" | "minutes" | "hours and minutes";
   hasGuestOfHonor: boolean;
@@ -1539,6 +1557,8 @@ type RawPackage = {
   price_per_additional?: number | string | null;
   min_participants?: number | string | null;
   max_participants?: number | string | null;
+  max_tickets_per_slot?: number | string | null;
+  participant_label?: string | null;
   duration?: number | string | null;
   duration_unit?: string | null;
   has_guest_of_honor?: boolean | null;
@@ -1570,6 +1590,10 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
   const unit = raw.duration_unit;
   const durationUnit: BookablePackage["durationUnit"] =
     unit === "minutes" || unit === "hours and minutes" ? unit : "hours";
+  const ticketCap =
+    raw.max_tickets_per_slot == null || raw.max_tickets_per_slot === ""
+      ? null
+      : Number(raw.max_tickets_per_slot);
   return {
     id: raw.id,
     name: raw.name?.trim() || `Package #${raw.id}`,
@@ -1580,6 +1604,9 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
     pricePerAdditional: Number(raw.price_per_additional ?? 0),
     minParticipants: Number(raw.min_participants ?? 1) || 1,
     maxParticipants: Number(raw.max_participants ?? 0) || 0,
+    maxTicketsPerSlot:
+      ticketCap != null && !Number.isNaN(ticketCap) ? ticketCap : null,
+    participantLabel: raw.participant_label?.trim() || "",
     duration: Number(raw.duration ?? 0),
     durationUnit,
     hasGuestOfHonor: !!raw.has_guest_of_honor,

@@ -744,9 +744,15 @@ const EditPurchaseScreen = () => {
 
       setToast({ message: "Purchase updated successfully!", type: "success" });
       setTimeout(() => router.back(), 1200);
-    } catch {
+    } catch (err) {
+      // Show what the API said when it refuses the save — a full time slot comes
+      // back as "That time slot is already full." / "Only N tickets fit in that
+      // time slot.", and retrying blindly would never work.
       setToast({
-        message: "Error updating purchase. Please try again.",
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "Error updating purchase. Please try again.",
         type: "error",
       });
       setSubmitting(false);

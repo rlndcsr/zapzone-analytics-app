@@ -592,7 +592,7 @@ const EditEventPurchaseScreen = () => {
       date: purchaseDate,
       signal: controller.signal,
     })
-      .then((slots) => setAvailableTimeSlots(keepOriginal(slots)))
+      .then(({ slots }) => setAvailableTimeSlots(keepOriginal(slots)))
       .catch(() => {
         if (controller.signal.aborted) return;
         // The saved time stays pickable even when the lookup fails.
@@ -696,9 +696,15 @@ const EditEventPurchaseScreen = () => {
         type: "success",
       });
       setTimeout(() => router.back(), 1200);
-    } catch {
+    } catch (err) {
+      // Show what the API said when it refuses the save — a full time slot comes
+      // back as "That time slot is already full." / "Only N tickets fit in that
+      // time slot.", and retrying blindly would never work.
       setToast({
-        message: "Error updating purchase. Please try again.",
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "Error updating purchase. Please try again.",
         type: "error",
       });
       setSubmitting(false);

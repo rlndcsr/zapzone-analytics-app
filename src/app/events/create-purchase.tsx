@@ -39,6 +39,11 @@ import {
 import { rollbackEventPurchase } from "../../lib/payments/rollback";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  clampToRemaining,
+  isLowRemaining,
+  quantityCeiling,
+} from "../../lib/ticketLimits";
+import {
   createEventPurchase,
   type CreateEventPurchaseInput,
 } from "../../services/eventPurchasesService";
@@ -302,6 +307,12 @@ const CreateEventPurchaseScreen = () => {
   // client-side schedule derivation is only a fallback if those calls fail.
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [timeSlots, setTimeSlots] = useState<string[]>([]);
+  /**
+   * Tickets left per slot, or null when the event has no `max_tickets_per_slot`.
+   * A slot that is already full is dropped from `time_slots` server-side, so a
+   * sold-out time is simply not offered (the web behaves the same way).
+   */
+  const [slotsLeft, setSlotsLeft] = useState<Record<string, number> | null>(null);
   const [loadingDates, setLoadingDates] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
@@ -311,14 +322,18 @@ const CreateEventPurchaseScreen = () => {
     setLoadingSlots(true);
     setPurchaseTime("");
     try {
-      const slots = await fetchEventAvailableTimeSlots({
+      const { slots, remainingTickets } = await fetchEventAvailableTimeSlots({
         token,
         eventId: event.id,
         date,
       });
       setTimeSlots(slots.length > 0 ? slots : eventTimeSlots(event));
+      // Counts only make sense against the API's own slot list; if we had to
+      // fall back to the event's raw schedule there is nothing to count.
+      setSlotsLeft(slots.length > 0 ? remainingTickets : null);
     } catch {
       setTimeSlots(eventTimeSlots(event));
+      setSlotsLeft(null);
     } finally {
       setLoadingSlots(false);
     }
@@ -440,6 +455,7 @@ const CreateEventPurchaseScreen = () => {
     setPurchaseDate("");
     setPurchaseTime("");
     setTimeSlots([]);
+    setSlotsLeft(null);
     setAvailableDates([]);
     // Load the bookable dates from the backend (auto-selects for one-time events).
     loadAvailableDates(e);
@@ -464,6 +480,9 @@ const CreateEventPurchaseScreen = () => {
     [availableDates],
   );
   const timeOptions = timeSlots;
+  /** Tickets left for the picked slot, or null when the event is uncapped. */
+  const slotLeft = purchaseTime ? (slotsLeft?.[purchaseTime] ?? null) : null;
+  const quantityMax = quantityCeiling(slotLeft, 99);
 
   const filteredEvents = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -908,14 +927,34 @@ const CreateEventPurchaseScreen = () => {
               <Section icon="tag" title="Purchase Details">
                 <View className="flex-row items-center justify-between mb-4">
                   <FieldLabel>Tickets</FieldLabel>
-                  <Stepper value={quantity} onChange={setQuantity} min={1} />
+                  <Stepper
+                    value={quantity}
+                    onChange={setQuantity}
+                    min={1}
+                    max={quantityMax}
+                  />
                 </View>
-                <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-4">
+                <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-1">
                   {money(selected.price)} × {quantity} ={" "}
                   <Text className="font-semibold text-gray-600 dark:text-gray-300">
                     {money(subtotal)}
                   </Text>
                 </Text>
+                {/* Live cap for the picked slot — the "+" above stops here. */}
+                {slotLeft != null ? (
+                  <Text
+                    className={`mb-4 text-[11px] font-semibold ${
+                      isLowRemaining(slotLeft)
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-emerald-700 dark:text-emerald-400"
+                    }`}
+                  >
+                    {slotLeft} ticket{slotLeft === 1 ? "" : "s"} left for this
+                    time
+                  </Text>
+                ) : (
+                  <View className="mb-4" />
+                )}
 
                 <InputField
                   label="Discount ($)"
@@ -998,7 +1037,9 @@ const CreateEventPurchaseScreen = () => {
                         loadingSlots
                           ? "Loading slots…"
                           : purchaseTime
-                            ? formatTime(purchaseTime)
+                            ? slotLeft != null
+                              ? `${formatTime(purchaseTime)} — ${slotLeft} left`
+                              : formatTime(purchaseTime)
                             : null
                       }
                       placeholder="Select time"
@@ -1356,29 +1397,45 @@ const CreateEventPurchaseScreen = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Time picker */}
+      {/* Time picker — each slot carries its live ticket count, like the web's
+          "10:00 AM — 8 left" option labels. */}
       <BottomSheet visible={sheet === "time"} onClose={() => setSheet(null)} title="Select Time">
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {timeOptions.map((t) => {
             const isSelected = purchaseTime === t;
+            const left = slotsLeft?.[t] ?? null;
             return (
               <Pressable
                 key={t}
                 onPress={() => {
                   setPurchaseTime(t);
+                  setQuantity((prev) => clampToRemaining(prev, left));
                   setSheet(null);
                 }}
                 className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {formatTime(t)}
-                </Text>
+                <View className="flex-row items-baseline gap-2">
+                  <Text
+                    className={`text-base font-medium ${
+                      isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {formatTime(t)}
+                  </Text>
+                  {left != null && (
+                    <Text
+                      className={`text-xs font-semibold ${
+                        isLowRemaining(left)
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-emerald-600 dark:text-emerald-400"
+                      }`}
+                    >
+                      — {left} left
+                    </Text>
+                  )}
+                </View>
                 {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
               </Pressable>
             );

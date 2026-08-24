@@ -43,6 +43,7 @@ import {
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { isLowRemaining } from "../../lib/ticketLimits";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -1572,6 +1573,27 @@ const CreateBookingScreen = () => {
                                 to {formatTime(s.endTime)}
                               </Text>
                             </View>
+                            {/* Live seats left in this slot — amber pill at 3 or
+                                fewer, else emerald (web OnsiteBooking). */}
+                            {s.remainingTickets != null && (
+                              <View
+                                className={`rounded-full px-1.5 py-0.5 ${
+                                  isLowRemaining(s.remainingTickets)
+                                    ? "bg-amber-100 dark:bg-amber-900/30"
+                                    : "bg-emerald-100 dark:bg-emerald-900/30"
+                                }`}
+                              >
+                                <Text
+                                  className={`text-[11px] font-semibold ${
+                                    isLowRemaining(s.remainingTickets)
+                                      ? "text-amber-800 dark:text-amber-300"
+                                      : "text-emerald-800 dark:text-emerald-300"
+                                  }`}
+                                >
+                                  {s.remainingTickets} left
+                                </Text>
+                              </View>
+                            )}
                           </Pressable>
                         </View>
                       );

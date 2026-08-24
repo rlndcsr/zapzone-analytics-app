@@ -220,6 +220,7 @@ const CreatePackage = () => {
   const [price, setPrice] = useState("");
   const [minParticipants, setMinParticipants] = useState("");
   const [maxParticipants, setMaxParticipants] = useState("");
+  const [maxTicketsPerSlot, setMaxTicketsPerSlot] = useState("");
   const [duration, setDuration] = useState("");
   const [durationUnit, setDurationUnit] = useState("hours");
   const [durationHours, setDurationHours] = useState("");
@@ -556,6 +557,7 @@ const CreatePackage = () => {
         pricePerAdditional: null,
         minParticipants: parseIntOrNull(minParticipants),
         maxParticipants: parseIntOrNull(maxParticipants),
+        maxTicketsPerSlot: parseIntOrNull(maxTicketsPerSlot),
         duration: dur,
         durationUnit,
         bookingWindowDays: parseIntOrNull(bookingWindowDays),
@@ -851,6 +853,15 @@ const CreatePackage = () => {
                   />
                 </View>
               </View>
+
+              <TextField
+                label="Max tickets per time slot"
+                value={maxTicketsPerSlot}
+                onChangeText={setMaxTicketsPerSlot}
+                keyboardType="number-pad"
+                placeholder="No limit"
+                hint="Seats sellable per slot per day. Customers see the live count."
+              />
 
               <SelectField
                 label="Duration unit"

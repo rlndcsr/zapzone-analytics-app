@@ -39,6 +39,14 @@ import {
   formatDurationDisplay,
 } from "../../lib/attractions/attractionDisplay";
 import { toKey } from "../../lib/date/calendar";
+import {
+  buildSlotRemainingMap,
+  clampToRemaining,
+  isLowRemaining,
+  quantityCeiling,
+  remainingForSlot,
+  type SlotRemainingMap,
+} from "../../lib/ticketLimits";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
@@ -63,6 +71,7 @@ import {
   type CreateAttractionPurchaseInput,
 } from "../../services/attractionPurchasesService";
 import {
+  fetchAttractionSlotAvailability,
   fetchAttractions,
   type AttractionRow,
 } from "../../services/attractionsService";
@@ -71,7 +80,11 @@ import {
   fetchDayOffsByLocation,
   type DayOff,
 } from "../../services/dayOffsService";
-import { fetchEvents, type EventRow } from "../../services/eventsService";
+import {
+  fetchEventAvailableTimeSlots,
+  fetchEvents,
+  type EventRow,
+} from "../../services/eventsService";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -475,9 +488,26 @@ const CreatePurchaseScreen = () => {
   const [selectedEvent, setSelectedEvent] = useState<EventRow | null>(null);
   const [eventQty, setEventQty] = useState(1);
   const [eventDate, setEventDate] = useState("");
+  const [eventTime, setEventTime] = useState("");
   const [eventsCatalog, setEventsCatalog] = useState<EventRow[]>([]);
   const [eventsCatalogKey, setEventsCatalogKey] = useState<number | null>(null);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  /** Bookable slots for the chosen event date (full ones are dropped by the API). */
+  const [eventSlots, setEventSlots] = useState<string[]>([]);
+  /** Tickets left per event slot, or null when the event has no ticket cap. */
+  const [eventSlotsLeft, setEventSlotsLeft] = useState<Record<
+    string,
+    number
+  > | null>(null);
+  const [loadingEventSlots, setLoadingEventSlots] = useState(false);
+  /**
+   * Live tickets-left per attraction slot for `scheduledDate` — null when the
+   * attraction has no `max_tickets_per_slot`, in which case no counter is shown
+   * and nothing caps the quantity (web parity).
+   */
+  const [slotRemaining, setSlotRemaining] = useState<SlotRemainingMap | null>(
+    null,
+  );
 
   /** Web parity: lines already on the order keep order mode on after a switch. */
   const orderMode = bulkMode || orderLines.length > 0;
@@ -656,6 +686,95 @@ const CreatePurchaseScreen = () => {
     }
   }, [availableTimeSlots, scheduledTime]);
 
+  /*
+   * Live ticket availability for the attraction on the chosen day. Refetched
+   * whenever the attraction or the date changes, exactly like the web: an
+   * uncapped attraction (or a failed lookup) leaves the map null, which hides
+   * every counter and lifts the quantity ceiling.
+   */
+  useEffect(() => {
+    const attractionId = selected?.id;
+    if (!scheduledDate || attractionId == null) {
+      setSlotRemaining(null);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchAttractionSlotAvailability(
+      token,
+      attractionId,
+      scheduledDate,
+      controller.signal,
+    )
+      .then((res) => setSlotRemaining(buildSlotRemainingMap(res)))
+      .catch(() => {
+        if (!controller.signal.aborted) setSlotRemaining(null);
+      });
+    return () => controller.abort();
+  }, [scheduledDate, selected?.id]);
+
+  /** Tickets left for the picked attraction slot, or null when uncapped. */
+  const attractionSlotLeft = remainingForSlot(slotRemaining, scheduledTime);
+  const quantityMax = quantityCeiling(attractionSlotLeft, 99);
+
+  /*
+   * Bookable slots (and their live ticket counts) for the chosen event date. The
+   * API drops any slot that is already full, so a sold-out time simply is not
+   * offered. A kept selection survives a refetch; anything else is cleared.
+   */
+  useEffect(() => {
+    const eventId = selectedEvent?.id;
+    const date = eventDate || selectedEvent?.startDate;
+    if (eventId == null || !date) {
+      setEventSlots([]);
+      setEventSlotsLeft(null);
+      setEventTime("");
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    setLoadingEventSlots(true);
+    fetchEventAvailableTimeSlots({
+      token,
+      eventId,
+      date,
+      signal: controller.signal,
+    })
+      .then(({ slots, remainingTickets }) => {
+        setEventSlots(slots);
+        setEventSlotsLeft(remainingTickets);
+        setEventTime((prev) => {
+          const kept = slots.includes(prev) ? prev : "";
+          const left = kept && remainingTickets ? remainingTickets[kept] : null;
+          if (left != null) setEventQty((q) => clampToRemaining(q, left));
+          return kept;
+        });
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setEventSlots([]);
+        setEventSlotsLeft(null);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingEventSlots(false);
+      });
+    return () => controller.abort();
+  }, [selectedEvent?.id, selectedEvent?.startDate, eventDate]);
+
+  /** Tickets left for the picked event slot, or null when the event is uncapped. */
+  const eventSlotLeft = eventTime ? (eventSlotsLeft?.[eventTime] ?? null) : null;
+  const eventQtyMax = quantityCeiling(eventSlotLeft, 99);
+  /**
+   * A capped event can only be sold against a specific slot — the same gate the
+   * web applies before an event line may join an order.
+   */
+  const eventNeedsTime =
+    selectedEvent != null &&
+    (selectedEvent.maxTicketsPerSlot != null ||
+      selectedEvent.maxBookingsPerSlot != null);
+
   const discountNum = Math.max(0, Number(discount) || 0);
 
   // Same pricing pipeline as the web: base = subtotal + add-ons − manual
@@ -744,8 +863,10 @@ const CreatePurchaseScreen = () => {
       if (!selectedEvent || selectedEvent.locationId == null) return null;
       const date = eventDate || selectedEvent.startDate;
       if (!date) return null;
+      // A capped event needs its slot before it can be priced or sold.
+      if (eventNeedsTime && !eventTime) return null;
       return {
-        key: `event-${selectedEvent.id}-${date}-${orderLines.length}`,
+        key: `event-${selectedEvent.id}-${date}-${eventTime || "any"}-${orderLines.length}`,
         type: "event",
         id: selectedEvent.id,
         name: selectedEvent.name,
@@ -754,7 +875,7 @@ const CreatePurchaseScreen = () => {
         unitPrice: selectedEvent.price,
         quantity: eventQty,
         scheduledDate: date,
-        scheduledTime: null,
+        scheduledTime: eventTime || null,
         addOns: [],
       };
     }
@@ -784,6 +905,8 @@ const CreatePurchaseScreen = () => {
     itemTab,
     selectedEvent,
     eventDate,
+    eventTime,
+    eventNeedsTime,
     eventQty,
     selected,
     scheduledDate,
@@ -829,6 +952,7 @@ const CreatePurchaseScreen = () => {
     setQuantity(1);
     setEventQty(1);
     setEventDate("");
+    setEventTime("");
     setScheduledDate("");
     setScheduledTime("");
     setAddonQty({});
@@ -840,7 +964,9 @@ const CreatePurchaseScreen = () => {
       setToast({
         message:
           itemTab === "events"
-            ? "Pick an event first."
+            ? selectedEvent
+              ? `Pick a time for ${selectedEvent.name} first.`
+              : "Pick an event first."
             : "Pick an attraction with a visit date and time first.",
         type: "error",
       });
@@ -886,6 +1012,7 @@ const CreatePurchaseScreen = () => {
       setSelectedEvent(event);
       setEventQty(line.quantity);
       setEventDate(line.scheduledDate ?? "");
+      setEventTime(line.scheduledTime ?? "");
     } else {
       const attraction = attractions.find((a) => a.id === line.id);
       if (!attraction) {
@@ -925,6 +1052,7 @@ const CreatePurchaseScreen = () => {
       setBulkMode(false);
       setOrderLines([]);
       setSelectedEvent(null);
+      setEventTime("");
       setItemTab("attractions");
     };
     if (orderLines.length > 0) {
@@ -1499,7 +1627,10 @@ const CreatePurchaseScreen = () => {
                       </Text>
                     </View>
                     <Pressable
-                      onPress={() => setSelectedEvent(null)}
+                      onPress={() => {
+                        setSelectedEvent(null);
+                        setEventTime("");
+                      }}
                       hitSlop={8}
                       accessibilityLabel="Clear selected event"
                     >
@@ -1521,7 +1652,10 @@ const CreatePurchaseScreen = () => {
                       return (
                         <Pressable
                           key={date}
-                          onPress={() => setEventDate(date)}
+                          onPress={() => {
+                            setEventDate(date);
+                            setEventTime("");
+                          }}
                           className={`mx-1 rounded-lg border px-3 py-2 ${
                             active
                               ? "border-[#0644C7] bg-[#0644C7]"
@@ -1542,10 +1676,106 @@ const CreatePurchaseScreen = () => {
                     })}
                   </ScrollView>
 
+                  {/* Time — only shown once the date has bookable slots, as on
+                      the web. A slot that is already sold out is not returned by
+                      the API, so it never appears here. */}
+                  {loadingEventSlots ? (
+                    <View className="mt-4 flex-row items-center gap-2">
+                      <ActivityIndicator size="small" color={PRIMARY} />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        Loading available times…
+                      </Text>
+                    </View>
+                  ) : eventSlots.length > 0 ? (
+                    <>
+                      <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+                        Time
+                      </Text>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        className="-mx-1"
+                      >
+                        {eventSlots.map((slot) => {
+                          const active = eventTime === slot;
+                          const left = eventSlotsLeft?.[slot] ?? null;
+                          return (
+                            <Pressable
+                              key={slot}
+                              onPress={() => {
+                                setEventTime(slot);
+                                setEventQty((prev) =>
+                                  clampToRemaining(prev, left),
+                                );
+                              }}
+                              className={`mx-1 items-center rounded-lg border px-3 py-2 ${
+                                active
+                                  ? "border-[#0644C7] bg-[#0644C7]"
+                                  : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                              }`}
+                            >
+                              <Text
+                                className={`text-xs font-semibold ${
+                                  active
+                                    ? "text-white"
+                                    : "text-gray-700 dark:text-gray-200"
+                                }`}
+                              >
+                                {convertTo12Hour(slot)}
+                              </Text>
+                              {/* Every branch keeps a `dark:` class so the
+                                  css-interop feature set stays stable when the
+                                  chip is selected (a post-mount upgrade throws). */}
+                              {left != null && (
+                                <Text
+                                  className={`text-[10px] font-semibold ${
+                                    active
+                                      ? "text-white/80 dark:text-white/80"
+                                      : isLowRemaining(left)
+                                        ? "text-amber-600 dark:text-amber-400"
+                                        : "text-emerald-600 dark:text-emerald-400"
+                                  }`}
+                                >
+                                  {left} left
+                                </Text>
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                      {eventNeedsTime && !eventTime && (
+                        <Text className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+                          Pick a time — this event limits tickets per slot.
+                        </Text>
+                      )}
+                    </>
+                  ) : (
+                    <Text className="mt-4 text-[11px] text-amber-600 dark:text-amber-400">
+                      No available time slots for this date.
+                    </Text>
+                  )}
+
                   <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                     Tickets
                   </Text>
-                  <Stepper value={eventQty} onChange={setEventQty} min={1} />
+                  <Stepper
+                    value={eventQty}
+                    onChange={setEventQty}
+                    min={1}
+                    max={eventQtyMax}
+                  />
+                  {eventSlotLeft != null && (
+                    <Text
+                      className={`mt-1.5 text-[11px] font-semibold ${
+                        isLowRemaining(eventSlotLeft)
+                          ? "text-amber-700 dark:text-amber-400"
+                          : "text-emerald-700 dark:text-emerald-400"
+                      }`}
+                    >
+                      {eventSlotLeft} ticket{eventSlotLeft === 1 ? "" : "s"} left
+                      for this time
+                    </Text>
+                  )}
                 </View>
               ) : loadingEvents ? (
                 <View className="py-8 items-center">
@@ -1570,6 +1800,7 @@ const CreatePurchaseScreen = () => {
                         setSelectedEvent(e);
                         setEventQty(1);
                         setEventDate(e.startDate);
+                        setEventTime("");
                       }}
                     />
                   ))}
@@ -1629,8 +1860,13 @@ const CreatePurchaseScreen = () => {
                   add-ons and the schedule, matching the web card. */}
               <Section icon="tag" title="Purchase Details">
                 <FieldLabel>Quantity</FieldLabel>
-                <View className="flex-row items-center gap-3 mb-4">
-                  <Stepper value={quantity} onChange={setQuantity} min={1} />
+                <View className="flex-row items-center gap-3 mb-1">
+                  <Stepper
+                    value={quantity}
+                    onChange={setQuantity}
+                    min={1}
+                    max={quantityMax}
+                  />
                   <Text className="text-xs text-gray-500 dark:text-gray-400">
                     {money(selected.price)} × {quantity} ={" "}
                     <Text className="font-semibold text-gray-800 dark:text-gray-200">
@@ -1638,6 +1874,21 @@ const CreatePurchaseScreen = () => {
                     </Text>
                   </Text>
                 </View>
+                {/* Live cap for the picked slot — the "+" above stops here. */}
+                {attractionSlotLeft != null ? (
+                  <Text
+                    className={`mb-4 text-[11px] font-semibold ${
+                      isLowRemaining(attractionSlotLeft)
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-emerald-700 dark:text-emerald-400"
+                    }`}
+                  >
+                    {attractionSlotLeft} ticket
+                    {attractionSlotLeft === 1 ? "" : "s"} left for this time
+                  </Text>
+                ) : (
+                  <View className="mb-4" />
+                )}
 
                 {/* An order is priced by the server, so a manual per-line
                     discount has nowhere to go there (web hides it too). */}
@@ -1739,9 +1990,20 @@ const CreatePurchaseScreen = () => {
                       scheduledDate={scheduledDate}
                       scheduledTime={scheduledTime}
                       availableTimeSlots={availableTimeSlots}
+                      slotRemaining={slotRemaining}
                       minDate={todayKey}
                       onDateSelect={setScheduledDate}
-                      onTimeSelect={setScheduledTime}
+                      onTimeSelect={(time) => {
+                        setScheduledTime(time);
+                        // Trim an over-large quantity down to what this slot can
+                        // still take (web parity).
+                        setQuantity((prev) =>
+                          clampToRemaining(
+                            prev,
+                            remainingForSlot(slotRemaining, time),
+                          ),
+                        );
+                      }}
                     />
                   </View>
                 )}

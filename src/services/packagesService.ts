@@ -215,6 +215,7 @@ export type PackageDetail = {
   pricePerAdditional1hr: number | null;
   minParticipants: number | null;
   maxParticipants: number | null;
+  maxTicketsPerSlot: number | null;
   duration: number | null;
   durationUnit: string;
   bookingWindowDays: number | null;
@@ -271,7 +272,9 @@ export async function fetchPackageDetail(
     packageType: str(d.package_type),
     isActive: !!d.is_active,
     features: Array.isArray(d.features)
-      ? (d.features as unknown[]).filter((f): f is string => typeof f === "string")
+      ? (d.features as unknown[]).filter(
+          (f): f is string => typeof f === "string",
+        )
       : [],
     price: Number(d.price ?? 0),
     pricePerAdditional: numOrNull(d.price_per_additional),
@@ -279,6 +282,7 @@ export async function fetchPackageDetail(
     pricePerAdditional1hr: numOrNull(d.price_per_additional_1hr),
     minParticipants: numOrNull(d.min_participants),
     maxParticipants: numOrNull(d.max_participants),
+    maxTicketsPerSlot: numOrNull(d.max_tickets_per_slot),
     duration: numOrNull(d.duration),
     durationUnit: str(d.duration_unit) || "hours",
     bookingWindowDays: numOrNull(d.booking_window_days),
@@ -334,7 +338,9 @@ export async function fetchPackageDetail(
       isActive: s.is_active !== false,
     })),
     image: Array.isArray(rawImage)
-      ? (rawImage as unknown[]).filter((x): x is string => typeof x === "string")
+      ? (rawImage as unknown[]).filter(
+          (x): x is string => typeof x === "string",
+        )
       : typeof rawImage === "string" && rawImage
         ? [rawImage]
         : [],
@@ -355,6 +361,8 @@ export type UpdatePackageInput = {
   pricePerAdditional: number | null;
   minParticipants: number | null;
   maxParticipants: number | null;
+  /** Seats sellable per slot per day; null clears the limit. */
+  maxTicketsPerSlot: number | null;
   duration: number | null;
   durationUnit: string;
   bookingWindowDays: number | null;
@@ -397,6 +405,7 @@ export async function updatePackage(
     price_per_additional: input.pricePerAdditional,
     min_participants: input.minParticipants,
     max_participants: input.maxParticipants,
+    max_tickets_per_slot: input.maxTicketsPerSlot,
     duration: input.duration,
     duration_unit: input.durationUnit,
     booking_window_days: input.bookingWindowDays,
@@ -441,6 +450,7 @@ export async function duplicatePackage(
     price: d.price,
     price_per_additional: d.pricePerAdditional,
     max_participants: d.maxParticipants,
+    max_tickets_per_slot: d.maxTicketsPerSlot,
     duration: d.duration,
     duration_unit: d.durationUnit,
     price_per_additional_30min: d.pricePerAdditional30min,
@@ -528,9 +538,7 @@ export async function bulkImportPackages(
     imported: Number(res?.data?.imported_count ?? 0),
     failed: Number(res?.data?.failed_count ?? 0),
     errors: Array.isArray(res?.errors)
-      ? res.errors.map((e) =>
-          typeof e === "string" ? e : JSON.stringify(e),
-        )
+      ? res.errors.map((e) => (typeof e === "string" ? e : JSON.stringify(e)))
       : [],
   };
 }
@@ -549,6 +557,8 @@ export type CreatePackageInput = {
   pricePerAdditional: number | null;
   minParticipants: number | null;
   maxParticipants: number | null;
+  /** Seats sellable per slot per day; null means no limit. */
+  maxTicketsPerSlot: number | null;
   duration: number;
   durationUnit: string;
   bookingWindowDays: number | null;
@@ -591,6 +601,7 @@ export async function createPackage(
     price_per_additional: input.pricePerAdditional,
     min_participants: input.minParticipants,
     max_participants: input.maxParticipants,
+    max_tickets_per_slot: input.maxTicketsPerSlot,
     duration: input.duration,
     duration_unit: input.durationUnit,
     booking_window_days: input.bookingWindowDays,

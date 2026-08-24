@@ -73,6 +73,8 @@ const EditAttractionScreen = () => {
   const [pricingType, setPricingType] = useState<string>("per_person");
   const [maxCapacity, setMaxCapacity] = useState("");
   const [displayCapacity, setDisplayCapacity] = useState(true);
+  /** Blank = no per-slot ticket limit (the field's own placeholder says so). */
+  const [maxTicketsPerSlot, setMaxTicketsPerSlot] = useState("");
   const [duration, setDuration] = useState("");
   const [durationUnit, setDurationUnit] = useState<"minutes" | "hours">(
     "minutes",
@@ -159,6 +161,11 @@ const EditAttractionScreen = () => {
         setPricingType(detail.pricingType || "per_person");
         setMaxCapacity(String(detail.maxCapacity));
         setDisplayCapacity(detail.displayCapacityToCustomers);
+        setMaxTicketsPerSlot(
+          detail.maxTicketsPerSlot != null
+            ? String(detail.maxTicketsPerSlot)
+            : "",
+        );
         setDuration(detail.duration != null ? String(detail.duration) : "");
         setDurationUnit(detail.durationUnit === "hours" ? "hours" : "minutes");
         setDisplayOrder(String(detail.displayOrder));
@@ -342,6 +349,12 @@ const EditAttractionScreen = () => {
     }
 
     const durationNum = duration === "" ? 0 : Number(duration);
+    // Blank clears the limit; the backend treats null as "unlimited".
+    const slotCapRaw = maxTicketsPerSlot.trim();
+    const slotCapNum =
+      slotCapRaw === "" || Number.isNaN(Number(slotCapRaw))
+        ? null
+        : Number(slotCapRaw);
     const addonIds = selectedAddOns
       .map((n) => addOns.find((a) => a.name === n)?.id)
       .filter((id): id is number => typeof id === "number");
@@ -356,6 +369,7 @@ const EditAttractionScreen = () => {
       price: Number(price),
       pricing_type: pricingType,
       max_capacity: Math.round(Number(maxCapacity)),
+      max_tickets_per_slot: slotCapNum,
       duration: Number.isNaN(durationNum) ? 0 : durationNum,
       duration_unit: durationUnit,
       availability: schedules,
@@ -565,6 +579,20 @@ const EditAttractionScreen = () => {
                   thumbColor="#FFFFFF"
                 />
               </View>
+
+              <InputField
+                pill={false}
+                label="Max Tickets per Time Slot"
+                value={maxTicketsPerSlot}
+                onChangeText={setMaxTicketsPerSlot}
+                placeholder="No limit"
+                keyboardType="number-pad"
+                containerClassName="mb-1"
+              />
+              <Text className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                Tickets sellable per time slot per day. Customers see the live
+                count.
+              </Text>
 
               <FieldLabel>Duration (0 for unlimited)</FieldLabel>
               {/* Input + unit joined into one bordered control, like the web. */}

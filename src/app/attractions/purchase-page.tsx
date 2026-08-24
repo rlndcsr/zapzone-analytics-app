@@ -40,12 +40,21 @@ import {
 } from "../../lib/attractions/dayOffAvailability";
 import { formatFullDate, toKey } from "../../lib/date/calendar";
 import {
+  buildSlotRemainingMap,
+  clampToRemaining,
+  isLowRemaining,
+  quantityCeiling,
+  remainingForSlot,
+  type SlotRemainingMap,
+} from "../../lib/ticketLimits";
+import {
   fetchDayOffsByLocation,
   type DayOff,
 } from "../../services/dayOffsService";
 import { getToken } from "../../lib/session";
 import {
   fetchAttractionDetail,
+  fetchAttractionSlotAvailability,
   type AttractionDetail,
 } from "../../services/attractionsService";
 import {
@@ -268,6 +277,14 @@ const PurchasePageScreen = () => {
   const [addonQty, setAddonQty] = useState<Record<number, number>>({});
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
+  /**
+   * Live tickets-left per slot for `scheduledDate` — null when the attraction has
+   * no `max_tickets_per_slot`, in which case no counter is shown and nothing caps
+   * the quantity (web parity).
+   */
+  const [slotRemaining, setSlotRemaining] = useState<SlotRemainingMap | null>(
+    null,
+  );
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -460,6 +477,33 @@ const PurchasePageScreen = () => {
       setScheduledTime("");
     }
   }, [availableTimeSlots, scheduledTime]);
+
+  /*
+   * Live ticket availability for this attraction on the chosen day (web parity:
+   * `PurchaseAttraction`'s slot-availability effect). An uncapped attraction — or
+   * a failed lookup — leaves the map null, which hides every counter and lifts
+   * the quantity ceiling.
+   */
+  useEffect(() => {
+    const id = detail?.id;
+    if (!scheduledDate || id == null) {
+      setSlotRemaining(null);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchAttractionSlotAvailability(token, id, scheduledDate, controller.signal)
+      .then((res) => setSlotRemaining(buildSlotRemainingMap(res)))
+      .catch(() => {
+        if (!controller.signal.aborted) setSlotRemaining(null);
+      });
+    return () => controller.abort();
+  }, [scheduledDate, detail?.id]);
+
+  /** Tickets left for the picked slot, or null when the attraction is uncapped. */
+  const slotLeft = remainingForSlot(slotRemaining, scheduledTime);
+  const quantityMax = quantityCeiling(slotLeft, 99);
 
   // Same pricing pipeline the web purchase page uses: server-side fee support
   // (Venue Fee) applied to the base price, special pricing subtracted.
@@ -995,7 +1039,12 @@ const PurchasePageScreen = () => {
             <Section icon="shopping-cart" title="Select Quantity">
               <View className="flex-row items-center justify-between">
                 <FieldLabel>How many tickets?</FieldLabel>
-                <Stepper value={quantity} onChange={setQuantity} min={1} />
+                <Stepper
+                  value={quantity}
+                  onChange={setQuantity}
+                  min={1}
+                  max={quantityMax}
+                />
               </View>
               <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                 {money(detail.price)} × {quantity} ={" "}
@@ -1003,6 +1052,18 @@ const PurchasePageScreen = () => {
                   {money(subtotal)}
                 </Text>
               </Text>
+              {/* Live cap for the picked slot — the "+" above stops here. */}
+              {slotLeft != null && (
+                <Text
+                  className={`mt-1.5 text-[11px] font-semibold ${
+                    isLowRemaining(slotLeft)
+                      ? "text-amber-700 dark:text-amber-400"
+                      : "text-emerald-700 dark:text-emerald-400"
+                  }`}
+                >
+                  {slotLeft} ticket{slotLeft === 1 ? "" : "s"} left for this time
+                </Text>
+              )}
             </Section>
 
             {/* Schedule */}
@@ -1025,7 +1086,13 @@ const PurchasePageScreen = () => {
                 <FieldLabel>Time</FieldLabel>
                 <SelectRow
                   icon="clock"
-                  value={scheduledTime ? formatTime(scheduledTime) : null}
+                  value={
+                    scheduledTime
+                      ? slotLeft != null
+                        ? `${formatTime(scheduledTime)} — ${slotLeft} left`
+                        : formatTime(scheduledTime)
+                      : null
+                  }
                   placeholder="Select time"
                   onPress={() => {
                     if (!scheduledDate) {
@@ -1586,26 +1653,43 @@ const PurchasePageScreen = () => {
           ) : (
             availableTimeSlots.map((t) => {
               const isSelected = scheduledTime === t;
+              const left = remainingForSlot(slotRemaining, t);
               return (
                 <Pressable
                   key={t}
                   onPress={() => {
                     setScheduledTime(t);
+                    // Trim an over-large quantity down to what this slot can
+                    // still take (web parity).
+                    setQuantity((prev) => clampToRemaining(prev, left));
                     setSheet(null);
                   }}
                   className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
                     isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                   }`}
                 >
-                  <Text
-                    className={`text-base font-medium ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    {formatTime(t)}
-                  </Text>
+                  <View className="flex-row items-baseline gap-2">
+                    <Text
+                      className={`text-base font-medium ${
+                        isSelected
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-gray-700 dark:text-gray-200"
+                      }`}
+                    >
+                      {formatTime(t)}
+                    </Text>
+                    {left != null && (
+                      <Text
+                        className={`text-xs font-semibold ${
+                          isLowRemaining(left)
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-emerald-600 dark:text-emerald-400"
+                        }`}
+                      >
+                        — {left} left
+                      </Text>
+                    )}
+                  </View>
                   {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
                 </Pressable>
               );

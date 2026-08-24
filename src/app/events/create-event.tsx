@@ -171,6 +171,8 @@ const CreateEventScreen = () => {
   const [timeEnd, setTimeEnd] = useState("17:00");
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const [maxBookingsPerSlot, setMaxBookingsPerSlot] = useState("");
+  /** Blank = unlimited tickets per slot (the field's own placeholder says so). */
+  const [maxTicketsPerSlot, setMaxTicketsPerSlot] = useState("");
   const [price, setPrice] = useState("0");
   const [features, setFeatures] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
@@ -288,6 +290,9 @@ const CreateEventScreen = () => {
     }
 
     const maxNum = maxBookingsPerSlot.trim() ? Number(maxBookingsPerSlot) : null;
+    const ticketCapNum = maxTicketsPerSlot.trim()
+      ? Number(maxTicketsPerSlot)
+      : null;
 
     const input: CreateEventInput = {
       location_id: selectedLocationId,
@@ -301,6 +306,8 @@ const CreateEventScreen = () => {
       time_end: timeEnd,
       interval_minutes: intervalMinutes,
       max_bookings_per_slot: maxNum && !Number.isNaN(maxNum) ? maxNum : null,
+      max_tickets_per_slot:
+        ticketCapNum && !Number.isNaN(ticketCapNum) ? ticketCapNum : null,
       price: Number(price) || 0,
       features: features.map((f) => f.trim()).filter(Boolean),
       add_on_ids: selectedAddOnIds.length > 0 ? selectedAddOnIds : undefined,
@@ -544,6 +551,17 @@ const CreateEventScreen = () => {
             />
             <Text className="text-xs text-gray-400 dark:text-gray-500 mb-4">
               Leave empty for unlimited capacity per slot.
+            </Text>
+            <InputField
+              label="Max Tickets per Slot"
+              value={maxTicketsPerSlot}
+              onChangeText={setMaxTicketsPerSlot}
+              placeholder="Unlimited"
+              keyboardType="number-pad"
+              containerClassName="mb-2"
+            />
+            <Text className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+              Tickets sellable per slot. Customers see the live count.
             </Text>
 
             <View className="flex-row items-center justify-between">

@@ -28,8 +28,8 @@ export type EventRow = {
   timeStart: string;
   timeEnd: string;
   intervalMinutes: number;
-  /** null means "Unlimited". */
   maxBookingsPerSlot: number | null;
+  maxTicketsPerSlot: number | null;
   price: number;
   features: string[];
   status: EventStatus;
@@ -38,7 +38,6 @@ export type EventRow = {
   createdAt: string | null;
   images: string[];
   addOns: EventAddOn[];
-  /** Preferred display order of add-ons, by id. */
   addOnsOrder: number[];
 };
 
@@ -64,6 +63,7 @@ type RawEvent = {
   time_end?: string | null;
   interval_minutes?: number | string | null;
   max_bookings_per_slot?: number | string | null;
+  max_tickets_per_slot?: number | string | null;
   price?: number | string | null;
   features?: string[] | null;
   add_ons_order?: number[] | null;
@@ -92,25 +92,41 @@ function mapEventAddOn(a: RawEventAddOn): EventAddOn {
 
 function mapEvent(raw: RawEvent): EventRow {
   const maxRaw =
-    raw.max_bookings_per_slot == null ? null : Number(raw.max_bookings_per_slot);
+    raw.max_bookings_per_slot == null
+      ? null
+      : Number(raw.max_bookings_per_slot);
+  const ticketCapRaw =
+    raw.max_tickets_per_slot == null || raw.max_tickets_per_slot === ""
+      ? null
+      : Number(raw.max_tickets_per_slot);
   return {
     id: raw.id,
     name: raw.name?.trim() || "Untitled Event",
     description: raw.description?.trim() || "",
-    dateType: (raw.date_type === "date_range" ? "date_range" : "one_time") as EventDateType,
+    dateType: (raw.date_type === "date_range"
+      ? "date_range"
+      : "one_time") as EventDateType,
     startDate: raw.start_date ?? "",
     endDate: raw.end_date ?? null,
     timeStart: raw.time_start ?? "",
     timeEnd: raw.time_end ?? "",
     intervalMinutes: Number(raw.interval_minutes ?? 60),
     maxBookingsPerSlot: maxRaw && !Number.isNaN(maxRaw) ? maxRaw : null,
+    maxTicketsPerSlot:
+      ticketCapRaw != null && !Number.isNaN(ticketCapRaw) ? ticketCapRaw : null,
     price: Number(raw.price ?? 0),
-    features: (raw.features ?? []).filter((f): f is string => typeof f === "string"),
+    features: (raw.features ?? []).filter(
+      (f): f is string => typeof f === "string",
+    ),
     status: raw.is_active ? "active" : "inactive",
     locationId: raw.location?.id ?? raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
-    images: raw.image ? (Array.isArray(raw.image) ? raw.image : [raw.image]) : [],
+    images: raw.image
+      ? Array.isArray(raw.image)
+        ? raw.image
+        : [raw.image]
+      : [],
     addOns: (raw.add_ons ?? []).map(mapEventAddOn),
     addOnsOrder: raw.add_ons_order ?? [],
   };
@@ -198,7 +214,9 @@ export async function fetchEventDetail(
   const res = await apiRequest<unknown>(`/api/events/${id}`, { token, signal });
   if (!res || typeof res !== "object") return null;
   const obj = res as Record<string, unknown>;
-  const raw = (obj.data && typeof obj.data === "object" ? obj.data : obj) as RawEvent;
+  const raw = (
+    obj.data && typeof obj.data === "object" ? obj.data : obj
+  ) as RawEvent;
   return raw?.id != null ? mapEvent(raw) : null;
 }
 
@@ -219,7 +237,21 @@ export async function fetchEventAvailableDates({
 }
 
 /**
- * GET /api/events/{id}/available-time-slots/{date} — bookable slots for a date.
+ * The bookable slots for one event date, plus how many tickets each still has.
+ *
+ * `remainingTickets` is null when the event has no `max_tickets_per_slot` — there
+ * is nothing to count then, and the web shows no counter either. When it IS set,
+ * a slot that is already full has been dropped from `slots` server-side, so a
+ * sold-out time disappears from the picker rather than showing as "Full".
+ */
+export type EventSlotAvailability = {
+  slots: string[];
+  remainingTickets: Record<string, number> | null;
+};
+
+/**
+ * GET /api/events/{id}/available-time-slots/{date} — bookable slots for a date and
+ * the live ticket count per slot (the same payload the web reads).
  * Normalizes `HH:mm:ss` → `HH:mm` to match the picker values.
  */
 export async function fetchEventAvailableTimeSlots({
@@ -227,12 +259,32 @@ export async function fetchEventAvailableTimeSlots({
   eventId,
   date,
   signal,
-}: EventAvailabilityParams & { date: string }): Promise<string[]> {
+}: EventAvailabilityParams & { date: string }): Promise<EventSlotAvailability> {
   const res = await apiRequest<unknown>(
     `/api/events/${eventId}/available-time-slots/${date}`,
     { token, signal },
   );
-  return extractStringList(res, "time_slots").map((t) => t.substring(0, 5));
+  const slots = extractStringList(res, "time_slots").map((t) =>
+    t.substring(0, 5),
+  );
+
+  const rawRemaining =
+    (res as { remaining_tickets?: unknown })?.remaining_tickets ??
+    (res as { data?: { remaining_tickets?: unknown } })?.data
+      ?.remaining_tickets;
+
+  let remainingTickets: Record<string, number> | null = null;
+  if (rawRemaining && typeof rawRemaining === "object") {
+    remainingTickets = {};
+    Object.entries(rawRemaining as Record<string, unknown>).forEach(
+      ([slot, value]) => {
+        const n = Number(value);
+        if (!Number.isNaN(n)) remainingTickets![slot.substring(0, 5)] = n;
+      },
+    );
+  }
+
+  return { slots, remainingTickets };
 }
 
 /** Payload for POST /api/events — mirrors the web CreateEventData. */
@@ -249,6 +301,8 @@ export type CreateEventInput = {
   time_end: string;
   interval_minutes: number;
   max_bookings_per_slot?: number | null;
+  /** Tickets sellable per slot; null means unlimited. */
+  max_tickets_per_slot?: number | null;
   price: number;
   features: string[];
   add_on_ids?: number[];

@@ -72,6 +72,8 @@ const CreateAttractionScreen = () => {
   const [pricingType, setPricingType] = useState<string>("per_person");
   const [maxCapacity, setMaxCapacity] = useState("");
   const [displayCapacity, setDisplayCapacity] = useState(true);
+  /** Blank = no per-slot ticket limit (the field's own placeholder says so). */
+  const [maxTicketsPerSlot, setMaxTicketsPerSlot] = useState("");
   const [duration, setDuration] = useState("");
   const [durationUnit, setDurationUnit] = useState<"minutes" | "hours">("minutes");
   const [schedules, setSchedules] = useState<AvailabilitySchedule[]>([newSchedule()]);
@@ -267,6 +269,12 @@ const CreateAttractionScreen = () => {
     }
 
     const durationNum = duration === "" ? 0 : Number(duration);
+    // Blank clears the limit; the backend treats null as "unlimited".
+    const slotCapRaw = maxTicketsPerSlot.trim();
+    const slotCapNum =
+      slotCapRaw === "" || Number.isNaN(Number(slotCapRaw))
+        ? null
+        : Number(slotCapRaw);
     const addonIds = selectedAddOns
       .map((n) => addOns.find((a) => a.name === n)?.id)
       .filter((id): id is number => typeof id === "number");
@@ -279,6 +287,7 @@ const CreateAttractionScreen = () => {
       price: Number(price),
       pricing_type: pricingType,
       max_capacity: Number(maxCapacity),
+      max_tickets_per_slot: slotCapNum,
       duration: Number.isNaN(durationNum) ? 0 : durationNum,
       duration_unit: durationUnit,
       availability: schedules,
@@ -488,6 +497,20 @@ const CreateAttractionScreen = () => {
             <Text className="mt-1 mb-4 text-xs text-gray-400 dark:text-gray-500">
               When unchecked, customers will not see the capacity on the
               attraction page
+            </Text>
+
+            <InputField
+              label="Max Tickets per Time Slot"
+              pill={false}
+              value={maxTicketsPerSlot}
+              onChangeText={setMaxTicketsPerSlot}
+              placeholder="No limit"
+              keyboardType="number-pad"
+              containerClassName="mb-1"
+            />
+            <Text className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+              Tickets sellable per time slot per day. Customers see the live
+              count.
             </Text>
 
             <FieldLabel>Duration (0 for unlimited)</FieldLabel>

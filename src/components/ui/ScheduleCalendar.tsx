@@ -11,6 +11,11 @@ import {
   parseKey,
   toKey,
 } from "../../lib/date/calendar";
+import {
+  isLowRemaining,
+  remainingForSlot,
+  type SlotRemainingMap,
+} from "../../lib/ticketLimits";
 import type { AvailabilitySchedule } from "../../services/attractionsService";
 
 const PRIMARY = "#0644C7";
@@ -55,29 +60,19 @@ const LegendItem = ({
 );
 
 type ScheduleCalendarProps = {
-  /** Open weekdays + hours for the thing being scheduled. */
   availability: AvailabilitySchedule[];
-  /** YYYY-MM-DD dates that are fully blocked (not selectable). */
   dayOffDates: Set<string>;
-  /** YYYY-MM-DD dates with limited hours (selectable, amber). */
   limitedDates?: Set<string>;
   scheduledDate: string;
   scheduledTime: string;
-  /** Open slots for `scheduledDate`, already trimmed by partial closures. */
   availableTimeSlots: string[];
+
+  slotRemaining?: SlotRemainingMap | null;
   onDateSelect: (dateKey: string) => void;
   onTimeSelect: (time: string) => void;
-  /** Earliest selectable day (YYYY-MM-DD). Defaults to today. */
   minDate?: string;
 };
 
-/**
- * Inline visit-date + time picker — the mobile port of the web admin's
- * `ScheduleCalendar`. Same five day states (available / selected / day off /
- * limited hours / unavailable), same legend, and the time slots stacked below
- * the grid instead of beside it. It renders state only: day-off and
- * availability rules are computed upstream by `lib/attractions/dayOffAvailability`.
- */
 export function ScheduleCalendar({
   availability,
   dayOffDates,
@@ -85,6 +80,7 @@ export function ScheduleCalendar({
   scheduledDate,
   scheduledTime,
   availableTimeSlots,
+  slotRemaining,
   onDateSelect,
   onTimeSelect,
   minDate,
@@ -123,12 +119,6 @@ export function ScheduleCalendar({
     );
   }, [scheduledDate]);
 
-  /**
-   * The month grid as rows of exactly seven cells. Rendering week-by-week with
-   * `flex-1` children is what keeps the columns aligned: a wrapping row of
-   * `width: 100/7 %` cells rounds past 100% and spills the seventh day onto the
-   * next line, which silently shifts every date by a column.
-   */
   const weeks = useMemo(() => {
     const cells = buildMonthCells(viewMonth);
     while (cells.length % 7 !== 0) cells.push(null);
@@ -314,7 +304,11 @@ export function ScheduleCalendar({
           <LegendItem color="#EFF6FF" borderColor="#BFDBFE" label="Available" />
           <LegendItem color={PRIMARY} label="Selected" />
           <LegendItem color="#FEE2E2" borderColor="#FECACA" label="Day Off" />
-          <LegendItem color="#FFFBEB" borderColor="#FCD34D" label="Limited hours" />
+          <LegendItem
+            color="#FFFBEB"
+            borderColor="#FCD34D"
+            label="Limited hours"
+          />
           <LegendItem color="#F3F4F6" label="Unavailable" />
         </View>
       </View>
@@ -336,12 +330,22 @@ export function ScheduleCalendar({
           <View className="flex-row flex-wrap -m-0.5">
             {availableTimeSlots.map((time) => {
               const active = scheduledTime === time;
+              const left = remainingForSlot(slotRemaining, time);
               return (
-                <View key={time} style={{ width: "33.3333%" }} className="p-0.5">
+                <View
+                  key={time}
+                  style={{ width: "33.3333%" }}
+                  className="p-0.5"
+                >
                   <Pressable
                     onPress={() => onTimeSelect(time)}
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
+                    accessibilityLabel={
+                      left != null
+                        ? `${formatTime12Hour(time)}, ${left} left`
+                        : formatTime12Hour(time)
+                    }
                     className={`py-2.5 rounded-lg border items-center ${
                       active
                         ? "bg-[#0644C7] border-[#0644C7]"
@@ -357,6 +361,24 @@ export function ScheduleCalendar({
                     >
                       {formatTime12Hour(time)}
                     </Text>
+                    {/* Live tickets left — the web's second line inside the chip:
+                        white on the selected chip, amber at 3 or fewer, else
+                        emerald. Every branch carries a `dark:` class so the
+                        css-interop feature set never changes when the chip is
+                        selected (a post-mount upgrade throws). */}
+                    {left != null && (
+                      <Text
+                        className={`text-[10px] font-semibold ${
+                          active
+                            ? "text-white/80 dark:text-white/80"
+                            : isLowRemaining(left)
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-emerald-600 dark:text-emerald-400"
+                        }`}
+                      >
+                        {left} left
+                      </Text>
+                    )}
                   </Pressable>
                 </View>
               );
@@ -379,7 +401,9 @@ export function ScheduleCalendar({
             <Text className="flex-1 text-xs text-green-800 dark:text-green-300">
               <Text className="font-bold">{formatFullDate(scheduledDate)}</Text>
               {" at "}
-              <Text className="font-bold">{formatTime12Hour(scheduledTime)}</Text>
+              <Text className="font-bold">
+                {formatTime12Hour(scheduledTime)}
+              </Text>
             </Text>
           </View>
         </View>

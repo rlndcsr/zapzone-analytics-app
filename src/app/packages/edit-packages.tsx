@@ -238,6 +238,7 @@ const EditPackage = () => {
   const [pricePerAdditional, setPricePerAdditional] = useState("");
   const [minParticipants, setMinParticipants] = useState("");
   const [maxParticipants, setMaxParticipants] = useState("");
+  const [maxTicketsPerSlot, setMaxTicketsPerSlot] = useState("");
   const [duration, setDuration] = useState("");
   const [durationUnit, setDurationUnit] = useState("hours");
   const [durationHours, setDurationHours] = useState("");
@@ -343,6 +344,11 @@ const EditPackage = () => {
         );
         setMaxParticipants(
           detail.maxParticipants != null ? String(detail.maxParticipants) : "",
+        );
+        setMaxTicketsPerSlot(
+          detail.maxTicketsPerSlot != null
+            ? String(detail.maxTicketsPerSlot)
+            : "",
         );
         setDurationUnit(detail.durationUnit || "hours");
         if (
@@ -604,6 +610,7 @@ const EditPackage = () => {
           : null,
         minParticipants: parseIntOrNull(minParticipants),
         maxParticipants: parseIntOrNull(maxParticipants),
+        maxTicketsPerSlot: parseIntOrNull(maxTicketsPerSlot),
         duration: dur,
         durationUnit,
         bookingWindowDays: parseIntOrNull(bookingWindowDays),
@@ -954,6 +961,15 @@ const EditPackage = () => {
                     />
                   </View>
                 </View>
+
+                <TextField
+                  label="Max tickets per time slot"
+                  value={maxTicketsPerSlot}
+                  onChangeText={setMaxTicketsPerSlot}
+                  keyboardType="number-pad"
+                  placeholder="No limit"
+                  hint="Seats sellable per slot per day. Customers see the live count."
+                />
 
                 {/* Per-additional pricing — only relevant with a max cap (web parity). */}
                 {maxParticipants.trim() !== "" && (
