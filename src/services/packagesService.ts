@@ -2,6 +2,9 @@ import { apiRequest } from "../lib/api";
 
 export type PackageStatus = "active" | "inactive";
 
+/** How a package is priced: one flat base price, or a price per player. */
+export type PackagePricingType = "base" | "per_person";
+
 /** Flattened package row backing the Packages list cards. */
 export type PackageRow = {
   id: number;
@@ -216,6 +219,9 @@ export type PackageDetail = {
   minParticipants: number | null;
   maxParticipants: number | null;
   maxTicketsPerSlot: number | null;
+  pricingType: PackagePricingType;
+  participantLabel: string;
+  displayLabel: string;
   duration: number | null;
   durationUnit: string;
   bookingWindowDays: number | null;
@@ -283,6 +289,9 @@ export async function fetchPackageDetail(
     minParticipants: numOrNull(d.min_participants),
     maxParticipants: numOrNull(d.max_participants),
     maxTicketsPerSlot: numOrNull(d.max_tickets_per_slot),
+    pricingType: d.pricing_type === "per_person" ? "per_person" : "base",
+    participantLabel: str(d.participant_label),
+    displayLabel: str(d.display_label),
     duration: numOrNull(d.duration),
     durationUnit: str(d.duration_unit) || "hours",
     bookingWindowDays: numOrNull(d.booking_window_days),
@@ -363,6 +372,11 @@ export type UpdatePackageInput = {
   maxParticipants: number | null;
   /** Seats sellable per slot per day; null clears the limit. */
   maxTicketsPerSlot: number | null;
+  pricingType: PackagePricingType;
+  /** What one person is called; blank clears it. */
+  participantLabel: string;
+  /** Customer-facing package label; blank clears it. */
+  displayLabel: string;
   duration: number | null;
   durationUnit: string;
   bookingWindowDays: number | null;
@@ -406,6 +420,9 @@ export async function updatePackage(
     min_participants: input.minParticipants,
     max_participants: input.maxParticipants,
     max_tickets_per_slot: input.maxTicketsPerSlot,
+    pricing_type: input.pricingType,
+    participant_label: input.participantLabel.trim() || null,
+    display_label: input.displayLabel.trim() || null,
     duration: input.duration,
     duration_unit: input.durationUnit,
     booking_window_days: input.bookingWindowDays,
@@ -449,8 +466,12 @@ export async function duplicatePackage(
     features: d.features,
     price: d.price,
     price_per_additional: d.pricePerAdditional,
+    min_participants: d.minParticipants,
     max_participants: d.maxParticipants,
     max_tickets_per_slot: d.maxTicketsPerSlot,
+    pricing_type: d.pricingType,
+    participant_label: d.participantLabel || null,
+    display_label: d.displayLabel || null,
     duration: d.duration,
     duration_unit: d.durationUnit,
     price_per_additional_30min: d.pricePerAdditional30min,
@@ -559,6 +580,11 @@ export type CreatePackageInput = {
   maxParticipants: number | null;
   /** Seats sellable per slot per day; null means no limit. */
   maxTicketsPerSlot: number | null;
+  pricingType: PackagePricingType;
+  /** What one person is called; blank clears it. */
+  participantLabel: string;
+  /** Customer-facing package label; blank clears it. */
+  displayLabel: string;
   duration: number;
   durationUnit: string;
   bookingWindowDays: number | null;
@@ -602,6 +628,9 @@ export async function createPackage(
     min_participants: input.minParticipants,
     max_participants: input.maxParticipants,
     max_tickets_per_slot: input.maxTicketsPerSlot,
+    pricing_type: input.pricingType,
+    participant_label: input.participantLabel.trim() || null,
+    display_label: input.displayLabel.trim() || null,
     duration: input.duration,
     duration_unit: input.durationUnit,
     booking_window_days: input.bookingWindowDays,

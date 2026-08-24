@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  SegmentedToggle,
   SelectField,
   TextField,
   ToggleRow,
@@ -40,6 +41,7 @@ import {
 import {
   createPackage,
   savePackageAvailabilitySchedules,
+  type PackagePricingType,
   type PackageScheduleInput,
 } from "../../services/packagesService";
 import { fetchPromos, type PromoOption } from "../../services/promosService";
@@ -218,9 +220,13 @@ const CreatePackage = () => {
 
   // --- Step 2: pricing & participants ---
   const [price, setPrice] = useState("");
+  const [pricingType, setPricingType] = useState<PackagePricingType>("base");
+  const [pricePerAdditional, setPricePerAdditional] = useState("");
   const [minParticipants, setMinParticipants] = useState("");
   const [maxParticipants, setMaxParticipants] = useState("");
   const [maxTicketsPerSlot, setMaxTicketsPerSlot] = useState("");
+  const [participantLabel, setParticipantLabel] = useState("");
+  const [displayLabel, setDisplayLabel] = useState("");
   const [duration, setDuration] = useState("");
   const [durationUnit, setDurationUnit] = useState("hours");
   const [durationHours, setDurationHours] = useState("");
@@ -438,6 +444,12 @@ const CreatePackage = () => {
       prev.map((s) => (s.key === key ? { ...s, ...patch } : s)),
     );
 
+  /* --- pricing-mode labels (web parity) ---------------------------------- */
+  const perPerson = pricingType === "per_person";
+  const guestLabel = participantLabel.trim();
+  const playerWord = guestLabel || "Player";
+  const participantWord = guestLabel || (perPerson ? "Player" : "Participant");
+
   /* --- per-step validation on Next -------------------------------------- */
   const validateStep = (s: number): string | null => {
     if (s === 0) {
@@ -450,6 +462,16 @@ const CreatePackage = () => {
     if (s === 1) {
       const p = parseNum(price);
       if (p == null || p < 0) return "Please enter a valid price.";
+      const maxP = parseIntOrNull(maxParticipants);
+      if (maxParticipants.trim() && (maxP == null || maxP < 1))
+        return "Please enter a valid max participants (minimum 1)";
+      const minP = parseIntOrNull(minParticipants);
+      if (minParticipants.trim() && (minP == null || minP < 1))
+        return "Please enter a valid min participants (minimum 1)";
+      if (minP && maxP && minP > maxP)
+        return "Minimum cannot be greater than maximum";
+      if (perPerson && (!minP || !maxP))
+        return `Per-${playerWord.toLowerCase()} pricing needs both minimum and maximum ${playerWord.toLowerCase()}s`;
       if (durationUnit === "hours and minutes") {
         const h = parseNum(durationHours) ?? 0;
         const m = parseNum(durationMinutes) ?? 0;
@@ -553,11 +575,13 @@ const CreatePackage = () => {
         category: categoryValue,
         packageType,
         price: parseNum(price) ?? 0,
-        // Per-additional pricing isn't exposed on create (matches the web admin).
-        pricePerAdditional: null,
+        pricingType,
+        pricePerAdditional: perPerson ? 0 : (parseNum(pricePerAdditional) ?? 0),
         minParticipants: parseIntOrNull(minParticipants),
         maxParticipants: parseIntOrNull(maxParticipants),
         maxTicketsPerSlot: parseIntOrNull(maxTicketsPerSlot),
+        participantLabel,
+        displayLabel,
         duration: dur,
         durationUnit,
         bookingWindowDays: parseIntOrNull(bookingWindowDays),
@@ -785,7 +809,6 @@ const CreatePackage = () => {
           {/* STEP 2 — Pricing & participants */}
           {step === 1 && (
             <View className="gap-4">
-              {/* Pricing — matches the web admin (base price only). */}
               <View>
                 <Text className="text-sm font-bold text-gray-900 dark:text-white">
                   Pricing
@@ -794,13 +817,37 @@ const CreatePackage = () => {
                   Set the base price for this package (before any add-ons or
                   additional participants)
                 </Text>
+                <SegmentedToggle<PackagePricingType>
+                  options={[
+                    { value: "base", label: "Base price" },
+                    {
+                      value: "per_person",
+                      label: `Per ${playerWord.toLowerCase()}`,
+                    },
+                  ]}
+                  value={pricingType}
+                  onChange={(next) => {
+                    setPricingType(next);
+                    // Per-player packages are not room-based (web clears rooms too).
+                    if (next === "per_person") setRoomSel([]);
+                  }}
+                />
                 <TextField
-                  label="Base Price"
+                  label={perPerson ? `Price per ${playerWord}` : "Price"}
                   required
                   value={price}
                   onChangeText={setPrice}
                   keyboardType="decimal-pad"
-                  placeholder="0.00"
+                  placeholder={
+                    perPerson
+                      ? `Amount each ${playerWord.toLowerCase()} pays`
+                      : "Enter price"
+                  }
+                  hint={
+                    perPerson
+                      ? `No base price — the total is this amount times the number of ${playerWord.toLowerCase()}s.`
+                      : undefined
+                  }
                 />
               </View>
 
@@ -833,26 +880,39 @@ const CreatePackage = () => {
                 </View>
               </View>
 
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <TextField
-                    label="Min participants"
-                    value={minParticipants}
-                    onChangeText={setMinParticipants}
-                    keyboardType="number-pad"
-                    placeholder="1"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Max participants"
-                    value={maxParticipants}
-                    onChangeText={setMaxParticipants}
-                    keyboardType="number-pad"
-                    placeholder="—"
-                  />
-                </View>
-              </View>
+              <TextField
+                label={`Min ${participantWord}s`}
+                value={minParticipants}
+                onChangeText={setMinParticipants}
+                keyboardType="number-pad"
+                placeholder="Enter min participants"
+              />
+
+              <TextField
+                label={`Max ${participantWord}s`}
+                value={maxParticipants}
+                onChangeText={setMaxParticipants}
+                keyboardType="number-pad"
+                placeholder="Enter max participants"
+              />
+
+              <TextField
+                label="Guest label"
+                value={participantLabel}
+                onChangeText={setParticipantLabel}
+                maxLength={50}
+                placeholder="Participant, Player, Guest..."
+                hint="What one person is called on the customer page."
+              />
+
+              <TextField
+                label="Shown to customers as"
+                value={displayLabel}
+                onChangeText={setDisplayLabel}
+                maxLength={100}
+                placeholder="Escape Room, Party Package..."
+                hint={'Storefront section and badge. Blank keeps "Package".'}
+              />
 
               <TextField
                 label="Max tickets per time slot"
@@ -862,6 +922,16 @@ const CreatePackage = () => {
                 placeholder="No limit"
                 hint="Seats sellable per slot per day. Customers see the live count."
               />
+
+              {maxParticipants.trim() !== "" && !perPerson && (
+                <TextField
+                  label="Price per Additional Participant"
+                  value={pricePerAdditional}
+                  onChangeText={setPricePerAdditional}
+                  keyboardType="decimal-pad"
+                  placeholder="Enter price per additional"
+                />
+              )}
 
               <SelectField
                 label="Duration unit"
@@ -971,22 +1041,29 @@ const CreatePackage = () => {
                   </View>
                 )}
 
-                <SectionLabel>Spaces (rooms)</SectionLabel>
-                {rooms.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 mb-2">
-                    No rooms available.
-                  </Text>
-                ) : (
-                  <View className="flex-row flex-wrap">
-                    {rooms.map((r) => (
-                      <Chip
-                        key={r.id}
-                        label={r.name}
-                        selected={roomSel.includes(r.id)}
-                        onPress={() => setRoomSel((prev) => toggleIn(prev, r.id))}
-                      />
-                    ))}
-                  </View>
+                {/* Per-player packages are the room, so the web hides Space here. */}
+                {!perPerson && (
+                  <>
+                    <SectionLabel>Spaces (rooms)</SectionLabel>
+                    {rooms.length === 0 ? (
+                      <Text className="text-sm text-gray-400 dark:text-gray-500 mb-2">
+                        No rooms available.
+                      </Text>
+                    ) : (
+                      <View className="flex-row flex-wrap">
+                        {rooms.map((r) => (
+                          <Chip
+                            key={r.id}
+                            label={r.name}
+                            selected={roomSel.includes(r.id)}
+                            onPress={() =>
+                              setRoomSel((prev) => toggleIn(prev, r.id))
+                            }
+                          />
+                        ))}
+                      </View>
+                    )}
+                  </>
                 )}
 
                 <SectionLabel>Add-ons</SectionLabel>

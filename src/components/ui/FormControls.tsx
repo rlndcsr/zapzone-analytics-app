@@ -155,6 +155,47 @@ export function SelectField({
   );
 }
 
+/** Mutually exclusive options as one inline pill bar (the web's segmented button group). */
+export function SegmentedToggle<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <View className="flex-row self-start bg-gray-100 dark:bg-neutral-800 rounded-xl p-0.5 mb-3">
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <Pressable
+            // Keyed by active so the segment remounts on toggle: css-interop then
+            // resolves the shadow/dark variables on a fresh render instead of a
+            // crash-prone post-mount upgrade.
+            key={`${o.value}-${active}`}
+            onPress={() => onChange(o.value)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            className={`px-4 py-2 rounded-lg ${
+              active ? "bg-white dark:bg-neutral-900 shadow-sm" : ""
+            }`}
+          >
+            <Text
+              className={`text-sm font-semibold ${
+                active ? "text-[#0644C7]" : "text-gray-500 dark:text-gray-400"
+              }`}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 /** A label + right-aligned toggle switch row. */
 export function ToggleRow({
   label,
