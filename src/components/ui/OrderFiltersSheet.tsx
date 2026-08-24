@@ -93,7 +93,7 @@ export function OrderFiltersSheet({
           <View className="flex-row gap-3 mt-2">
             <Pressable
               onPress={onClear}
-              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              className="flex-1 h-14 items-center justify-center rounded-xl border border-gray-300 dark:border-neutral-700 active:opacity-70"
             >
               <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                 Clear Filters
@@ -101,7 +101,7 @@ export function OrderFiltersSheet({
             </Pressable>
             <Pressable
               onPress={onClose}
-              className="flex-1 h-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+              className="flex-1 h-14 items-center justify-center rounded-xl bg-[#0644C7] active:opacity-90"
             >
               <Text className="text-base font-semibold text-white">Done</Text>
             </Pressable>

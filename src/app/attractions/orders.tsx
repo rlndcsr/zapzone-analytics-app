@@ -15,12 +15,24 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  BULK_ORDER_COLUMN_META,
+  BulkOrdersTable,
+  DEFAULT_BULK_ORDER_COLUMNS,
+} from "../../components/ui/BulkOrdersTable";
+import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
+import {
+  FilterPill,
+  PillDivider,
+  PillSegment,
+} from "../../components/ui/FilterPill";
+import {
   countActiveOrderFilters,
   EMPTY_ORDER_FILTERS,
   OrderFiltersSheet,
   type OrderFilterValues,
 } from "../../components/ui/OrderFiltersSheet";
 import { StatTile } from "../../components/ui/StatTile";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
@@ -223,6 +235,21 @@ export default function BulkOrdersScreen() {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<OrderFilterValues>(EMPTY_ORDER_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
+  // Table is the default layout everywhere in the app (see ViewToggle).
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  // Which columns the table renders (the web's Columns dropdown).
+  const [showColumns, setShowColumns] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
+    () => new Set(DEFAULT_BULK_ORDER_COLUMNS),
+  );
+  const toggleColumn = useCallback((key: string) => {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -513,39 +540,45 @@ export default function BulkOrdersScreen() {
             )}
           </View>
 
-          <View className="flex-row items-center gap-3">
-            <Pressable
+          {/* Filters + Columns — one toolbar pill, mirroring the web table
+              toolbar's button pair (same as Payments). Columns only applies to
+              the table layout, so it's hidden in Cards. */}
+          <FilterPill>
+            <PillSegment
+              label={
+                activeFilterCount > 0
+                  ? `Filters (${activeFilterCount})`
+                  : "Filters"
+              }
+              active={showFilters || activeFilterCount > 0}
               onPress={() => setShowFilters(true)}
-              accessibilityRole="button"
-              accessibilityLabel={`Open filters${
-                activeFilterCount > 0 ? `, ${activeFilterCount} active` : ""
-              }`}
-              className="flex-1 flex-row items-center gap-2.5 rounded-xl border border-gray-100 bg-white px-4 py-3.5 active:opacity-70 dark:border-neutral-800 dark:bg-neutral-900"
-            >
-              <Feather name="sliders" size={16} color="#6B7280" />
-              <Text className="flex-1 text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Filters
-              </Text>
-              {activeFilterCount > 0 && (
-                <View className="h-5 min-w-[20px] items-center justify-center rounded-full bg-[#0644C7] px-1.5">
-                  <Text className="text-[11px] font-bold text-white">
-                    {activeFilterCount}
-                  </Text>
-                </View>
-              )}
-              <Feather name="chevron-right" size={18} color="#9CA3AF" />
-            </Pressable>
+              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
+            />
+            {viewMode === "table" && (
+              <>
+                <PillDivider />
+                <PillSegment
+                  label="Columns"
+                  active={showColumns}
+                  onPress={() => setShowColumns(true)}
+                  renderIcon={(c) => (
+                    <Feather name="columns" size={15} color={c} />
+                  )}
+                />
+              </>
+            )}
+          </FilterPill>
 
-            <Pressable
-              onPress={() => router.push("/attractions/create-purchase")}
-              accessibilityRole="button"
-              accessibilityLabel="New order"
-              className="flex-row items-center gap-2 rounded-xl bg-[#0644C7] px-4 py-3.5 active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text className="text-sm font-semibold text-white">New Order</Text>
-            </Pressable>
-          </View>
+          {/* Full-width primary action, stacked under the toolbar pill. */}
+          <Pressable
+            onPress={() => router.push("/attractions/create-purchase")}
+            accessibilityRole="button"
+            accessibilityLabel="New order"
+            className="w-full flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] px-4 py-3.5 active:opacity-90"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New Order</Text>
+          </Pressable>
 
           <View className="mt-4">
             {loading && orders.length === 0 ? (
@@ -576,28 +609,66 @@ export default function BulkOrdersScreen() {
               </View>
             ) : (
               <>
-                <Text className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-                  {filtered.length} {filtered.length === 1 ? "order" : "orders"}
-                </Text>
-                {filtered.map((order) => (
-                  <OrderCard
-                    key={order.id}
-                    order={order}
-                    checkingIn={checkingIn === order.id}
-                    onOpen={() =>
+                {/* List header + layout toggle, matching the Purchases screen. */}
+                <View className="mb-3 flex-row items-center gap-2">
+                  <Text className="shrink text-xs text-gray-500 dark:text-gray-400">
+                    {filtered.length} {filtered.length === 1 ? "order" : "orders"}
+                  </Text>
+                  <View className="ml-auto">
+                    <ViewToggle mode={viewMode} onChange={setViewMode} />
+                  </View>
+                </View>
+
+                {/* Table and card layouts render from the same `filtered` list —
+                    switching is instant and never refetches. */}
+                {viewMode === "table" ? (
+                  <BulkOrdersTable
+                    orders={filtered}
+                    checkingInId={checkingIn}
+                    visibleKeys={visibleColumns}
+                    onView={(order) =>
                       router.push({
                         pathname: "/attractions/order-details",
                         params: { id: String(order.id) },
                       })
                     }
-                    onCheckIn={() => void checkInAll(order)}
+                    onCheckIn={(order) => void checkInAll(order)}
+                    methodLabel={methodLabel}
+                    allCheckedIn={allCheckedIn}
                   />
-                ))}
+                ) : (
+                  filtered.map((order) => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      checkingIn={checkingIn === order.id}
+                      onOpen={() =>
+                        router.push({
+                          pathname: "/attractions/order-details",
+                          params: { id: String(order.id) },
+                        })
+                      }
+                      onCheckIn={() => void checkInAll(order)}
+                    />
+                  ))
+                )}
               </>
             )}
           </View>
         </View>
       </ScrollView>
+
+      <ColumnsSheet
+        visible={showColumns}
+        columns={BULK_ORDER_COLUMN_META}
+        visibleKeys={visibleColumns}
+        onToggle={toggleColumn}
+        onShowAll={() =>
+          setVisibleColumns(new Set(BULK_ORDER_COLUMN_META.map((c) => c.key)))
+        }
+        onReset={() => setVisibleColumns(new Set(DEFAULT_BULK_ORDER_COLUMNS))}
+        onClose={() => setShowColumns(false)}
+      />
 
       <OrderFiltersSheet
         visible={showFilters}

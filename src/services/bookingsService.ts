@@ -23,6 +23,8 @@ export type CalendarBooking = {
   totalAmount: number;
   amountPaid: number;
   packageName: string;
+  /** Package category ("Birthday", "Wristband", …); "" when uncategorised. */
+  packageCategory: string;
   customerName: string;
   customerEmail: string | null;
   customerPhone: string | null;
@@ -132,7 +134,7 @@ type RawBooking = {
   notes?: string | null;
   special_requests?: string | null;
   payment_status?: string | null;
-  package?: { name?: string | null } | null;
+  package?: { name?: string | null; category?: string | null } | null;
   room?: { name?: string | null } | null;
   location?: { name?: string | null } | null;
   customer?: {
@@ -187,6 +189,7 @@ type RawBookingDetail = RawBooking & {
     id?: number | null;
     name?: string | null;
     price?: number | string | null;
+    category?: string | null;
   } | null;
   room?: { id?: number | null; name?: string | null } | null;
   customer?: {
@@ -269,6 +272,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     totalAmount: Number(raw.total_amount ?? 0),
     amountPaid: Number(raw.amount_paid ?? 0),
     packageName: raw.package?.name?.trim() || "Booking",
+    packageCategory: raw.package?.category?.trim() || "",
     customerName: customerName(raw.customer, raw.guest_name),
     customerEmail: raw.customer?.email?.trim() || raw.guest_email?.trim() || null,
     customerPhone: raw.customer?.phone?.trim() || raw.guest_phone?.trim() || null,

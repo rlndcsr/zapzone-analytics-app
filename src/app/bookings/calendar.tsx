@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CalendarCategoryTabs } from "../../components/ui/CalendarCategoryTabs";
 import { CalendarDaySections } from "../../components/ui/CalendarDaySections";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import {
@@ -21,9 +22,18 @@ import {
   CalendarSkeleton,
   CalendarWeekSkeleton,
 } from "../../components/ui/skeleton/CalendarSkeleton";
+import {
+  buildCalendarCategories,
+  categoryKeyOf,
+  EVENTS_CATEGORY_KEY,
+  useCategoryFilter,
+} from "../../lib/calendar/categoryFilter";
 import { packageColor } from "../../lib/calendar/packageColors";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
-import { useScheduledExtras } from "../../lib/hooks/useScheduledExtras";
+import {
+  useScheduledExtras,
+  type DayExtras,
+} from "../../lib/hooks/useScheduledExtras";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { timeToMinutes } from "../../lib/time";
 import type { CalendarBooking } from "../../services/bookingsService";
@@ -316,10 +326,56 @@ const BookingCalendar = () => {
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [bookings]);
 
-  // Group the filtered bookings by day, each day sorted by time.
+  // Categories present in the visible window — bookings by package category,
+  // tickets by attraction category, registrations in one "Events" bucket. Built
+  // from the search/package-filtered set but BEFORE the category filter, so a
+  // deselected tab keeps its place and its count (same as the web).
+  const categories = useMemo(() => {
+    const days = Object.values(extrasByDate);
+    return buildCalendarCategories({
+      bookings: filtered,
+      attractions: days.flatMap((d) => d.attractionPurchases),
+      events: days.flatMap((d) => d.eventPurchases),
+    });
+  }, [filtered, extrasByDate]);
+
+  const categoryFilter = useCategoryFilter(categories);
+  const { shows: showsCategory } = categoryFilter;
+
+  const categoryBookings = useMemo(
+    () => filtered.filter((b) => showsCategory(categoryKeyOf(b.packageCategory))),
+    [filtered, showsCategory],
+  );
+
+  // The same category filter applied to the ticket / registration overlay, with
+  // each day's counts recomputed from what survives.
+  const visibleExtras = useMemo(() => {
+    if (categoryFilter.isAll) return extrasByDate;
+    const showEvents = showsCategory(EVENTS_CATEGORY_KEY);
+    const map: Record<string, DayExtras> = {};
+    for (const [key, day] of Object.entries(extrasByDate)) {
+      const attractionPurchases = day.attractionPurchases.filter((p) =>
+        showsCategory(categoryKeyOf(p.category)),
+      );
+      const eventPurchases = showEvents ? day.eventPurchases : [];
+      if (attractionPurchases.length === 0 && eventPurchases.length === 0) continue;
+      map[key] = {
+        attractionPurchases,
+        eventPurchases,
+        attractionTickets: attractionPurchases.reduce(
+          (sum, p) => sum + (p.quantity || 0),
+          0,
+        ),
+        eventRegistrations: eventPurchases.length,
+      };
+    }
+    return map;
+  }, [extrasByDate, categoryFilter.isAll, showsCategory]);
+
+  // Group the visible bookings by day, each day sorted by time.
   const byDate = useMemo(() => {
     const map: Record<string, DayGroup> = {};
-    for (const b of filtered) {
+    for (const b of categoryBookings) {
       (map[b.date] ?? (map[b.date] = { bookings: [] })).bookings.push(b);
     }
     // Time ascending, untimed last — the web's getBookingsForDate ordering.
@@ -329,7 +385,7 @@ const BookingCalendar = () => {
       );
     }
     return map;
-  }, [filtered]);
+  }, [categoryBookings]);
 
   // Month grid cells (leading blanks + days, padded to whole weeks).
   const cells = useMemo(() => {
@@ -415,10 +471,10 @@ const BookingCalendar = () => {
     ? (byDate[selectedDayKey]?.bookings ?? [])
     : [];
   const selectedDayPurchases = selectedDayKey
-    ? (extrasByDate[selectedDayKey]?.attractionPurchases ?? [])
+    ? (visibleExtras[selectedDayKey]?.attractionPurchases ?? [])
     : [];
   const selectedDayEvents = selectedDayKey
-    ? (extrasByDate[selectedDayKey]?.eventPurchases ?? [])
+    ? (visibleExtras[selectedDayKey]?.eventPurchases ?? [])
     : [];
 
   // A purchase opens its own screen, so close the day sheet first (navigating
@@ -605,6 +661,10 @@ const BookingCalendar = () => {
             </View>
           </View>
 
+          {/* Category tabs — All / <package & attraction categories> / Events,
+              filtering bookings and the ticket overlay together (web parity). */}
+          {!loading && <CalendarCategoryTabs filter={categoryFilter} />}
+
           {/* Error */}
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
@@ -636,7 +696,7 @@ const BookingCalendar = () => {
                     {cells.slice(row * 7, row * 7 + 7).map((cell, col) => {
                       const group = cell.key ? byDate[cell.key] : undefined;
                       const dayBookings = group?.bookings ?? [];
-                      const extra = cell.key ? extrasByDate[cell.key] : undefined;
+                      const extra = cell.key ? visibleExtras[cell.key] : undefined;
                       const tickets = extra?.attractionTickets ?? 0;
                       const registrations = extra?.eventRegistrations ?? 0;
                       const hasBookings = dayBookings.length > 0;
@@ -818,16 +878,24 @@ const BookingCalendar = () => {
             ))}
 
           {/* Empty month */}
-          {!loading && !error && viewMode === "month" && filtered.length === 0 && (
+          {!loading &&
+            !error &&
+            viewMode === "month" &&
+            categoryBookings.length === 0 &&
+            Object.keys(visibleExtras).length === 0 && (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 mt-4 items-center border border-gray-100 dark:border-neutral-800">
               <Feather name="calendar" size={32} color="#9ca3af" />
               <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
-                No bookings
+                {categoryFilter.isAll
+                  ? "No bookings"
+                  : "Nothing in the selected categories"}
               </Text>
               <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {activeFilterCount > 0
-                  ? "No bookings match your filters."
-                  : `There are no bookings in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`}
+                {!categoryFilter.isAll
+                  ? `Nothing matches the selected categories in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`
+                  : activeFilterCount > 0
+                    ? "No bookings match your filters."
+                    : `There are no bookings in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`}
               </Text>
               {activeFilterCount > 0 && (
                 <Pressable

@@ -10,6 +10,7 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CalendarCategoryTabs } from "../../components/ui/CalendarCategoryTabs";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import { ScreenTitleCard } from "../../components/ui/ScreenTitleCard";
 import {
@@ -17,6 +18,11 @@ import {
   CalendarSkeleton,
   CalendarWeekSkeleton,
 } from "../../components/ui/skeleton/CalendarSkeleton";
+import {
+  buildCalendarCategories,
+  categoryKeyOf,
+  useCategoryFilter,
+} from "../../lib/calendar/categoryFilter";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import { useAttractionPurchases } from "../../lib/hooks/useAttractionPurchases";
 import { useNotifications } from "../../lib/hooks/useNotifications";
@@ -511,6 +517,30 @@ const Calendar = () => {
     [purchases, startDate, endDate],
   );
 
+  // Categories present in the visible window — bookings by package category,
+  // tickets by attraction category. Built before the category filter is applied,
+  // so a deselected tab keeps its place and its count (same as the web).
+  const categories = useMemo(
+    () =>
+      buildCalendarCategories({
+        bookings,
+        attractions: purchasesInWindow,
+      }),
+    [bookings, purchasesInWindow],
+  );
+
+  const categoryFilter = useCategoryFilter(categories);
+  const { shows: showsCategory } = categoryFilter;
+
+  const visibleBookings = useMemo(
+    () => bookings.filter((b) => showsCategory(categoryKeyOf(b.packageCategory))),
+    [bookings, showsCategory],
+  );
+  const visiblePurchases = useMemo(
+    () => purchasesInWindow.filter((p) => showsCategory(categoryKeyOf(p.category))),
+    [purchasesInWindow, showsCategory],
+  );
+
   // Group the window's bookings + attraction purchases by day.
   const byDate = useMemo(() => {
     const map: Record<string, DayGroup> = {};
@@ -518,8 +548,8 @@ const Calendar = () => {
       map[key] ??
       (map[key] = { bookings: [], attractions: [], attractionTickets: 0 });
 
-    for (const b of bookings) ensure(b.date).bookings.push(b);
-    for (const p of purchasesInWindow) {
+    for (const b of visibleBookings) ensure(b.date).bookings.push(b);
+    for (const p of visiblePurchases) {
       const entry = ensure(purchaseDateKey(p));
       entry.attractions.push(p);
       entry.attractionTickets += Number(p.quantity) || 0;
@@ -534,7 +564,7 @@ const Calendar = () => {
       );
     }
     return map;
-  }, [bookings, purchasesInWindow]);
+  }, [visibleBookings, visiblePurchases]);
 
   // Month grid cells (leading blanks + days, padded to whole weeks).
   const cells = useMemo(() => {
@@ -703,6 +733,10 @@ const Calendar = () => {
               <ChevronRight size={20} color="#6b7280" />
             </Pressable>
           </View>
+
+          {/* Category tabs — All / <package & attraction categories>, filtering
+              bookings and attraction tickets together (web parity). */}
+          {!loading && <CalendarCategoryTabs filter={categoryFilter} />}
 
           {/* Error */}
           {!loading && error && (
@@ -918,16 +952,19 @@ const Calendar = () => {
           {!loading &&
             !error &&
             viewMode === "month" &&
-            bookings.length === 0 &&
-            purchasesInWindow.length === 0 && (
+            visibleBookings.length === 0 &&
+            visiblePurchases.length === 0 && (
               <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 mt-4 items-center border border-gray-100 dark:border-neutral-800">
                 <CalendarIcon size={32} color="#9ca3af" />
                 <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
-                  No activity
+                  {categoryFilter.isAll
+                    ? "No activity"
+                    : "Nothing in the selected categories"}
                 </Text>
                 <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                  There are no bookings or attraction purchases in{" "}
-                  {MONTH_NAMES[anchor.getMonth()]} {anchor.getFullYear()}.
+                  {categoryFilter.isAll
+                    ? `There are no bookings or attraction purchases in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`
+                    : `Nothing matches the selected categories in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`}
                 </Text>
               </View>
             )}
