@@ -16,9 +16,13 @@ import { getToken } from "../session";
  * kiosk routes are keyed by access token, so there is no client-side path we
  * can build from an entity id.
  *
- * Failures the backend reports (no template assigned to the activity, attendant
- * role, out-of-scope record) surface as an Alert; resolves to whether the kiosk
- * was opened.
+ * Every staff role may launch it — company_admin, admin, location_manager and
+ * attendant all pass the backend's `guardStaff` on POST /waivers/kiosk-session,
+ * so there is no role gate here or at any call site (web parity).
+ *
+ * Failures the backend reports (no template assigned to the activity,
+ * out-of-scope record) surface as an Alert; resolves to whether the kiosk was
+ * opened.
  */
 export async function launchKioskSession(
   sourceType: KioskSourceType,

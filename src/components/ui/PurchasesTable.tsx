@@ -118,7 +118,7 @@ const IconAction = ({
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 
 type Handlers = {
-  /** Eye icon + row tap — open Purchase Details. */
+  /** Eye icon and row tap — open Purchase Details. */
   onView: (purchase: PurchaseRow) => void;
   /** Pencil icon — open Edit Purchase. */
   onEdit: (purchase: PurchaseRow) => void;
@@ -288,9 +288,9 @@ function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
 /**
  * Table layout for the Manage Purchases list. Thin wrapper over the generic
  * SelectableTable (same shell as BookingsTable), rendering the web-parity
- * purchase columns from the same `PurchaseRow[]` as the card view. Rows are
- * inert: Purchase Details opens from the row's eye action only, so the checkbox
- * / status pill / actions own every touch and a stray tap can't navigate.
+ * purchase columns from the same `PurchaseRow[]` as the card view. Tapping a row
+ * opens Purchase Details, like the eye action and the card view; the checkbox,
+ * status pill and action icons are nested Pressables that keep their own touches.
  */
 export function PurchasesTable({
   purchases,
@@ -306,7 +306,7 @@ export function PurchasesTable({
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
-  /** Eye action — open Purchase Details. */
+  /** Eye action and row tap — open Purchase Details. */
   onView: (purchase: PurchaseRow) => void;
   /** Pencil action — open Edit Purchase. */
   onEdit: (purchase: PurchaseRow) => void;
@@ -323,6 +323,7 @@ export function PurchasesTable({
       columns={columns}
       rows={purchases}
       rowId={(p) => p.id}
+      onRowPress={onView}
       selectedIds={selectedIds}
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}
