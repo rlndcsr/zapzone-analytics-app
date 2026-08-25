@@ -255,8 +255,11 @@ function LineCard({
           className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white py-2.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900"
         >
           <Feather name="edit-2" size={14} color="#374151" />
-          <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-            Edit Schedule &amp; Notes
+          <Text
+            className="text-xs font-semibold text-gray-700 dark:text-gray-200"
+            numberOfLines={1}
+          >
+            Edit Schedule
           </Text>
         </Pressable>
       </View>

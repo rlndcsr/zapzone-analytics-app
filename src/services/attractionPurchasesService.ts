@@ -295,6 +295,10 @@ export type AttractionPurchaseDetail = {
   /** 0/null means "Unlimited". */
   duration: number | null;
   durationUnit: string;
+  /** Parent bulk order, or null when this purchase stands alone. */
+  ticketOrderId: number | null;
+  /** This purchase's position within its bulk order. */
+  linePosition: number | null;
   addOns: PurchaseAddonLine[];
   appliedFees: AppliedFee[];
 };
@@ -358,6 +362,8 @@ function mapDetail(raw: RawPurchaseDetail): AttractionPurchaseDetail {
     category: raw.attraction?.category?.trim() || "",
     duration: durationRaw && !Number.isNaN(durationRaw) ? durationRaw : null,
     durationUnit: raw.attraction?.duration_unit ?? "minutes",
+    ticketOrderId: base.ticketOrderId,
+    linePosition: base.linePosition,
     addOns: (raw.add_ons ?? []).map((a, i) => ({
       id: a.id ?? i,
       name: a.name?.trim() || a.add_on?.name?.trim() || "Add-on",

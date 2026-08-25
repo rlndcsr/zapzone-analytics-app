@@ -41,6 +41,7 @@ import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { PaymentsListSkeleton } from "../../components/ui/skeleton/PaymentsSkeleton";
 import { mediaUrl } from "../../lib/api";
 import { formatDateTimeET } from "../../lib/date/venueTime";
+import { payableRoute } from "../../lib/payments/payableRoute";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { fetchPackages } from "../../services/packagesService";
@@ -1166,6 +1167,12 @@ const Payments = () => {
             () => voidPayment(getToken() ?? "", p.id),
           )
         }
+        onOpenPayable={(p) => {
+          const route = payableRoute(p.payableType, p.payableId);
+          if (!route) return;
+          setActionsPayment(null);
+          router.push(route);
+        }}
         onViewDetails={(p) => {
           setActionsPayment(null);
           setSelectedPaymentId(p.id);
@@ -1340,6 +1347,7 @@ function PaymentActionsSheet({
   onRefund,
   onManualRefund,
   onVoid,
+  onOpenPayable,
   onViewDetails,
   onDelete,
 }: {
@@ -1349,6 +1357,7 @@ function PaymentActionsSheet({
   onRefund: (p: PaymentRow) => void;
   onManualRefund: (p: PaymentRow) => void;
   onVoid: (p: PaymentRow) => void;
+  onOpenPayable: (p: PaymentRow) => void;
   onViewDetails: (p: PaymentRow) => void;
   onDelete: (p: PaymentRow) => void;
 }) {
@@ -1392,6 +1401,19 @@ function PaymentActionsSheet({
                   title={`Manual Refund (${payment.methodLabel})`}
                   desc="Records a cash/in-store refund. No gateway involved — marks the refund in the system only."
                   onPress={() => onManualRefund(payment)}
+                />
+              )}
+              {payableRoute(payment.payableType, payment.payableId) && (
+                <ActionEntry
+                  icon="external-link"
+                  tint={PRIMARY}
+                  title={`Open ${payment.typeLabel}`}
+                  desc={
+                    payment.payableType === "ticket_order"
+                      ? "Part of a bulk order — take the payment on the order."
+                      : "Open the record this payment was made against."
+                  }
+                  onPress={() => onOpenPayable(payment)}
                 />
               )}
               <ActionEntry

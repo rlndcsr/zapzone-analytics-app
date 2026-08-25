@@ -270,6 +270,10 @@ export type EventPurchaseDetail = {
   transactionId: string | null;
   notes: string;
   specialRequests: string;
+  /** Parent bulk order, or null when this purchase stands alone. */
+  ticketOrderId: number | null;
+  /** This purchase's position within its bulk order. */
+  linePosition: number | null;
   addOns: EventPurchaseAddonLine[];
   appliedFees: EventAppliedFee[];
   appliedDiscounts: EventAppliedDiscount[];
@@ -287,6 +291,7 @@ type RawEventAddonLine = {
 
 type RawEventPurchaseDetail = RawEventPurchase & {
   transaction_id?: string | null;
+  line_position?: number | null;
   discount_amount?: number | string | null;
   notes?: string | null;
   special_requests?: string | null;
@@ -326,6 +331,8 @@ function mapDetail(raw: RawEventPurchaseDetail): EventPurchaseDetail {
     transactionId: raw.transaction_id ?? null,
     notes: raw.notes?.trim() || "",
     specialRequests: raw.special_requests?.trim() || "",
+    ticketOrderId: base.ticketOrderId,
+    linePosition: raw.line_position ?? null,
     addOns: (raw.add_ons ?? []).map((a, i) => ({
       id: a.id ?? i,
       name: a.name?.trim() || "Add-on",

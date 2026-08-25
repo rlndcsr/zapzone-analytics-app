@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import { BulkOrderNotice } from "../../components/ui/BulkOrderNotice";
 import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
 import { PurchaseQRSheet } from "../../components/ui/PurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
@@ -383,6 +384,11 @@ const PurchaseDetailsScreen = () => {
             </Text>
           </Pressable>
         </View>
+
+        <BulkOrderNotice
+          ticketOrderId={detail.ticketOrderId}
+          linePosition={detail.linePosition}
+        />
 
         {/* Purchase Information */}
         <SectionCard title="Purchase Information">
