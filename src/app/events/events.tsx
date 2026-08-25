@@ -501,7 +501,7 @@ const Events = () => {
             Events
           </Text>
           {/* Export CSV — icon-only in the header, so the list actions below
-              are just the primary "New Event" CTA. */}
+              are just the primary "Create New Event" CTA. */}
           <Pressable
             onPress={exportCsv}
             disabled={exporting}
@@ -618,14 +618,16 @@ const Events = () => {
             </Pressable>
           </View>
 
-          {/* New Event — the primary filled CTA, full width (same as the
+          {/* Create New Event — the primary filled CTA, full width (same as the
               Attractions module). Export CSV lives in the header. */}
           <Pressable
             onPress={() => router.push("/events/create-event")}
             className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5 mt-5"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">New Event</Text>
+            <Text className="text-sm font-semibold text-white">
+              Create New Event
+            </Text>
           </Pressable>
 
           {/* Error state */}

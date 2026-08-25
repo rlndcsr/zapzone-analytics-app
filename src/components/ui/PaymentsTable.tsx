@@ -73,9 +73,13 @@ function statusPill(status: string): { pill: string; text: string; icon: Feather
   }
 }
 
-/** Icon for the payable type, keyed off the type label (Package / Attraction / Event). */
+/**
+ * Icon for the payable type, keyed off the type label (Package / Attraction /
+ * Event / Bulk Order) — the same pairing the web's `payableTypeConfig` uses.
+ */
 function typeIcon(typeLabel: string): FeatherName {
   const t = typeLabel.toLowerCase();
+  if (t.includes("bulk") || t.includes("order")) return "shopping-cart";
   if (t.includes("package")) return "package";
   if (t.includes("attraction")) return "zap";
   if (t.includes("event")) return "calendar";

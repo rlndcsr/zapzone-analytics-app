@@ -51,7 +51,13 @@ type RawPayable = {
   quantity?: number | null;
   participants?: number | null;
   reference_number?: string | null;
+  /** Attraction purchases have no reference number — they carry the gateway id. */
+  transaction_id?: string | null;
+  /** Ticket orders count their lines, and the tickets across those lines. */
+  item_count?: number | null;
+  ticket_count?: number | null;
   // Guest-checkout name/email live on the payable when there's no customer record.
+  customer_name?: string | null;
   guest_name?: string | null;
   guest_email?: string | null;
 } | null;
@@ -80,16 +86,112 @@ type RawPayment = {
   } | null;
   location?: { id?: number; name?: string | null } | null;
   location_id?: number | null;
+  // Laravel snake-cases relation keys on serialize; the camelCase spellings are
+  // accepted too, so a payload taken straight off the relation still resolves.
   booking?: RawPayable;
   attraction_purchase?: RawPayable;
+  attractionPurchase?: RawPayable;
   event_purchase?: RawPayable;
+  eventPurchase?: RawPayable;
+  /** Multi-item bulk order — one charge covering several ticket lines. */
+  ticket_order?: RawPayable;
+  ticketOrder?: RawPayable;
 };
 
 const TYPE_LABELS: Record<string, string> = {
   booking: "Package Booking",
   attraction_purchase: "Attraction",
   event_purchase: "Event",
+  ticket_order: "Bulk Order",
 };
+
+/**
+ * Reduce whatever `payable_type` arrives to one of the four morph-map keys. The
+ * backend registers them as "booking" / "attraction_purchase" /
+ * "event_purchase" / "ticket_order", but a payload serialized without the morph
+ * map spells them as class names, so match on substrings the way the web's
+ * `normalizePayableType` does.
+ */
+function normalizePayableType(type: string | null | undefined): string | null {
+  if (!type) return null;
+  const t = type.toLowerCase();
+  if (t.includes("ticketorder") || t.includes("ticket_order")) return "ticket_order";
+  if (t.includes("attractionpurchase") || t.includes("attraction_purchase")) {
+    return "attraction_purchase";
+  }
+  if (t.includes("eventpurchase") || t.includes("event_purchase")) {
+    return "event_purchase";
+  }
+  if (t.includes("booking")) return "booking";
+  return t;
+}
+
+/** The relation this payment points at, whichever spelling it arrived in. */
+function payableOf(raw: RawPayment, type: string | null): RawPayable {
+  switch (type) {
+    case "booking":
+      return raw.booking ?? null;
+    case "attraction_purchase":
+      return raw.attraction_purchase ?? raw.attractionPurchase ?? null;
+    case "event_purchase":
+      return raw.event_purchase ?? raw.eventPurchase ?? null;
+    case "ticket_order":
+      return raw.ticket_order ?? raw.ticketOrder ?? null;
+    default:
+      // Unknown type — take whichever relation the payload happens to carry.
+      return (
+        raw.booking ??
+        raw.attraction_purchase ??
+        raw.attractionPurchase ??
+        raw.event_purchase ??
+        raw.eventPurchase ??
+        raw.ticket_order ??
+        raw.ticketOrder ??
+        null
+      );
+  }
+}
+
+/** "1 guest" / "3 guests" — the Type column never reads "1 guests". */
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * The row's own reference, printed above the payable's kind and count. Falls
+ * back to "<Kind> #<id>" so a payment whose relation never loaded still names
+ * its payable instead of repeating the gateway transaction from the column to
+ * its left.
+ */
+function payableReference(
+  type: string | null,
+  payable: RawPayable,
+  payableId: number | null,
+): string | null {
+  switch (type) {
+    case "booking":
+      return (
+        payable?.reference_number?.trim() ||
+        (payableId ? `Booking #${payableId}` : null)
+      );
+    case "attraction_purchase":
+      // Attraction purchases have no reference number, only the gateway id.
+      return (
+        payable?.transaction_id?.trim() ||
+        (payableId ? `Purchase #${payableId}` : null)
+      );
+    case "event_purchase":
+      return (
+        payable?.reference_number?.trim() ||
+        (payableId ? `Event #${payableId}` : null)
+      );
+    case "ticket_order":
+      return (
+        payable?.reference_number?.trim() ||
+        (payableId ? `Order #${payableId}` : null)
+      );
+    default:
+      return payable?.reference_number?.trim() || null;
+  }
+}
 
 /** Humanize a snake_case / lowercase token into "Title Case". */
 function humanize(v: string | null | undefined): string {
@@ -110,32 +212,51 @@ function methodLabel(method: string | null | undefined): string {
   return humanize(method);
 }
 
-/** Phrase the payable's count: bookings show guests, purchases show quantity. */
-function countLabel(type: string | null | undefined, payable: RawPayable): string | null {
+/**
+ * Phrase the payable's count the way the web's Type column does: bookings show
+ * guests, single purchases show a quantity, and a bulk order shows how many
+ * lines it holds alongside the tickets those lines add up to.
+ */
+function countLabel(type: string | null, payable: RawPayable): string | null {
   if (!payable) return null;
   if (type === "booking") {
-    return payable.participants != null ? `${payable.participants} guests` : null;
+    return payable.participants != null
+      ? plural(payable.participants, "guest")
+      : null;
+  }
+  if (type === "ticket_order") {
+    const parts = [
+      payable.item_count != null ? plural(payable.item_count, "item") : null,
+      payable.ticket_count != null ? plural(payable.ticket_count, "ticket") : null,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : null;
   }
   return payable.quantity != null ? `Qty: ${payable.quantity}` : null;
 }
 
 function mapPayment(raw: RawPayment): PaymentRow {
-  // Only the payable matching `payable_type` is non-null; pick whichever is set.
-  const payable = raw.booking ?? raw.attraction_purchase ?? raw.event_purchase ?? null;
+  // `payable_type` decides which relation is the real one: reading "whichever
+  // is set" mislabels a bulk order, whose lines can load beside the order.
+  const payableType = normalizePayableType(raw.payable_type);
+  const payable = payableOf(raw, payableType);
+  const payableId = raw.payable_id ?? null;
   // Prefer the linked customer; fall back to the payable's guest name/email for
   // guest checkouts (no customer record) so cards never read "Unknown".
   const customerFull = `${raw.customer?.first_name ?? ""} ${raw.customer?.last_name ?? ""}`.trim();
   const email = raw.customer?.email?.trim() || payable?.guest_email?.trim() || "";
-  const name = customerFull || payable?.guest_name?.trim() || email || "Unknown";
+  const name =
+    customerFull ||
+    payable?.customer_name?.trim() ||
+    payable?.guest_name?.trim() ||
+    email ||
+    "Unknown";
   return {
     id: raw.id,
     reference: raw.transaction_id?.trim() || raw.payment_id?.trim() || `#${raw.id}`,
-    payableReference:
-      raw.booking?.reference_number?.trim() ||
-      raw.event_purchase?.reference_number?.trim() ||
-      null,
-    typeLabel: TYPE_LABELS[raw.payable_type ?? ""] || humanize(raw.payable_type) || "Payment",
-    countLabel: countLabel(raw.payable_type, payable),
+    payableReference: payableReference(payableType, payable, payableId),
+    typeLabel:
+      TYPE_LABELS[payableType ?? ""] || humanize(payableType) || "Payment",
+    countLabel: countLabel(payableType, payable),
     customerName: name,
     customerEmail: email,
     amount: Number(raw.amount ?? 0),
@@ -147,8 +268,8 @@ function mapPayment(raw: RawPayment): PaymentRow {
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
     deletedAt: raw.deleted_at ?? null,
-    payableId: raw.payable_id ?? null,
-    payableType: raw.payable_type ?? null,
+    payableId: payableId,
+    payableType: payableType,
     notes: raw.notes?.trim() || null,
     paidAt: raw.paid_at ?? null,
     refundedAt: raw.refunded_at ?? null,

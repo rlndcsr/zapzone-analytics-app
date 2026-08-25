@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
+import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import {
   FilterPill,
   PillDivider,
@@ -39,6 +40,7 @@ import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { PaymentsListSkeleton } from "../../components/ui/skeleton/PaymentsSkeleton";
 import { mediaUrl } from "../../lib/api";
+import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { fetchPackages } from "../../services/packagesService";
@@ -55,6 +57,8 @@ import {
   manualRefundPayment,
   packageInvoicesUrl,
   refundPayment,
+  isRefundRecord,
+  isVoidRecord,
   restorePayment,
   voidPayment,
   type PaymentRow,
@@ -75,6 +79,32 @@ const MONTHS = [
 ];
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+
+/**
+ * Earliest `created_at` a row may have to pass the Time Period filter, phrased
+ * exactly as the web's `period` predicate: today starts at midnight, and the
+ * other windows count back from now (a week is the last seven days).
+ */
+function periodStart(period: PaymentFilterValues["period"]): number | null {
+  if (period === "all") return null;
+  const now = new Date();
+  const back = new Date(now);
+  switch (period) {
+    case "today":
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    case "week":
+      back.setDate(now.getDate() - 7);
+      return back.getTime();
+    case "month":
+      back.setMonth(now.getMonth() - 1);
+      return back.getTime();
+    case "year":
+      back.setFullYear(now.getFullYear() - 1);
+      return back.getTime();
+    default:
+      return null;
+  }
+}
 
 /** ISO -> "Jul 9, 2026, 4:05 PM". */
 function fmtDateTime(iso: string | null): string {
@@ -180,6 +210,70 @@ function PaymentCard({ p, deleted }: { p: PaymentRow; deleted?: boolean }) {
   );
 }
 
+/**
+ * One of the module's square shortcut cards — the same card the Attractions,
+ * Events and Packages modules use, except these open a sheet instead of
+ * pushing a route, so the press handler comes in rather than a path.
+ */
+const ShortcutCard = ({
+  icon,
+  title,
+  subtitle,
+  action,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  title: string;
+  subtitle: string;
+  /** The blue call to action in the card's footer. */
+  action: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={title}
+    className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+    style={{
+      // Structural, so it is a style and not a `w-[48%]` class: a utility that
+      // has not made it into the generated stylesheet yet would collapse the
+      // card to its content width and break the grid.
+      width: "48%",
+      shadowColor: "#424242",
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
+      elevation: 1,
+    }}
+  >
+    <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
+      <Feather name={icon} size={20} color={PRIMARY} />
+    </View>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-bold text-gray-900 dark:text-white mb-1"
+    >
+      {title}
+    </Text>
+    <Text
+      numberOfLines={2}
+      style={{ minHeight: 28 }}
+      className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
+    >
+      {subtitle}
+    </Text>
+    <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
+      <Text
+        numberOfLines={1}
+        className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+      >
+        {action}
+      </Text>
+      <Feather name="chevron-right" size={16} color={PRIMARY} />
+    </View>
+  </Pressable>
+);
+
 const Payments = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -211,6 +305,9 @@ const Payments = () => {
   // the same `visible` slice, so switching never refetches.
   const [viewMode, setViewMode] = useState<ViewMode>("table");
 
+  // The payment-date range lives in a second sheet: this one is a native Modal,
+  // and two stacked native Modals crash Android's new architecture.
+  const [showDateSheet, setShowDateSheet] = useState(false);
   const [showInvoices, setShowInvoices] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
   // Header "more" menu (mirrors the Attractions header ActionMenu).
@@ -248,6 +345,8 @@ const Payments = () => {
   const [invoiceBusyId, setInvoiceBusyId] = useState<number | null>(null);
   /** Which bulk-invoice button is running, so only it shows a spinner. */
   const [bulkBusy, setBulkBusy] = useState<"view" | "download" | null>(null);
+  /** Which header-menu export is running ("csv" / "invoices"), or null. */
+  const [exporting, setExporting] = useState<"csv" | "invoices" | null>(null);
 
   // The payment whose detail sheet is open (null = closed). Opened from the
   // actions menu or by deep link (/payments/payments?openId=123).
@@ -321,6 +420,11 @@ const Payments = () => {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const since = periodStart(filters.period);
+    const min = filters.amountMin === "" ? null : parseFloat(filters.amountMin);
+    const max = filters.amountMax === "" ? null : parseFloat(filters.amountMax);
+    const { createdFrom, createdTo } = filters;
+
     return payments.filter((p) => {
       const matchesSearch =
         !q ||
@@ -333,11 +437,45 @@ const Payments = () => {
         p.locationName.toLowerCase().includes(q) ||
         p.statusLabel.toLowerCase().includes(q) ||
         p.amount.toFixed(2).includes(q);
-      const matchesStatus =
-        filters.status === "all" || p.status === filters.status;
-      const matchesLocation =
-        activeLocationId == null || p.locationId === activeLocationId;
-      return matchesSearch && matchesStatus && matchesLocation;
+      if (!matchesSearch) return false;
+
+      if (activeLocationId != null && p.locationId !== activeLocationId) {
+        return false;
+      }
+      if (filters.status !== "all" && p.status !== filters.status) return false;
+      if (filters.method !== "all" && p.method !== filters.method) return false;
+      if (
+        filters.payableType !== "all" &&
+        p.payableType !== filters.payableType
+      ) {
+        return false;
+      }
+
+      // Refund and void bookkeeping rows sit in the list beside the payments
+      // they undo, so "Payments" means neither of the two.
+      if (filters.recordType !== "all") {
+        const refund = isRefundRecord(p);
+        const voided = isVoidRecord(p);
+        if (filters.recordType === "refund" && !refund) return false;
+        if (filters.recordType === "void" && !voided) return false;
+        if (filters.recordType === "payment" && (refund || voided)) return false;
+      }
+
+      if (since != null) {
+        const when = p.createdAt ? new Date(p.createdAt).getTime() : NaN;
+        if (Number.isNaN(when) || when < since) return false;
+      }
+      if (createdFrom || createdTo) {
+        const day = p.createdAt ? p.createdAt.substring(0, 10) : null;
+        if (!day) return false;
+        if (createdFrom && day < createdFrom) return false;
+        if (createdTo && day > createdTo) return false;
+      }
+
+      if (min != null && !Number.isNaN(min) && p.amount < min) return false;
+      if (max != null && !Number.isNaN(max) && p.amount > max) return false;
+
+      return true;
     });
   }, [payments, search, filters, activeLocationId]);
 
@@ -455,6 +593,117 @@ const Payments = () => {
     [selectedIds, shareInvoicePdf],
   );
 
+  /**
+   * Header menu action — the whole filtered list as a spreadsheet (the web's
+   * "Export CSV"). The native modules load lazily, as everywhere else here.
+   */
+  const exportCsv = useCallback(async () => {
+    if (filtered.length === 0) {
+      Alert.alert("Nothing to export", "No payments match the current filters.");
+      return;
+    }
+    setExporting("csv");
+    try {
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+
+      const header = [
+        "Payment ID",
+        "Transaction",
+        "Type",
+        "Reference",
+        "Customer",
+        "Email",
+        "Amount",
+        "Method",
+        "Status",
+        "Location",
+        "Date",
+        "Paid At",
+        "Refunded At",
+        "Updated At",
+        "Notes",
+      ];
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const when = (iso: string | null) =>
+        formatDateTimeET(iso, { month: "short", showZone: false, fallback: "" });
+      const lines = filtered.map((row) =>
+        [
+          row.id,
+          row.reference,
+          row.typeLabel,
+          row.payableReference ?? "",
+          row.customerName,
+          row.customerEmail,
+          row.amount.toFixed(2),
+          row.methodLabel,
+          row.statusLabel,
+          row.locationName,
+          when(row.createdAt),
+          when(row.paidAt),
+          when(row.refundedAt),
+          when(row.updatedAt),
+          row.notes ?? "",
+        ]
+          .map(esc)
+          .join(","),
+      );
+      const csv = [header.map(esc).join(","), ...lines].join("\n");
+      const date = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}payments-export-${date}.csv`;
+      await FileSystem.writeAsStringAsync(uri, csv, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Payments",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert(
+          "Sharing unavailable",
+          "Sharing isn't available on this device.",
+        );
+      }
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export.",
+      );
+    } finally {
+      setExporting(null);
+    }
+  }, [filtered]);
+
+  /**
+   * Header menu action — one PDF holding every invoice in play: the checked
+   * rows when the table has a selection, otherwise the whole filtered list.
+   */
+  const exportInvoices = useCallback(async () => {
+    const ids =
+      selectedIds.size > 0 ? [...selectedIds] : filtered.map((row) => row.id);
+    if (ids.length === 0) {
+      Alert.alert("Nothing to export", "No payments match the current filters.");
+      return;
+    }
+    setExporting("invoices");
+    try {
+      await shareInvoicePdf(
+        bulkInvoicesUrl(ids, false),
+        `invoices-${ids.length}.pdf`,
+        `${ids.length} invoice${ids.length === 1 ? "" : "s"}`,
+      );
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export the invoices.",
+      );
+    } finally {
+      setExporting(null);
+    }
+  }, [filtered, selectedIds, shareInvoicePdf]);
+
   /** Run one of the menu's mutations, then close the sheet and refresh. */
   const runAction = useCallback(
     async (label: string, fn: () => Promise<void>) => {
@@ -501,8 +750,24 @@ const Payments = () => {
 
   const activeFilterCount = countActivePaymentFilters(filters);
 
-  // Header "more" menu entries — the two page-level actions that used to sit as
-  // buttons above the list (same shape as the Attractions header menu).
+  // The filter sheet closes fully before the calendar opens (and reopens after),
+  // so the two native Modals are never mounted at the same time.
+  const openDateRange = useCallback(() => {
+    setShowFilterSheet(false);
+    setTimeout(() => setShowDateSheet(true), 280);
+  }, []);
+  const closeDateRange = useCallback(() => {
+    setShowDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+  const applyDateRange = useCallback((start: string, end: string) => {
+    setFilters((f) => ({ ...f, createdFrom: start, createdTo: end }));
+    setShowDateSheet(false);
+    setTimeout(() => setShowFilterSheet(true), 280);
+  }, []);
+
+  // Header "more" menu entries — the module's two exports. Package Invoices and
+  // View Deleted are square shortcut cards above the list instead.
   const moreActions: {
     label: string;
     icon: React.ComponentProps<typeof Feather>["name"];
@@ -510,21 +775,29 @@ const Payments = () => {
     onPress: () => void;
   }[] = [
     {
-      label: "Package Invoices",
-      icon: "package",
-      hint: "Export all invoices for a package",
+      label: "Export CSV",
+      icon: "download",
+      hint:
+        filtered.length === 0
+          ? "Nothing to export"
+          : `All ${filtered.length} filtered ${filtered.length === 1 ? "row" : "rows"} as a spreadsheet`,
       onPress: () => {
         setShowMoreSheet(false);
-        setShowInvoices(true);
+        exportCsv();
       },
     },
     {
-      label: "View Deleted",
-      icon: "trash-2",
-      hint: "Restore or permanently remove deleted payments",
+      label: "Export Invoices",
+      icon: "file-text",
+      hint:
+        selectedIds.size > 0
+          ? `One PDF of the ${selectedIds.size} selected ${selectedIds.size === 1 ? "invoice" : "invoices"}`
+          : filtered.length === 0
+            ? "Nothing to export"
+            : `One PDF of all ${filtered.length} filtered ${filtered.length === 1 ? "invoice" : "invoices"}`,
       onPress: () => {
         setShowMoreSheet(false);
-        setShowDeleted(true);
+        exportInvoices();
       },
     },
   ];
@@ -547,15 +820,20 @@ const Payments = () => {
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">Payments</Text>
           {/* Page-level "More" menu (mirrors the Attractions header menu):
-              hosts Package Invoices / View Deleted. Refreshing stays on
-              pull-to-refresh. */}
+              hosts Export CSV / Export Invoices, and spins in place while one
+              of them runs. Refreshing stays on pull-to-refresh. */}
           <Pressable
             onPress={() => setShowMoreSheet(true)}
+            disabled={exporting != null}
             className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
             accessibilityRole="button"
             accessibilityLabel="More actions"
           >
-            <Feather name="more-horizontal" size={20} color={headerIcon} />
+            {exporting ? (
+              <ActivityIndicator size="small" color={headerIcon} />
+            ) : (
+              <Feather name="more-horizontal" size={20} color={headerIcon} />
+            )}
           </Pressable>
         </View>
       </View>
@@ -573,6 +851,29 @@ const Payments = () => {
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               View and manage all payment transactions
             </Text>
+          </View>
+
+          {/* Package Invoices and View Deleted — the module's shortcuts as
+              equal square cards, two per row, as in the other modules. Both
+              exports live in the header's "More" menu. */}
+          <View
+            className="flex-row flex-wrap justify-between"
+            style={{ rowGap: 12 }}
+          >
+            <ShortcutCard
+              icon="package"
+              title="Package Invoices"
+              subtitle="Every invoice for one package"
+              action="Export Invoices"
+              onPress={() => setShowInvoices(true)}
+            />
+            <ShortcutCard
+              icon="trash-2"
+              title="View Deleted"
+              subtitle="Deleted payments and their totals"
+              action="Restore or Remove"
+              onPress={() => setShowDeleted(true)}
+            />
           </View>
 
           {/* Skeleton (first load) */}
@@ -807,6 +1108,17 @@ const Payments = () => {
         onChange={setFilters}
         onClear={() => setFilters(EMPTY_PAYMENT_FILTERS)}
         onClose={() => setShowFilterSheet(false)}
+        onOpenDateRange={openDateRange}
+      />
+
+      {/* Shared range calendar for the Payment Date filter, opened only after
+          the filter sheet has closed. */}
+      <DateRangeSheet
+        visible={showDateSheet}
+        initialStart={filters.createdFrom || undefined}
+        initialEnd={filters.createdTo || undefined}
+        onClose={closeDateRange}
+        onApply={applyDateRange}
       />
 
       <ColumnsSheet
