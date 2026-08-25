@@ -44,6 +44,7 @@ import {
 } from "../../lib/hooks/useAttractionPurchases";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { countTransactions } from "../../lib/purchaseMetrics";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteAttractionPurchase,
@@ -400,7 +401,8 @@ const ManagePurchases = () => {
   // KPI values — computed over the active set (already location-scoped by the
   // fetch), like the web metrics.
   const kpis = useMemo(() => {
-    const total = purchases.length;
+    const lines = purchases.length;
+    const total = countTransactions(purchases);
     const confirmed = purchases.filter((p) => p.status === "confirmed").length;
     const revenue = purchases.reduce((sum, p) => sum + p.amountPaid, 0);
     const avg = total > 0 ? revenue / total : 0;
@@ -408,7 +410,7 @@ const ManagePurchases = () => {
     // falsy filter, so guest rows with a blank email collapse into one bucket
     // (dropping them would drift the count off the web's value by one).
     const customers = new Set(purchases.map((p) => p.email)).size;
-    return { total, confirmed, revenue, avg, customers };
+    return { total, lines, confirmed, revenue, avg, customers };
   }, [purchases]);
 
   // The list uses the active or deleted set (both already location-scoped by
@@ -842,7 +844,7 @@ const ManagePurchases = () => {
                   tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Purchases"
                   value={String(kpis.total)}
-                  change={`${kpis.confirmed} confirmed`}
+                  change={`${kpis.lines} ticket lines · ${kpis.confirmed} confirmed`}
                 />
               </View>
               <View className="w-1/2">

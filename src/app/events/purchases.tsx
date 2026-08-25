@@ -46,6 +46,7 @@ import {
 } from "../../lib/hooks/useEventPurchases";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { countTransactions } from "../../lib/purchaseMetrics";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteEventPurchase,
@@ -93,6 +94,9 @@ const STATUS_PRIORITY: Record<string, number> = {
   refunded: 5,
   voided: 6,
 };
+
+// Statuses the web excludes from its event transaction count and revenue.
+const ENDED_STATUSES = ["cancelled", "refunded", "voided"];
 
 const STATUS_BADGE: Record<EventPurchaseStatus, string> = {
   confirmed: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
@@ -458,12 +462,17 @@ const EventPurchases = () => {
   // KPI math mirrors the web EventPurchases metrics exactly: revenue is the
   // sum of total_amount (not amount paid), and Avg. Purchase = revenue / count.
   const kpis = useMemo(() => {
-    const total = purchases.length;
+    const lines = purchases.length;
     const confirmed = purchases.filter((p) => p.status === "confirmed").length;
+    // Web parity: the transaction count skips cancelled/refunded/voided lines.
+    const live = purchases.filter(
+      (p) => !ENDED_STATUSES.includes(String(p.status)),
+    );
+    const total = countTransactions(live);
     const revenue = purchases.reduce((sum, p) => sum + p.totalAmount, 0);
     const avg = total > 0 ? revenue / total : 0;
     const customers = new Set(purchases.map((p) => p.email)).size;
-    return { total, confirmed, revenue, avg, customers };
+    return { total, lines, confirmed, revenue, avg, customers };
   }, [purchases]);
 
   // The list uses the active or deleted set (both already location-scoped by
@@ -941,7 +950,7 @@ const EventPurchases = () => {
                   tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Purchases"
                   value={String(kpis.total)}
-                  change={`${kpis.confirmed} confirmed`}
+                  change={`${kpis.lines} ticket lines · ${kpis.confirmed} confirmed`}
                 />
               </View>
               <View className="w-1/2">

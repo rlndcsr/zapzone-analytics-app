@@ -3,19 +3,11 @@ import type { AppliedDiscount, AppliedFee } from "./pricingService";
 
 /** Booking lifecycle status, mirroring the backend `status` enum. */
 export type EventPurchaseStatus =
-  | "pending"
-  | "confirmed"
-  | "checked-in"
-  | "completed"
-  | "cancelled";
+  "pending" | "confirmed" | "checked-in" | "completed" | "cancelled";
 
 /** Payment settlement state, mirroring the backend `payment_status` enum. */
 export type EventPaymentStatus =
-  | "paid"
-  | "partial"
-  | "pending"
-  | "refunded"
-  | "voided";
+  "paid" | "partial" | "pending" | "refunded" | "voided";
 
 /** Flattened event-purchase row backing the list + KPI cards. */
 export type EventPurchaseRow = {
@@ -37,12 +29,9 @@ export type EventPurchaseRow = {
   purchaseDate: string | null;
   purchaseTime: string | null;
   locationId: number | null;
-  /** Eager-loaded `location:id,name`; "" when absent. */
   locationName: string;
-  /** True when there's no linked customer (guest / walk-in) — drives the web
-   *  "Customer Type" filter. */
   isGuest: boolean;
-  /** Soft-delete timestamp; only present for trashed purchases. */
+  ticketOrderId: number | null;
   deletedAt: string | null;
 };
 
@@ -60,6 +49,7 @@ type RawEventPurchase = {
   location_id?: number | null;
   purchase_date?: string | null;
   purchase_time?: string | null;
+  ticket_order_id?: number | null;
   guest_name?: string | null;
   guest_email?: string | null;
   guest_phone?: string | null;
@@ -100,6 +90,7 @@ function mapPurchase(raw: RawEventPurchase): EventPurchaseRow {
     locationId: raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
     isGuest: !raw.customer,
+    ticketOrderId: raw.ticket_order_id ?? null,
     deletedAt: raw.deleted_at ?? null,
   };
 }
@@ -112,8 +103,10 @@ function extractPurchases(res: unknown): RawEventPurchase[] {
   if (Array.isArray(data)) return data as RawEventPurchase[];
   if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>;
-    if (Array.isArray(obj.purchases)) return obj.purchases as RawEventPurchase[];
-    if (Array.isArray(obj.event_purchases)) return obj.event_purchases as RawEventPurchase[];
+    if (Array.isArray(obj.purchases))
+      return obj.purchases as RawEventPurchase[];
+    if (Array.isArray(obj.event_purchases))
+      return obj.event_purchases as RawEventPurchase[];
     if (Array.isArray(obj.data)) return obj.data as RawEventPurchase[];
   }
   return [];
@@ -300,10 +293,12 @@ type RawEventPurchaseDetail = RawEventPurchase & {
   location?: { name?: string | null } | null;
   add_ons?: RawEventAddonLine[] | null;
   applied_fees?:
-    | { fee_name?: string | null; fee_amount?: number | string | null }[]
-    | null;
+    { fee_name?: string | null; fee_amount?: number | string | null }[] | null;
   applied_discounts?:
-    | { discount_name?: string | null; discount_amount?: number | string | null }[]
+    | {
+        discount_name?: string | null;
+        discount_amount?: number | string | null;
+      }[]
     | null;
 };
 
@@ -386,10 +381,7 @@ export async function fetchEventPurchaseDetail(
 
 /** Payment methods the web Edit Event Purchase form offers. */
 export type EventPaymentMethod =
-  | "card"
-  | "in-store"
-  | "paylater"
-  | "authorize.net";
+  "card" | "in-store" | "paylater" | "authorize.net";
 
 /** Payment states the update endpoint accepts (`in:paid,partial,pending`). */
 export type EditableEventPaymentStatus = "paid" | "partial" | "pending";
@@ -494,7 +486,8 @@ function mapEditRecord(raw: RawEventEditPurchase): EventPurchaseEditRecord {
     eventId: raw.event_id ?? raw.event?.id ?? null,
     customerId: raw.customer_id ?? null,
     customerName: customer
-      ? `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() || null
+      ? `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() ||
+        null
       : null,
     locationId: raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
