@@ -106,5 +106,24 @@ export function useEvents({ locationId }: UseEventsParams = {}) {
 
   const refetch = useCallback(() => sync({ force: true }), [sync]);
 
-  return { events, loading, error, refetch };
+  // Patch one row's status in the cache + local list, so the status pill flips
+  // instantly and survives a layout switch without a refetch.
+  const applyStatus = useCallback((id: number, active: boolean) => {
+    const patch = (rows: EventRow[]) =>
+      rows.map((e) =>
+        e.id === id ? { ...e, status: active ? "active" : "inactive" } : e,
+      ) as EventRow[];
+    if (cache) cache = { ...cache, data: patch(cache.data) };
+    setEvents((prev) => patch(prev));
+  }, []);
+
+  // Drop a row from the cache + local list without a full refetch (used after
+  // a delete).
+  const remove = useCallback((id: number) => {
+    const drop = (rows: EventRow[]) => rows.filter((e) => e.id !== id);
+    if (cache) cache = { ...cache, data: drop(cache.data) };
+    setEvents((prev) => drop(prev));
+  }, []);
+
+  return { events, loading, error, refetch, applyStatus, remove };
 }

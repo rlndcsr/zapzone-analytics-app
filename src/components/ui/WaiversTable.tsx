@@ -87,7 +87,7 @@ type RowContext = {
 };
 
 type Column = {
-  key: WColKey | "name" | "actions";
+  key: WColKey | "name" | "phone" | "actions";
   label: string;
   width: number;
   /** Undefined for always-on columns (name / actions). */
@@ -117,6 +117,18 @@ const COLUMNS: Column[] = [
           </Text>
         )}
       </View>
+    ),
+  },
+  {
+    // Always on, like the web's Customer-group Phone column (which sits right
+    // after Name and isn't hidden by default).
+    key: "phone",
+    label: "Phone",
+    width: 150,
+    render: (w) => (
+      <Text numberOfLines={1} className={CELL_TEXT}>
+        {w.adultPhone || "—"}
+      </Text>
     ),
   },
   {
@@ -202,7 +214,7 @@ const COLUMNS: Column[] = [
 
 /**
  * Table layout for the Waivers list, mirroring the web admin's Records table:
- * Name (+ email), Minors, Submitted, Check-in, then the remaining toggleable
+ * Name (+ email), Phone, Minors, Submitted, Check-in, then the remaining toggleable
  * columns, and a trailing Actions cell (Check In / Print / Delete, gated by
  * role + settings). Horizontally scrollable with fixed column widths; columns
  * respect the same visibility toggles as the card view (Location also honors

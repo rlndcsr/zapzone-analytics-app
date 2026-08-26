@@ -328,3 +328,36 @@ export async function createEvent(
   });
   return mapEvent(res.data);
 }
+
+/**
+ * PATCH /api/events/{id}/toggle-status — flips an event's active flag, the same
+ * endpoint the web Events table's status dropdown calls. The backend answers
+ * with the bare updated model (no `{ data }` envelope), so read `is_active` off
+ * either shape. Returns null when the flag can't be read back, so the caller
+ * can keep its optimistic value instead of flipping the row the wrong way.
+ */
+export async function toggleEventStatus(
+  token: string,
+  id: number,
+): Promise<boolean | null> {
+  const res = await apiRequest<unknown>(`/api/events/${id}/toggle-status`, {
+    method: "PATCH",
+    token,
+  });
+  const obj = res && typeof res === "object" ? (res as Record<string, unknown>) : {};
+  const body = (
+    obj.data && typeof obj.data === "object" ? obj.data : obj
+  ) as Record<string, unknown>;
+  const flag = body.is_active;
+  if (typeof flag === "boolean") return flag;
+  if (flag === 1 || flag === 0) return flag === 1;
+  return null;
+}
+
+/** DELETE /api/events/{id} — soft-deletes an event (same endpoint as the web). */
+export async function deleteEvent(token: string, id: number): Promise<void> {
+  await apiRequest<{ message?: string }>(`/api/events/${id}`, {
+    method: "DELETE",
+    token,
+  });
+}

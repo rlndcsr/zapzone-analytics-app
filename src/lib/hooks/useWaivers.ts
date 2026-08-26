@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchWaiverCount,
+  fetchWaiverPeriodSummary,
   fetchWaivers,
   type Waiver,
+  type WaiverPeriodScope,
+  type WaiverPeriodSummary,
   type WaiverSearchFilters,
   type WaiverStatus,
 } from "../../services/waiversService";
@@ -137,4 +140,46 @@ export function useWaiverStats(nonce = 0) {
   }, [nonce]);
 
   return { stats, loading };
+}
+
+/**
+ * The "This period, all statuses" counts for the summary line, from the same
+ * `/waivers/period-summary` endpoint the web Records page reads. Sequence-
+ * guarded: on a reconciliation line, a slow reply landing after a newer one
+ * would show figures for a period nobody is looking at. Refetches when the
+ * scope or `nonce` changes (bump it after a mutation).
+ */
+export function useWaiverPeriodSummary(scope: WaiverPeriodScope, nonce = 0) {
+  const [summary, setSummary] = useState<WaiverPeriodSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const requestIdRef = useRef(0);
+
+  const { all, date, locationId } = scope;
+
+  useEffect(() => {
+    const requestId = ++requestIdRef.current;
+    const token = getToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchWaiverPeriodSummary(token, { all, date, locationId })
+      .then((res) => {
+        if (requestId !== requestIdRef.current) return;
+        setSummary(res);
+      })
+      .catch(() => {
+        // Best-effort: the line just hides itself; the list surfaces real errors.
+        if (requestId === requestIdRef.current) setSummary(null);
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) setLoading(false);
+      });
+    return () => {
+      requestIdRef.current++;
+    };
+  }, [all, date, locationId, nonce]);
+
+  return { summary, loading };
 }

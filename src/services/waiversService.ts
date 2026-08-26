@@ -516,6 +516,79 @@ export async function fetchWaiverCount(
   return res?.data?.pagination?.total ?? 0;
 }
 
+/**
+ * The waiver figures for a period, counted the way the company dashboard counts
+ * them — deliberately ignoring the list's status filter, so "total" reconciles
+ * with the dashboard's waiver card. Same endpoint the web Records page uses for
+ * its "This period, all statuses" line.
+ */
+export type WaiverPeriodSummary = {
+  total: number;
+  /** Signed waivers ("completed"). */
+  completed: number;
+  pending: number;
+  checkedIn: number;
+  minorsCovered: number;
+  peopleCovered: number;
+};
+
+type WaiverPeriodSummaryResponse = {
+  success?: boolean;
+  data?: {
+    total?: number | string | null;
+    completed?: number | string | null;
+    pending?: number | string | null;
+    checked_in?: number | string | null;
+    minors_covered?: number | string | null;
+    people_covered?: number | string | null;
+  } | null;
+};
+
+/** The date scope to summarise — the same one the list request is using. */
+export type WaiverPeriodScope = {
+  /** True for "All Dates"; the backend then ignores the date window. */
+  all?: boolean;
+  /** A single venue day (YYYY-MM-DD), used when `all` is false. */
+  date?: string;
+  /** Narrow to one location; omit for every location the user can read. */
+  locationId?: number;
+};
+
+/**
+ * GET /api/waivers/period-summary — the period counts for the summary line.
+ * Returns null when the backend reports failure, so the caller can just hide
+ * the line rather than render zeros as if they were real counts.
+ */
+export async function fetchWaiverPeriodSummary(
+  token: string,
+  scope: WaiverPeriodScope,
+  signal?: AbortSignal,
+): Promise<WaiverPeriodSummary | null> {
+  const params = new URLSearchParams();
+  if (scope.all) params.append("all", "1");
+  else if (scope.date) params.append("date", scope.date);
+  if (scope.locationId != null)
+    params.append("location_id", String(scope.locationId));
+
+  const query = params.toString();
+  const res = await apiRequest<WaiverPeriodSummaryResponse>(
+    `/api/waivers/period-summary${query ? `?${query}` : ""}`,
+    { token, signal },
+  );
+  const data = res?.data;
+  if (res?.success === false || !data) return null;
+
+  const num = (v: number | string | null | undefined) => Number(v ?? 0) || 0;
+  return {
+    total: num(data.total),
+    completed: num(data.completed),
+    pending: num(data.pending),
+    checkedIn: num(data.checked_in),
+    minorsCovered: num(data.minors_covered),
+    peopleCovered: num(data.people_covered),
+  };
+}
+
 /** GET /api/waivers/{id} — full record + rendered legal body. */
 export async function fetchWaiverDetail(
   token: string,

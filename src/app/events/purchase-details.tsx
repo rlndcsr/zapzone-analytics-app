@@ -441,6 +441,24 @@ const EventPurchaseDetailsScreen = () => {
           </SectionCard>
         )}
 
+        {/* Event Features — what the ticket includes, off the parent event.
+            Hidden when the event lists none, like the web section. */}
+        {detail.eventFeatures.length > 0 && (
+          <SectionCard icon="list" title="Event Features">
+            {detail.eventFeatures.map((feature, i) => (
+              <View key={i} className="flex-row items-start gap-2.5 py-1">
+                <View
+                  className="w-1.5 h-1.5 rounded-full bg-gray-400"
+                  style={{ marginTop: 7 }}
+                />
+                <Text className="flex-1 text-sm leading-5 text-gray-700 dark:text-gray-200">
+                  {feature}
+                </Text>
+              </View>
+            ))}
+          </SectionCard>
+        )}
+
         {/* Payment Information */}
         <SectionCard icon="credit-card" title="Payment Information">
           <View className="flex-row items-start justify-between py-1.5">

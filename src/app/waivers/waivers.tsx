@@ -38,6 +38,7 @@ import {
 } from "../../components/ui/skeleton/WaiversSkeleton";
 import {
   consumeWaiversStale,
+  useWaiverPeriodSummary,
   useWaivers,
   useWaiverStats,
 } from "../../lib/hooks/useWaivers";
@@ -396,6 +397,22 @@ const Waivers = () => {
     perPage,
   });
   const { stats } = useWaiverStats(statsNonce);
+  // Dashboard-shaped figures for the same period as the list request, fetched
+  // separately because they must ignore the status filter — that filter is
+  // exactly why the counts and the dashboard looked like they disagreed.
+  // Not narrowed by the workspace location, matching the list request (which
+  // applies location client-side), so the two counts stay comparable.
+  const periodScope = useMemo(
+    () => ({
+      all: dateFilter === "all",
+      date: dateFilter === "today" ? todayKey() : undefined,
+    }),
+    [dateFilter],
+  );
+  const { summary: periodSummary } = useWaiverPeriodSummary(
+    periodScope,
+    statsNonce,
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -662,18 +679,19 @@ const Waivers = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Waivers
           </Text>
-          {canManageSubModules ? (
-            <Pressable
-              onPress={() => setSheet("manage")}
-              className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-              accessibilityRole="button"
-              accessibilityLabel="Manage waivers"
-            >
+          {/* Always shown — the sheet carries Export, which every role has. */}
+          <Pressable
+            onPress={() => setSheet("manage")}
+            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            accessibilityRole="button"
+            accessibilityLabel="More waiver options"
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color={headerIcon} />
+            ) : (
               <Feather name="more-horizontal" size={20} color={headerIcon} />
-            </Pressable>
-          ) : (
-            <View style={{ width: 36 }} />
-          )}
+            )}
+          </Pressable>
         </View>
       </View>
 
@@ -752,7 +770,7 @@ const Waivers = () => {
             />
           </FilterPill>
 
-          {/* Filters · Columns · Export pill */}
+          {/* Filters · Columns pill (Export lives in the header's ⋯ sheet) */}
           <FilterPill>
             <PillSegment
               label={
@@ -769,17 +787,6 @@ const Waivers = () => {
               active={showColumns}
               onPress={() => setShowColumns(true)}
               renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Export"
-              onPress={exportCsv}
-              renderIcon={(c) =>
-                exporting ? (
-                  <ActivityIndicator size="small" color={c} />
-                ) : (
-                  <Feather name="download" size={15} color={c} />
-                )
-              }
             />
           </FilterPill>
 
@@ -815,6 +822,54 @@ const Waivers = () => {
                     {total}
                   </Text>
                 </View>
+              </View>
+
+              {/* Counts line, as on the web Records page. The first line is the
+                  list's own count for the current status + period; the second
+                  is the period counted across every status, so it reconciles
+                  with the company dashboard's waiver card. */}
+              <View className="mt-3 bg-white dark:bg-neutral-900 rounded-2xl px-4 py-3 border border-gray-100 dark:border-neutral-800">
+                <Text className="text-sm text-gray-600 dark:text-gray-300">
+                  <Text className="font-semibold text-gray-900 dark:text-white">
+                    {total}
+                  </Text>{" "}
+                  {statusLabel.toLowerCase()} waiver{total === 1 ? "" : "s"}
+                </Text>
+
+                {periodSummary && (
+                  <View className="mt-2.5 pt-2.5 border-t border-gray-100 dark:border-neutral-800">
+                    <Text className="text-sm text-gray-600 dark:text-gray-300">
+                      <Text className="font-medium text-gray-700 dark:text-gray-200">
+                        This period, all statuses:
+                      </Text>{" "}
+                      <Text className="font-semibold text-gray-900 dark:text-white">
+                        {periodSummary.total}
+                      </Text>{" "}
+                      total ·{" "}
+                      <Text className="font-semibold text-gray-900 dark:text-white">
+                        {periodSummary.completed}
+                      </Text>{" "}
+                      signed ·{" "}
+                      <Text className="font-semibold text-gray-900 dark:text-white">
+                        {periodSummary.pending}
+                      </Text>{" "}
+                      pending ·{" "}
+                      <Text className="font-semibold text-gray-900 dark:text-white">
+                        {periodSummary.checkedIn}
+                      </Text>{" "}
+                      checked in ·{" "}
+                      <Text className="font-semibold text-gray-900 dark:text-white">
+                        {periodSummary.minorsCovered}
+                      </Text>{" "}
+                      minor{periodSummary.minorsCovered === 1 ? "" : "s"}
+                    </Text>
+                    <Text className="mt-1 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
+                      Counted the way the company dashboard counts, for the same
+                      period — so total should match the dashboard&apos;s waiver
+                      card.
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
           )}
@@ -971,38 +1026,51 @@ const Waivers = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Manage (sub-module navigation) */}
+      {/* Manage — sub-module navigation plus Export. Group Invites isn't listed
+          here; it has its own card in the shortcut grid above. */}
       <BottomSheet
         visible={sheet === "manage"}
         onClose={() => setSheet(null)}
         title="Manage Waivers"
       >
         <View className="px-4 pb-8">
+          {canManageSubModules && (
+            <Pressable
+              onPress={() => {
+                setSheet(null);
+                router.push("/waivers/templates" as never);
+              }}
+              className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+            >
+              <Feather name="layout" size={18} color={PRIMARY} />
+              <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
+                Waiver Templates
+              </Text>
+              <Feather name="chevron-right" size={16} color="#9CA3AF" />
+            </Pressable>
+          )}
+          {/* The sheet is a native Modal, so it closes fully before the share
+              sheet opens — two stacked native Modals crash Android's new
+              architecture (same guard the filter → calendar hop uses). */}
           <Pressable
             onPress={() => {
               setSheet(null);
-              router.push("/waivers/templates" as never);
+              setTimeout(exportCsv, 280);
             }}
+            disabled={exporting}
             className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+            accessibilityRole="button"
+            accessibilityLabel="Export waivers as CSV"
           >
-            <Feather name="layout" size={18} color={PRIMARY} />
+            <Feather name="download" size={18} color={PRIMARY} />
             <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
-              Waiver Templates
+              Export CSV
             </Text>
-            <Feather name="chevron-right" size={16} color="#9CA3AF" />
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              setSheet(null);
-              router.push("/waivers/group-invites" as never);
-            }}
-            className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-          >
-            <Feather name="users" size={18} color={PRIMARY} />
-            <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
-              Group Invites
-            </Text>
-            <Feather name="chevron-right" size={16} color="#9CA3AF" />
+            {exporting ? (
+              <ActivityIndicator size="small" color={PRIMARY} />
+            ) : (
+              <Feather name="chevron-right" size={16} color="#9CA3AF" />
+            )}
           </Pressable>
         </View>
       </BottomSheet>

@@ -6,6 +6,7 @@ import { BottomSheet } from "./BottomSheet";
 import { formatShortDate } from "./DateRangeSheet";
 import { SelectField, type SelectOption } from "./FormControls";
 import { InputField } from "./InputField";
+import { CONTROL_RADIUS } from "./PrimaryButton";
 
 /** Which of the two date ranges an "open calendar" request targets. */
 export type PurchaseDateTarget = "created" | "scheduled";
@@ -230,14 +231,18 @@ export function PurchaseFiltersSheet({
             )}
           </View>
 
-          {/* Footer: Clear All + Cancel (secondary), Apply (primary) */}
+          {/* Footer: Clear All + Cancel (secondary), Apply (primary). The radius
+              is an inline style, not a class: NativeWind resolves conflicting
+              utilities by CSS order, so `rounded-full` would win over a class
+              override here (see CONTROL_RADIUS). */}
           <View className="gap-3 mt-2">
             <View className="flex-row gap-3">
               <Pressable
                 onPress={onClear}
                 accessibilityRole="button"
                 accessibilityLabel="Clear all filters"
-                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+                className="flex-1 h-14 items-center justify-center border border-gray-300 dark:border-neutral-700 active:opacity-70"
+                style={{ borderRadius: CONTROL_RADIUS }}
               >
                 <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                   Clear All
@@ -247,7 +252,8 @@ export function PurchaseFiltersSheet({
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel"
-                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+                className="flex-1 h-14 items-center justify-center border border-gray-300 dark:border-neutral-700 active:opacity-70"
+                style={{ borderRadius: CONTROL_RADIUS }}
               >
                 <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                   Cancel
@@ -258,7 +264,8 @@ export function PurchaseFiltersSheet({
               onPress={onApply}
               accessibilityRole="button"
               accessibilityLabel="Apply filters"
-              className="h-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+              className="h-14 items-center justify-center bg-[#0644C7] active:opacity-90"
+              style={{ borderRadius: CONTROL_RADIUS }}
             >
               <Text className="text-base font-semibold text-white">Apply</Text>
             </Pressable>

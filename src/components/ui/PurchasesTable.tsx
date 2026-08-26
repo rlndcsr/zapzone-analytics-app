@@ -117,6 +117,32 @@ const IconAction = ({
 
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 
+/**
+ * "BULK #1" chip trailing the attraction name when the purchase is one line of
+ * a ticket order — the mobile twin of the web Attraction cell's bulk link.
+ * Nested Pressable, so tapping it opens the parent order instead of the row's
+ * Purchase Details.
+ */
+const BulkBadge = ({
+  linePosition,
+  onPress,
+}: {
+  linePosition: number | null;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    hitSlop={4}
+    accessibilityRole="button"
+    accessibilityLabel={`Item ${linePosition ?? ""} of a bulk order — view the order`}
+    className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 active:opacity-70"
+  >
+    <Text className="text-[10px] font-bold uppercase tracking-wide text-blue-800 dark:text-blue-300">
+      {linePosition != null ? `Bulk #${linePosition}` : "Bulk"}
+    </Text>
+  </Pressable>
+);
+
 type Handlers = {
   /** Eye icon and row tap — open Purchase Details. */
   onView: (purchase: PurchaseRow) => void;
@@ -125,6 +151,8 @@ type Handlers = {
   /** Status pill — open the parent-hosted "Set Status" picker sheet. */
   onStatusPress: (purchase: PurchaseRow) => void;
   onDelete: (purchase: PurchaseRow) => void;
+  /** Bulk chip in the Attraction cell — open the parent ticket order. */
+  onOpenOrder: (purchase: PurchaseRow) => void;
 };
 
 /**
@@ -167,14 +195,22 @@ function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
   {
     key: "attraction",
     label: "Attraction",
-    width: 170,
+    width: 220,
     render: (p) => (
-      <Text
-        numberOfLines={1}
-        className="text-sm font-medium text-gray-900 dark:text-white"
-      >
-        {p.attractionName}
-      </Text>
+      <View className="flex-row items-center gap-2">
+        <Text
+          numberOfLines={1}
+          className="shrink text-sm font-medium text-gray-900 dark:text-white"
+        >
+          {p.attractionName}
+        </Text>
+        {p.ticketOrderId != null && (
+          <BulkBadge
+            linePosition={p.linePosition}
+            onPress={() => h.onOpenOrder(p)}
+          />
+        )}
+      </View>
     ),
   },
   {
@@ -301,6 +337,7 @@ export function PurchasesTable({
   onEdit,
   onStatusPress,
   onDelete,
+  onOpenOrder,
 }: {
   purchases: PurchaseRow[];
   selectedIds: Set<number>;
@@ -313,10 +350,12 @@ export function PurchasesTable({
   /** Status pill — open the parent-hosted "Set Status" picker sheet. */
   onStatusPress: (purchase: PurchaseRow) => void;
   onDelete: (purchase: PurchaseRow) => void;
+  /** Bulk chip in the Attraction cell — open the purchase's parent order. */
+  onOpenOrder: (purchase: PurchaseRow) => void;
 }) {
   const columns = useMemo(
-    () => buildColumns({ onView, onEdit, onStatusPress, onDelete }),
-    [onView, onEdit, onStatusPress, onDelete],
+    () => buildColumns({ onView, onEdit, onStatusPress, onDelete, onOpenOrder }),
+    [onView, onEdit, onStatusPress, onDelete, onOpenOrder],
   );
   return (
     <SelectableTable

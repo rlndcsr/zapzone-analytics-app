@@ -1036,6 +1036,12 @@ const ManagePurchases = () => {
                     }
                     onStatusPress={setStatusPurchase}
                     onDelete={handleRowDelete}
+                    onOpenOrder={(purchase) =>
+                      router.push({
+                        pathname: "/attractions/order-details",
+                        params: { id: String(purchase.ticketOrderId) },
+                      })
+                    }
                   />
                 ) : (
                   paged.map((purchase) => (

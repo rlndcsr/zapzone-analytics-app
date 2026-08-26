@@ -28,14 +28,26 @@ import {
   type EventDateTarget,
   type EventFilterValues,
 } from "../../components/ui/EventFiltersSheet";
+import { EventsTable } from "../../components/ui/EventsTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
 import { formatDateTimeET } from "../../lib/date/venueTime";
-import { consumeEventsStale, useEvents } from "../../lib/hooks/useEvents";
+import {
+  consumeEventsStale,
+  markEventsStale,
+  useEvents,
+} from "../../lib/hooks/useEvents";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
-import type { EventRow, EventStatus } from "../../services/eventsService";
+import { getToken } from "../../lib/session";
+import {
+  deleteEvent,
+  toggleEventStatus,
+  type EventRow,
+  type EventStatus,
+} from "../../services/eventsService";
 
 const PRIMARY = "#0644C7";
 
@@ -262,11 +274,17 @@ const Events = () => {
   const activeLocationId =
     activeLocation.id === "all" ? undefined : activeLocation.id;
 
-  const { events, loading, error, refetch } = useEvents({
+  const { events, loading, error, refetch, applyStatus, remove } = useEvents({
     locationId: activeLocationId,
   });
 
   const [search, setSearch] = useState("");
+  // Presentation layout only — table by default (like the other catalog
+  // screens), cards on toggle. Both read the same `paged` slice, so switching
+  // never refetches.
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  // Row with a status-toggle or delete request in flight.
+  const [busyId, setBusyId] = useState<number | null>(null);
   const [filters, setFilters] =
     useState<EventFilterValues>(EMPTY_EVENT_FILTERS);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
@@ -483,6 +501,84 @@ const Events = () => {
   );
 
   const hasResults = filtered.length > 0;
+
+  // Status pill — PATCH /events/{id}/toggle-status, optimistic + reconcile with
+  // whatever flag the backend reports back (it echoes the updated event).
+  const handleToggleStatus = useCallback(
+    async (event: EventRow) => {
+      const token = getToken();
+      if (!token) {
+        Alert.alert("Not signed in", "Please sign in again to update events.");
+        return;
+      }
+      const next = event.status !== "active";
+      applyStatus(event.id, next);
+      setBusyId(event.id);
+      try {
+        const confirmed = await toggleEventStatus(token, event.id);
+        if (confirmed != null) applyStatus(event.id, confirmed);
+        markEventsStale();
+      } catch (err) {
+        applyStatus(event.id, !next); // revert on failure
+        Alert.alert(
+          "Update failed",
+          err instanceof Error ? err.message : "Could not update status.",
+        );
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [applyStatus],
+  );
+
+  // Delete action — same confirm-then-DELETE flow the web table's trash uses.
+  const handleDelete = useCallback(
+    (event: EventRow) => {
+      Alert.alert(
+        "Delete event",
+        `Delete "${event.name}"? This can't be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) {
+                Alert.alert(
+                  "Not signed in",
+                  "Please sign in again to delete events.",
+                );
+                return;
+              }
+              setBusyId(event.id);
+              try {
+                await deleteEvent(token, event.id);
+                remove(event.id);
+                markEventsStale();
+              } catch (err) {
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error
+                    ? err.message
+                    : "Could not delete the event.",
+                );
+              } finally {
+                setBusyId(null);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [remove],
+  );
+
+  // Handed to the table so its cells format exactly like the cards.
+  const formatters = useMemo(
+    () => ({ dateLabel, timeRange: formatTimeRange, money: formatMoney }),
+    [],
+  );
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -729,6 +825,11 @@ const Events = () => {
                   {filtered.length}
                 </Text>
               </View>
+
+              {/* Table/Cards toggle — same switch the other catalog lists use. */}
+              <View className="ml-auto">
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </View>
             </View>
           )}
 
@@ -752,9 +853,19 @@ const Events = () => {
           ) : (
             !error && (
               <>
-                {paged.map((event) => (
-                  <EventCard key={event.id} event={event} />
-                ))}
+                {viewMode === "table" ? (
+                  <EventsTable
+                    events={paged}
+                    formatters={formatters}
+                    busyId={busyId}
+                    onToggleStatus={handleToggleStatus}
+                    onDelete={handleDelete}
+                  />
+                ) : (
+                  paged.map((event) => (
+                    <EventCard key={event.id} event={event} />
+                  ))
+                )}
 
                 {/* Pagination */}
                 <View className="mt-1 mb-4">

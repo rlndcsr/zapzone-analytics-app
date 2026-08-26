@@ -8,15 +8,15 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Switch,
   Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { InputField } from "../../components/ui/InputField";
-import { PrimaryButton } from "../../components/ui/PrimaryButton";
+import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton";
 import { markGroupInvitesStale } from "../../lib/hooks/useGroupInvites";
 import { getToken } from "../../lib/session";
 import {
@@ -24,8 +24,6 @@ import {
   fetchTemplates,
   type WaiverTemplate,
 } from "../../services/waiversService";
-
-const PRIMARY = "#0644C7";
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -45,30 +43,22 @@ function prettyDate(dateStr: string): string {
   });
 }
 
-function shiftDate(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return ymd(d);
-}
+/** The visit date can be in the past here, as on the web's plain date input. */
+const EARLIEST_SELECTABLE = "2000-01-01";
 
-const Section = ({
-  icon,
-  title,
+/** Field label, matching the web modal's `Template *` / `Email` labels. */
+const FieldLabel = ({
   children,
+  className = "",
 }: {
-  icon: keyof typeof Feather.glyphMap;
-  title: string;
   children: React.ReactNode;
+  className?: string;
 }) => (
-  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm">
-    <View className="flex-row items-center gap-2 mb-4">
-      <Feather name={icon} size={16} color={PRIMARY} />
-      <Text className="text-base font-bold text-gray-900 dark:text-white">
-        {title}
-      </Text>
-    </View>
+  <Text
+    className={`mb-2 text-sm font-medium text-gray-700 dark:text-gray-200 ${className}`}
+  >
     {children}
-  </View>
+  </Text>
 );
 
 const CreateGroupInvite = () => {
@@ -88,6 +78,7 @@ const CreateGroupInvite = () => {
   const [allowShareable, setAllowShareable] = useState(false);
 
   const [templateSheet, setTemplateSheet] = useState(false);
+  const [datePicker, setDatePicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<{
     template?: string;
@@ -201,10 +192,11 @@ const CreateGroupInvite = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
         >
-          <Section icon="file-text" title="Waiver & Date">
-            <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-              Template
-            </Text>
+          {/* One card, laid out like the web's New Group Invite modal:
+              Template · Visit date · Chaperone name · Email | Phone · the
+              shareable-link checkbox. */}
+          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 shadow-sm">
+            <FieldLabel>Template *</FieldLabel>
             <Pressable
               onPress={() => setTemplateSheet(true)}
               disabled={templatesLoading}
@@ -221,10 +213,10 @@ const CreateGroupInvite = () => {
                 numberOfLines={1}
               >
                 {templatesLoading
-                  ? "Loading templates..."
+                  ? "Loading templates…"
                   : selectedTemplate
                     ? selectedTemplate.title
-                    : "Select a template"}
+                    : "Select a template…"}
               </Text>
               <Feather name="chevron-down" size={18} color="#9CA3AF" />
             </Pressable>
@@ -239,106 +231,135 @@ const CreateGroupInvite = () => {
               </Text>
             )}
 
-            <Text className="mt-4 mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-              Visit date
-            </Text>
-            <View className="flex-row items-center gap-3">
-              <Pressable
-                onPress={() => setSelectedDate((d) => shiftDate(d, -1))}
-                className="h-12 w-12 items-center justify-center rounded-full border border-gray-200 dark:border-neutral-700"
-              >
-                <Feather name="chevron-left" size={18} color={headerIcon} />
-              </Pressable>
-              <View className="flex-1 h-12 items-center justify-center rounded-full bg-gray-50 dark:bg-neutral-800">
-                <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {prettyDate(selectedDate)}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => setSelectedDate((d) => shiftDate(d, 1))}
-                className="h-12 w-12 items-center justify-center rounded-full border border-gray-200 dark:border-neutral-700"
-              >
-                <Feather name="chevron-right" size={18} color={headerIcon} />
-              </Pressable>
-            </View>
+            <FieldLabel className="mt-4">Visit date *</FieldLabel>
             <Pressable
-              onPress={() => setSelectedDate(ymd(new Date()))}
-              className="mt-2 self-start"
+              onPress={() => setDatePicker(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Choose the visit date"
+              className="h-14 flex-row items-center justify-between rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5"
             >
-              <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                Reset to today
+              <Text className="flex-1 text-base text-gray-900 dark:text-white">
+                {prettyDate(selectedDate)}
               </Text>
+              <Feather name="calendar" size={18} color="#9CA3AF" />
             </Pressable>
-          </Section>
 
-          <Section icon="user" title="Chaperone">
             <InputField
-              label="Name"
-              icon="user"
+              label="Chaperone name *"
               value={chaperoneName}
               onChangeText={(t) => {
                 setChaperoneName(t);
                 if (errors.name) setErrors((e) => ({ ...e, name: undefined }));
               }}
-              placeholder="Chaperone full name"
+              placeholder="e.g. Coach Carter"
               error={errors.name}
-              containerClassName="mb-4"
+              containerClassName="mt-4"
             />
-            <InputField
-              label="Email"
-              icon="mail"
-              value={email}
-              onChangeText={(t) => {
-                setEmail(t);
-                if (errors.contact) setErrors((e) => ({ ...e, contact: undefined }));
-              }}
-              placeholder="chaperone@email.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              containerClassName="mb-4"
-            />
-            <InputField
-              label="Phone"
-              icon="phone"
-              value={phone}
-              onChangeText={(t) => {
-                setPhone(t);
-                if (errors.contact) setErrors((e) => ({ ...e, contact: undefined }));
-              }}
-              placeholder="(555) 123-4567"
-              keyboardType="phone-pad"
-              error={errors.contact}
-            />
-          </Section>
 
-          <Section icon="link" title="Sharing">
-            <View className="flex-row items-center justify-between">
-              <Text className="text-sm text-gray-700 dark:text-gray-200 flex-1 mr-3">
-                Allow a shareable link the chaperone can forward
-              </Text>
-              <Switch
-                value={allowShareable}
-                onValueChange={setAllowShareable}
-                trackColor={{ false: "#D1D5DB", true: PRIMARY }}
-                thumbColor="#FFFFFF"
-                ios_backgroundColor="#D1D5DB"
+            {/* Email and Phone share a row, as in the web modal's 2-col grid. */}
+            <View className="flex-row gap-3 mt-4">
+              <InputField
+                label="Email"
+                value={email}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  if (errors.contact)
+                    setErrors((e) => ({ ...e, contact: undefined }));
+                }}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                containerClassName="flex-1"
+              />
+              <InputField
+                label="Phone"
+                value={phone}
+                onChangeText={(t) => {
+                  setPhone(t);
+                  if (errors.contact)
+                    setErrors((e) => ({ ...e, contact: undefined }));
+                }}
+                keyboardType="phone-pad"
+                containerClassName="flex-1"
               />
             </View>
-          </Section>
+            {/* Below the row, not under one field — "add an email or phone"
+                belongs to the pair, and wraps badly in a half-width column. */}
+            {errors.contact && (
+              <Text className="ml-1 mt-1.5 text-xs text-red-500">
+                {errors.contact}
+              </Text>
+            )}
+
+            <Pressable
+              onPress={() => setAllowShareable((v) => !v)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: allowShareable }}
+              className="flex-row items-center gap-3 mt-5"
+            >
+              <View
+                className={`w-5 h-5 rounded items-center justify-center border ${
+                  allowShareable
+                    ? "bg-[#0644C7] border-[#0644C7]"
+                    : "border-gray-300 dark:border-neutral-600"
+                }`}
+              >
+                {allowShareable && (
+                  <Feather name="check" size={13} color="#FFFFFF" />
+                )}
+              </View>
+              <Text className="flex-1 text-sm text-gray-700 dark:text-gray-200">
+                Allow a shareable link the chaperone can forward
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
 
         <View
           className="bg-white dark:bg-neutral-900 border-t border-gray-100 dark:border-neutral-800 px-5 pt-4"
           style={{ paddingBottom: insets.bottom + 12 }}
         >
-          <PrimaryButton
-            label="Send Invite"
-            onPress={submit}
-            loading={submitting}
-            disabled={templatesLoading}
-          />
+          {/* Cancel + Create & Notify, as in the web modal's footer. The radius
+              is an inline style, not a class: NativeWind resolves conflicting
+              utilities by CSS order, so PrimaryButton's `rounded-full` would
+              win over a class override here (see CONTROL_RADIUS). */}
+          <View className="flex-row gap-3">
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              className="flex-1 h-14 items-center justify-center border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              style={{ borderRadius: CONTROL_RADIUS }}
+            >
+              <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
+                Cancel
+              </Text>
+            </Pressable>
+            <View className="flex-1">
+              <PrimaryButton
+                label="Create & Notify"
+                onPress={submit}
+                loading={submitting}
+                disabled={templatesLoading}
+                style={{ borderRadius: CONTROL_RADIUS }}
+              />
+            </View>
+          </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Visit date calendar — past dates stay selectable, like the web's plain
+          date input (the backend only requires a valid date). */}
+      <DatePickerSheet
+        visible={datePicker}
+        value={selectedDate}
+        minDate={EARLIEST_SELECTABLE}
+        title="Visit date"
+        onClose={() => setDatePicker(false)}
+        onSelect={(date) => {
+          setSelectedDate(date);
+          setDatePicker(false);
+        }}
+      />
 
       {/* Template picker */}
       <BottomSheet

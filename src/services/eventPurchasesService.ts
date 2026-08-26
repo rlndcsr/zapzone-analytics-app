@@ -274,6 +274,12 @@ export type EventPurchaseDetail = {
   ticketOrderId: number | null;
   /** This purchase's position within its bulk order. */
   linePosition: number | null;
+  /**
+   * What the ticket includes, straight off the parent event (`events.features`,
+   * an array cast) — the same list the web ViewEventPurchase renders under
+   * "Event Features". Empty when the event defines none.
+   */
+  eventFeatures: string[];
   addOns: EventPurchaseAddonLine[];
   appliedFees: EventAppliedFee[];
   appliedDiscounts: EventAppliedDiscount[];
@@ -296,6 +302,8 @@ type RawEventPurchaseDetail = RawEventPurchase & {
   notes?: string | null;
   special_requests?: string | null;
   location?: { name?: string | null } | null;
+  /** `show()` loads the whole event, so its `features` array rides along. */
+  event?: { name?: string | null; features?: string[] | null } | null;
   add_ons?: RawEventAddonLine[] | null;
   applied_fees?:
     { fee_name?: string | null; fee_amount?: number | string | null }[] | null;
@@ -333,6 +341,10 @@ function mapDetail(raw: RawEventPurchaseDetail): EventPurchaseDetail {
     specialRequests: raw.special_requests?.trim() || "",
     ticketOrderId: base.ticketOrderId,
     linePosition: raw.line_position ?? null,
+    eventFeatures: (raw.event?.features ?? [])
+      .filter((f): f is string => typeof f === "string")
+      .map((f) => f.trim())
+      .filter(Boolean),
     addOns: (raw.add_ons ?? []).map((a, i) => ({
       id: a.id ?? i,
       name: a.name?.trim() || "Add-on",
