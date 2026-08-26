@@ -87,8 +87,11 @@ export async function markNotificationAsRead(
   token: string,
   id: number,
 ): Promise<{ success: boolean; message: string }> {
+  // `mark-as-read`, not `read` — matches the route the web admin calls
+  // (Notifications.tsx: `PATCH ${API_BASE_URL}/notifications/${id}/mark-as-read`),
+  // and lines up with the `mark-all-as-read` sibling below.
   return apiRequest<{ success: boolean; message: string }>(
-    `/api/notifications/${id}/read`,
+    `/api/notifications/${id}/mark-as-read`,
     {
       method: "PATCH",
       token,

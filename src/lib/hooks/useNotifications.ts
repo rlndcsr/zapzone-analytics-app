@@ -24,7 +24,11 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
   // in its undo window, so a second delete (or unmount) can flush it early.
   const commitDeleteRef = useRef<(() => void) | null>(null);
 
-  const loadNotifications = useCallback(async () => {
+  // `silent` re-reads the list without flipping `loading`, so the cards stay on
+  // screen instead of being swapped for skeletons. That is what pull-to-refresh
+  // and the refresh-on-return want; the first load still shows skeletons.
+  const loadNotifications = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     try {
       const token = getToken();
       const user = getCurrentUser();
@@ -35,7 +39,7 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
         return;
       }
 
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await fetchNotifications(token, filter, page, perPage);
       setNotifications(data.data.notifications);
       setTotalCount(data.data.pagination.total);
@@ -45,7 +49,7 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
       console.error('Notifications error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load notifications');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [filter, page, perPage]);
 
@@ -53,9 +57,22 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
     loadNotifications();
   }, [loadNotifications]);
 
-  // Returns the load promise (and is stable) so callers like pull-to-refresh
-  // can await completion before clearing their indicator.
-  const refresh = useCallback(() => loadNotifications(), [loadNotifications]);
+  // A delete sitting in its undo window exists locally-removed but still on the
+  // server, so any re-read has to commit it first — otherwise the fetch brings
+  // the row back and the pending timer then deletes it behind a visible card.
+  const flushPendingDelete = useCallback(async () => {
+    if (!undoTimerRef.current) return;
+    clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = null;
+    await commitDeleteRef.current?.();
+  }, []);
+
+  // Returns the load promise so callers like pull-to-refresh can await
+  // completion before clearing their indicator.
+  const refresh = useCallback(async () => {
+    await flushPendingDelete();
+    await loadNotifications({ silent: true });
+  }, [loadNotifications, flushPendingDelete]);
 
   const updateFilter = (newFilter: NotificationFilterType) => {
     setFilter(newFilter);
@@ -75,7 +92,9 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
       if (!token || !user || !user.location_id) return;
       
       await markAllNotificationsAsRead(token, user.location_id);
-      refresh();
+      // Awaited so `actionLoading` (and its skeleton) covers the reload too —
+      // `refresh` is silent, so nothing else would cover it.
+      await refresh();
     } catch (err) {
       Alert.alert('Error', 'Failed to mark all as read');
     } finally {
@@ -117,7 +136,7 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
 
       await clearAllNotifications(token, user.location_id);
       setPage(1);
-      refresh();
+      await refresh();
     } catch (err) {
       Alert.alert('Error', 'Failed to clear notifications');
     } finally {

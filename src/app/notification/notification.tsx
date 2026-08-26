@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import {
   AlertCircle,
   Bell,
@@ -9,8 +9,15 @@ import {
   CreditCard,
   X
 } from "lucide-react-native";
-import React, { useCallback, useRef } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import React, { useCallback, useRef, useState } from "react";
+import {
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { SwipeableNotificationCard } from "../../components/ui/SwipeableNotificationCard";
 import { UndoSnackbar } from "../../components/ui/UndoSnackbar";
 import { NotificationsListSkeleton } from "../../components/ui/skeleton/NotificationsSkeleton";
@@ -42,7 +49,42 @@ const Notification = () => {
     updatePerPage,
     lastPage,
     totalCount,
+    refresh,
   } = useNotifications("all");
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
+
+  // Re-read the list when the screen is focused again — coming back from a
+  // notification's details is the case that matters: that one was just marked
+  // read, so under the "Unread" filter the server should now drop it.
+  //
+  // Read through a ref so this callback can stay dependency-free: `refresh`
+  // changes identity whenever filter/page/perPage change, and depending on it
+  // would re-fire this on every filter tap on top of the load that already
+  // triggers.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const hasFocusedRef = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      // The mount load already covers the first focus.
+      if (!hasFocusedRef.current) {
+        hasFocusedRef.current = true;
+        return;
+      }
+      void refreshRef.current();
+    }, []),
+  );
 
   const filterScrollRef = useRef<ScrollView>(null);
   const tabLayoutsRef = useRef<Record<string, { x: number; width: number }>>(
@@ -247,6 +289,15 @@ const Notification = () => {
         className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 96 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#0644C7"
+            colors={["#0644C7"]}
+            progressBackgroundColor="#FFFFFF"
+          />
+        }
       >
         <View className="px-5 pt-0">
           {/* Stats Section */}
