@@ -1,3 +1,5 @@
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug } from "./debug/authDebug";
 import {
   handleUnauthorized,
   isSessionInvalidated,
@@ -135,6 +137,11 @@ export async function apiRequest<T>(
     return neverSettles<T>();
   }
 
+  // TEMP (investigation): every AUTHENTICATED request, so a teardown can be
+  // traced back to the call that caused it. Unauthenticated calls are skipped
+  // to keep the trace readable.
+  if (token) authDebug("api.request", { method, path });
+
   // Fail fast after `timeoutMs` instead of hanging indefinitely.
   const timeoutController = new AbortController();
   let timedOut = false;
@@ -185,9 +192,19 @@ export async function apiRequest<T>(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
+    // TEMP (investigation): every non-2xx, so a teardown is never the first
+    // sign that something failed.
+    authDebug("api.response NOT OK", {
+      method,
+      path,
+      status: response.status,
+      authenticated: !!token,
+    });
     // 401 → tear down once (idempotent) and swallow silently, so parallel 401s
     // cause no banners and one logout. 403 (role denial) still surfaces below.
     if (response.status === 401 && !publicEndpoint) {
+      // TEMP (investigation): names the exact request that tore the session down.
+      authDebug("api.401 → handleUnauthorized", { method, path });
       handleUnauthorized();
       return neverSettles<T>();
     }

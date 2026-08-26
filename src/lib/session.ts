@@ -7,6 +7,8 @@ import {
   markAccountSignInRequired,
   upsertSavedAccount,
 } from "./accounts/savedAccountsStore";
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug, registerAuthDebugSource } from "./debug/authDebug";
 import { resetActiveLocation } from "./location/activeLocationStore";
 
 const TOKEN_KEY = "zapzone_auth_token";
@@ -33,16 +35,21 @@ let endReason: SessionEndReason = null;
 // one teardown runs for many parallel failures. Reset only on a fresh session.
 let sessionInvalidated = false;
 
+// TEMP (investigation): lets every [AUTH-DEBUG] line carry the live session
+// state without each call site gathering it. Remove with the instrumentation.
+registerAuthDebugSource(() => ({
+  authed: isAuthenticated(),
+  hasToken: authToken !== null,
+  userId: authUser?.id ?? null,
+  invalidated: sessionInvalidated,
+  expiresInMin:
+    expiresAt == null ? null : Math.round((expiresAt - Date.now()) / 60000),
+}));
+
 // Makes auth changes update the app immediately
 const listeners = new Set<() => void>();
 function notify(): void {
-  if (__DEV__)
-    console.log(
-      "[SESSION] notify() -> " +
-        listeners.size +
-        " listeners; authed=" +
-        isAuthenticated(),
-    );
+  authDebug("session.notify", { listeners: listeners.size });
   listeners.forEach((l) => l());
 }
 
@@ -60,7 +67,7 @@ function persistableUser(user: AuthUser): AuthUser {
 
 // Saves the session after login and starts the inactivity timer
 export async function setSession(token: string, user: AuthUser): Promise<void> {
-  if (__DEV__) console.log("[SESSION] setSession() begin");
+  authDebug("session.setSession begin", { incomingUserId: user.id });
   const now = Date.now();
   // Captured before the swap: any incoming user that isn't the one already in
   // memory means the *account* changed, not just the token.
@@ -109,6 +116,11 @@ export async function restoreSession(): Promise<boolean> {
       SecureStore.getItemAsync(TOKEN_KEY),
       SecureStore.getItemAsync(USER_KEY),
     ]);
+
+    authDebug("session.restoreSession read", {
+      foundToken: token !== null,
+      foundUser: userJson !== null,
+    });
 
     if (token && userJson) {
       authUser = JSON.parse(userJson) as AuthUser;
@@ -195,6 +207,7 @@ export function isAuthenticated(): boolean {
  * behaviour belongs to one call site instead of a flag threaded through here.
  */
 export async function clearSession(): Promise<void> {
+  authDebug("session.clearSession begin");
   authToken = null;
   authUser = null;
   expiresAt = null;
@@ -213,6 +226,12 @@ export async function clearSession(): Promise<void> {
 }
 
 function invalidateSession(reason: Exclude<SessionEndReason, null>): void {
+  // TEMP (investigation): this is the "unconfirmed link" in the report — a
+  // teardown happening AFTER a successful login is what arms the redirect cycle.
+  authDebug("session.invalidateSession", {
+    reason,
+    alreadyLatched: sessionInvalidated,
+  });
   if (sessionInvalidated) return; // one logout flow, regardless of the count
   sessionInvalidated = true;
   endReason = reason;

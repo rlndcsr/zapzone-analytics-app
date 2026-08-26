@@ -17,6 +17,8 @@ import { PushDeviceRegistrar } from "../components/PushDeviceRegistrar";
 import { PushNotificationRouter } from "../components/PushNotificationRouter";
 import "../global.css";
 import { restoreSavedAccounts } from "../lib/accounts/savedAccountsStore";
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug } from "../lib/debug/authDebug";
 import { restoreTimeframeSelection } from "../lib/dashboard/timeframeStore";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
 import { restoreActiveLocation } from "../lib/location/activeLocationStore";
@@ -33,14 +35,15 @@ export const unstable_settings = {
 };
 
 export default function RootLayout() {
-  if (__DEV__) console.count("[render] RootLayout");
   const [sessionRestored, setSessionRestored] = useState(false);
   const [fontsLoaded] = useFonts(montserratFonts);
+
+  authDebug("RootLayout render", { sessionRestored, fontsLoaded });
 
   const { colorScheme } = useColorScheme();
 
   useEffect(() => {
-    if (__DEV__) console.log("[RootLayout] restore effect run");
+    authDebug("RootLayout hydration START");
     Promise.all([
       restoreSavedAccounts().then(() =>
         restoreSession().then(async (restored) => {
@@ -50,7 +53,10 @@ export default function RootLayout() {
       ),
       applyStoredTheme(),
       restoreActiveLocation(),
-    ]).finally(() => setSessionRestored(true));
+    ]).finally(() => {
+      authDebug("RootLayout hydration COMPLETE → mounting <Stack>");
+      setSessionRestored(true);
+    });
   }, []);
 
   if (!sessionRestored || !fontsLoaded) {

@@ -1,5 +1,7 @@
 import { markAccountSignInRequired } from "../lib/accounts/savedAccountsStore";
 import { apiRequest, apiUrl } from "../lib/api";
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug } from "../lib/debug/authDebug";
 import { unregisterCurrentPushDevice } from "../lib/notifications/pushDevice";
 import {
   clearSession,
@@ -64,7 +66,10 @@ const VALIDATE_TIMEOUT_MS = 8000;
  *  network error → keep session. Raw fetch: apiRequest's never-settle would hang. */
 export async function validateStoredSession(): Promise<void> {
   const token = getToken();
-  if (!token) return;
+  if (!token) {
+    authDebug("validateStoredSession skipped: no token");
+    return;
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), VALIDATE_TIMEOUT_MS);
@@ -76,11 +81,13 @@ export async function validateStoredSession(): Promise<void> {
       },
       signal: controller.signal,
     });
+    authDebug("validateStoredSession GET /api/user", { status: res.status });
     if (res.status === 401) {
       handleUnauthorized();
     }
   } catch {
     // Offline / timeout — keep the session; it re-validates on the next request.
+    authDebug("validateStoredSession network error — session KEPT");
   } finally {
     clearTimeout(timeoutId);
   }

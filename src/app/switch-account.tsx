@@ -25,6 +25,8 @@ import {
   commitPendingSwitch,
   SWITCH_MIN_DWELL_MS,
 } from "../lib/accounts/switchAccount";
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug } from "../lib/debug/authDebug";
 import { isAuthenticated } from "../lib/session";
 
 const DOT_PULSE_MS = 420;
@@ -99,8 +101,10 @@ export default function SwitchAccount() {
         await new Promise((resolve) => setTimeout(resolve, remaining));
       }
       if (committed || isAuthenticated()) {
+        authDebug('switch-account router.replace("/home")', { committed });
         router.replace("/home");
       } else {
+        authDebug('switch-account router.replace("/")', { committed });
         router.replace("/");
       }
     };

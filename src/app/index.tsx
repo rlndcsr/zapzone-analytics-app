@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LoginForm } from "../components/auth/LoginForm";
 import { SavedAccountsStrip } from "../components/auth/SavedAccountsStrip";
 import { useSavedAccounts } from "../lib/accounts/savedAccountsStore";
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug } from "../lib/debug/authDebug";
 import { useTransientAlert } from "../lib/hooks/useTransientAlert";
 import { consumeSessionExpiredNotice, isAuthenticated } from "../lib/session";
 import { hasPlayedSplash } from "../lib/splashState";
@@ -81,11 +83,22 @@ export default function HomeScreen() {
     }
   }, [entry.expiredNotice, showSessionEnded]);
 
-  // Snapshot auth ONCE at mount (not live): this redirects an already-authed
-  // cold start / deep link straight to /home, without re-rendering into a
-  // redirect after an in-app login — that path is navigated imperatively by
-  // LoginForm, so the two never compete.
-  const [authedAtMount] = useState(() => isAuthenticated());
+  // This screen deliberately owns NO authenticated navigation. It used to
+  // snapshot auth at mount and `<Redirect href="/home">` when that snapshot was
+  // true, which made it a second authority over the auth boundary: AuthGuard
+  // pushed unauthed users to `/`, and this pushed them straight back to
+  // `/home`. Because `/` is public, arriving here re-armed AuthGuard's
+  // `redirectedRef`, so the two could trade redirects until React threw
+  // "Maximum update depth exceeded".
+  //
+  // The only case that redirect legitimately served was an already-signed-in
+  // cold start, and the splash hand-off (app/splash.tsx) now routes that
+  // directly to `/home` without this screen ever mounting.
+  authDebug("index(login) render", {
+    liveAuthed: isAuthenticated(),
+    splashPlayed: hasPlayedSplash(),
+    addAccount: entry.addAccount,
+  });
 
   /**
    * Plain back navigation — this screen is pushed over Saved Accounts, so it
@@ -117,14 +130,11 @@ export default function HomeScreen() {
   };
 
   if (!hasPlayedSplash()) {
+    authDebug("index → returns <Redirect href=/splash>");
     return <Redirect href="/splash" />;
   }
 
-  // In add-account mode the caller *wants* the login form while still signed
-  // in, so the authed redirect is deliberately skipped.
-  if (authedAtMount && !entry.addAccount) {
-    return <Redirect href="/home" />;
-  }
+  authDebug("index → returns login form");
 
   return (
     // Root is WHITE so keyboard open/close never reveals a blue "footer"; blue

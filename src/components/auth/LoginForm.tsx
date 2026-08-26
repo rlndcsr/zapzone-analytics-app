@@ -11,6 +11,8 @@ import {
 
 import { ApiError } from "../../lib/api";
 import { restoreTimeframeSelection } from "../../lib/dashboard/timeframeStore";
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug } from "../../lib/debug/authDebug";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { setSession } from "../../lib/session";
 import { login, type AuthUser } from "../../services/auth";
@@ -86,8 +88,10 @@ export function LoginForm({ initialEmail, onSuccess }: LoginFormProps = {}) {
     if (!validate()) return;
 
     setSubmitting(true);
+    authDebug("LoginForm submit", { hasOnSuccess: !!onSuccess });
     try {
       const result = await login({ email: email.trim(), password });
+      authDebug("LoginForm POST /api/login OK", { userId: result.user.id });
       // Establish the session, then navigate imperatively. `setSession` awaits
       // its storage writes and notifies before this runs, so the replace happens
       // after the auth state has settled — not during a render.
@@ -98,13 +102,18 @@ export function LoginForm({ initialEmail, onSuccess }: LoginFormProps = {}) {
       // window the previous account had in memory.
       await restoreTimeframeSelection();
       if (onSuccess) {
+        authDebug("LoginForm → onSuccess (add-account path)");
         onSuccess(result.user);
       } else {
-        if (__DEV__) console.log('[LoginForm] router.replace("/home")');
+        authDebug('LoginForm router.replace("/home")');
         router.replace("/home");
-        if (__DEV__) console.log("[LoginForm] router.replace returned");
+        authDebug("LoginForm router.replace returned");
       }
     } catch (error) {
+      authDebug("LoginForm submit FAILED", {
+        status: error instanceof ApiError ? error.status : "non-api",
+        message: error instanceof Error ? error.message : String(error),
+      });
       if (
         error instanceof ApiError &&
         error.status === 422 &&

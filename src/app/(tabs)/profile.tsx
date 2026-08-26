@@ -21,6 +21,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProfileSkeleton } from "../../components/ui/skeleton/ProfileSkeleton";
 import { useSavedAccounts } from "../../lib/accounts/savedAccountsStore";
 import { mediaUrl } from "../../lib/api";
+// TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
+import { authDebug } from "../../lib/debug/authDebug";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { getCurrentUser } from "../../lib/session";
 import { signOut } from "../../services/auth";
@@ -374,9 +376,19 @@ const Profile = () => {
   const handleLogout = async () => {
     if (loggingOut) return;
     setLoggingOut(true);
+    authDebug("logout START");
     try {
       await signOut();
+      authDebug("logout signOut() resolved");
+    } catch (error) {
+      // TEMP (investigation): a rejection here means clearSession() never ran,
+      // so the session survives the "logout". Rethrown — same outcome as before.
+      authDebug("logout signOut() REJECTED — session may still be live", {
+        error: String(error),
+      });
+      throw error;
     } finally {
+      authDebug('logout router.replace("/")');
       router.replace("/");
     }
   };
