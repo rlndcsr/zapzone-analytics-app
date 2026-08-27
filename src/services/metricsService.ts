@@ -89,6 +89,10 @@ export type LocationStat = {
   bookingRevenue: number;
   purchaseRevenue: number;
   eventPurchaseRevenue: number;
+  /** Waivers covering visits at this location in the timeframe. */
+  waivers?: number;
+  /** Of those, the completed (signed) ones. */
+  waiversSigned?: number;
   [key: string]: unknown;
 };
 

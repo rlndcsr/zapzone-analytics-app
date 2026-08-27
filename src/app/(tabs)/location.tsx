@@ -45,7 +45,8 @@ type LocationRow = {
   bookings: number;
   tickets: number;
   events: number;
-  guests: number;
+  waivers: number;
+  waiversSigned: number;
   revenue: number;
   utilization: number;
   bookingRevenue: number;
@@ -80,13 +81,16 @@ const UtilizationBar = ({ value }: { value: number }) => {
   );
 };
 
-/** Label above a headline figure — the layout every stat on this screen uses. */
+/** Label above a headline figure — the layout every stat on this screen uses.
+ *  `sub` is the optional caption web renders under a figure (Waivers signed). */
 const StatCell = ({
   label,
   value,
+  sub,
 }: {
   label: string;
   value: string | number;
+  sub?: string;
 }) => (
   <View className="flex-1 pr-2">
     <Text className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">
@@ -100,6 +104,14 @@ const StatCell = ({
     >
       {value}
     </Text>
+    {sub ? (
+      <Text
+        className="text-[10px] text-gray-400 dark:text-gray-500"
+        numberOfLines={1}
+      >
+        {sub}
+      </Text>
+    ) : null}
   </View>
 );
 
@@ -160,12 +172,13 @@ const TopLocationCard = ({
       </View>
     </View>
 
-    {/* Bookings • Tickets • Events • Guests */}
+    {/* Bookings • Tickets • Events • Waivers — web's "bkgs · tix · events ·
+        waivers" line, in the same order. */}
     <View className="flex-row mb-3">
       <StatCell label="Bookings" value={location.bookings} />
       <StatCell label="Tickets" value={location.tickets} />
       <StatCell label="Events" value={location.events} />
-      <StatCell label="Guests" value={location.guests} />
+      <StatCell label="Waivers" value={location.waivers} />
     </View>
 
     <View className="mb-3">
@@ -212,10 +225,17 @@ const OverviewCard = ({ location }: { location: LocationRow }) => (
       <View className="w-3 h-3 rounded-full bg-[#0644C7]" />
     </View>
 
+    {/* Web's four-column grid: Bkgs / Tix / Events / Waivers, with the
+        signed count captioned under the waiver total. */}
     <View className="flex-row mb-3">
       <StatCell label="Bookings" value={location.bookings} />
       <StatCell label="Tickets" value={location.tickets} />
       <StatCell label="Events" value={location.events} />
+      <StatCell
+        label="Waivers"
+        value={location.waivers}
+        sub={`${location.waiversSigned} signed`}
+      />
     </View>
 
     <View className="flex-row mb-3">
@@ -281,7 +301,8 @@ const Location = () => {
       // Web reads `attractionTickets ?? purchases` for the Tickets figure.
       tickets: Number(stats.attractionTickets ?? stats.purchases ?? 0),
       events: Number(stats.eventPurchases ?? 0),
-      guests: Number(stats.participants ?? 0),
+      waivers: Number(stats.waivers ?? 0),
+      waiversSigned: Number(stats.waiversSigned ?? 0),
       revenue: Number(stats.revenue ?? 0),
       utilization: Number(stats.utilization ?? 0),
       bookingRevenue: Number(stats.bookingRevenue ?? 0),

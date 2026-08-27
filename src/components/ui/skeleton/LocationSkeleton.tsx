@@ -57,7 +57,7 @@ function TopLocationCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
         </View>
       </View>
 
-      {/* Row 2: Bookings / Tickets / Events / Guests */}
+      {/* Row 2: Bookings / Tickets / Events / Waivers */}
       <View className="flex-row mb-3">
         <StatColumnSkeleton pulse={pulse} />
         <StatColumnSkeleton pulse={pulse} />
@@ -112,7 +112,7 @@ function RevenueColumnSkeleton({ pulse }: { pulse: SharedValue<number> }) {
   );
 }
 
-/** Matches OverviewCard: name + dot, Bookings/Tickets/Events,
+/** Matches OverviewCard: name + dot, Bookings/Tickets/Events/Waivers,
  *  Revenue/Utilization, then the Bookings/Tickets/Events revenue breakdown. */
 function OverviewCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
   return (
@@ -124,6 +124,7 @@ function OverviewCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
       </View>
 
       <View className="flex-row mb-3">
+        <StatColumnSkeleton pulse={pulse} />
         <StatColumnSkeleton pulse={pulse} />
         <StatColumnSkeleton pulse={pulse} />
         <StatColumnSkeleton pulse={pulse} />
