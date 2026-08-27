@@ -267,6 +267,9 @@ const VisitorTracking = () => {
   const [capped, setCapped] = useState(false);
   const [stats, setStats] = useState<VisitorStats | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Counters only. Separate from `loading` so the tiles are never gated on the
+   *  table's much slower paged load. */
+  const [statsLoading, setStatsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -285,7 +288,13 @@ const VisitorTracking = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  const load = useCallback(async () => {
+  // Sessions and counters are two separate endpoints and load independently, the
+  // way the web page's `loadSessions` / `loadStats` do. They used to share one
+  // `Promise.all`, which is what held the counters behind the table: paging the
+  // list is up to 30 sequential round trips (100 rows a page, capped at
+  // MAX_LOADED_SESSIONS) while the counters are a single cheap call, and
+  // `Promise.all` only resolves once the slowest of the two is done.
+  const loadSessions = useCallback(async () => {
     const token = getToken();
     if (!token) {
       setError("Not authenticated");
@@ -294,14 +303,12 @@ const VisitorTracking = () => {
     }
     setLoading(true);
     try {
-      const [list, counts] = await Promise.all([
-        fetchAllVisitorSessions({ token, locationId: activeLocationId }),
-        // Best-effort: the counters go blank rather than failing the screen.
-        fetchVisitorStats(token, activeLocationId).catch(() => null),
-      ]);
+      const list = await fetchAllVisitorSessions({
+        token,
+        locationId: activeLocationId,
+      });
       setSessions(list.rows);
       setCapped(list.capped);
-      setStats(counts);
       setError(null);
     } catch (err) {
       setError(
@@ -314,18 +321,40 @@ const VisitorTracking = () => {
     }
   }, [activeLocationId]);
 
+  // Best-effort, and deliberately kept out of `error`: the web swallows a stats
+  // failure as well, so the tiles fall back to 0 and the table is unaffected —
+  // and a table failure leaves whatever the counters already showed in place.
+  const loadStats = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      setStatsLoading(false);
+      return;
+    }
+    setStatsLoading(true);
+    try {
+      setStats(await fetchVisitorStats(token, activeLocationId));
+    } catch {
+      setStats(null);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [activeLocationId]);
+
   useEffect(() => {
-    load();
-  }, [load]);
+    loadSessions();
+    loadStats();
+  }, [loadSessions, loadStats]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await load();
+      // Both settle before the spinner retracts, but neither waits on the other
+      // to *render* — and neither rejects, both handle their own failure.
+      await Promise.all([loadSessions(), loadStats()]);
     } finally {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [loadSessions, loadStats]);
 
   useEffect(() => {
     setPage(1);
@@ -575,8 +604,10 @@ const VisitorTracking = () => {
             </Text>
           </View>
 
-          {/* Counters */}
-          {loading && sessions.length === 0 ? (
+          {/* Counters — gated on their own request, not the table's. Skeleton
+              only while there is nothing to show, so a refresh updates the
+              figures in place instead of dropping back to the skeleton. */}
+          {statsLoading && !stats ? (
             <AnalyticsSkeleton tiles={4} panels={0} />
           ) : (
             <View className="flex-row flex-wrap gap-3">
