@@ -21,10 +21,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   ALL_DAY_KEYS,
   AttractionLivePreview,
+  CallToBookNotice,
   DAYS,
   ErrorText,
   FieldLabel,
   formatTime,
+  isCallToBook,
   MAX_IMAGES,
   newSchedule,
   PRICING_TYPES,
@@ -638,6 +640,14 @@ const EditAttractionScreen = () => {
               title="Availability Schedule"
               onLayout={registerSection("availability")}
             >
+              {/* Same notice as the create form: green while bookable online,
+                  teal once no schedule is left and the storefront would show a
+                  Call to Book button. */}
+              <CallToBookNotice
+                active={isCallToBook(schedules)}
+                itemLabel="attraction"
+              />
+
               {schedules.map((schedule, index) => (
                 <View
                   key={index}

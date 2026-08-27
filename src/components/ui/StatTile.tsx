@@ -17,6 +17,7 @@ const CARD_SHADOW = {
  */
 export function StatTile({
   icon,
+  renderIcon,
   iconBg,
   iconColor,
   label,
@@ -25,6 +26,11 @@ export function StatTile({
   info,
 }: {
   icon: ComponentProps<typeof Feather>["name"];
+  /**
+   * Draws the glyph instead of `icon`, for a tile whose web counterpart uses a
+   * symbol Feather lacks (e.g. footprints). Gets the tile's colour and size.
+   */
+  renderIcon?: (color: string, size: number) => React.ReactNode;
   iconBg: string;
   iconColor: string;
   label: string;
@@ -39,7 +45,11 @@ export function StatTile({
     >
       <View className="flex-row items-center gap-2">
         <View className={`w-9 h-9 rounded-xl items-center justify-center ${iconBg}`}>
-          <Feather name={icon} size={18} color={iconColor} />
+          {renderIcon ? (
+            renderIcon(iconColor, 18)
+          ) : (
+            <Feather name={icon} size={18} color={iconColor} />
+          )}
         </View>
         <View className="flex-1 flex-row items-center gap-1">
           {/* Wraps to as many lines as the label needs, never cut short. */}

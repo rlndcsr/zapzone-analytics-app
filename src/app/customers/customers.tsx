@@ -1,4 +1,4 @@
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -695,16 +695,39 @@ const Customers = () => {
         }
       >
         <View className="px-5 gap-4">
-          {/* Analytics link — a square shortcut tile at half width, so it
-              matches the Manage Purchases card in the Attractions module. */}
-          <View className="mt-6 flex-row items-stretch">
-            <View className="w-1/2 pr-1.5">
+          {/* Sub-page shortcuts — square tiles side by side, the same design the
+              Attractions and Events modules use. */}
+          <View className="mt-6 flex-row flex-wrap items-stretch">
+            <View className="w-1/2 pr-1.5 mb-3">
               <NavTileCard
                 icon="pie-chart"
                 title="Customer Analytics"
                 desc="KPIs, trends, top customers, and segments"
                 cta="View Analytics"
                 onPress={() => router.push("/customers/analytics")}
+              />
+            </View>
+            <View className="w-1/2 pl-1.5 mb-3">
+              <NavTileCard
+                icon="phone-call"
+                title="Customer Concerns"
+                desc="Guests waiting on a call or who left checkout"
+                cta="View Concerns"
+                onPress={() => router.push("/customers/customer-concerns")}
+              />
+            </View>
+            <View className="w-1/2 pr-1.5">
+              <NavTileCard
+                // Footprints, like the web sidebar's icon. Feather has no
+                // footprint glyph, so this one comes from Ionicons.
+                icon="activity"
+                renderIcon={(color, size) => (
+                  <Ionicons name="footsteps-outline" size={size} color={color} />
+                )}
+                title="Visitor Tracking"
+                desc="Every visit as its own session, one visitor a day"
+                cta="View Sessions"
+                onPress={() => router.push("/customers/visitor-tracking")}
               />
             </View>
           </View>

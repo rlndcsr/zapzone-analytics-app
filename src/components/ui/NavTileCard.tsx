@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { type ComponentProps } from "react";
+import { type ComponentProps, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 
 const PRIMARY = "#0644C7";
@@ -17,6 +17,7 @@ const CARD_SHADOW = {
  *  chevron sits at the card's right edge. A `badge` replaces that action row. */
 export function NavTileCard({
   icon,
+  renderIcon,
   title,
   desc,
   cta = "Open",
@@ -25,6 +26,12 @@ export function NavTileCard({
   badge,
 }: {
   icon: ComponentProps<typeof Feather>["name"];
+  /**
+   * Draws the icon chip's glyph instead of `icon`, for the odd tile whose web
+   * counterpart uses a symbol Feather doesn't have (e.g. footprints). Receives
+   * the chip's colour and size so any icon set matches the Feather ones.
+   */
+  renderIcon?: (color: string, size: number) => ReactNode;
   title: string;
   desc: string;
   cta?: string;
@@ -45,7 +52,11 @@ export function NavTileCard({
       accessibilityState={{ disabled }}
     >
       <View className="mb-3 h-12 w-12 items-center justify-center rounded-xl bg-[#0644C7]/10">
-        <Feather name={icon} size={20} color={PRIMARY} />
+        {renderIcon ? (
+          renderIcon(PRIMARY, 20)
+        ) : (
+          <Feather name={icon} size={20} color={PRIMARY} />
+        )}
       </View>
       <Text
         numberOfLines={1}

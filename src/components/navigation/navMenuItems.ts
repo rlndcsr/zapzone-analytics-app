@@ -46,6 +46,13 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
     route: "/pricing/pricing",
   },
   {
+    // Between Pricing and Waivers, as in the web admin sidebar.
+    key: "custom-fields",
+    label: "Custom Fields",
+    icon: "check-square",
+    route: "/custom-fields/custom-fields",
+  },
+  {
     key: "waivers",
     label: "Waivers",
     icon: "file-text",

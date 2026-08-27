@@ -74,6 +74,80 @@ export const newSchedule = (): AvailabilitySchedule => ({
 
 export const money = (n: number) => `$${n.toFixed(2)}`;
 
+/**
+ * Whether an attraction would fall back to "Call to Book": true when no
+ * schedule is usable, i.e. none has at least one day and both times. Mirrors the
+ * web's `attractionIsCallToBook`, so both apps decide it the same way.
+ */
+export const isCallToBook = (availability: AvailabilitySchedule[]): boolean =>
+  !availability.some(
+    (block) =>
+      Array.isArray(block.days) &&
+      block.days.length > 0 &&
+      !!block.start_time &&
+      !!block.end_time,
+  );
+
+/**
+ * What the schedules below mean for the customer site — the mobile twin of the
+ * web's CallToBookNotice, shown above the Availability Schedules list. Green
+ * while the item is bookable online, teal once every schedule is gone and the
+ * storefront would show a Call to Book button instead.
+ */
+export const CallToBookNotice = ({
+  active,
+  itemLabel = "attraction",
+}: {
+  /** True when there is no usable schedule — see {@link isCallToBook}. */
+  active: boolean;
+  itemLabel?: "attraction" | "package" | "event";
+}) =>
+  active ? (
+    <View className="rounded-xl border border-teal-200 dark:border-teal-900/40 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 mb-4">
+      <View className="flex-row items-start gap-2.5">
+        <Feather name="phone-call" size={16} color="#0F766E" style={{ marginTop: 2 }} />
+        <View className="flex-1">
+          <Text className="text-sm font-bold text-teal-900 dark:text-teal-200">
+            No schedule — customers will see “Call to Book”
+          </Text>
+          <Text className="text-xs leading-5 text-teal-900 dark:text-teal-200 mt-1">
+            Because this {itemLabel} has no availability schedule, customers
+            cannot pick a date or time online. On the customer site the usual
+            booking button is replaced with a{" "}
+            <Text className="font-semibold">Call to Book</Text> button that shows
+            your venue’s name and phone number, lets guests call with one tap, or
+            leave their name, number and a message asking to be called back.
+          </Text>
+          <Text className="text-xs leading-5 text-teal-900 dark:text-teal-200 mt-1">
+            Those requests appear under{" "}
+            <Text className="font-semibold">Customers → Customer Concerns</Text>{" "}
+            marked “Call to book”, and every active staff member at the venue is
+            emailed and texted right away. Add a schedule at any time to switch
+            back to normal online booking.
+          </Text>
+        </View>
+      </View>
+    </View>
+  ) : (
+    <View className="rounded-xl border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 mb-4">
+      <View className="flex-row items-start gap-2.5">
+        <Feather name="calendar" size={16} color="#047857" style={{ marginTop: 2 }} />
+        <View className="flex-1">
+          <Text className="text-sm font-bold text-emerald-900 dark:text-emerald-200">
+            Bookable online
+          </Text>
+          <Text className="text-xs leading-5 text-emerald-900 dark:text-emerald-200 mt-1">
+            This {itemLabel} has a schedule, so customers can pick a date and
+            time and pay online. If you remove every schedule, the customer site
+            shows a <Text className="font-semibold">Call to Book</Text> button
+            instead — guests are asked to call the venue or request a call back,
+            and nothing can be booked or paid online.
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
 /** Human-readable day list for one availability schedule (in weekday order). */
 export const scheduleDaysLabel = (days: string[]): string => {
   const labels = DAYS.filter((d) => days.includes(d.key)).map((d) => d.label);

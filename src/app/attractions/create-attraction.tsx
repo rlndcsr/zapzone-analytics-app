@@ -19,11 +19,13 @@ import { useColorScheme } from "nativewind";
 import {
   ALL_DAY_KEYS,
   AttractionLivePreview,
+  CallToBookNotice,
   DAYS,
   ErrorText,
   FieldLabel,
   FormButton,
   formatTime,
+  isCallToBook,
   MAX_IMAGES,
   newSchedule,
   PRICING_TYPES,
@@ -551,6 +553,10 @@ const CreateAttractionScreen = () => {
 
           {/* Availability Schedules */}
           <Section icon="calendar" title="Availability Schedules">
+            {/* What these schedules mean for the customer site — flips to the
+                Call to Book warning once no schedule is usable. */}
+            <CallToBookNotice active={isCallToBook(schedules)} itemLabel="attraction" />
+
             {schedules.map((schedule, index) => {
               const allDays = ALL_DAY_KEYS.every((d) => schedule.days.includes(d));
               return (
