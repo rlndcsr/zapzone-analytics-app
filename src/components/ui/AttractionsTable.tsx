@@ -601,9 +601,8 @@ export const AttractionsTable = memo(function AttractionsTable({
 }: {
   attractions: AttractionRow[];
   /**
-   * Open the Attraction Details — wired only to the row's eye action. Rows
-   * themselves are inert so a stray tap while scanning the table (or reaching
-   * for a checkbox) never navigates.
+   * Open the Attraction Details sheet. Fired by a tap anywhere on the row that
+   * an interactive cell does not claim, and by the row's eye action.
    */
   onView: (attraction: AttractionRow) => void;
   /** Row Actions — View Purchase Page, Edit, Duplicate, Delete, and the per-row
@@ -695,10 +694,15 @@ export const AttractionsTable = memo(function AttractionsTable({
           {attractions.map((attraction, i) => {
             const selected = selectedIds.has(attraction.id);
             return (
-              // Inert row — details open from the eye action only, so the cells
-              // (checkbox, status pill, copy link, actions) own every touch.
-              <View
+              // Tapping the row opens the Attraction Details sheet, matching a
+              // card tap in the other layout. The interactive cells (checkbox,
+              // status pill, copy link, action icons) are nested Pressables, so
+              // they win the touch and never fall through to this handler.
+              <Pressable
                 key={attraction.id}
+                onPress={() => onView(attraction)}
+                accessibilityRole="button"
+                accessibilityLabel={`View details for ${attraction.name}`}
                 className={`flex-row items-center ${
                   selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 } ${
@@ -706,7 +710,10 @@ export const AttractionsTable = memo(function AttractionsTable({
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={{ minHeight: ROW_MIN_HEIGHT }}
+                style={({ pressed }) => ({
+                  minHeight: ROW_MIN_HEIGHT,
+                  opacity: pressed ? 0.6 : 1,
+                })}
               >
                 <CheckboxCell
                   state={selected ? "on" : "off"}
@@ -722,7 +729,7 @@ export const AttractionsTable = memo(function AttractionsTable({
                     {col.render(attraction, rowContext)}
                   </View>
                 ))}
-              </View>
+              </Pressable>
             );
           })}
         </View>

@@ -23,10 +23,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CallToBookNotice } from "../../components/ui/attractionFormKit";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { InputField } from "../../components/ui/InputField";
 import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
+import { eventIsCallToBook } from "../../lib/callToBook";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markEventsStale } from "../../lib/hooks/useEvents";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -519,6 +521,14 @@ const CreateEventScreen = () => {
               </View>
             </View>
             <ErrorText error={errors.time} />
+
+            {/* What leaving either time empty means for the customer site. */}
+            <View className="mt-4">
+              <CallToBookNotice
+                active={eventIsCallToBook({ timeStart, timeEnd })}
+                itemLabel="event"
+              />
+            </View>
 
             <View className="mt-4">
               <FieldLabel>Slot Interval</FieldLabel>

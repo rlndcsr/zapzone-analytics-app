@@ -23,8 +23,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CallToBookCard } from "../../components/ui/CallToBookCard";
+import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
+import { packageIsCallToBook } from "../../lib/callToBook";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import {
   CARD_MONTHS,
   cardYears,
@@ -255,6 +259,9 @@ const ManualBookingScreen = () => {
 
   // Availability (standard mode).
   const [schedules, setSchedules] = useState<PackageAvailabilitySchedule[]>([]);
+  /** False until the fetch above settles, so an unloaded package never reads as
+   *  "no schedule" and flashes the Call to Book card. */
+  const [schedulesLoaded, setSchedulesLoaded] = useState(false);
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [anchor, setAnchor] = useState<Date>(new Date());
@@ -378,6 +385,7 @@ const ManualBookingScreen = () => {
 
   // Availability schedules for the calendar (standard mode).
   useEffect(() => {
+    setSchedulesLoaded(false);
     if (!pkg || bookingMode !== "standard") {
       setSchedules([]);
       return;
@@ -386,7 +394,13 @@ const ManualBookingScreen = () => {
     if (!token) return;
     let alive = true;
     fetchPackageAvailabilitySchedules(token, pkg.id)
-      .then((s) => alive && setSchedules(s))
+      .then((s) => {
+        if (!alive) return;
+        setSchedules(s);
+        setSchedulesLoaded(true);
+      })
+      // A failed read must not look like "no schedule": leave it unloaded so
+      // the normal booking UI stays put.
       .catch(() => alive && setSchedules([]));
     return () => {
       alive = false;
@@ -437,6 +451,16 @@ const ManualBookingScreen = () => {
 
   const effectiveLocationId =
     pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
+
+  /**
+   * Call to Book: no usable schedule on the selected package. `schedules` is
+   * only loaded in standard mode (see the effect above), which is also the only
+   * mode this affects — flexible mode deliberately skips date validation.
+   */
+  const callToBook = !!pkg && schedulesLoaded && packageIsCallToBook(schedules);
+  const { name: venueName, phone: venuePhone } =
+    useVenuePhone(effectiveLocationId);
+  const [callToBookOpen, setCallToBookOpen] = useState(false);
 
   // Fees (debounced).
   useEffect(() => {
@@ -1277,6 +1301,21 @@ const ManualBookingScreen = () => {
                     react-native-css-interop never has to upgrade a View to a
                     Pressable in place (that post-mount upgrade throws while it
                     serializes props for a dev warning). */}
+                {/* No usable schedule at this venue → the venue books this
+                    package by phone. Flexible mode still records a booking
+                    manually, which is what that mode exists for, so the card
+                    only replaces the standard-mode picker. */}
+                {callToBook && bookingMode === "standard" && (
+                  <View className="mt-4">
+                    <CallToBookCard
+                      venueName={venueName}
+                      venuePhone={venuePhone}
+                      itemLabel="package"
+                      onRequestCall={() => setCallToBookOpen(true)}
+                    />
+                  </View>
+                )}
+
                 <View className="mt-4" key={`time-content-${bookingMode}`}>
                   <FieldLabel>Time *</FieldLabel>
                   {bookingMode === "standard" ? (
@@ -1889,6 +1928,13 @@ const ManualBookingScreen = () => {
                 Cancel
               </Text>
             </Pressable>
+            {callToBook && bookingMode === "standard" ? (
+              <View className="flex-[1.4] py-3.5 rounded-xl border border-teal-200 dark:border-teal-900/40 bg-teal-50 dark:bg-teal-900/20 items-center justify-center px-2">
+                <Text className="text-[11px] font-semibold text-teal-800 dark:text-teal-300 text-center">
+                  Booked by phone — or switch to Flexible to record it
+                </Text>
+              </View>
+            ) : (
             <Pressable
               onPress={handleSubmit}
               disabled={submitDisabled || !canSubmit}
@@ -1909,6 +1955,7 @@ const ManualBookingScreen = () => {
                 </>
               )}
             </Pressable>
+            )}
           </View>
         )}
       </KeyboardAvoidingView>
@@ -2051,6 +2098,20 @@ const ManualBookingScreen = () => {
           </View>
         </View>
       )}
+
+      <CallToBookSheet
+        visible={callToBookOpen}
+        onClose={() => setCallToBookOpen(false)}
+        locationId={effectiveLocationId}
+        venueName={venueName}
+        venuePhone={venuePhone}
+        entityType="package"
+        entityId={pkg?.id ?? null}
+        entityName={pkg?.name ?? null}
+        initialName={customerName}
+        initialPhone={phone}
+        initialEmail={email}
+      />
     </View>
   );
 };

@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/api";
+import { ApiError, apiRequest } from "../lib/api";
 
 /**
  * Customer Concerns — guests who asked for schedule help, wanted to book by
@@ -268,4 +268,126 @@ export async function updateCheckoutConcernStatus(
     },
   );
   return res?.data ? mapConcern(res.data) : null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Call to Book — creating a callback request
+ * ------------------------------------------------------------------ */
+
+export type CallToBookEntityType = "package" | "attraction" | "event";
+
+export type CallToBookInput = {
+  /** The venue the customer is actually booking at — never a global default. */
+  locationId: number;
+  name: string;
+  phone: string;
+  email?: string | null;
+  message?: string | null;
+  entityType?: CallToBookEntityType;
+  entityId?: number | null;
+  entityName?: string | null;
+  /** Free-form breadcrumbs the concerns screen shows staff (`step_label` etc). */
+  context?: Record<string, unknown> | null;
+};
+
+type SubmitResponse = {
+  success?: boolean;
+  message?: string | null;
+  data?: { id?: number | null } | null;
+};
+
+const SUBMIT_FALLBACK_MESSAGE =
+  "Thanks — the team at this venue has your details and will contact you about this.";
+
+/** Drop undefined / null / "" so optional fields are absent rather than empty,
+ *  matching the web service's `strip()` before it posts. */
+function stripEmpty(payload: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value !== undefined && value !== null && value !== "") out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * POST /api/checkout-concerns with `kind: "call_to_book"` — the same public
+ * endpoint the web admin's Call to Book modal posts to.
+ *
+ * `publicEndpoint: true` is required, not cosmetic: this route sits outside the
+ * auth group, so a 401 from it says nothing about the staff session. Without
+ * the flag `apiRequest` would tear the session down and sign the user out
+ * mid-booking.
+ *
+ * Everything after the response — deduplication, the Contact upsert, staff
+ * email + SMS, and the in-app notification — is the backend's job. Nothing here
+ * triggers or duplicates any of it.
+ *
+ * Returns the backend's confirmation message. Failures throw an `ApiError`
+ * whose `message` is already user-facing and whose `status` / `fieldErrors` the
+ * caller can inspect.
+ */
+export async function submitCallToBook(
+  input: CallToBookInput,
+): Promise<{ message: string }> {
+  const body = stripEmpty({
+    location_id: input.locationId,
+    kind: "call_to_book",
+    name: input.name.trim(),
+    phone: input.phone.trim(),
+    email: input.email?.trim(),
+    message: input.message?.trim(),
+    entity_type: input.entityType,
+    entity_id: input.entityId,
+    entity_name: input.entityName,
+    context: input.context,
+  });
+
+  try {
+    const res = await apiRequest<SubmitResponse>("/api/checkout-concerns", {
+      method: "POST",
+      body,
+      publicEndpoint: true,
+    });
+
+    // 201 carries `data.id`; a request repeated inside the backend's 10-minute
+    // dedupe window answers 200 with a message and no id. Both mean the venue
+    // has the customer's details, so neither is an error.
+    return { message: res?.message?.trim() || SUBMIT_FALLBACK_MESSAGE };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw new ApiError(
+        callToBookErrorMessage(err),
+        err.status,
+        err.fieldErrors,
+        err.body,
+      );
+    }
+    throw err;
+  }
+}
+
+/** Turn a failed submit into something worth showing a member of staff. The
+ *  first field error wins, the way the web surfaces `errors.phone[0]`. */
+function callToBookErrorMessage(err: ApiError): string {
+  const firstFieldError = err.fieldErrors
+    ? Object.values(err.fieldErrors)[0]?.[0]
+    : undefined;
+
+  if (err.status === 422) {
+    return (
+      firstFieldError ||
+      err.message ||
+      "Please check the name and phone number and try again."
+    );
+  }
+
+  if (err.status === 429) {
+    return "Too many requests from this venue just now. Wait a moment and try again, or call the venue directly.";
+  }
+
+  // status 0 is a transport failure (offline / timeout) — apiRequest has
+  // already put a readable message on it.
+  if (err.status === 0) return err.message;
+
+  return err.message || "We could not send that. Please call the venue directly.";
 }

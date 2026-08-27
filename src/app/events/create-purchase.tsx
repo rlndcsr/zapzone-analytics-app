@@ -23,10 +23,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CallToBookCard } from "../../components/ui/CallToBookCard";
+import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { InputField } from "../../components/ui/InputField";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { eventIsCallToBook } from "../../lib/callToBook";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import {
   CARD_MONTHS,
   cardYears,
@@ -383,6 +387,18 @@ const CreateEventPurchaseScreen = () => {
   // Accept.js credentials for the event's location — fetched as soon as the
   // card method is active, exactly like the web `initializeAuthorizeNet`.
   const cardLocationId = selected?.locationId ?? selectedLocationId;
+
+  /**
+   * Call to Book: an event missing either end of its daily window has no slots
+   * to pick, so this venue books it by phone. Evaluated against the selected
+   * event at its own location — never a company-wide flag.
+   */
+  const callToBook = useMemo(
+    () => !!selected && eventIsCallToBook(selected),
+    [selected],
+  );
+  const { name: venueName, phone: venuePhone } = useVenuePhone(cardLocationId);
+  const [callToBookOpen, setCallToBookOpen] = useState(false);
   useEffect(() => {
     if (paymentMethod !== "authorize.net" || cardLocationId == null) return;
     const token = getToken();
@@ -1014,7 +1030,16 @@ const CreateEventPurchaseScreen = () => {
                 </Section>
               )}
 
-              {/* Schedule */}
+              {/* Schedule — or, for an event with no start/end time, the Call
+                  to Book card in its place. */}
+              {callToBook ? (
+                <CallToBookCard
+                  venueName={venueName}
+                  venuePhone={venuePhone}
+                  itemLabel="event"
+                  onRequestCall={() => setCallToBookOpen(true)}
+                />
+              ) : (
               <Section icon="calendar" title="Event Date & Slot">
                 <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-3">
                   Pick a date and time slot within the events schedule.
@@ -1053,8 +1078,10 @@ const CreateEventPurchaseScreen = () => {
                   </Text>
                 ) : null}
               </Section>
+              )}
 
-              {/* Payment */}
+              {/* Payment — nothing is taken online for a Call to Book event. */}
+              {callToBook ? null : (
               <Section icon="credit-card" title="Payment">
                 <View className="flex-row gap-2">
                   {(
@@ -1212,6 +1239,7 @@ const CreateEventPurchaseScreen = () => {
                   </View>
                 )}
               </Section>
+              )}
 
             </>
           )}
@@ -1300,8 +1328,9 @@ const CreateEventPurchaseScreen = () => {
             )}
           </Section>
 
-          {/* Actions */}
-          {selected && (
+          {/* Actions — no purchase action for a Call to Book event; the venue
+              takes it on the phone. */}
+          {selected && !callToBook && (
             <View className="flex-row gap-3 mt-1">
               <Pressable
                 onPress={() => router.back()}
@@ -1516,6 +1545,20 @@ const CreateEventPurchaseScreen = () => {
           })}
         </ScrollView>
       </BottomSheet>
+
+      <CallToBookSheet
+        visible={callToBookOpen}
+        onClose={() => setCallToBookOpen(false)}
+        locationId={cardLocationId ?? null}
+        venueName={venueName}
+        venuePhone={venuePhone}
+        entityType="event"
+        entityId={selected?.id ?? null}
+        entityName={selected?.name ?? null}
+        initialName={customerName}
+        initialPhone={customerPhone}
+        initialEmail={customerEmail}
+      />
     </View>
   );
 };

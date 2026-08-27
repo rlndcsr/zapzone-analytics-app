@@ -37,6 +37,18 @@ export type AttractionRow = {
   addOns: AttractionAddOn[];
   addOnsOrder: string[];
   availability: AvailabilitySchedule[];
+  /**
+   * `availability` exactly as the API sent it, before {@link mapAvailability}
+   * drops anything that is not already an array of blocks.
+   *
+   * Only the Call to Book predicate reads this. Legacy attractions store
+   * availability as `{ monday: true }`, which maps to `[]` — indistinguishable
+   * from "no schedule at all" unless the original is kept. Normalising it in
+   * `mapAvailability` instead would hand those attractions an invented
+   * 09:00–17:00 window everywhere, changing which slots the booking screens
+   * offer, so the raw value is carried alongside rather than folded in.
+   */
+  availabilityRaw: unknown;
 };
 
 type RawAttraction = {
@@ -130,6 +142,7 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
     })),
     addOnsOrder: raw.add_ons_order ?? [],
     availability: mapAvailability(raw.availability),
+    availabilityRaw: raw.availability ?? null,
   };
 }
 

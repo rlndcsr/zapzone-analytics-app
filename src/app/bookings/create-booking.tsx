@@ -31,8 +31,12 @@ import {
   parseKey,
   toKey,
 } from "../../lib/date/calendar";
+import { CallToBookCard } from "../../components/ui/CallToBookCard";
+import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
+import { packageIsCallToBook } from "../../lib/callToBook";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
+import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import {
   formatCardNumber,
   getCardType,
@@ -65,10 +69,12 @@ import {
   createBooking,
   fetchAvailableTimeSlots,
   fetchBookablePackageDetail,
+  fetchPackageAvailabilitySchedules,
   fetchPackageList,
   recordBookingPayment,
   type AvailableSlot,
   type BookablePackage,
+  type PackageAvailabilitySchedule,
   type PackageListItem,
 } from "../../services/bookingsService";
 import { searchCustomers, type CustomerHit } from "../../services/customersService";
@@ -781,6 +787,33 @@ const CreateBookingScreen = () => {
     };
   }, [pkg, scheduledDate]);
 
+  /**
+   * Call to Book: whether the selected package has any usable schedule at all.
+   * The package list this screen browses is the slim one, which carries no
+   * schedules, so they are read from the same endpoint manual-booking uses.
+   * `null` means "not known yet" — the booking UI is left alone until it is.
+   */
+  const [pkgSchedules, setPkgSchedules] = useState<
+    PackageAvailabilitySchedule[] | null
+  >(null);
+  useEffect(() => {
+    setPkgSchedules(null);
+    if (!pkg) return;
+    const token = getToken();
+    if (!token) return;
+    let active = true;
+    fetchPackageAvailabilitySchedules(token, pkg.id)
+      .then((s) => active && setPkgSchedules(s))
+      .catch(() => active && setPkgSchedules(null));
+    return () => {
+      active = false;
+    };
+  }, [pkg]);
+
+  const callToBook =
+    !!pkg && pkgSchedules !== null && packageIsCallToBook(pkgSchedules);
+  const [callToBookOpen, setCallToBookOpen] = useState(false);
+
   // ---- Pricing math (mirrors the web calculateTotal) -----------------------
   const subtotal = useMemo(() => {
     if (!pkg) return 0;
@@ -830,6 +863,10 @@ const CreateBookingScreen = () => {
   );
 
   const effectiveLocationId = pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
+
+  /** Venue name + number for the Call to Book card — the booking's own venue. */
+  const { name: venueName, phone: venuePhone } =
+    useVenuePhone(effectiveLocationId);
 
   // Accept.js credentials for the booking's location — fetched as soon as the
   // card method is active, exactly like the web `initializeAuthorizeNet`.
@@ -1512,8 +1549,19 @@ const CreateBookingScreen = () => {
                 </View>
               </View>
 
-              {/* Time slots — radio cards showing start and end, as on the web. */}
+              {/* Time slots — radio cards showing start and end, as on the web.
+                  With no usable schedule at this venue there is nothing to pick,
+                  so the Call to Book card takes their place. */}
               <View className="mt-5 border-t border-gray-100 pt-4 dark:border-neutral-800">
+                {callToBook ? (
+                  <CallToBookCard
+                    venueName={venueName}
+                    venuePhone={venuePhone}
+                    itemLabel="package"
+                    onRequestCall={() => setCallToBookOpen(true)}
+                  />
+                ) : (
+                <>
                 <View className="mb-2 flex-row items-center gap-1.5">
                   <Feather name="clock" size={14} color="#6B7280" />
                   <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -1599,6 +1647,8 @@ const CreateBookingScreen = () => {
                       );
                     })}
                   </View>
+                )}
+                </>
                 )}
               </View>
 
@@ -2859,6 +2909,13 @@ const CreateBookingScreen = () => {
               <Text className="text-sm font-semibold text-white">Continue</Text>
               <Feather name="chevron-right" size={18} color="#FFFFFF" />
             </Pressable>
+          ) : callToBook ? (
+            // Nothing to confirm online — the venue takes this on the phone.
+            <View className="flex-1 h-14 items-center justify-center rounded-lg border border-teal-200 dark:border-teal-900/40 bg-teal-50 dark:bg-teal-900/20 px-3">
+              <Text className="text-xs font-semibold text-teal-800 dark:text-teal-300 text-center">
+                Booked by phone — use Call to Book above
+              </Text>
+            </View>
           ) : (
             <Pressable
               onPress={handleSubmit}
@@ -2882,6 +2939,19 @@ const CreateBookingScreen = () => {
         </View>
       </KeyboardAvoidingView>
 
+      <CallToBookSheet
+        visible={callToBookOpen}
+        onClose={() => setCallToBookOpen(false)}
+        locationId={effectiveLocationId}
+        venueName={venueName}
+        venuePhone={venuePhone}
+        entityType="package"
+        entityId={pkg?.id ?? null}
+        entityName={pkg?.name ?? null}
+        initialName={customerName}
+        initialPhone={customerPhone}
+        initialEmail={customerEmail}
+      />
     </View>
   );
 };

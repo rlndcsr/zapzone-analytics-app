@@ -1107,6 +1107,10 @@ export type PackageAvailabilitySchedule = {
   availabilityType: "daily" | "weekly" | "monthly" | string;
   dayConfiguration: string[] | null;
   isActive: boolean;
+  /** Daily window, "HH:MM". Null when the row never had one — which is what
+   *  makes a schedule unusable, and the package Call to Book. */
+  timeSlotStart: string | null;
+  timeSlotEnd: string | null;
 };
 
 /** A concrete open slot from the mobile availability endpoint. */
@@ -1193,6 +1197,8 @@ export async function fetchPackageAvailabilitySchedules(
       ? s.day_configuration.map((d: string) => String(d).toLowerCase())
       : null,
     isActive: s.is_active !== false,
+    timeSlotStart: s.time_slot_start ?? null,
+    timeSlotEnd: s.time_slot_end ?? null,
   }));
 }
 

@@ -21,6 +21,11 @@ import {
   ToggleRow,
   type SelectOption,
 } from "../../components/ui/FormControls";
+import { CallToBookNotice } from "../../components/ui/attractionFormKit";
+import {
+  packageIsCallToBook,
+  type PackageScheduleLike,
+} from "../../lib/callToBook";
 import { markPackagesStale } from "../../lib/hooks/usePackages";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
@@ -136,6 +141,22 @@ type SchedRow = {
   interval: string;
   isActive: boolean;
 };
+
+/** One editor row in the shape `packageIsCallToBook` reads. Times are passed
+ *  through as typed — unlike the save payload, which substitutes defaults for
+ *  blanks — so a row with no times correctly reads as unusable here. */
+const toScheduleLike = (s: SchedRow): PackageScheduleLike => ({
+  availabilityType: s.type,
+  dayConfiguration:
+    s.type === "weekly"
+      ? s.weekDays
+      : s.type === "monthly"
+        ? [`${s.occurrence}-${s.monthlyDay}`]
+        : [],
+  timeSlotStart: s.start || null,
+  timeSlotEnd: s.end || null,
+  isActive: s.isActive,
+});
 
 /* --- Small presentational helpers --------------------------------------- */
 
@@ -1143,6 +1164,11 @@ const CreatePackage = () => {
           {/* STEP 6 — Availability */}
           {step === 5 && (
             <View className="gap-4">
+              {/* What these schedules mean for the customer site. */}
+              <CallToBookNotice
+                active={packageIsCallToBook(schedules.map(toScheduleLike))}
+                itemLabel="package"
+              />
               <Text className="text-xs text-gray-400 dark:text-gray-500">
                 At least one schedule is required (matches the web admin).
               </Text>

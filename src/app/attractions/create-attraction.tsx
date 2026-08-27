@@ -32,10 +32,10 @@ import {
   PRIMARY,
   Section,
   SelectRow,
-  TIME_OPTIONS,
 } from "../../components/ui/attractionFormKit";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { InputField } from "../../components/ui/InputField";
+import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { markAttractionsStale } from "../../lib/hooks/useAttractions";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -949,47 +949,27 @@ const CreateAttractionScreen = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Time picker */}
-      <BottomSheet
+      {/* Time picker — free hour/minute wheels, so any time is selectable. */}
+      <TimePickerSheet
         visible={sheet?.kind === "time"}
+        value={
+          sheet?.kind === "time"
+            ? (schedules[sheet.index]?.[sheet.field] ?? "09:00")
+            : "09:00"
+        }
+        title={
+          sheet?.kind === "time" && sheet.field === "start_time"
+            ? "Start Time"
+            : "End Time"
+        }
         onClose={() => setSheet(null)}
-        title={sheet?.kind === "time" && sheet.field === "start_time" ? "Start Time" : "End Time"}
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {TIME_OPTIONS.map((t) => {
-            const current =
-              sheet?.kind === "time"
-                ? schedules[sheet.index]?.[sheet.field]
-                : undefined;
-            const isSelected = current === t;
-            return (
-              <Pressable
-                key={t}
-                onPress={() => {
-                  if (sheet?.kind === "time") {
-                    setScheduleTime(sheet.index, sheet.field, t);
-                  }
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3 rounded-lg mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {formatTime(t)}
-                </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
+        onSelect={(time) => {
+          if (sheet?.kind === "time") {
+            setScheduleTime(sheet.index, sheet.field, time);
+          }
+          setSheet(null);
+        }}
+      />
     </View>
   );
 };

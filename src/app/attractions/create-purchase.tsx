@@ -24,11 +24,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CallToBookCard } from "../../components/ui/CallToBookCard";
+import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { mediaUrl } from "../../lib/api";
+import {
+  attractionIsCallToBook,
+  eventIsCallToBook,
+} from "../../lib/callToBook";
+import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import { convertTo12Hour } from "../../lib/time";
 import {
   availableTimeSlotsForDate,
@@ -523,6 +530,26 @@ const CreatePurchaseScreen = () => {
     selected?.locationId ??
     selectedEvent?.locationId ??
     null;
+  /**
+   * Call to Book, evaluated per selected item at its OWN location — never a
+   * global flag. The attraction reads `availabilityRaw` so a legacy
+   * `{ monday: true }` attraction stays bookable (see lib/callToBook).
+   */
+  const attractionCallToBook = useMemo(
+    () => !!selected && attractionIsCallToBook(selected.availabilityRaw),
+    [selected],
+  );
+  const eventCallToBook = useMemo(
+    () => !!selectedEvent && eventIsCallToBook(selectedEvent),
+    [selectedEvent],
+  );
+  const attractionVenue = useVenuePhone(selected?.locationId ?? null);
+  const eventVenue = useVenuePhone(selectedEvent?.locationId ?? null);
+  /** Which item's callback sheet is open, if any. */
+  const [callToBookOpen, setCallToBookOpen] = useState<
+    "attraction" | "event" | null
+  >(null);
+
   const submitLockRef = useRef(false);
   /** Web parity (`lastSubmitTimeRef`): a 3s cooldown after any submit, so a
    *  double-tap can never produce a second card charge. */
@@ -1638,6 +1665,19 @@ const CreatePurchaseScreen = () => {
                     </Pressable>
                   </View>
 
+                  {/* An event with no start/end time has nothing to pick, so
+                      the venue books it by phone instead. */}
+                  {eventCallToBook ? (
+                    <View className="mt-4">
+                      <CallToBookCard
+                        venueName={eventVenue.name}
+                        venuePhone={eventVenue.phone}
+                        itemLabel="event"
+                        onRequestCall={() => setCallToBookOpen("event")}
+                      />
+                    </View>
+                  ) : (
+                  <>
                   <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                     Event date
                   </Text>
@@ -1754,7 +1794,11 @@ const CreatePurchaseScreen = () => {
                       No available time slots for this date.
                     </Text>
                   )}
+                  </>
+                  )}
 
+                  {eventCallToBook ? null : (
+                  <>
                   <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                     Tickets
                   </Text>
@@ -1775,6 +1819,8 @@ const CreatePurchaseScreen = () => {
                       {eventSlotLeft} ticket{eventSlotLeft === 1 ? "" : "s"} left
                       for this time
                     </Text>
+                  )}
+                  </>
                   )}
                 </View>
               ) : loadingEvents ? (
@@ -1971,8 +2017,21 @@ const CreatePurchaseScreen = () => {
                   </View>
                 )}
 
+                {/* No usable availability at this venue → booked by phone, so
+                    the schedule picker is replaced rather than left empty. */}
+                {attractionCallToBook && (
+                  <View className="mt-6 pt-5 border-t border-gray-100 dark:border-neutral-800">
+                    <CallToBookCard
+                      venueName={attractionVenue.name}
+                      venuePhone={attractionVenue.phone}
+                      itemLabel="attraction"
+                      onRequestCall={() => setCallToBookOpen("attraction")}
+                    />
+                  </View>
+                )}
+
                 {/* Schedule */}
-                {selected.availability.length > 0 && (
+                {!attractionCallToBook && selected.availability.length > 0 && (
                   <View className="mt-6 pt-5 border-t border-gray-100 dark:border-neutral-800">
                     <View className="flex-row items-center gap-2 mb-1">
                       <Feather name="calendar" size={14} color="#6B7280" />
@@ -2685,6 +2744,36 @@ const CreatePurchaseScreen = () => {
           })}
         </ScrollView>
       </BottomSheet>
+
+      {/* Callback request for whichever item is booked by phone. The venue and
+          entity always come from the item's own location. */}
+      <CallToBookSheet
+        visible={callToBookOpen !== null}
+        onClose={() => setCallToBookOpen(null)}
+        locationId={
+          (callToBookOpen === "event"
+            ? selectedEvent?.locationId
+            : selected?.locationId) ?? null
+        }
+        venueName={
+          callToBookOpen === "event" ? eventVenue.name : attractionVenue.name
+        }
+        venuePhone={
+          callToBookOpen === "event" ? eventVenue.phone : attractionVenue.phone
+        }
+        entityType={callToBookOpen === "event" ? "event" : "attraction"}
+        entityId={
+          (callToBookOpen === "event" ? selectedEvent?.id : selected?.id) ?? null
+        }
+        entityName={
+          (callToBookOpen === "event"
+            ? selectedEvent?.name
+            : selected?.name) ?? null
+        }
+        initialName={customerName}
+        initialPhone={customerPhone}
+        initialEmail={customerEmail}
+      />
     </View>
   );
 };

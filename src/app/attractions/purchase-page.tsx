@@ -28,12 +28,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CallToBookCard } from "../../components/ui/CallToBookCard";
+import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { CountryPickerSheet } from "../../components/ui/CountryPickerSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { mediaUrl } from "../../lib/api";
+import { attractionIsCallToBook } from "../../lib/callToBook";
 import { countryName } from "../../lib/countries";
+import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import {
   availableTimeSlotsForDate,
   computeDayOffAvailability,
@@ -459,6 +463,20 @@ const PurchasePageScreen = () => {
       }),
     [dayOffs, detail?.id, detail?.availability, today],
   );
+
+  /**
+   * No usable availability at this venue → the venue books this attraction by
+   * phone. Evaluated from `availabilityRaw` so a legacy `{ monday: true }`
+   * attraction still counts as bookable (see lib/callToBook).
+   */
+  const callToBook = useMemo(
+    () => !!detail && attractionIsCallToBook(detail.availabilityRaw),
+    [detail],
+  );
+  const { name: venueName, phone: venuePhone } = useVenuePhone(
+    detail?.locationId ?? null,
+  );
+  const [callToBookOpen, setCallToBookOpen] = useState(false);
 
   // Time slots for the selected day: the weekday's availability window minus
   // any partial-closure hours — mirrors the web time-slot recompute.
@@ -1066,7 +1084,16 @@ const PurchasePageScreen = () => {
               )}
             </Section>
 
-            {/* Schedule */}
+            {/* Schedule — or, with no usable availability at this venue, the
+                Call to Book card in its place. */}
+            {callToBook ? (
+              <CallToBookCard
+                venueName={venueName ?? detail.locationName}
+                venuePhone={venuePhone}
+                itemLabel="attraction"
+                onRequestCall={() => setCallToBookOpen(true)}
+              />
+            ) : (
             <Section icon="calendar" title="Schedule Visit">
               <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-3">
                 Select your preferred visit date and time.
@@ -1109,6 +1136,7 @@ const PurchasePageScreen = () => {
                 </Text>
               )}
             </Section>
+            )}
 
             {/* Add-ons */}
             {orderedAddOns.length > 0 && (
@@ -1534,6 +1562,9 @@ const PurchasePageScreen = () => {
               )}
             </Section>
 
+            {/* No online payment for a Call to Book attraction — the venue
+                takes the booking on the phone. */}
+            {callToBook ? null : (
             <Pressable
               onPress={handlePurchase}
               disabled={submitDisabled}
@@ -1563,9 +1594,24 @@ const PurchasePageScreen = () => {
                 </>
               )}
             </Pressable>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <CallToBookSheet
+        visible={callToBookOpen}
+        onClose={() => setCallToBookOpen(false)}
+        locationId={detail?.locationId ?? null}
+        venueName={venueName ?? detail?.locationName}
+        venuePhone={venuePhone}
+        entityType="attraction"
+        entityId={detail?.id ?? null}
+        entityName={detail?.name ?? null}
+        initialName={`${firstName.trim()} ${lastName.trim()}`.trim()}
+        initialPhone={phone}
+        initialEmail={email}
+      />
 
       {/* Date picker — native calendar (browse months, tap a day). Past dates
           are disabled; the selected date flows through the same `scheduledDate`

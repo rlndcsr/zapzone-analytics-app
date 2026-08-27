@@ -10,6 +10,7 @@ import {
 } from "react-native";
 
 import { formatDurationDisplay } from "../../lib/attractions/attractionDisplay";
+import { attractionIsCallToBook } from "../../lib/callToBook";
 import type { AvailabilitySchedule } from "../../services/attractionsService";
 
 export const PRIMARY = "#0644C7";
@@ -76,17 +77,15 @@ export const money = (n: number) => `$${n.toFixed(2)}`;
 
 /**
  * Whether an attraction would fall back to "Call to Book": true when no
- * schedule is usable, i.e. none has at least one day and both times. Mirrors the
- * web's `attractionIsCallToBook`, so both apps decide it the same way.
+ * schedule is usable, i.e. none has at least one day and both times.
+ *
+ * Delegates to the shared predicate so the create/edit forms and the purchase
+ * screens can never drift apart. Identical behaviour for the schedule arrays
+ * these forms hold — the shared version additionally understands the legacy
+ * object form, which the editors never produce.
  */
 export const isCallToBook = (availability: AvailabilitySchedule[]): boolean =>
-  !availability.some(
-    (block) =>
-      Array.isArray(block.days) &&
-      block.days.length > 0 &&
-      !!block.start_time &&
-      !!block.end_time,
-  );
+  attractionIsCallToBook(availability);
 
 /**
  * What the schedules below mean for the customer site — the mobile twin of the
