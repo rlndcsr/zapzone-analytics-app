@@ -42,11 +42,16 @@ import {
   availableTimeSlotsForDate,
   computeDayOffAvailability,
 } from "../../lib/attractions/dayOffAvailability";
+import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+} from "../../lib/addOnQuantity";
 import { formatFullDate, toKey } from "../../lib/date/calendar";
 import {
   buildSlotRemainingMap,
   clampToRemaining,
   isLowRemaining,
+  isSoldOut,
   quantityCeiling,
   remainingForSlot,
   type SlotRemainingMap,
@@ -542,8 +547,17 @@ const PurchasePageScreen = () => {
     purchaseTime: "",
   });
 
-  const setAddon = (addonId: number, n: number) =>
-    setAddonQty((prev) => ({ ...prev, [addonId]: n }));
+  /**
+   * Apply an add-on quantity, clamped to its own min/max. Attraction add-ons are
+   * never "forced" — that flag is scoped to packages — so no package is passed.
+   */
+  const setAddon = (addonId: number, n: number) => {
+    const addOn = orderedAddOns.find((a) => a.id === addonId);
+    setAddonQty((prev) => ({
+      ...prev,
+      [addonId]: clampAddOnQuantity(addOn, null, prev[addonId] ?? 0, n),
+    }));
+  };
 
   const cardValid = validateCardNumber(cardNumber);
   // Same disabled rule as the web Pay button.
@@ -1163,13 +1177,14 @@ const PurchasePageScreen = () => {
                       </Text>
                       <Text className="text-xs text-gray-400">
                         {money(addOn.price)} each
+                        {addOn.minQuantity > 1 ? ` · min ${addOn.minQuantity}` : ""}
                       </Text>
                     </View>
                     <Stepper
                       value={addonQty[addOn.id] ?? 0}
                       onChange={(n) => setAddon(addOn.id, n)}
                       min={0}
-                      max={addOn.maxQuantity}
+                      max={addOn.maxQuantity || DEFAULT_MAX_QUANTITY}
                     />
                   </View>
                 ))}
@@ -1700,6 +1715,7 @@ const PurchasePageScreen = () => {
             availableTimeSlots.map((t) => {
               const isSelected = scheduledTime === t;
               const left = remainingForSlot(slotRemaining, t);
+              const soldOut = isSoldOut(left);
               return (
                 <Pressable
                   key={t}
@@ -1710,16 +1726,24 @@ const PurchasePageScreen = () => {
                     setQuantity((prev) => clampToRemaining(prev, left));
                     setSheet(null);
                   }}
+                  disabled={soldOut}
+                  accessibilityState={{ disabled: soldOut }}
                   className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                    soldOut
+                      ? "opacity-50"
+                      : isSelected
+                        ? "bg-blue-50 dark:bg-blue-900/20"
+                        : ""
                   }`}
                 >
                   <View className="flex-row items-baseline gap-2">
                     <Text
                       className={`text-base font-medium ${
-                        isSelected
-                          ? "text-blue-600 dark:text-blue-400"
-                          : "text-gray-700 dark:text-gray-200"
+                        soldOut
+                          ? "text-gray-400 dark:text-gray-500"
+                          : isSelected
+                            ? "text-blue-600 dark:text-blue-400"
+                            : "text-gray-700 dark:text-gray-200"
                       }`}
                     >
                       {formatTime(t)}
@@ -1727,12 +1751,14 @@ const PurchasePageScreen = () => {
                     {left != null && (
                       <Text
                         className={`text-xs font-semibold ${
-                          isLowRemaining(left)
-                            ? "text-amber-600 dark:text-amber-400"
-                            : "text-emerald-600 dark:text-emerald-400"
+                          soldOut
+                            ? "text-red-600 dark:text-red-400"
+                            : isLowRemaining(left)
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-emerald-600 dark:text-emerald-400"
                         }`}
                       >
-                        — {left} left
+                        {soldOut ? "— Sold out" : `— ${left} left`}
                       </Text>
                     )}
                   </View>

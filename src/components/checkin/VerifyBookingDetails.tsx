@@ -3,6 +3,7 @@ import * as Clipboard from "expo-clipboard";
 import React from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
+import { formatDuration } from "../../lib/time";
 import { launchKioskSession } from "../../lib/waivers/kiosk";
 import type { BookingDetail } from "../../services/bookingsService";
 import type {
@@ -99,25 +100,81 @@ function InfoTile({
   );
 }
 
+/** Status banner wording and colour, mirroring the web's Booking Details modal. */
+const DETAILS_BANNER: Record<
+  string,
+  { title: string; body: string; icon: IconName; tint: string; box: string }
+> = {
+  "checked-in": {
+    title: "Checked In",
+    body: "This booking has been checked in.",
+    icon: "check-circle",
+    tint: "#16A34A",
+    box: "border-green-200 bg-green-50 dark:border-green-900/40 dark:bg-green-900/20",
+  },
+  completed: {
+    title: "Booking Completed",
+    body: "This booking has been completed.",
+    icon: "check-circle",
+    tint: "#2563EB",
+    box: "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/20",
+  },
+  cancelled: {
+    title: "Booking Cancelled",
+    body: "This booking has been cancelled.",
+    icon: "x-circle",
+    tint: "#DC2626",
+    box: "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/20",
+  },
+  confirmed: {
+    title: "Confirmed Booking",
+    body: "This booking is confirmed and ready to be checked in.",
+    icon: "alert-circle",
+    tint: "#CA8A04",
+    box: "border-yellow-200 bg-yellow-50 dark:border-yellow-900/40 dark:bg-yellow-900/20",
+  },
+};
+
+const BANNER_TEXT: Record<string, string> = {
+  "checked-in": "text-green-800 dark:text-green-300",
+  completed: "text-blue-800 dark:text-blue-300",
+  cancelled: "text-red-800 dark:text-red-300",
+  confirmed: "text-yellow-800 dark:text-yellow-300",
+};
+
+const BANNER_BODY_TEXT: Record<string, string> = {
+  "checked-in": "text-green-600 dark:text-green-400",
+  completed: "text-blue-600 dark:text-blue-400",
+  cancelled: "text-red-600 dark:text-red-400",
+  confirmed: "text-yellow-700 dark:text-yellow-400",
+};
+
 /** The rich, read-only "Verify Booking Details" body (mirrors the web modal). */
 export function VerifyBookingDetails({
   detail,
   waivers,
   onCheckInWaiver,
   checkingWaiverId,
+  variant = "verify",
 }: {
   detail: BookingDetail;
   waivers: EntityWaivers | null;
   onCheckInWaiver: (waiverId: number) => void;
   checkingWaiverId: number | null;
+  /**
+   * "verify" heads the body with the scan review's Scheduled + Valid Booking
+   * banners and its "check this person in now?" prompt. "details" heads it with
+   * a single status banner instead — the same body reached from a list's
+   * Details action, where nothing is being approved.
+   */
+  variant?: "verify" | "details";
 }) {
   const time = fmtTime(detail.time);
   const dateTime = detail.date
     ? `${fmtDate(detail.date)}${time ? ` at ${time}` : ""}`
     : "—";
-  const durationLabel = detail.duration
-    ? `${detail.duration} ${detail.durationUnit}`
-    : "—";
+  const durationLabel = formatDuration(detail.duration, detail.durationUnit);
+  const banner = DETAILS_BANNER[(detail.status ?? "").toLowerCase()] ?? null;
 
   const [launchingKiosk, setLaunchingKiosk] = React.useState(false);
 
@@ -142,36 +199,65 @@ export function VerifyBookingDetails({
 
   return (
     <View>
-      {/* Scheduled banner */}
-      <View className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/20">
-        <View className="flex-row items-center justify-center gap-2">
-          <Feather name="clock" size={18} color="#0644C7" />
-          <Text className="text-base font-bold text-[#0644C7] dark:text-blue-300">
-            {time ? `Scheduled for ${time}` : "Scheduled"}
-          </Text>
-        </View>
-        {!!detail.date && (
-          <Text className="mt-1 text-center text-sm text-gray-600 dark:text-gray-300">
-            {fmtDate(detail.date)}
-          </Text>
-        )}
-        <Text className="mt-2 text-center text-sm text-[#0644C7] dark:text-blue-300">
-          Would you like to check this person in now?
-        </Text>
-      </View>
+      {variant === "details" ? (
+        /* One status banner — the head of the web's Booking Details modal. */
+        banner && (
+          <View className={`flex-row gap-3 rounded-2xl border p-4 ${banner.box}`}>
+            <Feather name={banner.icon} size={18} color={banner.tint} />
+            <View className="flex-1">
+              <Text
+                className={`text-base font-bold ${
+                  BANNER_TEXT[detail.status?.toLowerCase() ?? ""] ??
+                  "text-gray-900 dark:text-white"
+                }`}
+              >
+                {banner.title}
+              </Text>
+              <Text
+                className={`mt-0.5 text-sm ${
+                  BANNER_BODY_TEXT[detail.status?.toLowerCase() ?? ""] ??
+                  "text-gray-600 dark:text-gray-300"
+                }`}
+              >
+                {banner.body}
+              </Text>
+            </View>
+          </View>
+        )
+      ) : (
+        <>
+          {/* Scheduled banner */}
+          <View className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/20">
+            <View className="flex-row items-center justify-center gap-2">
+              <Feather name="clock" size={18} color="#0644C7" />
+              <Text className="text-base font-bold text-[#0644C7] dark:text-blue-300">
+                {time ? `Scheduled for ${time}` : "Scheduled"}
+              </Text>
+            </View>
+            {!!detail.date && (
+              <Text className="mt-1 text-center text-sm text-gray-600 dark:text-gray-300">
+                {fmtDate(detail.date)}
+              </Text>
+            )}
+            <Text className="mt-2 text-center text-sm text-[#0644C7] dark:text-blue-300">
+              Would you like to check this person in now?
+            </Text>
+          </View>
 
-      {/* Valid booking banner */}
-      <View className="mt-4 rounded-2xl border border-green-100 bg-green-50/70 p-4 dark:border-green-900/40 dark:bg-green-900/20">
-        <View className="flex-row items-center gap-2">
-          <Feather name="check-circle" size={18} color="#16A34A" />
-          <Text className="text-base font-bold text-green-700 dark:text-green-400">
-            Valid Booking
-          </Text>
-        </View>
-        <Text className="mt-0.5 text-sm text-green-700/90 dark:text-green-400/90">
-          This booking is ready to be checked in.
-        </Text>
-      </View>
+          {/* Valid booking banner */}
+          <View className="mt-4 rounded-2xl border border-green-100 bg-green-50/70 p-4 dark:border-green-900/40 dark:bg-green-900/20">
+            <View className="flex-row items-center gap-2">
+              <Feather name="check-circle" size={18} color="#16A34A" />
+              <Text className="text-base font-bold text-green-700 dark:text-green-400">
+                Valid Booking
+              </Text>
+            </View>
+            <Text className="mt-0.5 text-sm text-green-700/90 dark:text-green-400/90">
+              This booking is ready to be checked in.
+            </Text>
+          </View>
+        </>
+      )}
 
       {/* Waivers */}
       {waivers && (

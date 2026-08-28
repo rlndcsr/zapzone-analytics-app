@@ -623,6 +623,32 @@ const CompanyPerformanceAnalytics = () => {
                 </Panel>
               )}
 
+              {/* Minor Age Brackets — the backend always returns the four
+                  buckets, so an all-zero result means no minors were covered:
+                  say so rather than draw four empty bars. Same shape as the
+                  adult panel above. */}
+              {!!report.waivers && (
+                <Panel
+                  icon={Baby}
+                  title="Minor Age Brackets"
+                  info="Ages of the minors covered by signed waivers, computed from each minor's date of birth as of the waiver date."
+                >
+                  {!report.waivers.minorAgeBrackets.some((b) => b.count > 0) ? (
+                    <Text className="text-sm text-gray-400 dark:text-gray-500">
+                      No data.
+                    </Text>
+                  ) : (
+                    <BarChart
+                      data={report.waivers.minorAgeBrackets.map((b) => ({
+                        label: b.bracket,
+                        value: b.count,
+                      }))}
+                      height={200}
+                    />
+                  )}
+                </Panel>
+              )}
+
               {/* Waivers by Source */}
               {!!report.waivers && report.waivers.bySource.length > 0 && (
                 <Panel

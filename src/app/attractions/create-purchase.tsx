@@ -50,10 +50,16 @@ import {
   buildSlotRemainingMap,
   clampToRemaining,
   isLowRemaining,
+  isSoldOut,
   quantityCeiling,
   remainingForSlot,
   type SlotRemainingMap,
 } from "../../lib/ticketLimits";
+import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+} from "../../lib/addOnQuantity";
+import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
@@ -802,12 +808,14 @@ const CreatePurchaseScreen = () => {
     (selectedEvent.maxTicketsPerSlot != null ||
       selectedEvent.maxBookingsPerSlot != null);
 
-  const discountNum = Math.max(0, Number(discount) || 0);
-
   // Same pricing pipeline as the web: base = subtotal + add-ons − manual
   // discount, then server-side fees applied and special pricing subtracted.
+  // The hook bounds the typed discount, so `discountNum` below is the effective
+  // one — never negative, never more than the order is worth.
   const {
     subtotal,
+    discountCeiling,
+    discountNum,
     feeBreakdown,
     specialPricing,
     specialPricingDiscount,
@@ -819,7 +827,7 @@ const CreatePurchaseScreen = () => {
     entityType: "attraction",
     quantity,
     addonQty,
-    discountNum,
+    discountNum: Number(discount) || 0,
     purchaseDate: scheduledDate,
     purchaseTime: scheduledTime,
   });
@@ -828,8 +836,17 @@ const CreatePurchaseScreen = () => {
   // `purchase_date`. Computed once, timezone-safe.
   const todayKey = useMemo(() => toKey(new Date()), []);
 
-  const setAddon = (id: number, n: number) =>
-    setAddonQty((prev) => ({ ...prev, [id]: n }));
+  /**
+   * Apply an add-on quantity, clamped to its own min/max. Attraction add-ons are
+   * never "forced" — that flag is scoped to packages — so no package is passed.
+   */
+  const setAddon = (id: number, n: number) => {
+    const addOn = selected?.addOns.find((a) => a.id === id);
+    setAddonQty((prev) => ({
+      ...prev,
+      [id]: clampAddOnQuantity(addOn, null, prev[id] ?? 0, n),
+    }));
+  };
 
   /* ------------------------------------------------------- bulk ordering -- */
 
@@ -1405,12 +1422,15 @@ const CreatePurchaseScreen = () => {
     const isPayLater = paymentMethod === "paylater";
     // Web parity: a card always pays the full total; cash honours the typed
     // amount and falls back to the total; pay-later collects nothing now.
+    // A cash amount is bounded by the order total, so an over-typed figure can
+    // never be recorded as paid.
+    const typedPaid = clampAmount(amountPaid, total);
     const paid = isPayLater
       ? 0
       : isCardPayment
         ? total
-        : Number(amountPaid) > 0
-          ? Number(amountPaid)
+        : typedPaid > 0
+          ? typedPaid
           : total;
 
     const input: CreateAttractionPurchaseInput = {
@@ -1739,6 +1759,7 @@ const CreatePurchaseScreen = () => {
                         {eventSlots.map((slot) => {
                           const active = eventTime === slot;
                           const left = eventSlotsLeft?.[slot] ?? null;
+                          const soldOut = isSoldOut(left);
                           return (
                             <Pressable
                               key={slot}
@@ -1748,17 +1769,23 @@ const CreatePurchaseScreen = () => {
                                   clampToRemaining(prev, left),
                                 );
                               }}
+                              disabled={soldOut}
+                              accessibilityState={{ disabled: soldOut }}
                               className={`mx-1 items-center rounded-lg border px-3 py-2 ${
-                                active
-                                  ? "border-[#0644C7] bg-[#0644C7]"
-                                  : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                                soldOut
+                                  ? "border-gray-200 bg-gray-50 opacity-50 dark:border-neutral-800 dark:bg-neutral-900"
+                                  : active
+                                    ? "border-[#0644C7] bg-[#0644C7]"
+                                    : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
                               }`}
                             >
                               <Text
                                 className={`text-xs font-semibold ${
-                                  active
-                                    ? "text-white"
-                                    : "text-gray-700 dark:text-gray-200"
+                                  soldOut
+                                    ? "text-gray-400 dark:text-gray-500"
+                                    : active
+                                      ? "text-white"
+                                      : "text-gray-700 dark:text-gray-200"
                                 }`}
                               >
                                 {convertTo12Hour(slot)}
@@ -1769,14 +1796,16 @@ const CreatePurchaseScreen = () => {
                               {left != null && (
                                 <Text
                                   className={`text-[10px] font-semibold ${
-                                    active
-                                      ? "text-white/80 dark:text-white/80"
-                                      : isLowRemaining(left)
-                                        ? "text-amber-600 dark:text-amber-400"
-                                        : "text-emerald-600 dark:text-emerald-400"
+                                    soldOut
+                                      ? "text-red-600 dark:text-red-400"
+                                      : active
+                                        ? "text-white/80 dark:text-white/80"
+                                        : isLowRemaining(left)
+                                          ? "text-amber-600 dark:text-amber-400"
+                                          : "text-emerald-600 dark:text-emerald-400"
                                   }`}
                                 >
-                                  {left} left
+                                  {soldOut ? "Sold out" : `${left} left`}
                                 </Text>
                               )}
                             </Pressable>
@@ -1943,6 +1972,9 @@ const CreatePurchaseScreen = () => {
                     label="Discount ($)"
                     value={discount}
                     onChangeText={setDiscount}
+                    onBlur={() =>
+                      setDiscount(clampAmountText(discount, discountCeiling))
+                    }
                     placeholder="0"
                     keyboardType="decimal-pad"
                     containerClassName="mb-4"
@@ -1957,6 +1989,7 @@ const CreatePurchaseScreen = () => {
                   }
                   value={paymentMethod === "paylater" ? "0" : amountPaid}
                   onChangeText={setAmountPaid}
+                  onBlur={() => setAmountPaid(clampAmountText(amountPaid, total))}
                   editable={paymentMethod !== "paylater"}
                   placeholder="0.00"
                   keyboardType="decimal-pad"
@@ -2004,13 +2037,14 @@ const CreatePurchaseScreen = () => {
                           </Text>
                           <Text className="text-[10px] text-gray-500 dark:text-gray-400">
                             {money(addOn.price)} each
+                            {addOn.minQuantity > 1 ? ` · min ${addOn.minQuantity}` : ""}
                           </Text>
                         </View>
                         <Stepper
                           value={addonQty[addOn.id] ?? 0}
                           onChange={(n) => setAddon(addOn.id, n)}
                           min={0}
-                          max={addOn.maxQuantity}
+                          max={addOn.maxQuantity || DEFAULT_MAX_QUANTITY}
                         />
                       </View>
                     ))}

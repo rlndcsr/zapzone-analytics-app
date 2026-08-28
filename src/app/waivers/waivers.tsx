@@ -863,6 +863,14 @@ const Waivers = () => {
                       </Text>{" "}
                       minor{periodSummary.minorsCovered === 1 ? "" : "s"}
                     </Text>
+                    {periodSummary.minorAgeBrackets.some((b) => b.count > 0) && (
+                      <Text className="mt-1 text-xs leading-4 text-gray-500 dark:text-gray-400">
+                        Minors by age (at signing):{" "}
+                        {periodSummary.minorAgeBrackets
+                          .map((b) => `${b.bracket}: ${b.count}`)
+                          .join(" · ")}
+                      </Text>
+                    )}
                     <Text className="mt-1 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
                       Counted the way the company dashboard counts, for the same
                       period — so total should match the dashboard&apos;s waiver

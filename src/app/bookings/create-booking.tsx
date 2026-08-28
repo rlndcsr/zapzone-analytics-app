@@ -34,6 +34,18 @@ import {
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { packageIsCallToBook } from "../../lib/callToBook";
+import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+  getAddOnMinQuantity,
+  isForceAddOn,
+  seedForcedAddOns,
+} from "../../lib/addOnQuantity";
+import {
+  clampParticipants,
+  participantMax,
+  participantMin,
+} from "../../lib/participants";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
@@ -47,7 +59,8 @@ import {
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { getCurrentUser, getToken } from "../../lib/session";
-import { isLowRemaining } from "../../lib/ticketLimits";
+import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
+import { formatDuration } from "../../lib/time";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -225,6 +238,10 @@ const AddOnRow = ({
   price,
   qty,
   image,
+  note,
+  noteTone = "muted",
+  min = 0,
+  max = DEFAULT_MAX_QUANTITY,
   onAdd,
   onChange,
 }: {
@@ -233,6 +250,12 @@ const AddOnRow = ({
   qty: number;
   /** Thumbnail URL; falls back to the "No Image" tile when absent. */
   image?: string | null;
+  /** Quantity-rule hint ("Required · min 2", "Min 3"), or null when unbounded. */
+  note?: string | null;
+  noteTone?: "muted" | "required";
+  /** Stepper floor — above 0 for a required add-on, which cannot be removed. */
+  min?: number;
+  max?: number;
   onAdd: () => void;
   onChange: (n: number) => void;
 }) => (
@@ -258,9 +281,20 @@ const AddOnRow = ({
       <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-400">
         {price}
       </Text>
+      {!!note && (
+        <Text
+          className={`text-[10px] ${
+            noteTone === "required"
+              ? "text-amber-700 dark:text-amber-500"
+              : "text-gray-400 dark:text-gray-500"
+          }`}
+        >
+          {note}
+        </Text>
+      )}
     </View>
     {qty > 0 ? (
-      <Stepper value={qty} onChange={onChange} />
+      <Stepper value={qty} onChange={onChange} min={min} max={max} />
     ) : (
       <Pressable
         onPress={onAdd}
@@ -745,7 +779,8 @@ const CreateBookingScreen = () => {
       const full = await fetchBookablePackageDetail(token, item.id);
       setPkg(full);
       setParticipants(full.minParticipants || 1);
-      setAddonQty({});
+      // Required add-ons start at their minimum, as they do on the web.
+      setAddonQty(seedForcedAddOns(full));
       setAttractionQty({});
       setSlot(null);
       setSlots([]);
@@ -1466,7 +1501,7 @@ const CreateBookingScreen = () => {
                               <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
                                 <Feather name="clock" size={10} color="#9333EA" />
                                 <Text className="text-[11px] text-purple-700 dark:text-purple-300">
-                                  {p.duration} {p.durationUnit}
+                                  {formatDuration(p.duration, p.durationUnit)}
                                 </Text>
                               </View>
                             )}
@@ -1535,9 +1570,9 @@ const CreateBookingScreen = () => {
                 <View className="flex-row items-center gap-3">
                   <Stepper
                     value={participants}
-                    onChange={setParticipants}
-                    min={1}
-                    max={pkg.maxParticipants > 0 ? pkg.maxParticipants : 99}
+                    onChange={(n) => setParticipants(clampParticipants(n, pkg))}
+                    min={participantMin(pkg)}
+                    max={participantMax(pkg) ?? 99}
                   />
                   <Text className="text-xs text-gray-500 dark:text-gray-400">
                     {pkg.minParticipants > 0
@@ -1592,6 +1627,7 @@ const CreateBookingScreen = () => {
                       const active =
                         slot?.startTime === s.startTime &&
                         slot?.roomId === s.roomId;
+                      const soldOut = isSoldOut(s.remainingTickets);
                       return (
                         <View
                           key={`${s.startTime}-${s.roomId ?? "auto"}`}
@@ -1600,48 +1636,78 @@ const CreateBookingScreen = () => {
                         >
                           <Pressable
                             onPress={() => setSlot(s)}
+                            disabled={soldOut}
                             accessibilityRole="radio"
-                            accessibilityState={{ selected: active }}
-                            className={`flex-row items-start gap-2 rounded-lg border p-3 ${
-                              active
-                                ? "border-[#0644C7] bg-[#0644C7]/5"
-                                : "border-gray-200 dark:border-neutral-700"
+                            accessibilityState={{
+                              selected: active,
+                              disabled: soldOut,
+                            }}
+                            className={`rounded-lg border-2 p-3 ${
+                              soldOut
+                                ? "border-gray-200 bg-gray-50 opacity-50 dark:border-neutral-800 dark:bg-neutral-900"
+                                : active
+                                  ? "border-[#0644C7] bg-[#0644C7]/5"
+                                  : "border-gray-200 dark:border-neutral-700"
                             }`}
                           >
-                            <Feather
-                              name={active ? "check-circle" : "circle"}
-                              size={14}
-                              color={active ? PRIMARY : "#9CA3AF"}
-                            />
-                            <View className="flex-1">
-                              <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                                {formatTime(s.startTime)}
-                              </Text>
-                              <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-                                to {formatTime(s.endTime)}
-                              </Text>
-                            </View>
-                            {/* Live seats left in this slot — amber pill at 3 or
-                                fewer, else emerald (web OnsiteBooking). */}
-                            {s.remainingTickets != null && (
-                              <View
-                                className={`rounded-full px-1.5 py-0.5 ${
-                                  isLowRemaining(s.remainingTickets)
-                                    ? "bg-amber-100 dark:bg-amber-900/30"
-                                    : "bg-emerald-100 dark:bg-emerald-900/30"
+                            {/* Radio, time and the seats-left pill share the top
+                                row, the pill pushed to the far edge — the web's
+                                `flex items-center` + `ml-auto`. */}
+                            <View className="flex-row items-center gap-2">
+                              <Feather
+                                name={active ? "check-circle" : "circle"}
+                                size={14}
+                                color={
+                                  soldOut
+                                    ? "#D1D5DB"
+                                    : active
+                                      ? PRIMARY
+                                      : "#9CA3AF"
+                                }
+                              />
+                              <Text
+                                className={`text-sm font-semibold ${
+                                  soldOut
+                                    ? "text-gray-400 dark:text-gray-500"
+                                    : "text-gray-900 dark:text-white"
                                 }`}
                               >
-                                <Text
-                                  className={`text-[11px] font-semibold ${
-                                    isLowRemaining(s.remainingTickets)
-                                      ? "text-amber-800 dark:text-amber-300"
-                                      : "text-emerald-800 dark:text-emerald-300"
+                                {formatTime(s.startTime)}
+                              </Text>
+                              {/* Live seats left in this slot — red when sold
+                                  out, amber at 3 or fewer, else emerald
+                                  (web OnsiteBooking). */}
+                              {s.remainingTickets != null && (
+                                <View
+                                  className={`ml-auto rounded-full px-1.5 py-0.5 ${
+                                    soldOut
+                                      ? "bg-red-100 dark:bg-red-900/30"
+                                      : isLowRemaining(s.remainingTickets)
+                                        ? "bg-amber-100 dark:bg-amber-900/30"
+                                        : "bg-emerald-100 dark:bg-emerald-900/30"
                                   }`}
                                 >
-                                  {s.remainingTickets} left
-                                </Text>
-                              </View>
-                            )}
+                                  <Text
+                                    className={`text-[11px] font-semibold ${
+                                      soldOut
+                                        ? "text-red-800 dark:text-red-300"
+                                        : isLowRemaining(s.remainingTickets)
+                                          ? "text-amber-800 dark:text-amber-300"
+                                          : "text-emerald-800 dark:text-emerald-300"
+                                    }`}
+                                  >
+                                    {soldOut
+                                      ? "Sold out"
+                                      : `${s.remainingTickets} left`}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            {/* Indented past the radio so it lines up under the
+                                start time, like the web's `ml-6`. */}
+                            <Text className="ml-[22px] text-xs text-gray-500 dark:text-gray-400">
+                              to {formatTime(s.endTime)}
+                            </Text>
                           </Pressable>
                         </View>
                       );
@@ -1653,15 +1719,15 @@ const CreateBookingScreen = () => {
               </View>
 
               {/* Session duration — the web's footer row on this card. */}
-              <View className="mt-4 flex-row items-center justify-between rounded-lg bg-gray-50 px-4 py-3 dark:bg-neutral-800/50">
+              <View className="mt-4 flex-row items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-neutral-700 dark:bg-neutral-800/50">
                 <View className="flex-row items-center gap-1.5">
                   <Feather name="clock" size={14} color="#6B7280" />
-                  <Text className="text-sm text-gray-600 dark:text-gray-300">
+                  <Text className="text-sm font-medium text-gray-600 dark:text-gray-300">
                     Session Duration
                   </Text>
                 </View>
                 <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {pkg.duration} {pkg.durationUnit}
+                  {formatDuration(pkg.duration, pkg.durationUnit)}
                 </Text>
               </View>
             </Section>
@@ -1672,41 +1738,64 @@ const CreateBookingScreen = () => {
             <>
               {pkg.addOns.length > 0 && (
                 <Section icon="plus-circle" title="Package Add-ons">
-                  {pkg.addOns.map((a) => (
-                    <AddOnRow
-                      key={a.id}
-                      name={a.name}
-                      price={money(a.price)}
-                      qty={addonQty[a.id] ?? 0}
-                      image={a.image}
-                      onAdd={() =>
-                        setAddonQty((p) => ({ ...p, [a.id]: (p[a.id] ?? 0) + 1 }))
-                      }
-                      onChange={(n) => setAddonQty((p) => ({ ...p, [a.id]: n }))}
-                    />
-                  ))}
+                  {pkg.addOns.map((a) => {
+                    const forced = isForceAddOn(a, pkg.id);
+                    const minQty = forced
+                      ? Math.max(1, getAddOnMinQuantity(a, pkg.id))
+                      : getAddOnMinQuantity(a, pkg.id);
+                    const setQty = (n: number) =>
+                      setAddonQty((p) => ({
+                        ...p,
+                        [a.id]: clampAddOnQuantity(a, pkg.id, p[a.id] ?? 0, n),
+                      }));
+                    return (
+                      <AddOnRow
+                        key={a.id}
+                        name={a.name}
+                        price={money(a.price)}
+                        qty={addonQty[a.id] ?? 0}
+                        image={a.image}
+                        note={
+                          forced
+                            ? `Required · min ${minQty}`
+                            : minQty > 1
+                              ? `Min ${minQty}`
+                              : null
+                        }
+                        noteTone={forced ? "required" : "muted"}
+                        min={forced ? minQty : 0}
+                        max={a.maxQuantity ?? DEFAULT_MAX_QUANTITY}
+                        onAdd={() => setQty((addonQty[a.id] ?? 0) + 1)}
+                        onChange={setQty}
+                      />
+                    );
+                  })}
                 </Section>
               )}
 
               {pkg.attractions.length > 0 && (
                 <Section icon="zap" title="Attractions">
-                  {pkg.attractions.map((a) => (
-                    <AddOnRow
-                      key={a.id}
-                      name={a.name}
-                      price={`${money(a.price)}${a.pricingType === "per_person" ? " /person" : ""}`}
-                      qty={attractionQty[a.id] ?? 0}
-                      onAdd={() =>
-                        setAttractionQty((p) => ({
-                          ...p,
-                          [a.id]: (p[a.id] ?? 0) + 1,
-                        }))
-                      }
-                      onChange={(n) =>
-                        setAttractionQty((p) => ({ ...p, [a.id]: n }))
-                      }
-                    />
-                  ))}
+                  {pkg.attractions.map((a) => {
+                    const minQty = a.minQuantity ?? 0;
+                    const setQty = (n: number) =>
+                      setAttractionQty((p) => ({
+                        ...p,
+                        [a.id]: clampAddOnQuantity(a, null, p[a.id] ?? 0, n),
+                      }));
+                    return (
+                      <AddOnRow
+                        key={a.id}
+                        name={a.name}
+                        price={`${money(a.price)}${a.pricingType === "per_person" ? " /person" : ""}`}
+                        qty={attractionQty[a.id] ?? 0}
+                        image={a.image}
+                        note={minQty > 1 ? `Min ${minQty}` : null}
+                        max={a.maxQuantity ?? DEFAULT_MAX_QUANTITY}
+                        onAdd={() => setQty((attractionQty[a.id] ?? 0) + 1)}
+                        onChange={setQty}
+                      />
+                    );
+                  })}
                 </Section>
               )}
 

@@ -530,6 +530,18 @@ export type WaiverPeriodSummary = {
   checkedIn: number;
   minorsCovered: number;
   peopleCovered: number;
+  /**
+   * The covered minors' ages as of each waiver's own date, bucketed. The four
+   * minor brackets are always present (zeros included); an extra "18+" bucket
+   * appears only when a listed minor had already turned 18 by signing.
+   */
+  minorAgeBrackets: WaiverAgeBracket[];
+};
+
+/** One age bucket and how many people fell into it. */
+export type WaiverAgeBracket = {
+  bracket: string;
+  count: number;
 };
 
 type WaiverPeriodSummaryResponse = {
@@ -541,6 +553,9 @@ type WaiverPeriodSummaryResponse = {
     checked_in?: number | string | null;
     minors_covered?: number | string | null;
     people_covered?: number | string | null;
+    minor_age_brackets?:
+      | { bracket?: string | null; count?: number | string | null }[]
+      | null;
   } | null;
 };
 
@@ -586,6 +601,12 @@ export async function fetchWaiverPeriodSummary(
     checkedIn: num(data.checked_in),
     minorsCovered: num(data.minors_covered),
     peopleCovered: num(data.people_covered),
+    // Zero buckets are kept, matching the web line and the dashboard card, so
+    // the four brackets stay in a stable order instead of reflowing as counts
+    // change. The caller decides whether an all-zero breakdown is worth showing.
+    minorAgeBrackets: (data.minor_age_brackets ?? [])
+      .map((b) => ({ bracket: b.bracket?.trim() || "", count: num(b.count) }))
+      .filter((b) => b.bracket),
   };
 }
 

@@ -35,7 +35,8 @@ export type BreakdownKey =
   | "confirmedBreakdown"
   | "waiverBreakdown"
   | "waiverStatusBreakdown"
-  | "waiverAgeBreakdown";
+  | "waiverAgeBreakdown"
+  | "waiverMinorAgeBreakdown";
 
 export type DashboardBreakdowns = Record<BreakdownKey, BreakdownItem[]>;
 

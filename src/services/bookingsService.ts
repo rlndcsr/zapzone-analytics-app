@@ -1,4 +1,4 @@
-import { apiRequest, apiUrl, mediaUrl } from "../lib/api";
+import { apiRequest, apiUrl, firstMediaUrl, mediaUrl } from "../lib/api";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
   AppliedFee as PricingAppliedFee,
@@ -383,6 +383,50 @@ function mapBookingAttractions(raw: RawBookingDetail): BookingAttraction[] {
     quantity: Number(a.pivot?.quantity ?? 1),
     priceAtBooking: Number(a.pivot?.price_at_booking ?? 0),
   }));
+}
+
+/**
+ * Bookings for one venue day, for the check-in desk's manual lookup.
+ *
+ * Mirrors the web Check In page: one page of up to 100 rows scoped by
+ * `booking_date`, filtered down to the two statuses that can be checked in —
+ * `confirmed` (still to arrive) and `checked-in` (already here). Anything
+ * pending, completed or cancelled is not something the desk acts on.
+ */
+export async function fetchBookingsForCheckIn({
+  token,
+  date,
+  locationId,
+  userId,
+  signal,
+}: {
+  token: string;
+  /** Venue day as YYYY-MM-DD. */
+  date: string;
+  locationId?: number | null;
+  userId?: number;
+  signal?: AbortSignal;
+}): Promise<CalendarBooking[]> {
+  const params = new URLSearchParams({
+    booking_date: date,
+    per_page: "100",
+    sort_by: "booking_time",
+    sort_order: "asc",
+  });
+  if (locationId != null) params.append("location_id", String(locationId));
+  if (userId != null) params.append("user_id", String(userId));
+
+  const res = await apiRequest<BookingsListResponse>(
+    `/api/bookings?${params.toString()}`,
+    { token, signal },
+  );
+
+  const out: CalendarBooking[] = [];
+  for (const raw of res?.data?.bookings ?? []) {
+    if (raw.status !== "confirmed" && raw.status !== "checked-in") continue;
+    out.push(mapBooking(raw, toDateKey(raw.booking_date) ?? date));
+  }
+  return out;
 }
 
 /** Full detail for one booking (GET /api/bookings/{id}). */
@@ -924,6 +968,47 @@ export async function createRoom(
     token,
     body: input,
   });
+}
+
+/**
+ * Create a space and attach it to a package, as the web's Manual Booking does
+ * when a name is typed into Space Selection: POST /api/rooms, then
+ * POST /api/packages/room/create to link it. Returns the new space so the
+ * caller can select it straight away.
+ *
+ * The link step is best-effort — the web logs and moves on if it fails, since
+ * the space itself already exists and the booking can still reference it.
+ */
+export async function createPackageSpace(
+  token: string,
+  input: { name: string; locationId: number; packageId: number },
+): Promise<PackageRoom> {
+  const res = await apiRequest<RoomMutationResponse>("/api/rooms", {
+    method: "POST",
+    token,
+    body: {
+      location_id: input.locationId,
+      name: input.name,
+      is_available: true,
+    },
+  });
+  const created = res?.data;
+  if (!created?.id) throw new Error("Space was not created");
+
+  try {
+    await apiRequest("/api/packages/room/create", {
+      method: "POST",
+      token,
+      body: { package_id: input.packageId, room_id: created.id },
+    });
+  } catch {
+    // Linking is not fatal; the space exists and stays selectable.
+  }
+
+  return {
+    id: Number(created.id),
+    name: created.name?.trim() || input.name,
+  };
 }
 
 /** PUT /api/rooms/{id} — update a space/room. */
@@ -1509,6 +1594,22 @@ export type PackageAddOn = {
   price: number;
   /** Resolved thumbnail URL, or null when the add-on has no image. */
   image: string | null;
+  /**
+   * "per_person" multiplies by participants; otherwise a flat per-unit price.
+   * `add_ons` has no such column today, so this is per-unit in practice — it is
+   * mapped because the web reads the same field and the column may yet land.
+   */
+  pricingType: string;
+  /** Quantity floor once selected; 0 when the add-on sets none. */
+  minQuantity: number | null;
+  /** Quantity ceiling, or null to fall back to the shared default. */
+  maxQuantity: number | null;
+  /** `is_force_add_on` — only binding for packages in {@link priceEachPackages}. */
+  isForced: boolean;
+  /** Per-package price / minimum-quantity overrides. */
+  priceEachPackages:
+    | { package_id: number; price?: number; minimum_quantity?: number }[]
+    | null;
 };
 export type PackageAttraction = {
   id: number;
@@ -1516,6 +1617,12 @@ export type PackageAttraction = {
   price: number;
   /** "per_person" multiplies by participants; otherwise a flat per-unit price. */
   pricingType: string;
+  /** Resolved thumbnail URL, or null when the attraction has no image. */
+  image: string | null;
+  /** Quantity floor once selected; 0 when the attraction sets none. */
+  minQuantity: number | null;
+  /** Quantity ceiling, or null to fall back to the shared default. */
+  maxQuantity: number | null;
 };
 
 /** A package with everything the Create Booking form needs. */
@@ -1550,7 +1657,16 @@ export type BookablePackage = {
   isActive: boolean;
   addOns: PackageAddOn[];
   attractions: PackageAttraction[];
+  /** Spaces this package can be booked into; Flexible mode picks one by hand. */
+  rooms: PackageRoom[];
 };
+
+/** A bookable space attached to a package. */
+export type PackageRoom = {
+  id: number;
+  name: string;
+};
+
 
 type RawPackage = {
   id: number;
@@ -1574,23 +1690,44 @@ type RawPackage = {
   location_id?: number | null;
   /** Eager-loaded by GET /api/mobile/packages (`location:id,name`). */
   location?: { id?: number | null; name?: string | null } | null;
-  add_ons?:
-    | {
-        id: number;
-        name?: string | null;
-        price?: number | string | null;
-        image?: string | null;
-      }[]
-    | null;
-  attractions?:
-    | {
-        id: number;
-        name?: string | null;
-        price?: number | string | null;
-        pricing_type?: string | null;
-      }[]
+  add_ons?: RawPackageAddOn[] | null;
+  attractions?: RawPackageAttraction[] | null;
+  rooms?: { id: number; name?: string | null }[] | null;
+};
+
+/** `add_ons` rows come straight off the model, so every column is present. */
+type RawPackageAddOn = {
+  id: number;
+  name?: string | null;
+  price?: number | string | null;
+  /** String column that sometimes holds a JSON-encoded array of paths. */
+  image?: string | string[] | null;
+  pricing_type?: string | null;
+  min_quantity?: number | string | null;
+  max_quantity?: number | string | null;
+  is_force_add_on?: boolean | number | null;
+  price_each_packages?:
+    | { package_id: number; price?: number; minimum_quantity?: number }[]
     | null;
 };
+
+/** `attractions` rows likewise; `image` is an array cast server-side. */
+type RawPackageAttraction = {
+  id: number;
+  name?: string | null;
+  price?: number | string | null;
+  pricing_type?: string | null;
+  image?: string | string[] | null;
+  min_quantity?: number | string | null;
+  max_quantity?: number | string | null;
+};
+
+/** Numeric column that is absent or empty far more often than it is zero. */
+function optionalCount(value: number | string | null | undefined): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
 
 function mapBookablePackage(raw: RawPackage): BookablePackage {
   const unit = raw.duration_unit;
@@ -1634,13 +1771,27 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
       id: Number(a.id),
       name: a.name?.trim() || `Add-on #${a.id}`,
       price: Number(a.price ?? 0),
-      image: mediaUrl(a.image),
+      image: firstMediaUrl(a.image),
+      pricingType: a.pricing_type ?? "flat",
+      minQuantity: optionalCount(a.min_quantity),
+      maxQuantity: optionalCount(a.max_quantity),
+      isForced: a.is_force_add_on === true || a.is_force_add_on === 1,
+      priceEachPackages: Array.isArray(a.price_each_packages)
+        ? a.price_each_packages
+        : null,
     })),
     attractions: (raw.attractions ?? []).map((a) => ({
       id: Number(a.id),
       name: a.name?.trim() || `Attraction #${a.id}`,
       price: Number(a.price ?? 0),
       pricingType: a.pricing_type ?? "flat",
+      image: firstMediaUrl(a.image),
+      minQuantity: optionalCount(a.min_quantity),
+      maxQuantity: optionalCount(a.max_quantity),
+    })),
+    rooms: (raw.rooms ?? []).map((r) => ({
+      id: Number(r.id),
+      name: r.name?.trim() || `Space #${r.id}`,
     })),
   };
 }

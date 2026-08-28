@@ -49,6 +49,40 @@ export function mediaUrl(path: string | null | undefined): string | null {
   return `${API_BASE_URL}/storage/${p.replace(/^storage\//, "")}`;
 }
 
+/**
+ * Resolve an image column that may hold a single path, an array of paths, or a
+ * JSON-encoded array inside a string column, to absolute URLs. Attraction
+ * `image` is cast to an array server-side while add-on `image` is a plain
+ * string column, so both shapes reach the client for the same kind of field.
+ */
+export function mediaUrlList(image: unknown): string[] {
+  const raw: unknown[] = [];
+  if (Array.isArray(image)) {
+    raw.push(...image);
+  } else if (typeof image === "string") {
+    const s = image.trim();
+    if (s.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) raw.push(...parsed);
+        else raw.push(s);
+      } catch {
+        raw.push(s);
+      }
+    } else if (s) {
+      raw.push(s);
+    }
+  }
+  return raw
+    .map((v) => (typeof v === "string" ? mediaUrl(v) : null))
+    .filter((v): v is string => !!v);
+}
+
+/** First usable image URL from any of {@link mediaUrlList}'s shapes, else null. */
+export function firstMediaUrl(image: unknown): string | null {
+  return mediaUrlList(image)[0] ?? null;
+}
+
 export type FieldErrors = Record<string, string[]>;
 
 export class ApiError extends Error {

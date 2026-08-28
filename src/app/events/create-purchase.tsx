@@ -43,8 +43,14 @@ import {
 import { rollbackEventPurchase } from "../../lib/payments/rollback";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+} from "../../lib/addOnQuantity";
+import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import {
   clampToRemaining,
   isLowRemaining,
+  isSoldOut,
   quantityCeiling,
 } from "../../lib/ticketLimits";
 import {
@@ -512,9 +518,12 @@ const CreateEventPurchaseScreen = () => {
 
   // Totals — same math as the web: base (subtotal + add-ons − manual discount),
   // then server-side fees applied and special-pricing discounts subtracted.
-  const discountNum = Math.max(0, Number(discount) || 0);
+  // The hook bounds the typed discount, so `discountNum` is the effective one —
+  // never negative, never more than the order is worth.
   const {
     subtotal,
+    discountCeiling,
+    discountNum,
     total,
     specialPricingDiscount,
     feeBreakdown,
@@ -525,7 +534,7 @@ const CreateEventPurchaseScreen = () => {
     entityType: "event",
     quantity,
     addonQty,
-    discountNum,
+    discountNum: Number(discount) || 0,
     purchaseDate,
     purchaseTime,
   });
@@ -563,8 +572,17 @@ const CreateEventPurchaseScreen = () => {
         user?.location?.name ??
         null);
 
-  const setAddon = (id: number, n: number) =>
-    setAddonQty((prev) => ({ ...prev, [id]: n }));
+  /**
+   * Apply an add-on quantity, clamped to its own min/max. Event add-ons are
+   * never "forced" — that flag is scoped to packages — so no package is passed.
+   */
+  const setAddon = (id: number, n: number) => {
+    const addOn = orderedAddOns.find((a) => a.id === id);
+    setAddonQty((prev) => ({
+      ...prev,
+      [id]: clampAddOnQuantity(addOn, null, prev[id] ?? 0, n),
+    }));
+  };
 
   const handleSubmit = async () => {
     if (!selected) {
@@ -627,10 +645,13 @@ const CreateEventPurchaseScreen = () => {
     const isPayLater = paymentMethod === "paylater";
     // Web parity: the card leg pays the full total and the record starts unpaid
     // — the charge endpoint marks it paid once the gateway approves.
+    // A cash amount is bounded by the order total, so an over-typed figure can
+    // never be recorded as paid.
+    const typedPaid = clampAmount(amountPaid, total);
     const paid = isPayLater || isCardPayment
       ? 0
-      : Number(amountPaid) > 0
-        ? Number(amountPaid)
+      : typedPaid > 0
+        ? typedPaid
         : total;
 
     const input: CreateEventPurchaseInput = {
@@ -976,6 +997,9 @@ const CreateEventPurchaseScreen = () => {
                   label="Discount ($)"
                   value={discount}
                   onChangeText={setDiscount}
+                  onBlur={() =>
+                    setDiscount(clampAmountText(discount, discountCeiling))
+                  }
                   placeholder="0.00"
                   keyboardType="decimal-pad"
                   containerClassName="mb-4"
@@ -985,6 +1009,13 @@ const CreateEventPurchaseScreen = () => {
                   label="Amount Paid"
                   value={paymentMethod === "paylater" ? "0" : amountPaid}
                   onChangeText={setAmountPaid}
+                  onBlur={() =>
+                    setAmountPaid(
+                      amountPaid.trim()
+                        ? clampAmountText(amountPaid, total)
+                        : "",
+                    )
+                  }
                   editable={paymentMethod !== "paylater"}
                   placeholder={money(total)}
                   keyboardType="decimal-pad"
@@ -1017,13 +1048,16 @@ const CreateEventPurchaseScreen = () => {
                         <Text className="text-sm font-medium text-gray-900 dark:text-white">
                           {addOn.name}
                         </Text>
-                        <Text className="text-xs text-gray-400">{money(addOn.price)} each</Text>
+                        <Text className="text-xs text-gray-400">
+                          {money(addOn.price)} each
+                          {addOn.minQuantity > 1 ? ` · min ${addOn.minQuantity}` : ""}
+                        </Text>
                       </View>
                       <Stepper
                         value={addonQty[addOn.id] ?? 0}
                         onChange={(n) => setAddon(addOn.id, n)}
                         min={0}
-                        max={addOn.maxQuantity}
+                        max={addOn.maxQuantity || DEFAULT_MAX_QUANTITY}
                       />
                     </View>
                   ))}
@@ -1433,6 +1467,7 @@ const CreateEventPurchaseScreen = () => {
           {timeOptions.map((t) => {
             const isSelected = purchaseTime === t;
             const left = slotsLeft?.[t] ?? null;
+            const soldOut = isSoldOut(left);
             return (
               <Pressable
                 key={t}
@@ -1441,14 +1476,24 @@ const CreateEventPurchaseScreen = () => {
                   setQuantity((prev) => clampToRemaining(prev, left));
                   setSheet(null);
                 }}
+                disabled={soldOut}
+                accessibilityState={{ disabled: soldOut }}
                 className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  soldOut
+                    ? "opacity-50"
+                    : isSelected
+                      ? "bg-blue-50 dark:bg-blue-900/20"
+                      : ""
                 }`}
               >
                 <View className="flex-row items-baseline gap-2">
                   <Text
                     className={`text-base font-medium ${
-                      isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
+                      soldOut
+                        ? "text-gray-400 dark:text-gray-500"
+                        : isSelected
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-gray-700 dark:text-gray-200"
                     }`}
                   >
                     {formatTime(t)}
@@ -1456,12 +1501,14 @@ const CreateEventPurchaseScreen = () => {
                   {left != null && (
                     <Text
                       className={`text-xs font-semibold ${
-                        isLowRemaining(left)
-                          ? "text-amber-600 dark:text-amber-400"
-                          : "text-emerald-600 dark:text-emerald-400"
+                        soldOut
+                          ? "text-red-600 dark:text-red-400"
+                          : isLowRemaining(left)
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-emerald-600 dark:text-emerald-400"
                       }`}
                     >
-                      — {left} left
+                      {soldOut ? "— Sold out" : `— ${left} left`}
                     </Text>
                   )}
                 </View>

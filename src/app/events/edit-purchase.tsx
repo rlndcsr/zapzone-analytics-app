@@ -25,7 +25,12 @@ import { FieldLabel, SelectField } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
 import { Toast, type ToastType } from "../../components/ui/Toast";
+import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+} from "../../lib/addOnQuantity";
 import { eventFullDayOffDatesFor } from "../../lib/attractions/dayOffAvailability";
+import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
 import { WEEKDAY_NAMES_LOWER, formatFullDate } from "../../lib/date/calendar";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { getToken } from "../../lib/session";
@@ -156,6 +161,7 @@ type EditableAddOn = {
   id: number;
   name: string;
   price: number;
+  minQuantity: number;
   maxQuantity: number;
 };
 
@@ -209,11 +215,14 @@ const Section = ({
 const MoneyInput = ({
   value,
   onChangeText,
+  onBlur,
   placeholder = "0.00",
   prefix = "$",
 }: {
   value: string;
   onChangeText: (v: string) => void;
+  /** Settles the field onto its clamped value once editing ends. */
+  onBlur?: () => void;
   placeholder?: string;
   prefix?: string;
 }) => (
@@ -222,6 +231,7 @@ const MoneyInput = ({
     <TextInput
       value={value}
       onChangeText={onChangeText}
+      onBlur={onBlur}
       placeholder={placeholder}
       placeholderTextColor="#9CA3AF"
       keyboardType="decimal-pad"
@@ -462,12 +472,20 @@ const EditEventPurchaseScreen = () => {
       id: a.id,
       name: a.name,
       price: a.price,
+      minQuantity: a.minQuantity,
       maxQuantity: a.maxQuantity,
     }));
     const ids = new Set(list.map((a) => a.id));
     (record?.addOns ?? []).forEach((a) => {
       if (ids.has(a.id)) return;
-      list.push({ id: a.id, name: a.name, price: a.price, maxQuantity: 99 });
+      // A line the event no longer offers: no rules left to enforce.
+      list.push({
+        id: a.id,
+        name: a.name,
+        price: a.price,
+        minQuantity: 0,
+        maxQuantity: DEFAULT_MAX_QUANTITY,
+      });
       ids.add(a.id);
     });
     return list;
@@ -482,19 +500,21 @@ const EditEventPurchaseScreen = () => {
   );
 
   const handleAddOnChange = (addOnId: number, next: number) => {
+    const addOn = availableAddOns.find((a) => a.id === addOnId);
     setSelectedAddOns((prev) => {
-      if (next <= 0) {
+      const current = prev[addOnId] ?? 0;
+      // Event add-ons are never forced — that flag is package-scoped.
+      const qty = clampAddOnQuantity(addOn, null, current, next);
+      if (qty <= 0) {
         const { [addOnId]: _removed, ...rest } = prev;
         return rest;
       }
-      return { ...prev, [addOnId]: next };
+      return { ...prev, [addOnId]: qty };
     });
   };
 
   /* --- Totals (identical to the web EditEventPurchase) --------------------- */
 
-  const discountNum = num(discountAmount);
-  const amountPaidNum = num(amountPaid);
   const baseSubtotal = eventPrice * quantity;
   const addOnsTotal = useMemo(
     () =>
@@ -508,10 +528,16 @@ const EditEventPurchaseScreen = () => {
   const additiveFeeTotal = appliedFees
     .filter((f) => f.fee_application_type === "additive")
     .reduce((s, f) => s + num(f.fee_amount), 0);
-  const displayTotal = Math.max(
+  /** A discount can never exceed what is owed before it is applied. */
+  const discountCeiling = Math.max(
     0,
-    baseSubtotal + addOnsTotal + additiveFeeTotal - discountNum,
+    baseSubtotal + addOnsTotal + additiveFeeTotal,
   );
+  // Both money fields are clamped here rather than only in their inputs, so a
+  // half-typed or out-of-range amount can never reach the totals or the payload.
+  const discountNum = clampAmount(discountAmount, discountCeiling);
+  const displayTotal = Math.max(0, discountCeiling - discountNum);
+  const amountPaidNum = clampAmount(amountPaid, displayTotal);
   const balance = displayTotal - amountPaidNum;
 
   /* --- Schedule ------------------------------------------------------------ */
@@ -977,13 +1003,14 @@ const EditEventPurchaseScreen = () => {
                           {money(unit)}
                         </Text>{" "}
                         /unit
+                        {addOn.minQuantity > 1 ? ` · min ${addOn.minQuantity}` : ""}
                       </Text>
                     </View>
                     <Stepper
                       value={qty}
                       onChange={(n) => handleAddOnChange(addOn.id, n)}
                       min={0}
-                      max={addOn.maxQuantity || 99}
+                      max={addOn.maxQuantity || DEFAULT_MAX_QUANTITY}
                     />
                   </View>
                 );
@@ -1168,7 +1195,13 @@ const EditEventPurchaseScreen = () => {
 
             <View className="mt-4">
               <FieldLabel>Discount Amount (applied to total)</FieldLabel>
-              <MoneyInput value={discountAmount} onChangeText={setDiscountAmount} />
+              <MoneyInput
+                value={discountAmount}
+                onChangeText={setDiscountAmount}
+                onBlur={() =>
+                  setDiscountAmount(clampAmountText(discountAmount, discountCeiling))
+                }
+              />
             </View>
           </Section>
 
@@ -1202,7 +1235,13 @@ const EditEventPurchaseScreen = () => {
             </View>
             <View className="mb-4">
               <FieldLabel>Amount Paid</FieldLabel>
-              <MoneyInput value={amountPaid} onChangeText={setAmountPaid} />
+              <MoneyInput
+                value={amountPaid}
+                onChangeText={setAmountPaid}
+                onBlur={() =>
+                  setAmountPaid(clampAmountText(amountPaid, displayTotal))
+                }
+              />
             </View>
             {balance > 0 ? (
               <View className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 px-4 py-3">

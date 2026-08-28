@@ -212,13 +212,19 @@ export const METRIC_CARDS = {
     secondaryBreakdowns: [
       { key: "waiverStatusBreakdown", label: "By status" },
       { key: "waiverAgeBreakdown", label: "Adult age brackets (signed)" },
+      // Minors' ages as of the waiver date; percentages are of minors covered,
+      // not of all waivers, so this section does not sum with the adult one.
+      {
+        key: "waiverMinorAgeBreakdown",
+        label: "Minor age brackets (at signing)",
+      },
     ],
     breakdownSectionLabel: "By source",
     subtitle: signedPendingPart,
     icon: "file-signature.png",
     color: "#4338CA",
     gradient: ["#4338CA", "#6366F1"],
-    info: 'Waivers created in the selected period (by creation date), scoped to the selected location. "Signed" are completed waivers; pending are not yet signed. Open the card for the split by status, by source, adults vs minors covered, and the adult age brackets.',
+    info: 'Waivers for visits in the selected period, scoped to the selected location, counted on the day each waiver covers. "Signed" are completed waivers; pending are not yet signed. Open the card for the split by status, by source, adults vs minors covered, the adult age brackets, and the minors\' ages as of the waiver date.',
   },
   revenue: {
     key: "revenue",

@@ -24,6 +24,13 @@ import type { CheckInPhase, ResultTone } from "./useAttractionCheckIn";
 
 export type { CheckInPhase, ResultTone };
 
+/**
+ * Where the booking on screen came from. The camera belongs to "scan" only —
+ * a booking opened from a list must never mount the viewfinder, nor leave it
+ * running when the booking is closed.
+ */
+export type CheckInOrigin = "scan" | "manual";
+
 /** Terminal outcome rendered on the booking check-in result surface. */
 export type BookingCheckInResult = {
   tone: ResultTone;
@@ -97,7 +104,14 @@ export type UseBookingCheckIn = {
   paying: boolean;
   /** Id of the waiver whose check-in is in flight (null when idle). */
   checkingWaiverId: number | null;
-  handleScan: (decoded: string) => void;
+  /** How the booking on screen was opened; drives where closing it returns to. */
+  origin: CheckInOrigin;
+  /**
+   * Look a booking up and open its review. `origin` defaults to "scan" (the
+   * camera's own callback shape); pass "manual" when opening a row from a list
+   * so no camera is involved at any point.
+   */
+  handleScan: (decoded: string, origin?: CheckInOrigin) => void;
   /** Approve → check the customer in (same as confirm). */
   confirm: () => void;
   /** Record an in-store payment against the reviewed booking; returns success. */
@@ -129,6 +143,13 @@ export function useBookingCheckIn(): UseBookingCheckIn {
   const [busy, setBusy] = useState(false);
   const [paying, setPaying] = useState(false);
   const [checkingWaiverId, setCheckingWaiverId] = useState<number | null>(null);
+  /**
+   * How the booking on screen was opened. A scan belongs to the camera, so
+   * leaving its review returns to the viewfinder; a booking opened from a list
+   * never involved the camera, so leaving it must return to the landing state
+   * instead of switching the camera on.
+   */
+  const [origin, setOrigin] = useState<CheckInOrigin>("scan");
 
   const processingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -152,9 +173,10 @@ export function useBookingCheckIn(): UseBookingCheckIn {
   }, []);
 
   const handleScan = useCallback(
-    async (decoded: string) => {
+    async (decoded: string, from: CheckInOrigin = "scan") => {
       if (processingRef.current) return;
       processingRef.current = true;
+      setOrigin(from);
       setPhase("processing");
 
       try {
@@ -248,7 +270,7 @@ export function useBookingCheckIn(): UseBookingCheckIn {
         let detail: BookingDetail | null = null;
         try {
           detail = await fetchBookingDetail(token, booking.id, signal);
-        } catch (err) {
+        } catch {
           if (signal.aborted) return;
           detail = null; // fall back to the summary-only review
         }
@@ -261,7 +283,7 @@ export function useBookingCheckIn(): UseBookingCheckIn {
             booking.id,
             signal,
           );
-        } catch (err) {
+        } catch {
           if (signal.aborted) return;
           entityWaivers = null;
         }
@@ -407,21 +429,35 @@ export function useBookingCheckIn(): UseBookingCheckIn {
     [reviewDetail, checkingWaiverId],
   );
 
+  /**
+   * Leave whatever booking is on screen. Where that lands depends on how the
+   * booking was opened: back to the viewfinder for a scan, back to the landing
+   * state for one opened from a list — closing a list row must never leave the
+   * camera running.
+   */
   const clearReview = useCallback(() => {
     setReview(null);
     setReviewDetail(null);
     setWaivers(null);
     setResult(null);
-    setPhase("scanning");
-  }, []);
+    setPhase(origin === "manual" ? "idle" : "scanning");
+  }, [origin]);
 
-  // Deny → decline the check-in and return to the scanner.
+  // Deny → decline the check-in and go back where this booking came from.
   const deny = useCallback(() => clearReview(), [clearReview]);
   const cancelReview = useCallback(() => clearReview(), [clearReview]);
   const reset = useCallback(() => clearReview(), [clearReview]);
 
   /** Turn the camera on (web "Start Camera"). */
-  const startScanning = useCallback(() => clearReview(), [clearReview]);
+  const startScanning = useCallback(() => {
+    setReview(null);
+    setReviewDetail(null);
+    setWaivers(null);
+    setResult(null);
+    // Explicit: this is a scan, whatever opened the previous booking.
+    setOrigin("scan");
+    setPhase("scanning");
+  }, []);
 
   /** Turn the camera off, back to the landing state (web "Stop Camera"). */
   const stopScanning = useCallback(() => {
@@ -429,11 +465,13 @@ export function useBookingCheckIn(): UseBookingCheckIn {
     setReviewDetail(null);
     setWaivers(null);
     setResult(null);
+    setOrigin("scan");
     setPhase("idle");
   }, []);
 
   return {
     phase,
+    origin,
     startScanning,
     stopScanning,
     review,

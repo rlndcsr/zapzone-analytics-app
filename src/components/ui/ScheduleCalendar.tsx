@@ -13,6 +13,7 @@ import {
 } from "../../lib/date/calendar";
 import {
   isLowRemaining,
+  isSoldOut,
   remainingForSlot,
   type SlotRemainingMap,
 } from "../../lib/ticketLimits";
@@ -331,6 +332,7 @@ export function ScheduleCalendar({
             {availableTimeSlots.map((time) => {
               const active = scheduledTime === time;
               const left = remainingForSlot(slotRemaining, time);
+              const soldOut = isSoldOut(left);
               return (
                 <View
                   key={time}
@@ -339,44 +341,53 @@ export function ScheduleCalendar({
                 >
                   <Pressable
                     onPress={() => onTimeSelect(time)}
+                    disabled={soldOut}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
+                    accessibilityState={{ selected: active, disabled: soldOut }}
                     accessibilityLabel={
-                      left != null
-                        ? `${formatTime12Hour(time)}, ${left} left`
-                        : formatTime12Hour(time)
+                      soldOut
+                        ? `${formatTime12Hour(time)}, sold out`
+                        : left != null
+                          ? `${formatTime12Hour(time)}, ${left} left`
+                          : formatTime12Hour(time)
                     }
                     className={`py-2.5 rounded-lg border items-center ${
-                      active
-                        ? "bg-[#0644C7] border-[#0644C7]"
-                        : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                      soldOut
+                        ? "bg-gray-50 dark:bg-neutral-900 border-gray-200 dark:border-neutral-800 opacity-50"
+                        : active
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
                     }`}
                   >
                     <Text
                       className={`text-xs font-medium ${
-                        active
-                          ? "text-white"
-                          : "text-gray-700 dark:text-gray-200"
+                        soldOut
+                          ? "text-gray-400 dark:text-gray-500"
+                          : active
+                            ? "text-white"
+                            : "text-gray-700 dark:text-gray-200"
                       }`}
                     >
                       {formatTime12Hour(time)}
                     </Text>
                     {/* Live tickets left — the web's second line inside the chip:
-                        white on the selected chip, amber at 3 or fewer, else
-                        emerald. Every branch carries a `dark:` class so the
-                        css-interop feature set never changes when the chip is
-                        selected (a post-mount upgrade throws). */}
+                        red when sold out, white on the selected chip, amber at 3
+                        or fewer, else emerald. Every branch carries a `dark:`
+                        class so the css-interop feature set never changes when
+                        the chip is selected (a post-mount upgrade throws). */}
                     {left != null && (
                       <Text
                         className={`text-[10px] font-semibold ${
-                          active
-                            ? "text-white/80 dark:text-white/80"
-                            : isLowRemaining(left)
-                              ? "text-amber-600 dark:text-amber-400"
-                              : "text-emerald-600 dark:text-emerald-400"
+                          soldOut
+                            ? "text-red-600 dark:text-red-400"
+                            : active
+                              ? "text-white/80 dark:text-white/80"
+                              : isLowRemaining(left)
+                                ? "text-amber-600 dark:text-amber-400"
+                                : "text-emerald-600 dark:text-emerald-400"
                         }`}
                       >
-                        {left} left
+                        {soldOut ? "Sold out" : `${left} left`}
                       </Text>
                     )}
                   </Pressable>

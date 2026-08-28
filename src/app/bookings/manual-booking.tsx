@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
 import {
@@ -25,7 +26,21 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
+import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+  getAddOnMinQuantity,
+  isForceAddOn,
+  seedForcedAddOns,
+} from "../../lib/addOnQuantity";
 import { packageIsCallToBook } from "../../lib/callToBook";
+import {
+  clampParticipants,
+  participantLimitsLabel,
+  participantMax,
+  participantMin,
+} from "../../lib/participants";
+import { sortRoomsNumerically } from "../../lib/rooms";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
@@ -50,7 +65,7 @@ import {
   processCardPayment,
   type AuthorizeNetPublicKey,
 } from "../../services/paymentsService";
-import { isLowRemaining } from "../../lib/ticketLimits";
+import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
 import {
   buildAppliedDiscounts,
   buildAppliedFees,
@@ -61,6 +76,7 @@ import {
 } from "../../services/pricingService";
 import {
   createBooking,
+  createPackageSpace,
   fetchAvailableTimeSlots,
   fetchBookablePackageDetail,
   fetchPackageAvailabilitySchedules,
@@ -70,6 +86,8 @@ import {
   type AvailableSlot,
   type BookablePackage,
   type BookingStatus,
+  type PackageAddOn,
+  type PackageAttraction,
   type PackageAvailabilitySchedule,
   type PackageListItem,
 } from "../../services/bookingsService";
@@ -231,6 +249,91 @@ const Stepper = ({
   </View>
 );
 
+/**
+ * One add-on / attraction tile in the "Add-ons & Attractions" grid, mirroring
+ * the web on-site booking's card: cover image, name, price with its pricing
+ * unit, the quantity rules that apply, then a stepper.
+ */
+const ExtraCard = ({
+  name,
+  image,
+  price,
+  unitLabel,
+  note,
+  noteTone = "muted",
+  qty,
+  min,
+  max,
+  onChange,
+}: {
+  name: string;
+  /** Cover image URL; falls back to a placeholder tile when absent. */
+  image: string | null;
+  price: number;
+  unitLabel: string;
+  /** Quantity-rule hint ("Required · min 2", "Max: 4"), or null when unbounded. */
+  note: string | null;
+  noteTone?: "muted" | "required";
+  qty: number;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
+}) => {
+  const selected = qty > 0;
+  return (
+    <View
+      className={`w-[48%] mb-3 rounded-2xl overflow-hidden border ${
+        selected
+          ? "border-[#0644C7] bg-blue-50 dark:bg-neutral-800"
+          : "border-gray-200 dark:border-neutral-700"
+      }`}
+    >
+      <View className="h-24 w-full items-center justify-center bg-gray-100 dark:bg-neutral-800">
+        {image ? (
+          <Image
+            source={{ uri: image }}
+            style={{ width: "100%", height: "100%" }}
+            contentFit="cover"
+            transition={150}
+          />
+        ) : (
+          <Feather name="image" size={20} color="#9ca3af" />
+        )}
+      </View>
+      <View className="p-2.5">
+        <Text
+          numberOfLines={1}
+          className="text-xs font-semibold text-gray-900 dark:text-white"
+        >
+          {name}
+        </Text>
+        <View className="flex-row items-baseline gap-1 mt-0.5">
+          <Text className="text-sm font-bold text-[#0644C7] dark:text-blue-400">
+            {money(price)}
+          </Text>
+          <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+            {unitLabel}
+          </Text>
+        </View>
+        {!!note && (
+          <Text
+            className={`text-[10px] mt-0.5 ${
+              noteTone === "required"
+                ? "text-amber-700 dark:text-amber-500"
+                : "text-gray-400 dark:text-gray-500"
+            }`}
+          >
+            {note}
+          </Text>
+        )}
+        <View className="mt-2 items-center">
+          <Stepper value={qty} onChange={onChange} min={min} max={max} />
+        </View>
+      </View>
+    </View>
+  );
+};
+
 const ManualBookingScreen = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -278,6 +381,9 @@ const ManualBookingScreen = () => {
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState(""); // HH:MM (24h)
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
+  // Flexible-mode Space Selection: a name being typed, and the in-flight create.
+  const [newSpaceName, setNewSpaceName] = useState("");
+  const [creatingSpace, setCreatingSpace] = useState(false);
   const [participants, setParticipants] = useState(1);
   const [status, setStatus] = useState<BookingStatus>("confirmed");
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
@@ -347,10 +453,65 @@ const ManualBookingScreen = () => {
     };
   }, [selectedLocationId, packageSearch, user?.id]);
 
+  /**
+   * Create the space whose name is in the input, attach it to the current
+   * package, then select it — mirroring the web's Space Selection "+" action.
+   */
+  const addSpace = async () => {
+    const name = newSpaceName.trim();
+    const token = getToken();
+    if (!name || !pkg || !token || creatingSpace) return;
+
+    const locationId = pkg.locationId ?? selectedLocationId ?? user?.location_id;
+    if (locationId == null) {
+      Alert.alert("Can't add space", "No location is set for this package.");
+      return;
+    }
+
+    setCreatingSpace(true);
+    try {
+      const room = await createPackageSpace(token, {
+        name,
+        locationId,
+        packageId: pkg.id,
+      });
+      setPkg((prev) =>
+        prev ? { ...prev, rooms: [...prev.rooms, room] } : prev,
+      );
+      setSelectedRoomId(room.id);
+      setNewSpaceName("");
+    } catch {
+      Alert.alert("Couldn't add space", "Please try again.");
+    } finally {
+      setCreatingSpace(false);
+    }
+  };
+
+  /** Apply an add-on quantity, clamped to its min/max and forced-add-on rules. */
+  const setAddonQtyFor = (addOn: PackageAddOn, next: number) => {
+    setAddonQty((prev) => {
+      const current = prev[addOn.id] ?? 0;
+      const qty = clampAddOnQuantity(addOn, pkg?.id ?? null, current, next);
+      if (qty === current) return prev;
+      return { ...prev, [addOn.id]: qty };
+    });
+  };
+
+  /** Same, for attractions — which are never forced and have no package rules. */
+  const setAttractionQtyFor = (attraction: PackageAttraction, next: number) => {
+    setAttractionQty((prev) => {
+      const current = prev[attraction.id] ?? 0;
+      const qty = clampAddOnQuantity(attraction, null, current, next);
+      if (qty === current) return prev;
+      return { ...prev, [attraction.id]: qty };
+    });
+  };
+
   const resetSchedule = () => {
     setScheduledDate("");
     setScheduledTime("");
     setSelectedRoomId(null);
+    setNewSpaceName("");
     setSlots([]);
   };
 
@@ -362,7 +523,8 @@ const ManualBookingScreen = () => {
       const full = await fetchBookablePackageDetail(token, item.id);
       setPkg(full);
       setParticipants(full.minParticipants || 1);
-      setAddonQty({});
+      // Forced add-ons start at their minimum, as they do on the web.
+      setAddonQty(seedForcedAddOns(full));
       setAttractionQty({});
       setGohName("");
       setGohAge("");
@@ -444,7 +606,11 @@ const ManualBookingScreen = () => {
     }
     for (const a of pkg.addOns) {
       const qty = addonQty[a.id] ?? 0;
-      if (qty > 0) total += a.price * qty;
+      if (qty > 0)
+        total +=
+          a.pricingType === "per_person"
+            ? a.price * qty * participants
+            : a.price * qty;
     }
     return Math.max(0, total);
   }, [pkg, participants, attractionQty, addonQty]);
@@ -645,6 +811,12 @@ const ManualBookingScreen = () => {
         "Incomplete booking",
         "Enter the customer name, email, and a valid date and time.",
       );
+      return;
+    }
+    // Only Flexible mode offers a space picker — Standard takes its room from
+    // the chosen slot, so requiring one there would block slots that carry none.
+    if (bookingMode === "flexible" && pkg.rooms.length > 0 && selectedRoomId == null) {
+      Alert.alert("Select a space", "Please select a space for this booking.");
       return;
     }
     if (effectiveLocationId == null) {
@@ -1337,6 +1509,7 @@ const ManualBookingScreen = () => {
                           const active =
                             slot.startTime === scheduledTime &&
                             (slot.roomId ?? null) === selectedRoomId;
+                          const soldOut = isSoldOut(slot.remainingTickets);
                           return (
                             <View
                               key={`${slot.startTime}-${slot.roomId ?? ""}`}
@@ -1347,32 +1520,43 @@ const ManualBookingScreen = () => {
                                   setScheduledTime(slot.startTime);
                                   setSelectedRoomId(slot.roomId ?? null);
                                 }}
+                                disabled={soldOut}
+                                accessibilityState={{ disabled: soldOut }}
                                 className={`rounded-xl border px-2 py-2 ${
-                                  active
-                                    ? "border-[#0644C7] bg-[#0644C7]/10"
-                                    : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                                  soldOut
+                                    ? "border-gray-200 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-900 opacity-50"
+                                    : active
+                                      ? "border-[#0644C7] bg-[#0644C7]/10"
+                                      : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
                                 }`}
                               >
                                 <Text
                                   className={`text-xs font-semibold ${
-                                    active
-                                      ? "text-[#0644C7]"
-                                      : "text-gray-800 dark:text-gray-200"
+                                    soldOut
+                                      ? "text-gray-400 dark:text-gray-500"
+                                      : active
+                                        ? "text-[#0644C7]"
+                                        : "text-gray-800 dark:text-gray-200"
                                   }`}
                                 >
                                   {to12h(slot.startTime)}
                                 </Text>
-                                {/* Live seats left in this slot — amber at 3 or
-                                    fewer, else emerald (web ManualBooking). */}
+                                {/* Live seats left in this slot — red when sold
+                                    out, amber at 3 or fewer, else emerald
+                                    (web ManualBooking). */}
                                 {slot.remainingTickets != null && (
                                   <Text
                                     className={`text-[10px] font-semibold ${
-                                      isLowRemaining(slot.remainingTickets)
-                                        ? "text-amber-600 dark:text-amber-400"
-                                        : "text-emerald-600 dark:text-emerald-400"
+                                      soldOut
+                                        ? "text-red-600 dark:text-red-400"
+                                        : isLowRemaining(slot.remainingTickets)
+                                          ? "text-amber-600 dark:text-amber-400"
+                                          : "text-emerald-600 dark:text-emerald-400"
                                     }`}
                                   >
-                                    {slot.remainingTickets} left
+                                    {soldOut
+                                      ? "Sold out"
+                                      : `${slot.remainingTickets} left`}
                                   </Text>
                                 )}
                                 {!!slot.roomName && (
@@ -1425,14 +1609,13 @@ const ManualBookingScreen = () => {
                     <View className="flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-1.5">
                       <Stepper
                         value={participants}
-                        onChange={setParticipants}
-                        min={1}
-                        max={pkg.maxParticipants > 0 ? pkg.maxParticipants : 99}
+                        onChange={(n) => setParticipants(clampParticipants(n, pkg))}
+                        min={participantMin(pkg)}
+                        max={participantMax(pkg) ?? 99}
                       />
                     </View>
                     <Text className="text-[10px] text-gray-500 mt-1">
-                      Min: {pkg.minParticipants || 1}
-                      {pkg.maxParticipants > 0 ? ` · Max: ${pkg.maxParticipants}` : ""}
+                      {participantLimitsLabel(pkg)}
                     </Text>
                   </View>
                   <View className="flex-1">
@@ -1448,58 +1631,144 @@ const ManualBookingScreen = () => {
                     </Pressable>
                   </View>
                 </View>
+
+                {/* Space Selection — Flexible only. Standard mode gets its room
+                    from the chosen time slot, so picking one by hand would
+                    fight the auto-assignment. */}
+                {bookingMode === "flexible" && pkg.rooms.length > 0 && (
+                  <View className="mt-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
+                    <Text className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-700 dark:text-gray-300">
+                      Space Selection *
+                    </Text>
+                    <View className="flex-row flex-wrap gap-1.5">
+                      {sortRoomsNumerically(pkg.rooms).map((room) => {
+                        const active = selectedRoomId === room.id;
+                        return (
+                          <Pressable
+                            key={room.id}
+                            onPress={() => setSelectedRoomId(room.id)}
+                            className={`rounded-lg border px-3 py-2 active:opacity-80 ${
+                              active
+                                ? "border-[#0644C7] bg-[#0644C7]"
+                                : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                            }`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: active }}
+                          >
+                            <Text
+                              className={`text-sm ${
+                                active
+                                  ? "font-semibold text-white"
+                                  : "text-gray-800 dark:text-gray-200"
+                              }`}
+                            >
+                              {room.name}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
+                    <View className="mt-2 flex-row items-center gap-2">
+                      <TextInput
+                        value={newSpaceName}
+                        onChangeText={setNewSpaceName}
+                        placeholder="Type new Space name"
+                        placeholderTextColor="#9CA3AF"
+                        className={`flex-1 ${inputClass}`}
+                        editable={!creatingSpace}
+                        returnKeyType="done"
+                        onSubmitEditing={addSpace}
+                      />
+                      <Pressable
+                        onPress={addSpace}
+                        disabled={!newSpaceName.trim() || creatingSpace}
+                        className="w-10 h-10 items-center justify-center rounded-xl active:opacity-80"
+                        accessibilityRole="button"
+                        accessibilityLabel="Add space"
+                      >
+                        {creatingSpace ? (
+                          <ActivityIndicator size="small" color={PRIMARY} />
+                        ) : (
+                          <Feather
+                            name="plus"
+                            size={20}
+                            color={newSpaceName.trim() ? PRIMARY : "#D1D5DB"}
+                          />
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
               </Section>
 
               {/* ==================== ADD-ONS & ATTRACTIONS =============== */}
               {hasExtras && (
                 <Section title="Add-ons & Attractions" subtitle="Optional extras">
-                  {pkg.addOns.map((a) => (
-                    <View
-                      key={`addon-${a.id}`}
-                      className="flex-row items-center justify-between py-2 border-b border-gray-100 dark:border-neutral-800"
-                    >
-                      <View className="flex-1 mr-3">
-                        <Text
-                          className="text-sm font-medium text-gray-900 dark:text-white"
-                          numberOfLines={1}
-                        >
-                          {a.name}
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {money(a.price)} /unit
-                        </Text>
-                      </View>
-                      <Stepper
-                        value={addonQty[a.id] ?? 0}
-                        onChange={(n) => setAddonQty((p) => ({ ...p, [a.id]: n }))}
-                      />
-                    </View>
-                  ))}
-                  {pkg.attractions.map((a) => (
-                    <View
-                      key={`attraction-${a.id}`}
-                      className="flex-row items-center justify-between py-2 border-b border-gray-100 dark:border-neutral-800"
-                    >
-                      <View className="flex-1 mr-3">
-                        <Text
-                          className="text-sm font-medium text-gray-900 dark:text-white"
-                          numberOfLines={1}
-                        >
-                          {a.name}
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {money(a.price)}
-                          {a.pricingType === "per_person" ? " /person" : " /unit"}
-                        </Text>
-                      </View>
-                      <Stepper
-                        value={attractionQty[a.id] ?? 0}
-                        onChange={(n) =>
-                          setAttractionQty((p) => ({ ...p, [a.id]: n }))
-                        }
-                      />
-                    </View>
-                  ))}
+                  <View className="flex-row flex-wrap justify-between">
+                    {pkg.addOns.map((a) => {
+                      const forced = isForceAddOn(a, pkg.id);
+                      const minQty = forced
+                        ? Math.max(1, getAddOnMinQuantity(a, pkg.id))
+                        : getAddOnMinQuantity(a, pkg.id);
+                      const maxQty = a.maxQuantity ?? DEFAULT_MAX_QUANTITY;
+                      const qty = addonQty[a.id] ?? 0;
+                      return (
+                        <ExtraCard
+                          key={`addon-${a.id}`}
+                          name={a.name}
+                          image={a.image}
+                          price={a.price}
+                          unitLabel={
+                            a.pricingType === "per_person" ? "/person" : "/unit"
+                          }
+                          note={
+                            forced
+                              ? `Required · min ${minQty}`
+                              : minQty > 1
+                                ? `Min ${minQty}`
+                                : null
+                          }
+                          noteTone={forced ? "required" : "muted"}
+                          qty={qty}
+                          // A forced add-on can never be stepped down to zero.
+                          min={forced ? minQty : 0}
+                          max={maxQty}
+                          onChange={(n) => setAddonQtyFor(a, n)}
+                        />
+                      );
+                    })}
+
+                    {pkg.attractions.map((a) => {
+                      const minQty = a.minQuantity ?? 0;
+                      const maxQty = a.maxQuantity ?? DEFAULT_MAX_QUANTITY;
+                      const parts: string[] = [];
+                      if (minQty > 1) parts.push(`Min: ${minQty}`);
+                      if (maxQty < DEFAULT_MAX_QUANTITY)
+                        parts.push(`Max: ${maxQty}`);
+                      return (
+                        <ExtraCard
+                          key={`attraction-${a.id}`}
+                          name={a.name}
+                          image={a.image}
+                          price={a.price}
+                          unitLabel={
+                            a.pricingType === "per_person" ? "/person" : "/unit"
+                          }
+                          note={parts.length ? parts.join(" • ") : null}
+                          qty={attractionQty[a.id] ?? 0}
+                          min={0}
+                          max={maxQty}
+                          onChange={(n) => setAttractionQtyFor(a, n)}
+                        />
+                      );
+                    })}
+
+                    {/* Keeps a lone trailing card in the left column. */}
+                    {(pkg.addOns.length + pkg.attractions.length) % 2 === 1 && (
+                      <View className="w-[48%]" />
+                    )}
+                  </View>
                 </Section>
               )}
 
@@ -1554,6 +1823,10 @@ const ManualBookingScreen = () => {
                   {pkg.addOns.map((a) => {
                     const qty = addonQty[a.id] ?? 0;
                     if (qty <= 0) return null;
+                    const price =
+                      a.pricingType === "per_person"
+                        ? a.price * qty * participants
+                        : a.price * qty;
                     return (
                       <View
                         key={`sum-addon-${a.id}`}
@@ -1563,7 +1836,7 @@ const ManualBookingScreen = () => {
                           {a.name} ({qty})
                         </Text>
                         <Text className="text-xs font-medium text-gray-900 dark:text-white">
-                          {money(a.price * qty)}
+                          {money(price)}
                         </Text>
                       </View>
                     );

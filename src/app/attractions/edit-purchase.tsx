@@ -30,7 +30,12 @@ import {
   fullDayOffDatesFor,
   generateTimeSlots,
 } from "../../lib/attractions/dayOffAvailability";
+import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+} from "../../lib/addOnQuantity";
 import { WEEKDAY_NAMES_LOWER, formatFullDate } from "../../lib/date/calendar";
+import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -154,7 +159,13 @@ type PickerAttraction = {
   price: number;
   locationId: number | null;
   availability: AvailabilitySchedule[];
-  addOns: { id: number; name: string; price: number; maxQuantity: number }[];
+  addOns: {
+    id: number;
+    name: string;
+    price: number;
+    minQuantity: number;
+    maxQuantity: number;
+  }[];
 };
 
 /** Editable fee line — amounts stay strings while typing (web `type=number`). */
@@ -209,11 +220,14 @@ const Section = ({
 const MoneyInput = ({
   value,
   onChangeText,
+  onBlur,
   placeholder = "0.00",
   prefix = "$",
 }: {
   value: string;
   onChangeText: (v: string) => void;
+  /** Settles the field onto its clamped value once editing ends. */
+  onBlur?: () => void;
   placeholder?: string;
   prefix?: string;
 }) => (
@@ -222,6 +236,7 @@ const MoneyInput = ({
     <TextInput
       value={value}
       onChangeText={onChangeText}
+      onBlur={onBlur}
       placeholder={placeholder}
       placeholderTextColor="#9CA3AF"
       keyboardType="decimal-pad"
@@ -433,6 +448,7 @@ const EditPurchaseScreen = () => {
               id: x.id,
               name: x.name,
               price: x.price,
+              minQuantity: x.minQuantity,
               maxQuantity: x.maxQuantity,
             })),
           }));
@@ -486,7 +502,14 @@ const EditPurchaseScreen = () => {
     const ids = new Set(list.map((a) => a.id));
     (record?.addOns ?? []).forEach((a) => {
       if (ids.has(a.id)) return;
-      list.push({ id: a.id, name: a.name, price: a.price, maxQuantity: 99 });
+      // A line the attraction no longer offers: no rules left to enforce.
+      list.push({
+        id: a.id,
+        name: a.name,
+        price: a.price,
+        minQuantity: 0,
+        maxQuantity: DEFAULT_MAX_QUANTITY,
+      });
       ids.add(a.id);
     });
     return list;
@@ -501,12 +524,16 @@ const EditPurchaseScreen = () => {
   );
 
   const handleAddOnChange = (addOnId: number, next: number) => {
+    const addOn = availableAddOns.find((a) => a.id === addOnId);
     setSelectedAddOns((prev) => {
-      if (next <= 0) {
+      const current = prev[addOnId] ?? 0;
+      // Attraction add-ons are never forced — that flag is package-scoped.
+      const qty = clampAddOnQuantity(addOn, null, current, next);
+      if (qty <= 0) {
         const { [addOnId]: _removed, ...rest } = prev;
         return rest;
       }
-      return { ...prev, [addOnId]: next };
+      return { ...prev, [addOnId]: qty };
     });
   };
 
@@ -528,8 +555,6 @@ const EditPurchaseScreen = () => {
 
   /* --- Totals (identical to the web EditPurchase) -------------------------- */
 
-  const discountNum = num(discountAmount);
-  const amountPaidNum = num(amountPaid);
   const baseSubtotal = selectedAttraction ? selectedAttraction.price * quantity : 0;
   const addOnsTotal = useMemo(
     () =>
@@ -543,10 +568,16 @@ const EditPurchaseScreen = () => {
   const additiveFeeTotal = appliedFees
     .filter((f) => f.fee_application_type === "additive")
     .reduce((s, f) => s + num(f.fee_amount), 0);
-  const displayTotal = Math.max(
+  /** A discount can never exceed what is owed before it is applied. */
+  const discountCeiling = Math.max(
     0,
-    baseSubtotal + addOnsTotal + additiveFeeTotal - discountNum,
+    baseSubtotal + addOnsTotal + additiveFeeTotal,
   );
+  // Both money fields are clamped here rather than only in their inputs, so a
+  // half-typed or out-of-range amount can never reach the totals or the payload.
+  const discountNum = clampAmount(discountAmount, discountCeiling);
+  const displayTotal = Math.max(0, discountCeiling - discountNum);
+  const amountPaidNum = clampAmount(amountPaid, displayTotal);
   const balance = displayTotal - amountPaidNum;
 
   /* --- Schedule ------------------------------------------------------------ */
@@ -1026,13 +1057,14 @@ const EditPurchaseScreen = () => {
                           {money(unit)}
                         </Text>{" "}
                         /unit
+                        {addOn.minQuantity > 1 ? ` · min ${addOn.minQuantity}` : ""}
                       </Text>
                     </View>
                     <Stepper
                       value={qty}
                       onChange={(n) => handleAddOnChange(addOn.id, n)}
                       min={0}
-                      max={addOn.maxQuantity || 99}
+                      max={addOn.maxQuantity || DEFAULT_MAX_QUANTITY}
                     />
                   </View>
                 );
@@ -1217,7 +1249,13 @@ const EditPurchaseScreen = () => {
 
             <View className="mt-4">
               <FieldLabel>Discount Amount (applied to total)</FieldLabel>
-              <MoneyInput value={discountAmount} onChangeText={setDiscountAmount} />
+              <MoneyInput
+                value={discountAmount}
+                onChangeText={setDiscountAmount}
+                onBlur={() =>
+                  setDiscountAmount(clampAmountText(discountAmount, discountCeiling))
+                }
+              />
             </View>
           </Section>
 
@@ -1241,7 +1279,13 @@ const EditPurchaseScreen = () => {
             </View>
             <View className="mb-4">
               <FieldLabel>Amount Paid</FieldLabel>
-              <MoneyInput value={amountPaid} onChangeText={setAmountPaid} />
+              <MoneyInput
+                value={amountPaid}
+                onChangeText={setAmountPaid}
+                onBlur={() =>
+                  setAmountPaid(clampAmountText(amountPaid, displayTotal))
+                }
+              />
             </View>
             {balance > 0 ? (
               <View className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 px-4 py-3">

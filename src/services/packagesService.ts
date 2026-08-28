@@ -200,6 +200,12 @@ export type PackageAddOn = {
   pricingType: string | null;
   minQuantity: number | null;
   maxQuantity: number | null;
+  /** `is_force_add_on` — only binding for packages in {@link priceEachPackages}. */
+  isForced: boolean;
+  /** Per-package price / minimum-quantity overrides. */
+  priceEachPackages:
+    | { package_id: number; price?: number; minimum_quantity?: number }[]
+    | null;
 };
 
 /** Full package hydrated from GET /api/packages/{id} for the detail view. Safe to
@@ -318,6 +324,14 @@ export async function fetchPackageDetail(
       pricingType: str(a.pricing_type) || null,
       minQuantity: numOrNull(a.min_quantity),
       maxQuantity: numOrNull(a.max_quantity),
+      isForced: a.is_force_add_on === true || a.is_force_add_on === 1,
+      priceEachPackages: Array.isArray(a.price_each_packages)
+        ? (a.price_each_packages as {
+            package_id: number;
+            price?: number;
+            minimum_quantity?: number;
+          }[])
+        : null,
     })),
     rooms: rel(d.rooms).map((r) => ({
       id: Number(r.id),

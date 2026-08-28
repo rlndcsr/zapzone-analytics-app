@@ -5,6 +5,7 @@ import {
   buildSlotRemainingMap,
   clampToRemaining,
   isLowRemaining,
+  isSoldOut,
   quantityCeiling,
   remainingForSlot,
 } from "./ticketLimits.ts";
@@ -101,5 +102,18 @@ describe("the low-stock colour threshold", () => {
     assert.equal(isLowRemaining(0), true);
     assert.equal(isLowRemaining(3), true);
     assert.equal(isLowRemaining(4), false);
+  });
+});
+
+describe("marking a slot sold out", () => {
+  it("is sold out only at zero or below", () => {
+    assert.equal(isSoldOut(0), true);
+    assert.equal(isSoldOut(-1), true);
+    assert.equal(isSoldOut(1), false);
+  });
+
+  it("is never sold out when the count is unknown or uncapped", () => {
+    assert.equal(isSoldOut(null), false);
+    assert.equal(isSoldOut(undefined), false);
   });
 });

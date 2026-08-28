@@ -382,6 +382,11 @@ export type WaiverAnalytics = {
   /** Waivers created per bucket; longer ranges are grouped by month. */
   perDay: { label: string; count: number }[];
   ageBrackets: { bracket: string; count: number }[];
+  /**
+   * The covered minors' ages as of each waiver's date. Empty when no signed
+   * waiver in the period listed a minor with a date of birth.
+   */
+  minorAgeBrackets: { bracket: string; count: number }[];
   bySource: { source: string; count: number }[];
 };
 
@@ -863,6 +868,10 @@ function mapWaivers(raw: unknown): WaiverAnalytics | null {
       count: num(r.count),
     })),
     ageBrackets: list("age_brackets").map((r) => ({
+      bracket: String(r.bracket ?? "—"),
+      count: num(r.count),
+    })),
+    minorAgeBrackets: list("minor_age_brackets").map((r) => ({
       bracket: String(r.bracket ?? "—"),
       count: num(r.count),
     })),

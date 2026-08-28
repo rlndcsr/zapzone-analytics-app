@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { clampAmount } from "../orderAmounts";
 import { getToken } from "../session";
 import {
   buildAppliedDiscounts,
@@ -30,6 +31,10 @@ export type OnsitePricing = {
   addOnsTotal: number;
   /** max(0, subtotal + add-ons − manual discount) — the fee/pricing base price. */
   baseTotal: number;
+  /** subtotal + add-ons — the most a manual discount may take off. */
+  discountCeiling: number;
+  /** The caller's discount clamped into [0, discountCeiling]. */
+  discountNum: number;
   feeBreakdown: FeeBreakdown | null;
   specialPricing: SpecialPricingBreakdown | null;
   /** Special-pricing discount amount (0 when none apply). */
@@ -53,7 +58,10 @@ type Args = {
   entityType: PricingEntityType;
   quantity: number;
   addonQty: Record<number, number>;
-  /** Manual discount in dollars (already clamped ≥ 0). */
+  /**
+   * Manual discount in dollars, as typed. The hook clamps it into
+   * [0, subtotal + add-ons] and returns the effective value.
+   */
   discountNum: number;
   purchaseDate: string;
   purchaseTime: string;
@@ -71,7 +79,7 @@ export function useOnsitePricing({
   entityType,
   quantity,
   addonQty,
-  discountNum,
+  discountNum: rawDiscount,
   purchaseDate,
   purchaseTime,
 }: Args): OnsitePricing {
@@ -83,7 +91,12 @@ export function useOnsitePricing({
       0,
     );
   }, [entity, addonQty]);
-  const baseTotal = Math.max(0, subtotal + addOnsTotal - discountNum);
+  // A manual discount can never exceed what is owed before it, nor go negative.
+  // Clamping here keeps every screen that prices through this hook consistent,
+  // and keeps a half-typed amount out of the fee/special-pricing requests.
+  const discountCeiling = Math.max(0, subtotal + addOnsTotal);
+  const discountNum = clampAmount(rawDiscount, discountCeiling);
+  const baseTotal = Math.max(0, discountCeiling - discountNum);
 
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
   const [specialPricing, setSpecialPricing] =
@@ -184,6 +197,8 @@ export function useOnsitePricing({
     subtotal,
     addOnsTotal,
     baseTotal,
+    discountCeiling,
+    discountNum,
     feeBreakdown,
     specialPricing,
     specialPricingDiscount,

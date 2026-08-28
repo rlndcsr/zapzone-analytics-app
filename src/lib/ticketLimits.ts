@@ -42,3 +42,15 @@ export function clampToRemaining(
 export function isLowRemaining(left: number): boolean {
   return left <= 3;
 }
+
+/**
+ * Whether a slot has no seats left and must not be selectable.
+ *
+ * A null count means the slot is uncapped (or its availability is unknown), so
+ * it stays bookable — only a real zero sells out. Note {@link quantityCeiling}
+ * and {@link clampToRemaining} still floor at 1, because a quantity of 0 is not
+ * a meaningful order; blocking the sale is this check's job, not theirs.
+ */
+export function isSoldOut(left: number | null | undefined): boolean {
+  return left != null && left <= 0;
+}

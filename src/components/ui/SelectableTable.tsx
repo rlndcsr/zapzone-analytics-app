@@ -74,11 +74,15 @@ type Props<T> = {
    * row action, so a stray tap can't navigate.
    */
   onRowPress?: (row: T) => void;
-  /** Selected ids — the single source of truth lives in the parent screen. */
-  selectedIds: Set<number>;
-  onToggleRow: (id: number) => void;
+  /**
+   * Selected ids — the single source of truth lives in the parent screen.
+   * Omit all three selection props for a table with no bulk actions: the
+   * checkbox column disappears and the rows keep the same look everywhere else.
+   */
+  selectedIds?: Set<number>;
+  onToggleRow?: (id: number) => void;
   /** Select / deselect every row on the current page. */
-  onToggleAll: () => void;
+  onToggleAll?: () => void;
   /** Accessible verb for a row's checkbox, e.g. "booking for Jane". */
   rowLabel?: (row: T) => string;
 };
@@ -101,11 +105,15 @@ function SelectableTableInner<T>({
   onToggleAll,
   rowLabel,
 }: Props<T>) {
+  // Selection is opt-in: a table given no `selectedIds` drops the checkbox
+  // column entirely rather than showing one that does nothing.
+  const selectable = !!selectedIds;
   const tableWidth =
-    CHECKBOX_WIDTH + columns.reduce((sum, c) => sum + c.width, 0);
+    (selectable ? CHECKBOX_WIDTH : 0) +
+    columns.reduce((sum, c) => sum + c.width, 0);
 
   const selectedOnPage = rows.reduce(
-    (n, r) => (selectedIds.has(rowId(r)) ? n + 1 : n),
+    (n, r) => (selectedIds?.has(rowId(r)) ? n + 1 : n),
     0,
   );
   const headerState: "off" | "on" | "some" =
@@ -131,15 +139,17 @@ function SelectableTableInner<T>({
             className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
             style={{ minHeight: HEADER_MIN_HEIGHT }}
           >
-            <CheckboxCell
-              state={headerState}
-              onPress={onToggleAll}
-              label={
-                headerState === "on"
-                  ? "Deselect all rows on this page"
-                  : "Select all rows on this page"
-              }
-            />
+            {selectable && (
+              <CheckboxCell
+                state={headerState}
+                onPress={() => onToggleAll?.()}
+                label={
+                  headerState === "on"
+                    ? "Deselect all rows on this page"
+                    : "Select all rows on this page"
+                }
+              />
+            )}
             {columns.map((col) => (
               <View
                 key={col.key}
@@ -159,7 +169,7 @@ function SelectableTableInner<T>({
           {/* Rows */}
           {rows.map((row, i) => {
             const id = rowId(row);
-            const selected = selectedIds.has(id);
+            const selected = !!selectedIds?.has(id);
             return (
               <Pressable
                 key={id}
@@ -181,13 +191,15 @@ function SelectableTableInner<T>({
                   opacity: pressed && onRowPress ? 0.6 : 1,
                 })}
               >
-                <CheckboxCell
-                  state={selected ? "on" : "off"}
-                  onPress={() => onToggleRow(id)}
-                  label={`${selected ? "Deselect" : "Select"} ${
-                    rowLabel ? rowLabel(row) : "row"
-                  }`}
-                />
+                {selectable && (
+                  <CheckboxCell
+                    state={selected ? "on" : "off"}
+                    onPress={() => onToggleRow?.(id)}
+                    label={`${selected ? "Deselect" : "Select"} ${
+                      rowLabel ? rowLabel(row) : "row"
+                    }`}
+                  />
+                )}
                 {columns.map((col) => (
                   <View
                     key={col.key}

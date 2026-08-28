@@ -14,7 +14,7 @@ import {
   Save,
   User,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,6 +31,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { mediaUrl } from "../../lib/api";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import {
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+  getAddOnMinQuantity,
+  isForceAddOn,
+  seedForcedAddOns,
+} from "../../lib/addOnQuantity";
+import {
+  clampParticipants,
+  participantLimitsLabel,
+} from "../../lib/participants";
 import { getToken } from "../../lib/session";
 import {
   fetchAvailableTimeSlots,
@@ -154,15 +165,24 @@ const AddOnCard = ({
   addOn,
   quantity,
   unitPrice,
+  packageId,
   onChange,
 }: {
   addOn: PackageAddOn;
   quantity: number;
   unitPrice: number;
+  /** The package being booked; decides whether this add-on is required. */
+  packageId: number | null;
   onChange: (addOnId: number, change: number) => void;
 }) => {
   const isSelected = quantity > 0;
-  const maxQty = addOn.maxQuantity ?? 99;
+  const maxQty = addOn.maxQuantity ?? DEFAULT_MAX_QUANTITY;
+  const forced = isForceAddOn(addOn, packageId);
+  const minQty = forced
+    ? Math.max(1, getAddOnMinQuantity(addOn, packageId))
+    : getAddOnMinQuantity(addOn, packageId);
+  // A required add-on can be raised but never taken below its minimum.
+  const canDecrease = forced ? quantity > minQty : isSelected;
   const image = mediaUrl(addOn.image);
 
   return (
@@ -195,17 +215,28 @@ const AddOnCard = ({
             {addOn.pricingType === "per_person" ? "/person" : "/unit"}
           </Text>
         </View>
+        {(forced || minQty > 1) && (
+          <Text
+            className={`text-[10px] mb-1 ${
+              forced
+                ? "text-amber-700 dark:text-amber-500"
+                : "text-gray-400 dark:text-gray-500"
+            }`}
+          >
+            {forced ? `Required · min ${minQty}` : `Min ${minQty}`}
+          </Text>
+        )}
         <View className="flex-row items-center gap-1">
           <Pressable
             onPress={() => onChange(addOn.id, -1)}
-            disabled={!isSelected}
+            disabled={!canDecrease}
             className={`w-9 h-9 rounded-lg items-center justify-center border ${
-              isSelected
+              canDecrease
                 ? "border-gray-300 dark:border-neutral-600"
                 : "border-gray-200 dark:border-neutral-800 opacity-40"
             }`}
           >
-            <Minus size={16} color={isSelected ? "#374151" : "#9ca3af"} />
+            <Minus size={16} color={canDecrease ? "#374151" : "#9ca3af"} />
           </Pressable>
           <View className="w-14 h-9 rounded-lg border border-gray-300 dark:border-neutral-600 items-center justify-center">
             <Text className="text-sm font-bold text-gray-900 dark:text-white">
@@ -313,6 +344,8 @@ const EditBookingScreen = () => {
     [id: number]: number;
   }>({});
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null);
+  /** Set when the user picks a different package; see handlePackageChange. */
+  const clampOnPackageLoadRef = useRef(false);
   const [gohName, setGohName] = useState("");
   const [gohAge, setGohAge] = useState("");
   const [gohGender, setGohGender] = useState<string | null>(null);
@@ -431,7 +464,16 @@ const EditBookingScreen = () => {
     if (!token) return;
     const controller = new AbortController();
     fetchPackageDetail(token, packageId, controller.signal)
-      .then(setPackageDetail)
+      .then((detail) => {
+        setPackageDetail(detail);
+        if (clampOnPackageLoadRef.current) {
+          clampOnPackageLoadRef.current = false;
+          setParticipants((prev) => String(clampParticipants(prev, detail)));
+          // The new package's required add-ons come in at their minimum, as
+          // they do on the web's handlePackageChange.
+          setSelectedAddOns(seedForcedAddOns(detail));
+        }
+      })
       .catch(() => {});
     return () => controller.abort();
   }, [packageId]);
@@ -559,6 +601,10 @@ const EditBookingScreen = () => {
   const handlePackageChange = (value: string | number) => {
     setPackageId(Number(value));
     setSelectedAddOns({});
+    // The new package's limits only arrive with its detail fetch, so defer the
+    // player-count adjustment until then. Not armed on the initial load, which
+    // would otherwise rewrite the count already saved on the booking.
+    clampOnPackageLoadRef.current = true;
   };
 
   const handleSelectDate = (key: string) => {
@@ -581,6 +627,10 @@ const EditBookingScreen = () => {
           pricingType: "flat",
           minQuantity: null,
           maxQuantity: null,
+          // A legacy line the package dropped: no rules left to enforce, and
+          // never forced, so it stays freely removable.
+          isForced: false,
+          priceEachPackages: null,
         });
         ids.add(a.addOnId);
       }
@@ -610,26 +660,23 @@ const EditBookingScreen = () => {
   const handleAddOnChange = useCallback(
     (addOnId: number, change: number) => {
       const addOn = availableAddOns.find((a) => a.id === addOnId);
-      const minQty = addOn?.minQuantity ?? 0;
-      const maxQty = addOn?.maxQuantity ?? 99;
 
       setSelectedAddOns((prev) => {
         const currentValue = prev[addOnId] || 0;
-        let newValue = currentValue + change;
-
-        if (newValue > maxQty) newValue = maxQty;
-
+        const newValue = clampAddOnQuantity(
+          addOn,
+          packageId,
+          currentValue,
+          currentValue + change,
+        );
         if (newValue <= 0) {
           const { [addOnId]: _removed, ...rest } = prev;
           return rest;
         }
-
-        if (currentValue === 0 && change > 0 && minQty > 1) newValue = minQty;
-
         return { ...prev, [addOnId]: newValue };
       });
     },
-    [availableAddOns],
+    [availableAddOns, packageId],
   );
 
   const computeAddonsTotal = useCallback(
@@ -697,7 +744,12 @@ const EditBookingScreen = () => {
     }
     setSaving(true);
     try {
-      const participantCount = Number(participants) || 0;
+      // Clamp once more at save: the field may never have blurred, and this is
+      // the value that gets priced and persisted.
+      const participantCount = clampParticipants(participants, packageDetail);
+      if (String(participantCount) !== participants) {
+        setParticipants(String(participantCount));
+      }
       const isPackageChanged = packageId !== detail.packageId;
       const isParticipantsChanged = participantCount !== detail.participants;
 
@@ -1087,12 +1139,26 @@ const EditBookingScreen = () => {
                 <FieldLabel>Participants</FieldLabel>
                 <TextInput
                   value={participants}
-                  onChangeText={setParticipants}
-                  placeholder="0"
+                  // Whole numbers only: number-pad still admits a decimal point
+                  // and separators on some keyboards, so strip as we go.
+                  onChangeText={(t) => setParticipants(t.replace(/\D/g, ""))}
+                  // Clamping on blur rather than per-keystroke lets a count be
+                  // retyped from empty without the field fighting the typing.
+                  onBlur={() =>
+                    setParticipants((prev) =>
+                      String(clampParticipants(prev, packageDetail)),
+                    )
+                  }
+                  placeholder={String(clampParticipants("", packageDetail))}
                   placeholderTextColor="#9ca3af"
                   keyboardType="number-pad"
                   className={inputClass}
                 />
+                {!!packageDetail && (
+                  <Text className="text-[10px] text-gray-500 mt-1">
+                    {participantLimitsLabel(packageDetail)}
+                  </Text>
+                )}
               </View>
               <View className="flex-1">
                 <SelectField
@@ -1121,6 +1187,7 @@ const EditBookingScreen = () => {
                         addOn={addOn}
                         quantity={selectedAddOns[addOn.id] || 0}
                         unitPrice={getAddOnUnitPrice(addOn.id, addOn)}
+                        packageId={packageId}
                         onChange={handleAddOnChange}
                       />
                     </View>
