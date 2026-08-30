@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
 } from "react";
@@ -38,6 +39,7 @@ import {
   fetchVisitorStats,
   formatSessionDuration,
   isKnownVisitor,
+  peekVisitorSessions,
   type VisitorActivityFilter,
   type VisitorDeviceType,
   type VisitorIdentityFilter,
@@ -250,8 +252,8 @@ const TimelineRow = ({ event }: { event: VisitorTimelineEvent }) => {
 /**
  * Visitor Tracking — every customer visit as its own session (one visitor, one
  * day, Michigan time). Reads the same `/api/visitor-sessions` endpoints as the
- * web admin page: the grouped list (paged through so the filters below run over
- * the whole loaded set), the statistics behind the four counters, the
+ * web admin page: the grouped list (loaded in one request so the filters below
+ * run over the whole set), the statistics behind the four counters, the
  * server-side export, and one session's timeline behind the eye action.
  */
 const VisitorTracking = () => {
@@ -283,6 +285,11 @@ const VisitorTracking = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
 
+  // Only the newest load of each may write state — a location switch or a
+  // refresh can leave an older request in flight behind it.
+  const loadSeq = useRef(0);
+  const statsSeq = useRef(0);
+
   // Session timeline sheet.
   const [detail, setDetail] = useState<VisitorSessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -290,41 +297,64 @@ const VisitorTracking = () => {
 
   // Sessions and counters are two separate endpoints and load independently, the
   // way the web page's `loadSessions` / `loadStats` do. They used to share one
-  // `Promise.all`, which is what held the counters behind the table: paging the
-  // list is up to 30 sequential round trips (100 rows a page, capped at
-  // MAX_LOADED_SESSIONS) while the counters are a single cheap call, and
-  // `Promise.all` only resolves once the slowest of the two is done.
-  const loadSessions = useCallback(async () => {
-    const token = getToken();
-    if (!token) {
-      setError("Not authenticated");
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const list = await fetchAllVisitorSessions({
-        token,
-        locationId: activeLocationId,
-      });
-      setSessions(list.rows);
-      setCapped(list.capped);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Could not load visitor sessions — you may not have permission.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [activeLocationId]);
+  // `Promise.all`, which is what held the counters behind the table.
+  const loadSessions = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      const seq = ++loadSeq.current;
+      const isCurrent = () => seq === loadSeq.current;
+
+      const token = getToken();
+      if (!token) {
+        setError("Not authenticated");
+        setLoading(false);
+        return;
+      }
+
+      // Cached rows paint straight away and refresh behind; a pull-to-refresh
+      // asks for fresh data, so it skips the cache and keeps its spinner.
+      const cached = force ? null : peekVisitorSessions(activeLocationId);
+      if (cached) {
+        setSessions(cached.rows);
+        setCapped(cached.capped);
+        setError(null);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
+      try {
+        const list = await fetchAllVisitorSessions({
+          token,
+          locationId: activeLocationId,
+        });
+        if (!isCurrent()) return;
+        setSessions(list.rows);
+        setCapped(list.capped);
+        setError(null);
+      } catch (err) {
+        if (!isCurrent()) return;
+        // A failed revalidation keeps the cached rows rather than replacing
+        // them with the error state; a pull-to-refresh always surfaces it.
+        if (!cached)
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not load visitor sessions — you may not have permission.",
+          );
+      } finally {
+        if (isCurrent()) setLoading(false);
+      }
+    },
+    [activeLocationId],
+  );
 
   // Best-effort, and deliberately kept out of `error`: the web swallows a stats
   // failure as well, so the tiles fall back to 0 and the table is unaffected —
   // and a table failure leaves whatever the counters already showed in place.
   const loadStats = useCallback(async () => {
+    const seq = ++statsSeq.current;
+    const isCurrent = () => seq === statsSeq.current;
+
     const token = getToken();
     if (!token) {
       setStatsLoading(false);
@@ -332,11 +362,12 @@ const VisitorTracking = () => {
     }
     setStatsLoading(true);
     try {
-      setStats(await fetchVisitorStats(token, activeLocationId));
+      const next = await fetchVisitorStats(token, activeLocationId);
+      if (isCurrent()) setStats(next);
     } catch {
-      setStats(null);
+      if (isCurrent()) setStats(null);
     } finally {
-      setStatsLoading(false);
+      if (isCurrent()) setStatsLoading(false);
     }
   }, [activeLocationId]);
 
@@ -350,7 +381,7 @@ const VisitorTracking = () => {
     try {
       // Both settle before the spinner retracts, but neither waits on the other
       // to *render* — and neither rejects, both handle their own failure.
-      await Promise.all([loadSessions(), loadStats()]);
+      await Promise.all([loadSessions({ force: true }), loadStats()]);
     } finally {
       setRefreshing(false);
     }

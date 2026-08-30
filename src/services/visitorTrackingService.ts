@@ -135,50 +135,14 @@ type SessionsResponse = {
       last_page?: number;
       per_page?: number;
       total?: number;
+      capped?: boolean;
     } | null;
   } | null;
 };
 
-export type VisitorSessionPage = {
-  rows: VisitorSessionRow[];
-  lastPage: number;
-  total: number;
-};
-
-/** GET /api/visitor-sessions — one page, newest session first. */
-export async function fetchVisitorSessions({
-  token,
-  page = 1,
-  perPage = 100,
-  signal,
-  ...filters
-}: VisitorSessionFilters & {
-  token: string;
-  page?: number;
-  perPage?: number;
-  signal?: AbortSignal;
-}): Promise<VisitorSessionPage> {
-  const params = filterParams(filters);
-  params.append("page", String(page));
-  params.append("per_page", String(perPage));
-
-  const res = await apiRequest<SessionsResponse>(
-    `/api/visitor-sessions?${params.toString()}`,
-    { token, signal },
-  );
-  const pg = res?.data?.pagination;
-  return {
-    rows: (res?.data?.sessions ?? []).map(mapSession),
-    lastPage: pg?.last_page ?? page,
-    total: pg?.total ?? 0,
-  };
-}
-
 /**
- * Safety cap on the load-everything loop — the same 3000 the web page uses, so
- * both screens filter and count over the same set. The backend caps `per_page`
- * at 100, so this is up to 30 sequential requests; narrowing the time frame is
- * what keeps a load quick, not a smaller cap.
+ * Ceiling on one load — the same 3000 the web page uses, so both screens filter
+ * and count over the same set.
  */
 export const MAX_LOADED_SESSIONS = 3000;
 
@@ -190,9 +154,27 @@ export type AllVisitorSessions = {
   capped: boolean;
 };
 
+const CACHE_TTL_MS = 3 * 60 * 1000;
+const cacheKey = (locationId?: number) => String(locationId ?? "all");
+
+let cache: {
+  key: string;
+  fetchedAt: number;
+  data: AllVisitorSessions;
+} | null = null;
+
+/** The cached set for this location while it is still fresh, else null. */
+export function peekVisitorSessions(
+  locationId?: number,
+): AllVisitorSessions | null {
+  if (!cache || cache.key !== cacheKey(locationId)) return null;
+  return Date.now() - cache.fetchedAt < CACHE_TTL_MS ? cache.data : null;
+}
+
 /**
- * Page through the list so the screen's timeframe / type / device / activity /
- * search filters run over the whole loaded set, like the web page's do.
+ * GET /api/visitor-sessions?all=1 — the whole scoped set in one request, so the
+ * screen's timeframe / type / device / activity / search filters run over it
+ * client-side the way the web page's do.
  */
 export async function fetchAllVisitorSessions({
   token,
@@ -203,30 +185,24 @@ export async function fetchAllVisitorSessions({
   locationId?: number;
   signal?: AbortSignal;
 }): Promise<AllVisitorSessions> {
-  const rows: VisitorSessionRow[] = [];
-  let page = 1;
-  let lastPage = 1;
-  let total = 0;
+  const params = filterParams({ locationId });
+  params.append("all", "1");
+  params.append("limit", String(MAX_LOADED_SESSIONS));
 
-  do {
-    const res = await fetchVisitorSessions({
-      token,
-      locationId,
-      page,
-      perPage: 100,
-      signal,
-    });
-    rows.push(...res.rows);
-    lastPage = res.lastPage;
-    total = res.total;
-    page += 1;
-  } while (page <= lastPage && rows.length < MAX_LOADED_SESSIONS);
-
-  return {
+  const res = await apiRequest<SessionsResponse>(
+    `/api/visitor-sessions?${params.toString()}`,
+    { token, signal },
+  );
+  const pg = res?.data?.pagination;
+  const rows = (res?.data?.sessions ?? []).map(mapSession);
+  const data: AllVisitorSessions = {
     rows: rows.slice(0, MAX_LOADED_SESSIONS),
-    total,
-    capped: rows.length >= MAX_LOADED_SESSIONS && page <= lastPage,
+    total: pg?.total ?? rows.length,
+    // A server that doesn't report `capped` still tells us by filling the limit.
+    capped: pg?.capped ?? rows.length >= MAX_LOADED_SESSIONS,
   };
+  cache = { key: cacheKey(locationId), fetchedAt: Date.now(), data };
+  return data;
 }
 
 export type VisitorStats = {
