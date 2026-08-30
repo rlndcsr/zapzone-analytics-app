@@ -110,6 +110,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * First field-level message from a 422, when the API returned one. Lets a screen
+ * show "The interval minutes must be at least 15." instead of the generic
+ * validation message Laravel wraps it in.
+ */
+export function firstFieldError(err: unknown): string | undefined {
+  if (!(err instanceof ApiError) || !err.fieldErrors) return undefined;
+  for (const messages of Object.values(err.fieldErrors)) {
+    const first = messages?.[0];
+    if (typeof first === "string" && first.trim()) return first;
+  }
+  return undefined;
+}
+
 /** Default request timeout — fail fast instead of hanging indefinitely. */
 export const DEFAULT_TIMEOUT_MS = 15000;
 

@@ -72,6 +72,8 @@ function toImportInput(
     pricingType:
       (raw.pricingType as string) ?? (raw.pricing_type as string) ?? undefined,
     maxCapacity: num(raw.maxCapacity) ?? num(raw.max_capacity),
+    maxTicketsPerSlot:
+      num(raw.maxTicketsPerSlot) ?? num(raw.max_tickets_per_slot) ?? null,
     duration: num(raw.duration) ?? null,
     durationUnit:
       (raw.durationUnit as string) ?? (raw.duration_unit as string) ?? undefined,

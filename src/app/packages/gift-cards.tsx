@@ -30,6 +30,7 @@ import {
   type GiftCardInput,
   type GiftCardRow,
 } from "../../services/giftCardsService";
+import { venueDateKey } from "../../lib/date/venueTime";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
 import { getCurrentUser, getToken } from "../../lib/session";
 
@@ -287,6 +288,23 @@ const GiftCards = () => {
     const value = Number(cValue) || 0;
     if (value <= 0) {
       Alert.alert("Value required", "Please enter a gift card value.");
+      return;
+    }
+    if (cType === "percentage" && value > 100) {
+      Alert.alert(
+        "Invalid value",
+        "Percentage gift cards cannot exceed 100%",
+      );
+      return;
+    }
+    // Only a well-formed date is judged here; anything else is left to the API.
+    const expiry = cExpiry.trim();
+    const todayKey = venueDateKey(new Date().toISOString());
+    if (/^\d{4}-\d{2}-\d{2}$/.test(expiry) && todayKey && expiry < todayKey) {
+      Alert.alert(
+        "Invalid expiry",
+        "Expiry date cannot be in the past. Leave it blank or pick a future date.",
+      );
       return;
     }
     const input: GiftCardInput = {

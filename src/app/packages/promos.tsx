@@ -76,6 +76,25 @@ const formatDiscount = (type: string, value: number) =>
     ? `${value}% off`
     : `$${value.toFixed(2)} off`;
 
+/**
+ * Bounds on a typed discount, as the web admin applies them. Only Create insists
+ * on a value; Edit leaves a cleared field to its existing "save as 0" handling.
+ */
+const discountValueError = (
+  type: DiscountType,
+  raw: string,
+  requireValue: boolean,
+): string | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return requireValue ? "Please enter a valid value" : null;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return "Please enter a valid value";
+  if (value < 0) return "Discount value cannot be negative";
+  if (type === "percentage" && value > 100)
+    return "Percentage discount cannot exceed 100%";
+  return null;
+};
+
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "";
   const d = new Date(dateStr);
@@ -384,6 +403,11 @@ const Promos = () => {
       Alert.alert("Name required", "Please enter a promo name.");
       return;
     }
+    const createValueError = discountValueError(cType, cValue, true);
+    if (createValueError) {
+      Alert.alert("Invalid discount", createValueError);
+      return;
+    }
     // The API requires a window with end after start; blank fields fall back to
     // today → +30 days, the same defaults the web admin applies.
     const input: PromoInput = {
@@ -457,6 +481,11 @@ const Promos = () => {
     const end = eEnd.trim() || (editing.endDate?.substring(0, 10) ?? "");
     if (start && end && end <= start) {
       Alert.alert("Invalid dates", "The end date must be after the start date.");
+      return;
+    }
+    const editValueError = discountValueError(eType, eValue, false);
+    if (editValueError) {
+      Alert.alert("Invalid discount", editValueError);
       return;
     }
     // Targeting always goes up (an empty list clears the restriction), while the

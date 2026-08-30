@@ -75,3 +75,29 @@ export function formatDuration(
   }
   return `${duration % 1 < 0.01 ? whole : duration} ${durationUnit}`;
 }
+
+const MINUTES_PER_DAY = 24 * 60;
+
+/**
+ * Length of an "HH:MM"→"HH:MM" window in minutes — the web admin's
+ * `scheduleWindowMinutes`. Null when either side is blank or unparseable, 0 when
+ * the two times are identical, and wrapped by a day when the end is earlier than
+ * the start so an overnight window measures forwards.
+ */
+export function scheduleWindowMinutes(
+  startTime: string | null | undefined,
+  endTime: string | null | undefined,
+): number | null {
+  if (!startTime || !endTime) return null;
+
+  const [startHours, startMins] = startTime.split(":").map(Number);
+  const [endHours, endMins] = endTime.split(":").map(Number);
+  // A time missing its minutes destructures to undefined, which Number.isNaN
+  // would let through — the web only ever sees a complete <input type="time">.
+  if (![startHours, startMins, endHours, endMins].every(Number.isFinite))
+    return null;
+
+  const diff = endHours * 60 + endMins - (startHours * 60 + startMins);
+  if (diff === 0) return 0;
+  return diff < 0 ? diff + MINUTES_PER_DAY : diff;
+}

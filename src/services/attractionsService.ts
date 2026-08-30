@@ -353,6 +353,8 @@ export type AttractionImportInput = {
   price: number;
   pricingType?: string;
   maxCapacity?: number;
+  /** Null means uncapped, matching how the column is stored. */
+  maxTicketsPerSlot?: number | null;
   duration?: number | null;
   durationUnit?: string;
   availability?: AvailabilitySchedule[];

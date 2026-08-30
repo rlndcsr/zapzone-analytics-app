@@ -93,12 +93,29 @@ const CANCELLATION_MODES: { value: CancellationMode; label: string }[] = [
 
 const DEFAULT_BILLING = "default"; // sentinel = per member's home location
 
-/** Parse an optional numeric text field into a number or null when blank. */
-function numOrNull(v: string): number | null {
+/** Parse an optional whole-number field, floored at `min` — the web's `intOrNull`. */
+function intOrNull(v: string, min: number): number | null {
   const t = v.trim();
   if (t === "") return null;
+  const n = Math.floor(Number(t));
+  return Number.isFinite(n) ? Math.max(min, n) : null;
+}
+
+/**
+ * Complaint about one whole-number field, or null when it is acceptable. A blank
+ * field is "not set" and passes, so a value being retyped never blocks the form.
+ */
+function intFieldError(
+  label: string,
+  raw: string,
+  min: number,
+): string | null {
+  const t = raw.trim();
+  if (t === "") return null;
   const n = Number(t);
-  return Number.isNaN(n) ? null : n;
+  if (!Number.isFinite(n)) return `${label} must be a number`;
+  if (Math.floor(n) < min) return `${label} must be at least ${min}`;
+  return null;
 }
 
 /** Normalize a backend date value to a YYYY-MM-DD input string. */
@@ -624,9 +641,34 @@ function PlanFormSheet({
     })),
   ];
 
+  /** Only the usage field the chosen mode actually sends is judged. */
+  const planFormError = (): string | null => {
+    if (!name.trim()) return "Plan name is required";
+    if (!priceValid) return "Price must be 0 or more";
+    const checks: [string, string, number][] = [
+      ["Term length", termMonths, 1],
+      ["Trial days", trialDays, 0],
+      ["Grace period days", graceDays, 0],
+      ["Failed payment retry days", retryDays, 0],
+    ];
+    if (usageType === "limited_visits") checks.push(["Visits per term", visits, 1]);
+    if (usageType === "limited") checks.push(["Uses per term", uses, 1]);
+    if (usageType === "punch_card") checks.push(["Punch card total", punch, 1]);
+    for (const [label, raw, min] of checks) {
+      const problem = intFieldError(label, raw, min);
+      if (problem) return problem;
+    }
+    return null;
+  };
+
   const handleSave = async () => {
     const token = getToken();
     if (!token || !canSubmit) return;
+    const problem = planFormError();
+    if (problem) {
+      Alert.alert("Check this plan", problem);
+      return;
+    }
     setSubmitting(true);
     try {
       await savePlan(token, editingPlan?.id ?? null, {
@@ -634,22 +676,24 @@ function PlanFormSheet({
         description: description.trim() || null,
         price: priceNum,
         billing_cycle: cycle,
-        trial_days: numOrNull(trialDays),
-        term_length_months: numOrNull(termMonths),
+        trial_days: intOrNull(trialDays, 0),
+        term_length_months: intOrNull(termMonths, 1),
         season_start_date: seasonStart.trim() || null,
         season_end_date: seasonEnd.trim() || null,
         usage_type: usageType,
         unlimited_visits_per_term: usageType === "unlimited",
-        visits_per_term: usageType === "limited_visits" ? numOrNull(visits) : null,
-        uses_per_term: usageType === "limited" ? numOrNull(uses) : null,
-        punch_card_total: usageType === "punch_card" ? numOrNull(punch) : null,
+        visits_per_term:
+          usageType === "limited_visits" ? intOrNull(visits, 1) : null,
+        uses_per_term: usageType === "limited" ? intOrNull(uses, 1) : null,
+        punch_card_total:
+          usageType === "punch_card" ? intOrNull(punch, 1) : null,
         location_access_mode: accessMode,
         location_id: planLocationId,
         approved_location_ids: accessMode === "multi" ? approvedIds : undefined,
         billing_account_id: billingAccountId,
         cancellation_mode: cancellationMode,
-        grace_period_days: numOrNull(graceDays),
-        failed_payment_retry_days: numOrNull(retryDays),
+        grace_period_days: intOrNull(graceDays, 0),
+        failed_payment_retry_days: intOrNull(retryDays, 0),
         requires_photo: requiresPhoto,
         is_family_or_group: isFamily,
         is_active: isActive,
@@ -1007,6 +1051,21 @@ function BenefitsSheet({
   const modeNeedsValue = bMode === "percent" || bMode === "fixed" || bMode === "count";
   const valueNum = Number(bValue);
   const valueValid = !modeNeedsValue || (bValue.trim() !== "" && valueNum >= 0);
+
+  const benefitFormError = (): string | null => {
+    if (modeNeedsValue) {
+      if (!Number.isFinite(valueNum) || valueNum < 0)
+        return "Value must be 0 or more";
+      if (bMode === "percent" && valueNum > 100)
+        return "Percent off cannot exceed 100";
+      if (bMode === "count" && (valueNum < 1 || !Number.isInteger(valueNum)))
+        return "Number of passes must be a whole number of at least 1";
+    }
+    return (
+      intFieldError("Max redemptions", maxRedemptions, 1) ??
+      intFieldError("Priority", priority, 0)
+    );
+  };
   const targetScope = BENEFIT_TARGET_SCOPE[bType];
 
   // Load the "Applies to" catalog for the chosen benefit type while the add form
@@ -1059,6 +1118,11 @@ function BenefitsSheet({
   const handleAdd = async () => {
     const token = getToken();
     if (!token || planId == null || !valueValid) return;
+    const problem = benefitFormError();
+    if (problem) {
+      Alert.alert("Check this benefit", problem);
+      return;
+    }
 
     // Decode the "Applies to" selection into scope_type + scope_id.
     let scopeType: ScopeType = "any";
@@ -1078,8 +1142,8 @@ function BenefitsSheet({
         value: modeNeedsValue ? valueNum : 0,
         scopeType,
         scopeId,
-        maxRedemptions: numOrNull(maxRedemptions),
-        priority: numOrNull(priority) ?? 0,
+        maxRedemptions: intOrNull(maxRedemptions, 1),
+        priority: intOrNull(priority, 0) ?? 0,
         isStackable,
         requiresManualRedemption: manualRedemption,
         isActive: bActive,

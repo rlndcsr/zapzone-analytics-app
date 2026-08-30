@@ -684,6 +684,8 @@ export type PackageScheduleInput = {
   timeSlotEnd: string; // "HH:MM"
   timeSlotInterval: number; // minutes, min 15
   isActive: boolean;
+  /** List order — decides which schedule wins on a day two of them cover. */
+  priority?: number;
 };
 
 /** PUT /api/packages/{id}/availability-schedules — bulk-replace a package's
@@ -702,6 +704,7 @@ export async function savePackageAvailabilitySchedules(
       time_slot_end: s.timeSlotEnd,
       time_slot_interval: s.timeSlotInterval,
       is_active: s.isActive,
+      priority: s.priority,
     })),
   };
   await apiRequest(`/api/packages/${packageId}/availability-schedules`, {

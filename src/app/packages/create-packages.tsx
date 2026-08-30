@@ -27,6 +27,10 @@ import {
   type PackageScheduleLike,
 } from "../../lib/callToBook";
 import { markPackagesStale } from "../../lib/hooks/usePackages";
+import {
+  packageDurationMinutes,
+  validatePackageSetup,
+} from "../../lib/packageSetup";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
 import {
@@ -526,7 +530,7 @@ const CreatePackage = () => {
   };
 
   const buildSchedulePayload = (): PackageScheduleInput[] =>
-    schedules.map((s) => ({
+    schedules.map((s, index) => ({
       availabilityType: s.type,
       dayConfiguration:
         s.type === "weekly"
@@ -538,6 +542,7 @@ const CreatePackage = () => {
       timeSlotEnd: normalizeTime(s.end) ?? "17:00",
       timeSlotInterval: parseIntOrNull(s.interval) ?? 30,
       isActive: s.isActive,
+      priority: index,
     }));
 
   const handleSubmit = async () => {
@@ -573,6 +578,21 @@ const CreatePackage = () => {
           "Select at least one day for a weekly schedule.",
         );
     }
+
+    const setupError = validatePackageSetup({
+      minParticipants: parseIntOrNull(minParticipants),
+      maxTicketsPerSlot: parseIntOrNull(maxTicketsPerSlot),
+      durationMinutes: packageDurationMinutes(
+        durationUnit,
+        duration,
+        durationHours,
+        durationMinutes,
+      ),
+      schedules: schedules.map((s) => ({ start: s.start, end: s.end })),
+      bookingWindowDays: parseIntOrNull(bookingWindowDays),
+      minBookingNoticeHours: parseIntOrNull(minNotice),
+    });
+    if (setupError) return Alert.alert("Check this package", setupError);
 
     const dur = resolvedDuration();
     if (dur == null || dur <= 0)
@@ -1172,6 +1192,12 @@ const CreatePackage = () => {
               <Text className="text-xs text-gray-400 dark:text-gray-500">
                 At least one schedule is required (matches the web admin).
               </Text>
+              {schedules.length > 1 && (
+                <Text className="text-xs text-gray-500 dark:text-gray-400">
+                  When two schedules cover the same day, the one lower in this
+                  list wins.
+                </Text>
+              )}
               {schedules.map((s, idx) => (
                 <View
                   key={s.key}

@@ -258,6 +258,16 @@ const CreateAttractionScreen = () => {
   };
 
   const handleSubmit = async () => {
+    const sameClockIndex = schedules.findIndex(
+      (s) => s.start_time && s.end_time && s.start_time === s.end_time,
+    );
+    if (sameClockIndex !== -1) {
+      Alert.alert(
+        "Invalid schedule",
+        `Schedule ${sameClockIndex + 1}: start and end time cannot be the same`,
+      );
+      return;
+    }
     const found = validate();
     setErrors(found);
     if (Object.keys(found).length > 0) {

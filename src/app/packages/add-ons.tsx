@@ -285,6 +285,16 @@ const AddOns = () => {
       Alert.alert("Name required", "Please enter an add-on name.");
       return;
     }
+    // Blank max means unbounded, as it does everywhere the quantity is stepped.
+    const minQty = fMin.trim() ? parseInt(fMin, 10) : 1;
+    const maxQty = fMax.trim() ? parseInt(fMax, 10) : null;
+    if (maxQty !== null && minQty > maxQty) {
+      Alert.alert(
+        "Check quantities",
+        "Maximum quantity cannot be lower than minimum quantity",
+      );
+      return;
+    }
     const input: AddOnInput = {
       name: fName.trim(),
       price: Number(fPrice) || 0,

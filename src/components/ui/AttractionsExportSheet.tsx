@@ -80,6 +80,7 @@ export function AttractionsExportSheet({
         price: a.price,
         pricingType: a.pricingType,
         maxCapacity: a.maxCapacity,
+        maxTicketsPerSlot: a.maxTicketsPerSlot,
         duration: a.duration,
         durationUnit: a.durationUnit,
         status: a.status,
