@@ -1238,10 +1238,13 @@ const ManageAccounts = () => {
         email,
         role: inviteUserType,
         company_id: currentUser?.company_id ?? undefined,
+        // A manager's invite is scoped to the inviter's own location, as on web.
         location_id:
           inviteUserType === "attendant"
             ? (inviteLocationId ?? undefined)
-            : undefined,
+            : inviteUserType === "location_manager"
+              ? (currentUser?.location_id ?? undefined)
+              : undefined,
       });
       setInviteLink(link || null);
       setInviteSuccess(true);
