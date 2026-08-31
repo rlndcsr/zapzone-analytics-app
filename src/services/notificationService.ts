@@ -36,6 +36,7 @@ export async function fetchNotifications(
   filterType: NotificationFilterType = "all",
   page: number = 1,
   perPage: number = 5,
+  signal?: AbortSignal,
 ): Promise<PaginatedNotificationsResponse> {
   let params = new URLSearchParams();
   if (filterType === "unread") {
@@ -51,8 +52,43 @@ export async function fetchNotifications(
 
   return apiRequest<PaginatedNotificationsResponse>(
     `/api/notifications?${params.toString()}`,
-    { token, timeoutMs: NOTIFICATIONS_TIMEOUT_MS },
+    { token, timeoutMs: NOTIFICATIONS_TIMEOUT_MS, signal },
   );
+}
+
+/** One badge count per filter tab. */
+export type NotificationCounts = Record<NotificationFilterType, number>;
+
+/**
+ * Counts for every filter tab.
+ *
+ * There is no count endpoint, so this asks the list endpoint for a single row
+ * per filter and reads `pagination.total` — four small requests rather than
+ * four full pages. A failed count reads as 0 so a badge never blocks the list.
+ */
+export async function fetchNotificationCounts(
+  token: string,
+  signal?: AbortSignal,
+): Promise<NotificationCounts> {
+  const filters: NotificationFilterType[] = [
+    "all",
+    "unread",
+    "booking",
+    "payment",
+  ];
+  const totals = await Promise.all(
+    filters.map((f) =>
+      fetchNotifications(token, f, 1, 1, signal)
+        .then((r) => r?.data?.pagination?.total ?? 0)
+        .catch(() => 0),
+    ),
+  );
+  return {
+    all: totals[0],
+    unread: totals[1],
+    booking: totals[2],
+    payment: totals[3],
+  };
 }
 
 export async function markAllNotificationsAsRead(

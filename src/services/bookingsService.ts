@@ -1,4 +1,4 @@
-import { apiRequest, apiUrl, firstMediaUrl, mediaUrl } from "../lib/api";
+import { apiRequest, apiUrl, firstMediaUrl } from "../lib/api";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
   AppliedFee as PricingAppliedFee,
@@ -1684,7 +1684,12 @@ type RawPackage = {
   name?: string | null;
   description?: string | null;
   category?: string | null;
-  image?: string | null;
+  /**
+   * The API casts `image` to an array, so this arrives as a list of stored file
+   * paths (`images/packages/<id>.jpg`) — not the single string the field name
+   * suggests. Legacy rows can still hold a base64 data URI.
+   */
+  image?: string | string[] | null;
   is_active?: boolean | number | null;
   price?: number | string | null;
   price_per_additional?: number | string | null;
@@ -1753,7 +1758,9 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
     name: raw.name?.trim() || `Package #${raw.id}`,
     category: raw.category?.trim() || "",
     description: raw.description?.trim() || "",
-    image: mediaUrl(raw.image),
+    // firstMediaUrl, not mediaUrl: the field is an array, and stringifying a
+    // multi-image one yields "a.jpg,b.jpg" — a URL that resolves to nothing.
+    image: firstMediaUrl(raw.image),
     price: Number(raw.price ?? 0),
     pricePerAdditional: Number(raw.price_per_additional ?? 0),
     minParticipants: Number(raw.min_participants ?? 1) || 1,

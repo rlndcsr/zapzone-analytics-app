@@ -57,6 +57,13 @@ describe("action_url routing (primary signal)", () => {
     );
   });
 
+  it("opens customer concerns for a checkout-left-unfinished notification", () => {
+    assert.deepEqual(
+      route({ type: "system", action_url: "/customer-concerns" }),
+      { pathname: "/customers/customer-concerns" },
+    );
+  });
+
   it("opens the photo delivery log", () => {
     assert.deepEqual(
       route({ type: "system", action_url: "/photos/delivery-log" }),

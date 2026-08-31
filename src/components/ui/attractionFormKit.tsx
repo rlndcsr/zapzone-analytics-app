@@ -158,11 +158,14 @@ export const Section = ({
   icon,
   title,
   children,
+  right,
   onLayout,
 }: {
   icon: IconName;
   title: string;
   children: ReactNode;
+  /** Optional action aligned to the far end of the header row (e.g. "Add"). */
+  right?: ReactNode;
   onLayout?: (e: LayoutChangeEvent) => void;
 }) => (
   <View
@@ -174,9 +177,10 @@ export const Section = ({
       <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
         <Feather name={icon} size={16} color={PRIMARY} />
       </View>
-      <Text className="text-base font-bold text-gray-900 dark:text-white">
+      <Text className="flex-1 text-base font-bold text-gray-900 dark:text-white">
         {title}
       </Text>
+      {right}
     </View>
     {children}
   </View>

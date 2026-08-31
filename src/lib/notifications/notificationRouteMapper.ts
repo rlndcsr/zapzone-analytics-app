@@ -158,6 +158,13 @@ const ACTION_URL_RULES: ActionUrlRule[] = [
     pattern: /^\/photos\/delivery-log$/,
     route: () => ({ pathname: "/photos/delivery-log" }),
   },
+  // Checkout concerns ("Checkout left unfinished", "Customer needs help with
+  // the schedule"). The backend sends the web's own path, which the app serves
+  // under /customers.
+  {
+    pattern: /^\/customer-concerns$/,
+    route: () => ({ pathname: "/customers/customer-concerns" }),
+  },
 ];
 
 function resolveByActionUrl(

@@ -4,30 +4,59 @@ import {
   Bell,
   BellOff,
   Bookmark,
+  Calendar,
   Check,
   ChevronLeft,
+  Clock,
   CreditCard,
+  Gift,
+  Search,
+  Tag,
+  UserCheck,
+  Users,
   X
 } from "lucide-react-native";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
   RefreshControl,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SwipeableNotificationCard } from "../../components/ui/SwipeableNotificationCard";
 import { UndoSnackbar } from "../../components/ui/UndoSnackbar";
 import { NotificationsListSkeleton } from "../../components/ui/skeleton/NotificationsSkeleton";
-import { formatDateTimeET } from "../../lib/date/venueTime";
+import { timeAgo } from "../../lib/date/timeAgo";
+import { groupByDay } from "../../lib/notifications/notificationGroups";
+import {
+  notificationIconStyle,
+  type NotificationIconName,
+} from "../../lib/notifications/notificationIcon";
+import { formatDateET, venueDateKey } from "../../lib/date/venueTime";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import { getToken } from "../../lib/session";
 import { resolveNotificationRoute } from "../../lib/notifications/notificationRouteMapper";
 import {
   AppNotification,
+  fetchNotificationCounts,
   NotificationFilterType,
+  type NotificationCounts,
 } from "../../services/notificationService";
+
+/** Lucide component for each icon name the type map can return. */
+const TYPE_GLYPHS: Record<NotificationIconName, typeof Bell> = {
+  "credit-card": CreditCard,
+  calendar: Calendar,
+  users: Users,
+  "user-check": UserCheck,
+  gift: Gift,
+  tag: Tag,
+  clock: Clock,
+  bell: Bell,
+};
 
 const Notification = () => {
   const {
@@ -53,6 +82,54 @@ const Notification = () => {
   } = useNotifications("all");
 
   const [refreshing, setRefreshing] = useState(false);
+  /** Filters the loaded page by title/message — the server has no search param. */
+  const [search, setSearch] = useState("");
+  const [counts, setCounts] = useState<NotificationCounts | null>(null);
+
+  /**
+   * Search filters the loaded page only — the list endpoint takes no query
+   * parameter, so this cannot reach rows on other pages. Kept client-side
+   * rather than faked server-side so the behaviour is honest.
+   */
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return notifications;
+    return notifications.filter(
+      (n) =>
+        n.title?.toLowerCase().includes(term) ||
+        n.message?.toLowerCase().includes(term),
+    );
+  }, [notifications, search]);
+
+  /** Today / Earlier, split on the venue's calendar day. */
+  const groups = useMemo(
+    () =>
+      groupByDay(visible, {
+        createdAt: (n) => n.created_at,
+        dayKey: (v) => venueDateKey(v) ?? "",
+        today: venueDateKey(new Date().toISOString()) ?? "",
+      }),
+    [visible],
+  );
+
+  /** Tab badges. Refreshed whenever the list is, so they track marking/clearing. */
+  const loadCounts = useCallback(async (signal?: AbortSignal) => {
+    const token = getToken();
+    if (!token) return;
+    try {
+      const next = await fetchNotificationCounts(token, signal);
+      if (!signal?.aborted) setCounts(next);
+    } catch {
+      // Badges are decoration — a failure just leaves them off.
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadCounts(controller.signal);
+    return () => controller.abort();
+    // Re-count when the list changes identity (mark-all, clear, delete, load).
+  }, [loadCounts, notifications]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -167,18 +244,19 @@ const Notification = () => {
       >
         <View className="flex-row items-start justify-between mb-2">
           <View className="flex-1 flex-row items-center gap-3">
-            <View
-              className={`w-10 h-10 rounded-full items-center justify-center ${
-                item.status === "unread"
-                  ? "bg-blue-100 dark:bg-blue-900/30"
-                  : "bg-gray-100 dark:bg-neutral-800"
-              }`}
-            >
-              <Bell
-                size={20}
-                color={item.status === "unread" ? "#0644C7" : "#6b7280"}
-              />
-            </View>
+            {/* Tile keyed on the notification type — a card for payments, a
+                calendar for bookings, people for customer concerns. */}
+            {(() => {
+              const style = notificationIconStyle(item.type);
+              const Glyph = TYPE_GLYPHS[style.icon];
+              return (
+                <View
+                  className={`w-10 h-10 rounded-xl items-center justify-center ${style.tile}`}
+                >
+                  <Glyph size={20} color={style.color} />
+                </View>
+              );
+            })()}
             <View className="flex-1">
               <Text className="text-sm font-semibold text-gray-900 dark:text-white">
                 {item.title}
@@ -221,10 +299,12 @@ const Notification = () => {
           <Text className="text-sm text-gray-600 dark:text-gray-300 leading-5 mb-2">
             {item.message}
           </Text>
+          {/* Relative age ("12m ago") — how recent a notification is matters
+              more here than its exact timestamp. Anything past a month falls
+              back to the venue's calendar date. */}
           <Text className="text-xs text-gray-400 dark:text-gray-500">
-            {formatDateTimeET(item.created_at, {
-              month: "short",
-              showZone: false,
+            {timeAgo(item.created_at, {
+              formatOlder: (v) => formatDateET(v, { month: "short" }),
             })}
           </Text>
         </View>
@@ -300,24 +380,38 @@ const Notification = () => {
         }
       >
         <View className="px-5 pt-0">
-          {/* Stats Section */}
-          <View className="flex-row items-center justify-between bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
-            <View>
-              <Text className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                Total Notifications
-              </Text>
-              <Text className="text-2xl font-bold text-gray-900 dark:text-white">
-                {totalCount}
-              </Text>
+          {/* Search + mark-all row. The old "Total Notifications" tile is gone;
+              the per-tab counts below carry that information now. */}
+          <View className="flex-row items-center gap-2 mt-6 mb-4">
+            <View className="flex-1 flex-row items-center rounded-xl border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
+              <Search size={16} color="#9CA3AF" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search notifications…"
+                placeholderTextColor="#9CA3AF"
+                className="ml-2 flex-1 py-2.5 text-sm text-gray-900 dark:text-white"
+              />
+              {!!search && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <X size={16} color="#9CA3AF" />
+                </Pressable>
+              )}
             </View>
             <Pressable
               onPress={markAllAsRead}
               disabled={actionLoading}
-              className="flex-row items-center gap-2 px-4 py-2 rounded-xl bg-gray-100 dark:bg-neutral-800"
+              className="flex-row items-center gap-1.5 rounded-xl bg-gray-100 px-3 py-2.5 dark:bg-neutral-800"
+              accessibilityRole="button"
             >
               <Check size={16} color="#0644C7" />
               <Text className="text-xs font-medium text-[#0644C7]">
-                Mark all read
+                Mark all
               </Text>
             </Pressable>
           </View>
@@ -366,6 +460,27 @@ const Notification = () => {
                   >
                     {opt.label}
                   </Text>
+                  {/* Server-side count per filter; hidden until it loads so a
+                      tab never flashes a misleading zero. */}
+                  {counts != null && (
+                    <View
+                      className={`min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 ${
+                        isActive
+                          ? "bg-white/25"
+                          : "bg-gray-100 dark:bg-neutral-800"
+                      }`}
+                    >
+                      <Text
+                        className={`text-[10px] font-bold ${
+                          isActive
+                            ? "text-white"
+                            : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {counts[opt.value]}
+                      </Text>
+                    </View>
+                  )}
                 </Pressable>
               );
             })}
@@ -384,28 +499,38 @@ const Notification = () => {
               <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
-
           {/* Empty State */}
           {!loading &&
             !actionLoading &&
             !error &&
-            notifications.length === 0 && (
+            visible.length === 0 && (
               <View className="bg-white dark:bg-neutral-900 rounded-2xl p-12 items-center shadow-sm border border-gray-100 dark:border-neutral-800">
                 <View className="w-20 h-20 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-4">
                   <BellOff size={32} color="#9ca3af" />
                 </View>
                 <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                  No notifications
+                  {search.trim() ? "No matches" : "No notifications"}
                 </Text>
                 <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                  You&apos;re all caught up! Check back later for updates.
+                  {search.trim()
+                    ? "Nothing on this page matches your search."
+                    : "You're all caught up! Check back later for updates."}
                 </Text>
               </View>
             )}
 
-          {/* Notifications List */}
-          {!loading && !actionLoading && !error && notifications.length > 0 && (
-            <View>{notifications.map(renderNotification)}</View>
+          {/* Notifications List, split into Today / Earlier */}
+          {!loading && !actionLoading && !error && visible.length > 0 && (
+            <View>
+              {groups.map((g) => (
+                <View key={g.title}>
+                  <Text className="mb-2 mt-1 text-sm font-bold text-gray-900 dark:text-white">
+                    {g.title}
+                  </Text>
+                  {g.items.map(renderNotification)}
+                </View>
+              ))}
+            </View>
           )}
 
           {/* Pagination */}

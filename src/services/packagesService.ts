@@ -188,6 +188,11 @@ export type PackageScheduleView = {
   timeSlotStart: string | null;
   timeSlotEnd: string | null;
   timeSlotInterval: number | null;
+  /**
+   * Per-schedule override of the package minimum, applied on the days this
+   * schedule covers. Null means "use the package default".
+   */
+  minParticipants: number | null;
   isActive: boolean;
 };
 
@@ -361,6 +366,7 @@ export async function fetchPackageDetail(
       timeSlotStart: (s.time_slot_start as string) ?? null,
       timeSlotEnd: (s.time_slot_end as string) ?? null,
       timeSlotInterval: numOrNull(s.time_slot_interval),
+      minParticipants: numOrNull(s.min_participants),
       isActive: s.is_active !== false,
     })),
     image: Array.isArray(rawImage)
@@ -690,6 +696,8 @@ export type PackageScheduleInput = {
   timeSlotStart: string; // "HH:MM"
   timeSlotEnd: string; // "HH:MM"
   timeSlotInterval: number; // minutes, min 15
+  /** Override of the package minimum on these days; null uses the default. */
+  minParticipants?: number | null;
   isActive: boolean;
   /** List order — decides which schedule wins on a day two of them cover. */
   priority?: number;
@@ -710,6 +718,10 @@ export async function savePackageAvailabilitySchedules(
       time_slot_start: s.timeSlotStart,
       time_slot_end: s.timeSlotEnd,
       time_slot_interval: s.timeSlotInterval,
+      // Must be sent even when null: this endpoint deletes every schedule and
+      // recreates them, so omitting the override would silently drop one set
+      // on the web admin.
+      min_participants: s.minParticipants ?? null,
       is_active: s.isActive,
       priority: s.priority,
     })),

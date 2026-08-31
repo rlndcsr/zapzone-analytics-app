@@ -30,7 +30,7 @@ import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
 import { Toast, type ToastType } from "../../components/ui/Toast";
-import { mediaUrl } from "../../lib/api";
+import { firstMediaUrl, mediaUrl } from "../../lib/api";
 import {
   attractionIsCallToBook,
   eventIsCallToBook,
@@ -2024,7 +2024,7 @@ const CreatePurchaseScreen = () => {
                         className="flex-row items-center gap-2.5 p-2 mb-2 rounded-lg bg-gray-50 dark:bg-neutral-800"
                       >
                         <Thumb
-                          uri={mediaUrl(addOn.image)}
+                          uri={firstMediaUrl(addOn.image)}
                           size={40}
                           placeholder="No Img"
                         />

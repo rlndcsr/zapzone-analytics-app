@@ -21,13 +21,17 @@ import {
   ToggleRow,
   type SelectOption,
 } from "../../components/ui/FormControls";
-import { CallToBookNotice } from "../../components/ui/attractionFormKit";
+import {
+  CallToBookNotice,
+  Section,
+} from "../../components/ui/attractionFormKit";
 import { mediaUrl } from "../../lib/api";
 import {
   packageIsCallToBook,
   type PackageScheduleLike,
 } from "../../lib/callToBook";
 import { markPackagesStale } from "../../lib/hooks/usePackages";
+import { generateScheduleSlots } from "../../lib/packages/scheduleSlots";
 import {
   packageDurationMinutes,
   validatePackageSetup,
@@ -102,15 +106,6 @@ const WEEKDAY_OPTIONS: SelectOption[] = WEEKDAYS.map((d) => ({
   value: d,
 }));
 
-const STEPS = [
-  "Basic info",
-  "Pricing & participants",
-  "Booking rules",
-  "Attractions, rooms & add-ons",
-  "Promos & gift cards",
-  "Availability",
-  "Invitation & review",
-];
 
 const parseNum = (s: string): number | null => {
   const t = s.trim();
@@ -118,6 +113,15 @@ const parseNum = (s: string): number | null => {
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 };
+/** "13:30" -> "1:30 PM", for the generated-slot chips. */
+const to12h = (hhmm: string): string => {
+  const [h, m] = hhmm.split(":");
+  let hour = Number(h);
+  const meridian = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+  return `${hour}:${m} ${meridian}`;
+};
+
 const parseIntOrNull = (s: string): number | null => {
   const t = s.trim();
   if (!t) return null;
@@ -152,6 +156,8 @@ type SchedRow = {
   start: string;
   end: string;
   interval: string;
+  /** Per-schedule override of the package minimum; blank uses the default. */
+  minPlayers: string;
   isActive: boolean;
 };
 
@@ -232,6 +238,7 @@ const seedSchedules = (detail: PackageDetail): SchedRow[] =>
       start: toHHMM(s.timeSlotStart) || "09:00",
       end: toHHMM(s.timeSlotEnd) || "17:00",
       interval: String(s.timeSlotInterval ?? 30),
+      minPlayers: s.minParticipants != null ? String(s.minParticipants) : "",
       isActive: s.isActive,
     };
   });
@@ -245,7 +252,7 @@ const EditPackage = () => {
   const user = getCurrentUser();
   const userId = user?.id ?? 0;
 
-  const [step, setStep] = useState(0);
+
   const [submitting, setSubmitting] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -546,6 +553,7 @@ const EditPackage = () => {
         start: "09:00",
         end: "17:00",
         interval: "30",
+        minPlayers: "",
         isActive: true,
       },
     ]);
@@ -562,7 +570,11 @@ const EditPackage = () => {
   const playerWord = guestLabel || "Player";
   const participantWord = guestLabel || (perPerson ? "Player" : "Participant");
 
-  /* --- per-step validation on Next -------------------------------------- */
+  /**
+   * Field validation, grouped the way the form reads: 0 is the Details section,
+   * 1 is Pricing & Players. Kept as groups (rather than one flat function) so
+   * the first failure reported is the one nearest the top of the page.
+   */
   const validateStep = (s: number): string | null => {
     if (s === 0) {
       if (!name.trim()) return "Package name is required.";
@@ -598,15 +610,6 @@ const EditPackage = () => {
     return null;
   };
 
-  const goNext = () => {
-    const err = validateStep(step);
-    if (err) {
-      Alert.alert("Check this step", err);
-      return;
-    }
-    setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  };
-  const goBack = () => setStep((s) => Math.max(s - 1, 0));
 
   const resolvedDuration = (): number | null => {
     if (durationUnit === "hours and minutes") {
@@ -617,6 +620,12 @@ const EditPackage = () => {
     }
     return parseNum(duration);
   };
+
+  /** Session length in minutes, for the generated-slots preview. 0 means the
+   *  duration fields are still blank, so there is nothing to preview yet. */
+  const sessionMinutes =
+    packageDurationMinutes(durationUnit, duration, durationHours, durationMinutes) ||
+    null;
 
   const buildSchedulePayload = (): PackageScheduleInput[] =>
     schedules.map((s, index) => ({
@@ -630,16 +639,20 @@ const EditPackage = () => {
       timeSlotStart: normalizeTime(s.start) ?? "09:00",
       timeSlotEnd: normalizeTime(s.end) ?? "17:00",
       timeSlotInterval: parseIntOrNull(s.interval) ?? 30,
+      // Blank means "use the package minimum", which the API stores as null.
+      minParticipants: parseIntOrNull(s.minPlayers),
       isActive: s.isActive,
       priority: index,
     }));
 
   const handleSubmit = async () => {
-    for (let s = 0; s <= 1; s++) {
-      const err = validateStep(s);
+    // The form is one page now, so every rule runs here rather than gating a
+    // Next button. Groups are checked in reading order so the message names the
+    // first problem the user would scroll to.
+    for (const group of [0, 1]) {
+      const err = validateStep(group);
       if (err) {
-        setStep(s);
-        Alert.alert("Check this step", err);
+        Alert.alert("Check this form", err);
         return;
       }
     }
@@ -761,7 +774,7 @@ const EditPackage = () => {
     }
   };
 
-  const isLast = step === STEPS.length - 1;
+
 
   const categoryOptions = useMemo(() => {
     const opts = categories.map((c) => ({ label: c.name, value: c.name }));
@@ -790,25 +803,9 @@ const EditPackage = () => {
           </Text>
           <View style={{ width: 36 }} />
         </View>
-        {!loadingDetail && !loadError && (
-          <View className="mt-3">
-            <Text className="text-xs font-semibold text-[#0644C7]">
-              Step {step + 1} of {STEPS.length} · {STEPS[step]}
-            </Text>
-            <View className="flex-row gap-1 mt-2">
-              {STEPS.map((_, i) => (
-                <View
-                  key={i}
-                  className={`flex-1 h-1 rounded-full ${
-                    i <= step
-                      ? "bg-[#0644C7]"
-                      : "bg-gray-200 dark:bg-neutral-800"
-                  }`}
-                />
-              ))}
-            </View>
-          </View>
-        )}
+        <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          Update the details of your package deal.
+        </Text>
       </View>
 
       {loadingDetail ? (
@@ -835,12 +832,16 @@ const EditPackage = () => {
         >
           <ScrollView
             className="flex-1"
-            contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+            contentContainerStyle={{
+              padding: 20,
+              // The actions scroll with the content now, so the safe area has
+              // to be cleared here rather than by a pinned footer.
+              paddingBottom: insets.bottom + 32,
+            }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* STEP 1 — Basic info */}
-            {step === 0 && (
+            <Section icon="info" title="Details">
               <View className="gap-4">
                 {/* Package image — shown at the top of the form, matching the web admin. */}
                 <SectionLabel>Package image</SectionLabel>
@@ -985,10 +986,9 @@ const EditPackage = () => {
                   onValueChange={setIsActive}
                 />
               </View>
-            )}
+            </Section>
 
-            {/* STEP 2 — Pricing & participants */}
-            {step === 1 && (
+            <Section icon="dollar-sign" title="Pricing & Players">
               <View className="gap-4">
                 <View>
                   <Text className="text-sm font-bold text-gray-900 dark:text-white">
@@ -1153,10 +1153,9 @@ const EditPackage = () => {
                   />
                 )}
               </View>
-            )}
+            </Section>
 
-            {/* STEP 3 — Booking rules & deposits */}
-            {step === 2 && (
+            <Section icon="sliders" title="Booking Rules">
               <View className="gap-4">
                 <View className="flex-row gap-3">
                   <View className="flex-1">
@@ -1191,10 +1190,9 @@ const EditPackage = () => {
                   multiline
                 />
               </View>
-            )}
+            </Section>
 
-            {/* STEP 4 — Attractions / rooms / add-ons */}
-            {step === 3 && (
+            <Section icon="grid" title="Attractions, Spaces & Add-ons">
               <View>
                 <SectionLabel>Attractions</SectionLabel>
                 {attractions.length === 0 ? (
@@ -1263,10 +1261,9 @@ const EditPackage = () => {
                   </View>
                 )}
               </View>
-            )}
+            </Section>
 
-            {/* STEP 5 — Promos / gift cards */}
-            {step === 4 && (
+            <Section icon="tag" title="Promos & Gift Cards">
               <View>
                 <SectionLabel>Promos</SectionLabel>
                 {promos.length === 0 ? (
@@ -1309,19 +1306,28 @@ const EditPackage = () => {
                   </View>
                 )}
               </View>
-            )}
+            </Section>
 
-            {/* STEP 6 — Availability */}
-            {step === 5 && (
+            <Section icon="calendar" title="Availability Schedules">
               <View className="gap-4">
                 {/* What these schedules mean for the customer site. */}
                 <CallToBookNotice
                   active={packageIsCallToBook(schedules.map(toScheduleLike))}
                   itemLabel="package"
                 />
-                <Text className="text-xs text-gray-400 dark:text-gray-500">
-                  Existing schedules are shown below; add, edit, or remove them.
-                </Text>
+                {/* Count banner — the web's "N availability schedule(s)
+                    configured for this package". */}
+                <View className="rounded-xl border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
+                  <Text className="text-sm text-blue-900 dark:text-blue-200">
+                    <Text className="font-bold">{schedules.length}</Text>{" "}
+                    availability schedule{schedules.length === 1 ? "" : "s"}{" "}
+                    configured for this package.
+                  </Text>
+                  <Text className="mt-1 text-xs text-blue-800/80 dark:text-blue-300/80">
+                    Availability schedules define when this package can be
+                    booked, with different time configurations.
+                  </Text>
+                </View>
                 {schedules.length > 1 && (
                   <Text className="text-xs text-gray-500 dark:text-gray-400">
                     When two schedules cover the same day, the one lower in this
@@ -1342,31 +1348,64 @@ const EditPackage = () => {
                       </Pressable>
                     </View>
 
-                    <SelectField
-                      label="Type"
-                      value={s.type}
-                      options={SCHEDULE_TYPES}
-                      onSelect={(v) =>
-                        patchSchedule(s.key, { type: v as SchedRow["type"] })
-                      }
-                    />
-
-                    {s.type === "weekly" && (
+                    {/* Schedule Type — the web's three buttons, not a dropdown. */}
+                    <View>
+                      <SectionLabel>Schedule Type</SectionLabel>
                       <View className="flex-row flex-wrap">
-                        {WEEKDAYS.map((d) => (
+                        {SCHEDULE_TYPES.map((t) => (
                           <Chip
-                            key={d}
-                            label={d[0].toUpperCase() + d.slice(1, 3)}
-                            selected={s.weekDays.includes(d)}
+                            key={String(t.value)}
+                            label={t.label}
+                            selected={s.type === t.value}
                             onPress={() =>
                               patchSchedule(s.key, {
-                                weekDays: s.weekDays.includes(d)
-                                  ? s.weekDays.filter((x) => x !== d)
-                                  : [...s.weekDays, d],
+                                type: t.value as SchedRow["type"],
                               })
                             }
                           />
                         ))}
+                      </View>
+                    </View>
+
+                    {s.type === "weekly" && (
+                      <View>
+                        <View className="flex-row items-center justify-between mb-1">
+                          <SectionLabel>Select Days</SectionLabel>
+                          <Pressable
+                            onPress={() =>
+                              patchSchedule(s.key, {
+                                weekDays:
+                                  s.weekDays.length === WEEKDAYS.length
+                                    ? []
+                                    : [...WEEKDAYS],
+                              })
+                            }
+                            className="active:opacity-70"
+                            accessibilityRole="button"
+                          >
+                            <Text className="text-xs font-semibold text-[#0644C7]">
+                              {s.weekDays.length === WEEKDAYS.length
+                                ? "Deselect All"
+                                : "Select All"}
+                            </Text>
+                          </Pressable>
+                        </View>
+                        <View className="flex-row flex-wrap">
+                          {WEEKDAYS.map((d) => (
+                            <Chip
+                              key={d}
+                              label={d[0].toUpperCase() + d.slice(1, 3)}
+                              selected={s.weekDays.includes(d)}
+                              onPress={() =>
+                                patchSchedule(s.key, {
+                                  weekDays: s.weekDays.includes(d)
+                                    ? s.weekDays.filter((x) => x !== d)
+                                    : [...s.weekDays, d],
+                                })
+                              }
+                            />
+                          ))}
+                        </View>
                       </View>
                     )}
 
@@ -1415,16 +1454,38 @@ const EditPackage = () => {
                         />
                       </View>
                     </View>
-                    <TextField
-                      label="Slot interval (min)"
-                      value={s.interval}
-                      onChangeText={(t) =>
-                        patchSchedule(s.key, { interval: t })
-                      }
-                      keyboardType="number-pad"
-                      placeholder="30"
-                      hint="Minimum 15 minutes."
-                    />
+                    <View className="flex-row gap-3">
+                      <View className="flex-1">
+                        <TextField
+                          label="Interval (min)"
+                          value={s.interval}
+                          onChangeText={(t) =>
+                            patchSchedule(s.key, { interval: t })
+                          }
+                          keyboardType="number-pad"
+                          placeholder="30"
+                          hint={
+                            parseIntOrNull(s.interval)
+                              ? `A new start time every ${parseIntOrNull(s.interval)} min.`
+                              : "Minimum 15 minutes."
+                          }
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <TextField
+                          label="Min players (override)"
+                          value={s.minPlayers}
+                          onChangeText={(t) =>
+                            patchSchedule(s.key, {
+                              minPlayers: t.replace(/\D/g, ""),
+                            })
+                          }
+                          keyboardType="number-pad"
+                          placeholder="Package default"
+                          hint="Leave blank to use the package minimum on these days."
+                        />
+                      </View>
+                    </View>
                     <ToggleRow
                       label="Active"
                       value={s.isActive}
@@ -1432,6 +1493,51 @@ const EditPackage = () => {
                         patchSchedule(s.key, { isActive: v })
                       }
                     />
+
+                    {/* Generated Time Slots — what this window + interval will
+                        actually offer, so a misconfiguration is visible before
+                        saving rather than after a customer cannot book. */}
+                    <View className="border-t border-gray-100 dark:border-neutral-800 pt-3">
+                      <Text className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">
+                        Generated Time Slots:
+                      </Text>
+                      {(() => {
+                        const slots = generateScheduleSlots({
+                          start: s.start,
+                          end: s.end,
+                          intervalMinutes: parseIntOrNull(s.interval),
+                          durationMinutes: sessionMinutes,
+                        });
+                        if (sessionMinutes == null) {
+                          return (
+                            <Text className="text-xs text-gray-400 dark:text-gray-500">
+                              Set the package duration to preview slots.
+                            </Text>
+                          );
+                        }
+                        if (slots.length === 0) {
+                          return (
+                            <Text className="text-xs text-gray-400 dark:text-gray-500">
+                              No valid slots with current configuration
+                            </Text>
+                          );
+                        }
+                        return (
+                          <View className="flex-row flex-wrap">
+                            {slots.map((slot) => (
+                              <View
+                                key={slot.start}
+                                className="mr-1.5 mb-1.5 rounded border border-gray-200 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                              >
+                                <Text className="text-xs text-gray-700 dark:text-gray-200">
+                                  {to12h(slot.start)} - {to12h(slot.end)}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        );
+                      })()}
+                    </View>
                   </View>
                 ))}
                 <Pressable onPress={addSchedule}>
@@ -1440,10 +1546,9 @@ const EditPackage = () => {
                   </Text>
                 </Pressable>
               </View>
-            )}
+            </Section>
 
-            {/* STEP 7 — Invitation & review */}
-            {step === 6 && (
+            <Section icon="file-text" title="Invitation & Display">
               <View className="gap-4">
                 <View>
                   <SectionLabel>Invitation template (optional)</SectionLabel>
@@ -1547,26 +1652,10 @@ const EditPackage = () => {
                   </Text>
                 </View>
               </View>
-            )}
-          </ScrollView>
-
-          {/* Footer nav */}
-          <View
-            className="flex-row gap-3 px-5 pt-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-            style={{ paddingBottom: insets.bottom + 12 }}
-          >
-            {step > 0 && (
-              <Pressable
-                onPress={goBack}
-                disabled={submitting}
-                className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
-              >
-                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                  Back
-                </Text>
-              </Pressable>
-            )}
-            {isLast ? (
+            </Section>
+            {/* Actions scroll with the form, sitting below the last section
+                rather than pinned to the bottom — the Edit Attraction pattern. */}
+            <View className="flex-row gap-3 mt-4">
               <Pressable
                 onPress={handleSubmit}
                 disabled={submitting}
@@ -1576,23 +1665,24 @@ const EditPackage = () => {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <>
-                    <Feather name="check" size={16} color="#fff" />
+                    <Feather name="save" size={16} color="#fff" />
                     <Text className="text-sm font-semibold text-white">
-                      Save changes
+                      Update Package
                     </Text>
                   </>
                 )}
               </Pressable>
-            ) : (
               <Pressable
-                onPress={goNext}
-                className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+                onPress={() => router.back()}
+                disabled={submitting}
+                className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
               >
-                <Text className="text-sm font-semibold text-white">Next</Text>
-                <Feather name="chevron-right" size={16} color="#fff" />
+                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  Cancel
+                </Text>
               </Pressable>
-            )}
-          </View>
+            </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       )}
     </View>

@@ -34,7 +34,7 @@ import { CountryPickerSheet } from "../../components/ui/CountryPickerSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
-import { mediaUrl } from "../../lib/api";
+import { firstMediaUrl, mediaUrl } from "../../lib/api";
 import { attractionIsCallToBook } from "../../lib/callToBook";
 import { countryName } from "../../lib/countries";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
@@ -1163,7 +1163,7 @@ const PurchasePageScreen = () => {
                     <View className="w-11 h-11 rounded-lg overflow-hidden bg-gray-100 dark:bg-neutral-800 items-center justify-center">
                       {addOn.image ? (
                         <Image
-                          source={{ uri: mediaUrl(addOn.image) ?? undefined }}
+                          source={{ uri: firstMediaUrl(addOn.image) ?? undefined }}
                           style={{ width: "100%", height: "100%" }}
                           contentFit="cover"
                         />

@@ -20,6 +20,7 @@ import { SelectField, type SelectOption } from "../../components/ui/FormControls
 import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Pagination } from "../../components/ui/Pagination";
+import { timeAgo as sharedTimeAgo } from "../../lib/date/timeAgo";
 import { formatDateET, formatDateTimeET } from "../../lib/date/venueTime";
 import {
   useActivityFilterOptions,
@@ -61,22 +62,11 @@ function toneClass(category: string): string {
   return TONE_CLASS[CATEGORY_TONE[category] ?? "gray"] ?? TONE_CLASS.gray;
 }
 
-function timeAgo(value: string | null): string {
-  if (!value) return "—";
-  const then = new Date(value).getTime();
-  if (Number.isNaN(then)) return "—";
-  const diff = Date.now() - then;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  // Older than a month: fall back to the venue's calendar date, so a log line
-  // isn't dated a day off on a phone in another timezone.
-  return formatDateET(value, { month: "short" });
-}
+/** Shared relative-age helper, with the venue's date for anything older. */
+const timeAgo = (value: string | null): string =>
+  sharedTimeAgo(value, {
+    formatOlder: (v) => formatDateET(v, { month: "short" }),
+  });
 
 type Severity = "info" | "success" | "warning" | "error";
 

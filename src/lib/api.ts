@@ -1,6 +1,11 @@
 // TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
 import { authDebug } from "./debug/authDebug";
 import {
+  resolveFirstMediaPath,
+  resolveMediaPath,
+  resolveMediaPathList,
+} from "./mediaPath";
+import {
   handleUnauthorized,
   isSessionInvalidated,
   touchSession,
@@ -36,51 +41,34 @@ export function webUrl(path: string): string {
   return `${WEB_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/**
+ * A stored image reference as an absolute URL — a file path, a base64 data URI
+ * or an already-absolute URL. The rules live in `lib/mediaPath` so they can be
+ * unit-tested; this only supplies the app's base URL.
+ */
 export function mediaUrl(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const p = String(path).trim();
-  if (!p) return null;
-  if (/^(https?:|data:)/i.test(p)) return p;
-  if (p.startsWith("/")) return `${API_BASE_URL}${p}`;
-  if (p.length > 200 && !p.includes("/") && !p.includes(" ")) {
-    return `data:image/jpeg;base64,${p}`;
-  }
-  // Otherwise a storage-relative path/filename.
-  return `${API_BASE_URL}/storage/${p.replace(/^storage\//, "")}`;
+  return resolveMediaPath(path, API_BASE_URL);
 }
 
 /**
- * Resolve an image column that may hold a single path, an array of paths, or a
- * JSON-encoded array inside a string column, to absolute URLs. Attraction
- * `image` is cast to an array server-side while add-on `image` is a plain
- * string column, so both shapes reach the client for the same kind of field.
+ * Every image in a column that may hold one value, an array, or a JSON-encoded
+ * array in a string column — several image columns are cast to arrays
+ * server-side while others are plain strings, so both shapes reach the client
+ * for the same kind of field.
  */
 export function mediaUrlList(image: unknown): string[] {
-  const raw: unknown[] = [];
-  if (Array.isArray(image)) {
-    raw.push(...image);
-  } else if (typeof image === "string") {
-    const s = image.trim();
-    if (s.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(s);
-        if (Array.isArray(parsed)) raw.push(...parsed);
-        else raw.push(s);
-      } catch {
-        raw.push(s);
-      }
-    } else if (s) {
-      raw.push(s);
-    }
-  }
-  return raw
-    .map((v) => (typeof v === "string" ? mediaUrl(v) : null))
-    .filter((v): v is string => !!v);
+  return resolveMediaPathList(image, API_BASE_URL);
 }
 
-/** First usable image URL from any of {@link mediaUrlList}'s shapes, else null. */
+/**
+ * First usable image URL from any of those shapes, else null.
+ *
+ * Prefer this over {@link mediaUrl} for any column the API casts to an array:
+ * passing an array to `mediaUrl` stringifies it, and a two-image column becomes
+ * "a.jpg,b.jpg" — a URL that resolves to nothing.
+ */
 export function firstMediaUrl(image: unknown): string | null {
-  return mediaUrlList(image)[0] ?? null;
+  return resolveFirstMediaPath(image, API_BASE_URL);
 }
 
 export type FieldErrors = Record<string, string[]>;

@@ -21,6 +21,19 @@ export type CompanyDetails = {
   logo_path: string | null;
 };
 
+/**
+ * The only company sizes the API accepts — it validates this field against a
+ * fixed list, so the form offers a picker rather than free text.
+ */
+export const COMPANY_SIZES = [
+  "1-10",
+  "11-50",
+  "51-200",
+  "201-500",
+  "501-1000",
+  "1000+",
+] as const;
+
 export type ProfileLocation = {
   id: number;
   name: string;
@@ -96,11 +109,17 @@ export type UserProfilePayload = {
 /** Editable company fields (PUT /api/companies/{id}). */
 export type CompanyPayload = {
   company_name?: string;
+  /** Base64 data URI for a new logo; the API stores it and returns a path. */
+  logo_path?: string | null;
   email?: string | null;
   phone?: string | null;
   website?: string | null;
   industry?: string | null;
+  /** Constrained by the API to one of {@link COMPANY_SIZES}. */
   company_size?: string | null;
+  founded_date?: string | null;
+  tax_id?: string | null;
+  registration_number?: string | null;
   address?: string | null;
   city?: string | null;
   state?: string | null;
