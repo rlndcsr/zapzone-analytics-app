@@ -35,6 +35,11 @@ import {
   defaultAttractionColumnKeys,
 } from "../../components/ui/AttractionsTable";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import {
+  ALL_CATEGORIES,
+  buildCategoryOptions,
+  CategoryChips,
+} from "../../components/ui/CategoryChips";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import {
@@ -59,6 +64,7 @@ import {
   buildAttractionsCsv,
 } from "../../lib/attractions/attractionsCsv";
 import { openPurchasePage } from "../../lib/attractions/purchaseLink";
+import { categoryKeyOf } from "../../lib/calendar/categoryFilter";
 import {
   consumeAttractionsStale,
   markAttractionsStale,
@@ -252,10 +258,24 @@ const Attractions = () => {
   const locationScoped = attractions;
 
   // Category options derived from the (location-scoped) data — no extra call.
-  const categories = useMemo(() => {
-    const set = new Set(locationScoped.map((a) => a.category).filter(Boolean));
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [locationScoped]);
+  // One counted list feeds both the chips and the sheet's Category dropdown, so
+  // the two surfaces always offer the same choices.
+  const categories = useMemo(
+    () => buildCategoryOptions(locationScoped.map((a) => a.category)),
+    [locationScoped],
+  );
+
+  // Drop a selection the visible set no longer holds (e.g. after switching
+  // location), so the list can never be filtered down to nothing by a key with
+  // no chip left to clear it — the same rule the calendar tabs follow.
+  useEffect(() => {
+    if (
+      filters.category !== ALL_CATEGORIES &&
+      !categories.some((c) => c.value === filters.category)
+    ) {
+      setFilters((prev) => ({ ...prev, category: ALL_CATEGORIES }));
+    }
+  }, [categories, filters.category]);
 
   // KPI values — identical math to the web /attractions metrics, computed over
   // the location-scoped set so the cards react to the location filter.
@@ -291,7 +311,10 @@ const Attractions = () => {
       .filter((a) => {
         if (filters.status !== "all" && a.status !== filters.status)
           return false;
-        if (filters.category !== "all" && a.category !== filters.category)
+        if (
+          filters.category !== ALL_CATEGORIES &&
+          categoryKeyOf(a.category) !== filters.category
+        )
           return false;
         if (
           filters.pricingType !== "all" &&
@@ -859,6 +882,18 @@ const Attractions = () => {
               </>
             )}
           </FilterPill>
+
+          {/* Category chips — a visible surface over the sheet's Category
+              filter, not a second one: both write the same `filters.category`. */}
+          <CategoryChips
+            options={categories}
+            value={filters.category}
+            onChange={(next) =>
+              setFilters((prev) => ({ ...prev, category: next }))
+            }
+            totalCount={locationScoped.length}
+            allLabel="All Categories"
+          />
 
           {/* List header + layout toggle (Table default / Cards) */}
           {!loading && !error && (

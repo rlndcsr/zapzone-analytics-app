@@ -237,6 +237,8 @@ export type PackageDetail = {
   partialPaymentFixed: number | null;
   customerNotes: string;
   invitationDownloadLink: string;
+  /** Stored invitation file path; "" when none. Never resent on save. */
+  invitationFile: string;
   displayOrder: number;
   locationId: number | null;
   locationName: string;
@@ -307,6 +309,7 @@ export async function fetchPackageDetail(
     partialPaymentFixed: numOrNull(d.partial_payment_fixed),
     customerNotes: str(d.customer_notes),
     invitationDownloadLink: str(d.invitation_download_link),
+    invitationFile: str(d.invitation_file),
     displayOrder: Number(d.display_order ?? 0) || 0,
     locationId: numOrNull(loc.id) ?? numOrNull(d.location_id),
     locationName: str(loc.name),
@@ -400,8 +403,9 @@ export type UpdatePackageInput = {
   partialPaymentFixed: number | null;
   customerNotes: string;
   invitationDownloadLink: string;
-  /** Base64 data URL of a newly picked invitation file; null keeps the current. */
-  invitationFile: string | null;
+  /** Tri-state: a base64 data URL uploads a new file, `null` clears the stored
+   *  one, and `undefined` leaves it untouched (the stored path is never resent). */
+  invitationFile?: string | null;
   displayOrder: number | null;
   isActive: boolean;
   /** Base64 data URL of a newly picked image; null keeps the current image. */
@@ -455,10 +459,13 @@ export async function updatePackage(
     promo_ids: input.promoIds,
     gift_card_ids: input.giftCardIds,
   };
-  // Only send media when a new one was chosen (base64 data URL), matching the
-  // web admin — omitting the key leaves the existing image/file untouched.
+  // Only send an image when a new one was chosen (base64 data URL), matching the
+  // web admin — omitting the key leaves the existing image untouched. The
+  // invitation file is sent whenever it changed, including `null` to clear it.
   if (input.image) body.image = input.image;
-  if (input.invitationFile) body.invitation_file = input.invitationFile;
+  if (input.invitationFile !== undefined) {
+    body.invitation_file = input.invitationFile;
+  }
   await apiRequest(`/api/packages/${id}`, { method: "PUT", token, body });
 }
 

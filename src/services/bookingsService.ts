@@ -19,7 +19,13 @@ export type CalendarBooking = {
   totalAmount: number;
   amountPaid: number;
   packageName: string;
-  /** Package category ("Birthday", "Wristband", …); "" when uncategorised. */
+  /**
+   * How the package is labelled ("Birthday", "Escape Room", …); "" when
+   * uncategorised. Prefers the package's `display_label` over its `category`,
+   * because escape rooms keep their venue label there and use `category` for
+   * the difficulty — grouping on `category` alone splits one Escape Room into
+   * Advanced / Beginner / Intermediate.
+   */
   packageCategory: string;
   customerName: string;
   customerEmail: string | null;
@@ -130,7 +136,11 @@ type RawBooking = {
   notes?: string | null;
   special_requests?: string | null;
   payment_status?: string | null;
-  package?: { name?: string | null; category?: string | null } | null;
+  package?: {
+    name?: string | null;
+    category?: string | null;
+    display_label?: string | null;
+  } | null;
   room?: { name?: string | null } | null;
   location?: { name?: string | null } | null;
   customer?: {
@@ -268,7 +278,8 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     totalAmount: Number(raw.total_amount ?? 0),
     amountPaid: Number(raw.amount_paid ?? 0),
     packageName: raw.package?.name?.trim() || "Booking",
-    packageCategory: raw.package?.category?.trim() || "",
+    packageCategory:
+      raw.package?.display_label?.trim() || raw.package?.category?.trim() || "",
     customerName: customerName(raw.customer, raw.guest_name),
     customerEmail:
       raw.customer?.email?.trim() || raw.guest_email?.trim() || null,

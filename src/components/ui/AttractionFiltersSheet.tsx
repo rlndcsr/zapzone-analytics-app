@@ -3,6 +3,7 @@ import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { BottomSheet } from "./BottomSheet";
+import { type CategoryChipOption } from "./CategoryChips";
 import { formatShortDate } from "./DateRangeSheet";
 import { InputField } from "./InputField";
 import { SelectField, type SelectOption } from "./FormControls";
@@ -90,8 +91,8 @@ const FieldLabel = ({ children }: { children: React.ReactNode }) => (
 type Props = {
   visible: boolean;
   values: AttractionFilterValues;
-  /** Category names for the Category dropdown (derived from loaded data). */
-  categories: string[];
+  /** Categories present in the list — the same counted set the chips render. */
+  categories: CategoryChipOption[];
   onChange: (next: AttractionFilterValues) => void;
   onClear: () => void;
   onClose: () => void;
@@ -133,7 +134,7 @@ export function AttractionFiltersSheet({
 
   const categoryOptions: SelectOption[] = [
     { label: "All Categories", value: "all" },
-    ...categories.map((c) => ({ label: c, value: c })),
+    ...categories.map((c) => ({ label: c.label, value: c.value })),
   ];
 
   return (

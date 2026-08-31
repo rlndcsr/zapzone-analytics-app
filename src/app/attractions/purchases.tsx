@@ -21,6 +21,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import {
+  ALL_CATEGORIES,
+  buildCategoryOptions,
+  CategoryChips,
+} from "../../components/ui/CategoryChips";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import {
@@ -38,6 +43,7 @@ import { PurchasesTable } from "../../components/ui/PurchasesTable";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import { categoryKeyOf } from "../../lib/calendar/categoryFilter";
 import {
   consumeAttractionPurchasesStale,
   useAttractionPurchases,
@@ -419,6 +425,25 @@ const ManagePurchases = () => {
   const listLoading = showDeleted ? deletedLoading : loading;
   const listError = showDeleted ? deletedError : error;
 
+  // Chip counts come from the same location-scoped set the list draws from, so
+  // a category never appears for a location the workspace is not showing.
+  const categoryOptions = useMemo(
+    () => buildCategoryOptions(listSource.map((p) => p.category)),
+    [listSource],
+  );
+
+  // Drop a selection the visible set no longer holds (switching location or the
+  // deleted view), so the list can never be filtered down to nothing by a key
+  // that has no chip to clear it — the same rule the calendar tabs follow.
+  useEffect(() => {
+    if (
+      filters.category !== ALL_CATEGORIES &&
+      !categoryOptions.some((o) => o.value === filters.category)
+    ) {
+      setFilters((prev) => ({ ...prev, category: ALL_CATEGORIES }));
+    }
+  }, [categoryOptions, filters.category]);
+
   // Search + the full web-admin filter set. Predicates mirror the web
   // `useAdminTable`: select equality, inclusive date ranges on created_at /
   // scheduled_date, and an inclusive amount range (empty = unbounded).
@@ -435,6 +460,11 @@ const ManagePurchases = () => {
       if (
         filters.paymentMethod !== "all" &&
         p.paymentMethod !== filters.paymentMethod
+      )
+        return false;
+      if (
+        filters.category !== ALL_CATEGORIES &&
+        categoryKeyOf(p.category) !== filters.category
       )
         return false;
       if (
@@ -948,6 +978,23 @@ const ManagePurchases = () => {
             </Pressable>
           </View>
 
+          {/* Category chips — active list only, matching the web (the trashed
+              view has no chip row). Backed by the same `category` filter the
+              sheet writes, so the two stay in step. */}
+          {!showDeleted && (
+            <View className="pt-4">
+              <CategoryChips
+                options={categoryOptions}
+                value={filters.category}
+                onChange={(next) =>
+                  setFilters((prev) => ({ ...prev, category: next }))
+                }
+                totalCount={listSource.length}
+                allLabel="All Categories"
+              />
+            </View>
+          )}
+
           {/* List header + layout toggle — stays visible during loading; only
               the records below skeletonize. */}
           {!listError && (
@@ -1079,6 +1126,7 @@ const ManagePurchases = () => {
         visible={showFilterSheet}
         values={draft}
         attractions={attractionOptions}
+        categories={categoryOptions}
         onChange={setDraft}
         onApply={applyFilters}
         onClear={() => setDraft(EMPTY_PURCHASE_FILTERS)}

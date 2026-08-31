@@ -138,6 +138,10 @@ const normalizeTime = (v: string): string | null => {
 /** "HH:MM:SS" | "HH:MM" → "HH:MM" for the editable time inputs. */
 const toHHMM = (v: string | null): string => (v ? v.substring(0, 5) : "");
 
+/** Label a stored invitation file by its basename ("invitations/a1b2.pdf"). */
+const fileNameOf = (path: string): string =>
+  path.split("/").pop() || "Invitation file";
+
 /** Local schedule row (richer than the payload shape to hold monthly occ/day). */
 type SchedRow = {
   key: number;
@@ -305,7 +309,13 @@ const EditPackage = () => {
   const [newImage, setNewImage] = useState<string | null>(null);
   const [invitationType, setInvitationType] = useState<"link" | "file">("link");
   const [invitationLink, setInvitationLink] = useState("");
+  // A newly picked file (base64 data URL) vs. the one already stored on the
+  // package — kept apart so an untouched file is never re-uploaded, while
+  // "Remove" can still clear it. Removing sets `existingInvitationFile` to null.
   const [invitationFile, setInvitationFile] = useState<string | null>(null);
+  const [existingInvitationFile, setExistingInvitationFile] = useState<
+    string | null
+  >(null);
   const [invitationFileName, setInvitationFileName] = useState("");
 
   // Load the package + every option list up front so seeded relations always
@@ -431,7 +441,11 @@ const EditPackage = () => {
           detail.image.length > 0 ? mediaUrl(detail.image[0]) : null,
         );
         setInvitationLink(detail.invitationDownloadLink);
-        setInvitationType("link");
+        // Open on the tab the package actually uses, so a stored file is
+        // visible (and removable) instead of silently hidden behind "Link".
+        setExistingInvitationFile(detail.invitationFile || null);
+        setInvitationFileName(fileNameOf(detail.invitationFile));
+        setInvitationType(detail.invitationFile ? "file" : "link");
       } catch (err) {
         if (active)
           setLoadError(
@@ -505,6 +519,18 @@ const EditPackage = () => {
     } catch {
       Alert.alert("File error", "Could not open the document picker.");
     }
+  };
+
+  /**
+   * What to send as `invitation_file`: the new data URL when one was picked,
+   * `null` when the stored file was removed or the package switched to a link,
+   * and `undefined` to leave an untouched file alone (never resend its path —
+   * the backend unlinks the old file before re-saving whatever it is given).
+   */
+  const invitationFileForSave = (): string | null | undefined => {
+    if (invitationType !== "file") return existingInvitationFile ? null : undefined;
+    if (invitationFile) return invitationFile;
+    return existingInvitationFile ? undefined : null;
   };
 
   /* --- schedule editing -------------------------------------------------- */
@@ -690,7 +716,7 @@ const EditPackage = () => {
         customerNotes: customerNotes.trim(),
         invitationDownloadLink:
           invitationType === "link" ? invitationLink.trim() : "",
-        invitationFile: invitationType === "file" ? invitationFile : null,
+        invitationFile: invitationFileForSave(),
         displayOrder: null,
         isActive,
         image: newImage,
@@ -1455,7 +1481,7 @@ const EditPackage = () => {
                       placeholder="https://…"
                       autoCapitalize="none"
                     />
-                  ) : invitationFile ? (
+                  ) : invitationFile || existingInvitationFile ? (
                     <View className="flex-row items-center justify-between rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
                       <View className="flex-row items-center gap-2 flex-1 mr-2">
                         <Feather name="file-text" size={16} color={PRIMARY} />
@@ -1475,6 +1501,7 @@ const EditPackage = () => {
                         <Pressable
                           onPress={() => {
                             setInvitationFile(null);
+                            setExistingInvitationFile(null);
                             setInvitationFileName("");
                           }}
                         >

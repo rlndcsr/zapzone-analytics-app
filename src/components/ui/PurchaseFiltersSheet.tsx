@@ -3,6 +3,7 @@ import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { BottomSheet } from "./BottomSheet";
+import { type CategoryChipOption } from "./CategoryChips";
 import { formatShortDate } from "./DateRangeSheet";
 import { SelectField, type SelectOption } from "./FormControls";
 import { InputField } from "./InputField";
@@ -15,6 +16,8 @@ export type PurchaseDateTarget = "created" | "scheduled";
 export type PurchaseFilterValues = {
   status: string;
   paymentMethod: string;
+  /** Attraction category; "all", a category name, or the uncategorised key. */
+  category: string;
   attraction: string;
   createdFrom: string;
   createdTo: string;
@@ -27,6 +30,7 @@ export type PurchaseFilterValues = {
 export const EMPTY_PURCHASE_FILTERS: PurchaseFilterValues = {
   status: "all",
   paymentMethod: "all",
+  category: "all",
   attraction: "all",
   createdFrom: "",
   createdTo: "",
@@ -41,6 +45,7 @@ export function countActivePurchaseFilters(v: PurchaseFilterValues): number {
   let n = 0;
   if (v.status !== "all") n++;
   if (v.paymentMethod !== "all") n++;
+  if (v.category !== "all") n++;
   if (v.attraction !== "all") n++;
   if (v.createdFrom !== "" || v.createdTo !== "") n++;
   if (v.scheduledFrom !== "" || v.scheduledTo !== "") n++;
@@ -124,6 +129,8 @@ type Props = {
   values: PurchaseFilterValues;
   /** Attraction names for the Attraction dropdown (derived from loaded data). */
   attractions: string[];
+  /** Attraction categories present in the list, counted for the chips. */
+  categories: CategoryChipOption[];
   onChange: (next: PurchaseFilterValues) => void;
   onApply: () => void;
   onClear: () => void;
@@ -141,6 +148,7 @@ export function PurchaseFiltersSheet({
   visible,
   values,
   attractions,
+  categories,
   onChange,
   onApply,
   onClear,
@@ -158,6 +166,11 @@ export function PurchaseFiltersSheet({
   const attractionOptions: SelectOption[] = [
     { label: "All Attractions", value: "all" },
     ...attractions.map((a) => ({ label: a, value: a })),
+  ];
+
+  const categoryOptions: SelectOption[] = [
+    { label: "All Categories", value: "all" },
+    ...categories.map((c) => ({ label: c.label, value: c.value })),
   ];
 
   return (
@@ -180,6 +193,12 @@ export function PurchaseFiltersSheet({
             value={values.paymentMethod}
             options={PAYMENT_METHOD_OPTS}
             onSelect={(v) => set({ paymentMethod: String(v) })}
+          />
+          <SelectField
+            label="Category"
+            value={values.category}
+            options={categoryOptions}
+            onSelect={(v) => set({ category: String(v) })}
           />
           <SelectField
             label="Attraction"

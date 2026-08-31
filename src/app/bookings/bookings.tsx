@@ -37,6 +37,11 @@ import {
   type BookingRowHandlers,
 } from "../../components/ui/BookingsTable";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import {
+  ALL_CATEGORIES,
+  buildCategoryOptions,
+  CategoryChips,
+} from "../../components/ui/CategoryChips";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import {
   FilterPill,
@@ -50,6 +55,7 @@ import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkeleton";
+import { categoryKeyOf } from "../../lib/calendar/categoryFilter";
 import { consumeBookingsStale, useBookings } from "../../lib/hooks/useBookings";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -542,6 +548,7 @@ const Bookings = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>(ALL_CATEGORIES);
   const [sheet, setSheet] = useState<null | "status" | "date">(null);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
@@ -726,11 +733,35 @@ const Bookings = () => {
   const listLoading = showDeleted ? deletedLoading : loading;
   const listError = showDeleted ? deletedError : error;
 
+  // Chip counts come from the same location-scoped set the list draws from, so
+  // a category never leaks in from a location the workspace is not showing.
+  const categoryOptions = useMemo(
+    () => buildCategoryOptions(listBase.map((b) => b.packageCategory)),
+    [listBase],
+  );
+
+  // Drop a selection the visible set no longer holds (switching location or the
+  // deleted view), so the list can never be filtered down to nothing by a key
+  // that has no chip to clear it — the same rule the calendar tabs follow.
+  useEffect(() => {
+    if (
+      categoryFilter !== ALL_CATEGORIES &&
+      !categoryOptions.some((o) => o.value === categoryFilter)
+    ) {
+      setCategoryFilter(ALL_CATEGORIES);
+    }
+  }, [categoryOptions, categoryFilter]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     const today = todayKey();
     const result = listBase.filter((b) => {
       if (statusFilter !== "all" && b.status !== statusFilter) return false;
+      if (
+        categoryFilter !== ALL_CATEGORIES &&
+        categoryKeyOf(b.packageCategory) !== categoryFilter
+      )
+        return false;
       if (dateFilter === "upcoming" && b.date < today) return false;
       if (dateFilter === "today" && b.date !== today) return false;
       if (dateFilter === "past" && b.date >= today) return false;
@@ -742,7 +773,7 @@ const Bookings = () => {
       return true;
     });
     return showDeleted ? result : result.sort(compareBookingsDefault);
-  }, [listBase, search, statusFilter, dateFilter, showDeleted]);
+  }, [listBase, search, statusFilter, dateFilter, categoryFilter, showDeleted]);
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
@@ -756,6 +787,7 @@ const Bookings = () => {
     search,
     statusFilter,
     dateFilter,
+    categoryFilter,
     activeLocationId,
     perPage,
     showDeleted,
@@ -775,6 +807,7 @@ const Bookings = () => {
     search,
     statusFilter,
     dateFilter,
+    categoryFilter,
     activeLocationId,
     perPage,
     page,
@@ -1162,6 +1195,16 @@ const Bookings = () => {
               </>
             )}
           </FilterPill>
+
+          {/* Category chips — reads the package's display label, so escape
+              rooms group under one chip instead of splitting by difficulty. */}
+          <CategoryChips
+            options={categoryOptions}
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+            totalCount={listBase.length}
+            allLabel="All Categories"
+          />
 
           {/* List header + top pagination (same state as the bottom control) */}
           {!listLoading && !listError && (

@@ -25,6 +25,7 @@ import { fetchLocations, type LocationOption } from "../../services/locationsSer
 import {
   fetchAccountingReport,
   type AccountingCategory,
+  type AccountingCategoryItem,
   type AccountingReport,
 } from "../../services/analyticsService";
 
@@ -44,9 +45,53 @@ function ymd(d: Date): string {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, "0")}-${`${d.getDate()}`.padStart(2, "0")}`;
 }
 
+const UNCATEGORIZED = "Uncategorized";
+
+type LabelGroup = {
+  name: string;
+  items: AccountingCategoryItem[];
+  /** Only the figures this screen actually shows — not the web's full column set. */
+  totals: { quantity: number; grossSales: number };
+};
+
+/**
+ * Split a section by its item labels: Parties into Birthday / Escape Room,
+ * Attractions into Activities / Wristband. Alphabetical, Uncategorized last.
+ */
+function groupItemsByLabel(items: AccountingCategoryItem[]): LabelGroup[] {
+  const groups = new Map<string, AccountingCategoryItem[]>();
+  items.forEach((item) => {
+    const key = item.subCategory || UNCATEGORIZED;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(item);
+    else groups.set(key, [item]);
+  });
+
+  return [...groups.entries()]
+    .sort(([a], [b]) =>
+      a === UNCATEGORIZED ? 1 : b === UNCATEGORIZED ? -1 : a.localeCompare(b),
+    )
+    .map(([name, groupItems]) => ({
+      name,
+      items: groupItems,
+      totals: {
+        quantity: groupItems.reduce((sum, it) => sum + it.quantity, 0),
+        grossSales: groupItems.reduce((sum, it) => sum + it.grossSales, 0),
+      },
+    }));
+}
+
 /** One expandable category (Parties / Attractions / Events / Add-ons). */
 function CategoryRow({ category }: { category: AccountingCategory }) {
   const [open, setOpen] = useState(false);
+  const labelGroups = useMemo(
+    () => groupItemsByLabel(category.items),
+    [category.items],
+  );
+  // A single label still gets its heading — otherwise the section reads as a
+  // flat list and you cannot tell which label you are looking at. Its totals
+  // row is dropped, since it would only restate the section subtotal.
+  const showLabelTotals = labelGroups.length > 1;
   return (
     <View className="border-t border-gray-100 dark:border-neutral-800">
       <Pressable onPress={() => setOpen((o) => !o)} className="flex-row items-center justify-between py-3.5">
@@ -70,16 +115,29 @@ function CategoryRow({ category }: { category: AccountingCategory }) {
               No {category.name.toLowerCase()} for this date
             </Text>
           ) : (
-            category.items.map((it, i) => (
-              <View key={`${it.name}-${i}`} className="flex-row items-center justify-between py-1.5">
-                <View className="flex-1 mr-2">
-                  <Text className="text-xs text-gray-700 dark:text-gray-200" numberOfLines={1}>{it.name}</Text>
-                  {!!it.subCategory && (
-                    <Text className="text-[10px] text-gray-400 dark:text-gray-500">{it.subCategory}</Text>
-                  )}
-                </View>
-                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mr-3">×{it.quantity}</Text>
-                <Text className="text-xs font-medium text-gray-900 dark:text-white">{money(it.grossSales)}</Text>
+            labelGroups.map((group) => (
+              <View key={group.name}>
+                <Text className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mt-2 mb-1">
+                  {group.name}
+                </Text>
+                {group.items.map((it, i) => (
+                  <View key={`${it.name}-${i}`} className="flex-row items-center justify-between py-1.5">
+                    <View className="flex-1 mr-2">
+                      <Text className="text-xs text-gray-700 dark:text-gray-200" numberOfLines={1}>{it.name}</Text>
+                    </View>
+                    <Text className="text-[11px] text-gray-400 dark:text-gray-500 mr-3">×{it.quantity}</Text>
+                    <Text className="text-xs font-medium text-gray-900 dark:text-white">{money(it.grossSales)}</Text>
+                  </View>
+                ))}
+                {showLabelTotals && (
+                  <View className="flex-row items-center justify-between py-1.5 border-t border-gray-100 dark:border-neutral-800">
+                    <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 flex-1 mr-2" numberOfLines={1}>
+                      {group.name} total
+                    </Text>
+                    <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mr-3">×{group.totals.quantity}</Text>
+                    <Text className="text-xs font-bold text-gray-900 dark:text-white">{money(group.totals.grossSales)}</Text>
+                  </View>
+                )}
               </View>
             ))
           )}
