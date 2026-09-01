@@ -10,15 +10,18 @@ import {
   Clock,
   CreditCard,
   Gift,
+  Image as ImageIcon,
+  MapPin,
+  RotateCcw,
   Search,
   Tag,
   UserCheck,
   Users,
-  X
+  X,
+  Zap
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -26,6 +29,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { StatusModal } from "../../components/ui/StatusModal";
 import { SwipeableNotificationCard } from "../../components/ui/SwipeableNotificationCard";
 import { UndoSnackbar } from "../../components/ui/UndoSnackbar";
 import { NotificationsListSkeleton } from "../../components/ui/skeleton/NotificationsSkeleton";
@@ -37,6 +41,7 @@ import {
 } from "../../lib/notifications/notificationIcon";
 import { formatDateET, venueDateKey } from "../../lib/date/venueTime";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useStatusModal } from "../../lib/hooks/useStatusModal";
 import { getToken } from "../../lib/session";
 import { resolveNotificationRoute } from "../../lib/notifications/notificationRouteMapper";
 import {
@@ -55,6 +60,10 @@ const TYPE_GLYPHS: Record<NotificationIconName, typeof Bell> = {
   gift: Gift,
   tag: Tag,
   clock: Clock,
+  zap: Zap,
+  image: ImageIcon,
+  "map-pin": MapPin,
+  "rotate-ccw": RotateCcw,
   bell: Bell,
 };
 
@@ -82,6 +91,7 @@ const Notification = () => {
   } = useNotifications("all");
 
   const [refreshing, setRefreshing] = useState(false);
+  const status = useStatusModal();
   /** Filters the loaded page by title/message — the server has no search param. */
   const [search, setSearch] = useState("");
   const [counts, setCounts] = useState<NotificationCounts | null>(null);
@@ -247,7 +257,7 @@ const Notification = () => {
             {/* Tile keyed on the notification type — a card for payments, a
                 calendar for bookings, people for customer concerns. */}
             {(() => {
-              const style = notificationIconStyle(item.type);
+              const style = notificationIconStyle(item.type, item.title);
               const Glyph = TYPE_GLYPHS[style.icon];
               return (
                 <View
@@ -313,14 +323,14 @@ const Notification = () => {
   );
 
   const handleClearAll = () => {
-    Alert.alert(
-      "Clear All Notifications",
-      "Are you sure you want to delete all notifications? This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Clear All", style: "destructive", onPress: clearAll },
-      ],
-    );
+    status.confirm({
+      title: "Clear All Notifications",
+      message:
+        "Are you sure you want to delete all notifications? This action cannot be undone.",
+      confirmLabel: "Clear All",
+      destructive: true,
+      onConfirm: clearAll,
+    });
   };
 
   const filterOptions: {
@@ -621,6 +631,9 @@ const Notification = () => {
       </ScrollView>
 
       <UndoSnackbar visible={!!pendingDelete} onUndo={undoDelete} />
+
+      {/* Confirmations and outcomes for this screen. */}
+      <StatusModal {...status.props} />
     </View>
   );
 };

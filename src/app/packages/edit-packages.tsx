@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -23,20 +22,28 @@ import {
 } from "../../components/ui/FormControls";
 import {
   CallToBookNotice,
+  CARD_SHADOW,
   Section,
 } from "../../components/ui/attractionFormKit";
+import { PackageImageField } from "../../components/ui/PackageImageField";
 import { mediaUrl } from "../../lib/api";
 import {
   packageIsCallToBook,
   type PackageScheduleLike,
 } from "../../lib/callToBook";
 import { markPackagesStale } from "../../lib/hooks/usePackages";
+import {
+  ADVANCE_NOTICE_PRESETS,
+  BOOKING_WINDOW_PRESETS,
+  bookingWindowMonthsLabel,
+} from "../../lib/packages/bookingWindow";
 import { generateScheduleSlots } from "../../lib/packages/scheduleSlots";
 import {
   packageDurationMinutes,
   validatePackageSetup,
 } from "../../lib/packageSetup";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { formatDuration } from "../../lib/time";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
 import {
   fetchAttractions,
@@ -48,10 +55,6 @@ import {
   type Category,
 } from "../../services/categoriesService";
 import {
-  fetchGiftCards,
-  type GiftCardOption,
-} from "../../services/giftCardsService";
-import {
   fetchPackageDetail,
   savePackageAvailabilitySchedules,
   updatePackage,
@@ -59,7 +62,6 @@ import {
   type PackagePricingType,
   type PackageScheduleInput,
 } from "../../services/packagesService";
-import { fetchPromos, type PromoOption } from "../../services/promosService";
 
 const PRIMARY = "#0644C7";
 
@@ -302,8 +304,6 @@ const EditPackage = () => {
   const [addonOrder, setAddonOrder] = useState<number[]>([]);
 
   // --- Step 5: promos / gift cards ---
-  const [promos, setPromos] = useState<PromoOption[]>([]);
-  const [giftCards, setGiftCards] = useState<GiftCardOption[]>([]);
   const [promoSel, setPromoSel] = useState<number[]>([]);
   const [giftCardSel, setGiftCardSel] = useState<number[]>([]);
 
@@ -350,7 +350,7 @@ const EditPackage = () => {
         );
         if (!active) return;
         const locId = detail.locationId ?? undefined;
-        const [cats, atts, rms, ads, prs, gcs] = await Promise.all([
+        const [cats, atts, rms, ads] = await Promise.all([
           fetchCategories(token).catch(() => []),
           fetchAttractions({ token, userId, locationId: locId }).catch(
             () => [],
@@ -359,8 +359,6 @@ const EditPackage = () => {
           fetchAddOns({ token, userId, locationId: locId, perPage: 500 }).catch(
             () => [],
           ),
-          fetchPromos(token).catch(() => []),
-          fetchGiftCards(token).catch(() => []),
         ]);
         if (!active) return;
 
@@ -368,8 +366,6 @@ const EditPackage = () => {
         setAttractions(atts);
         setRooms(rms);
         setAddOns(ads);
-        setPromos(prs);
-        setGiftCards(gcs);
 
         // Seed every field from the fetched detail.
         setLocationName(detail.locationName || "Your location");
@@ -621,11 +617,89 @@ const EditPackage = () => {
     return parseNum(duration);
   };
 
+  const bookingWindowMonths = bookingWindowMonthsLabel(
+    parseIntOrNull(bookingWindowDays),
+  );
+
   /** Session length in minutes, for the generated-slots preview. 0 means the
    *  duration fields are still blank, so there is nothing to preview yet. */
   const sessionMinutes =
     packageDurationMinutes(durationUnit, duration, durationHours, durationMinutes) ||
     null;
+
+  /* --- Live Preview: how this package will read to a customer ------------ */
+
+  const previewCategory = (
+    (useCustomCategory ? customCategory : category) ?? ""
+  ).trim();
+
+  const previewDuration = useMemo(() => {
+    const mins = packageDurationMinutes(
+      durationUnit,
+      duration,
+      durationHours,
+      durationMinutes,
+    );
+    return mins > 0 ? formatDuration(mins, "minutes") : "Not specified";
+  }, [durationUnit, duration, durationHours, durationMinutes]);
+
+  /**
+   * "Every day (9:00 AM - 5:00 PM)" for a single daily schedule, the weekday
+   * list for a weekly one, and a plain count once several are configured —
+   * spelling out four windows would not fit the card.
+   */
+  const previewAvailability = useMemo(() => {
+    if (schedules.length === 0) return "No schedules configured";
+    if (schedules.length > 1) return `${schedules.length} schedules configured`;
+    const s = schedules[0];
+    const window =
+      s.start && s.end ? ` (${to12h(s.start)} - ${to12h(s.end)})` : "";
+    if (s.type === "daily") return `Every day${window}`;
+    if (s.type === "weekly") {
+      if (s.weekDays.length === 0) return `No days selected${window}`;
+      const days = WEEKDAYS.filter((d) => s.weekDays.includes(d))
+        .map((d) => d[0].toUpperCase() + d.slice(1, 3))
+        .join(", ");
+      return `${days}${window}`;
+    }
+    return `${s.occurrence} ${s.monthlyDay}${window}`;
+  }, [schedules]);
+
+  /**
+   * One line per schedule — "12:30 PM - 9:30 PM (every 90 min)" — so the whole
+   * week is visible even though the Available line above collapses to a count.
+   */
+  const previewTimeSlots = useMemo(
+    () =>
+      schedules
+        .filter((s) => s.start && s.end)
+        .map(
+          (s) =>
+            `${to12h(s.start)} - ${to12h(s.end)}` +
+            (parseIntOrNull(s.interval)
+              ? ` (every ${parseIntOrNull(s.interval)} min)`
+              : ""),
+        ),
+    [schedules],
+  );
+
+  /** Selected names, or the web's greyed "No X selected" when none are picked. */
+  const namesOf = <T extends { id: number; name: string }>(
+    all: T[],
+    selected: number[],
+    emptyLabel: string,
+  ) => {
+    const picked = all.filter((x) => selected.includes(x.id)).map((x) => x.name);
+    return picked.length > 0 ? picked.join(", ") : emptyLabel;
+  };
+
+  const previewAttractions = namesOf(
+    attractions,
+    attractionSel,
+    "No attractions selected",
+  );
+  const previewSpaces = namesOf(rooms, roomSel, "No rooms selected");
+  const previewAddOns = namesOf(addOns, addonOrder, "No add-ons selected");
 
   const buildSchedulePayload = (): PackageScheduleInput[] =>
     schedules.map((s, index) => ({
@@ -841,46 +915,18 @@ const EditPackage = () => {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
+            {/* Package Image leads the form, as on the web — before Details. */}
+            <Section icon="image" title="Package Image">
+              <PackageImageField
+                uri={newImage ?? existingImageUri}
+                isNew={!!newImage}
+                onPick={pickImage}
+                onUndo={() => setNewImage(null)}
+              />
+            </Section>
+
             <Section icon="info" title="Details">
               <View className="gap-4">
-                {/* Package image — shown at the top of the form, matching the web admin. */}
-                <SectionLabel>Package image</SectionLabel>
-                {newImage || existingImageUri ? (
-                  <View>
-                    <Image
-                      source={{
-                        uri: newImage ?? existingImageUri ?? undefined,
-                      }}
-                      style={{ width: "100%", height: 160, borderRadius: 12 }}
-                      resizeMode="cover"
-                    />
-                    <View className="flex-row gap-4 mt-2">
-                      <Pressable onPress={pickImage}>
-                        <Text className="text-xs font-semibold text-[#0644C7]">
-                          Replace image
-                        </Text>
-                      </Pressable>
-                      {newImage && (
-                        <Pressable onPress={() => setNewImage(null)}>
-                          <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                            Undo change
-                          </Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  </View>
-                ) : (
-                  <Pressable
-                    onPress={pickImage}
-                    className="flex-row items-center justify-center gap-2 py-4 rounded-xl border border-dashed border-gray-300 dark:border-neutral-700"
-                  >
-                    <Feather name="image" size={18} color={PRIMARY} />
-                    <Text className="text-sm font-medium text-[#0644C7]">
-                      Choose image
-                    </Text>
-                  </Pressable>
-                )}
-
                 <View>
                   <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                     Location
@@ -935,12 +981,106 @@ const EditPackage = () => {
                   </Text>
                 </Pressable>
 
-                <SelectField
-                  label="Package type"
-                  value={packageType}
-                  options={PACKAGE_TYPES}
-                  onSelect={(v) => setPackageType(String(v))}
+                <View>
+                  <SelectField
+                    label="Package Type"
+                    value={packageType}
+                    options={PACKAGE_TYPES}
+                    onSelect={(v) => setPackageType(String(v))}
+                  />
+                  <Text className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    Use &quot;Regular&quot; for standard packages. Other types
+                    appear in the Custom Packages section.
+                  </Text>
+                </View>
+
+                <View className="flex-row gap-3">
+                  <View className="flex-1">
+                    <TextField
+                      label={`Min ${participantWord}s`}
+                      value={minParticipants}
+                      onChangeText={setMinParticipants}
+                      keyboardType="number-pad"
+                      placeholder="Enter min participants"
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <TextField
+                      label={`Max ${participantWord}s`}
+                      value={maxParticipants}
+                      onChangeText={setMaxParticipants}
+                      keyboardType="number-pad"
+                      placeholder="Enter max participants"
+                    />
+                  </View>
+                </View>
+
+                {/* The web runs these three across one row; stacked here, since
+                    three inputs plus their hints will not fit a phone. */}
+                <TextField
+                  label="Guest label"
+                  value={participantLabel}
+                  onChangeText={setParticipantLabel}
+                  maxLength={50}
+                  placeholder="Participant, Player, Guest..."
+                  hint="What one person is called on the customer page."
                 />
+                <TextField
+                  label="Shown to customers as"
+                  value={displayLabel}
+                  onChangeText={setDisplayLabel}
+                  maxLength={100}
+                  placeholder="Escape Room, Party Package..."
+                  hint={'Storefront section and badge. Blank keeps "Package".'}
+                />
+                <TextField
+                  label="Max tickets per time slot"
+                  value={maxTicketsPerSlot}
+                  onChangeText={setMaxTicketsPerSlot}
+                  keyboardType="number-pad"
+                  placeholder="No limit"
+                  hint="Seats sellable per slot per day. Customers see the live count."
+                />
+
+                {/* Duration — unit first, then the value(s), as on the web. */}
+                <SelectField
+                  label="Duration"
+                  required
+                  value={durationUnit}
+                  options={DURATION_UNITS}
+                  onSelect={(v) => setDurationUnit(String(v))}
+                />
+                {durationUnit === "hours and minutes" ? (
+                  <View className="flex-row gap-3">
+                    <View className="flex-1">
+                      <TextField
+                        label="Hours"
+                        value={durationHours}
+                        onChangeText={setDurationHours}
+                        keyboardType="number-pad"
+                        placeholder="0"
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <TextField
+                        label="Minutes"
+                        value={durationMinutes}
+                        onChangeText={setDurationMinutes}
+                        keyboardType="number-pad"
+                        placeholder="0"
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <TextField
+                    label=""
+                    required
+                    value={duration}
+                    onChangeText={setDuration}
+                    keyboardType="decimal-pad"
+                    placeholder="Enter duration"
+                  />
+                )}
 
                 <View>
                   <SectionLabel>Features</SectionLabel>
@@ -985,326 +1125,6 @@ const EditPackage = () => {
                   value={isActive}
                   onValueChange={setIsActive}
                 />
-              </View>
-            </Section>
-
-            <Section icon="dollar-sign" title="Pricing & Players">
-              <View className="gap-4">
-                <View>
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                    Pricing
-                  </Text>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
-                    Set the base price for this package (before any add-ons or
-                    additional participants)
-                  </Text>
-                  <SegmentedToggle<PackagePricingType>
-                    options={[
-                      { value: "base", label: "Base price" },
-                      {
-                        value: "per_person",
-                        label: `Per ${playerWord.toLowerCase()}`,
-                      },
-                    ]}
-                    value={pricingType}
-                    onChange={(next) => {
-                      setPricingType(next);
-                      // Per-player packages are not room-based (web clears rooms too).
-                      if (next === "per_person") setRoomSel([]);
-                    }}
-                  />
-                  <TextField
-                    label={perPerson ? `Price per ${playerWord}` : "Price"}
-                    required
-                    value={price}
-                    onChangeText={setPrice}
-                    keyboardType="decimal-pad"
-                    placeholder={
-                      perPerson
-                        ? `Amount each ${playerWord.toLowerCase()} pays`
-                        : "Enter price"
-                    }
-                    hint={
-                      perPerson
-                        ? `No base price — the total is this amount times the number of ${playerWord.toLowerCase()}s.`
-                        : undefined
-                    }
-                  />
-                </View>
-
-                <View>
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                    Partial Payment Options
-                  </Text>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
-                    Configure partial payment options for customers (percentage
-                    or fixed amount)
-                  </Text>
-                  <View className="gap-3">
-                    <TextField
-                      label="Partial Payment Percentage (%)"
-                      value={partialPct}
-                      onChangeText={setPartialPct}
-                      keyboardType="number-pad"
-                      placeholder="0"
-                      hint="Leave 0 to disable percentage-based partial payment."
-                    />
-                    <TextField
-                      label="Partial Payment Fixed Amount ($)"
-                      value={partialFixed}
-                      onChangeText={setPartialFixed}
-                      keyboardType="decimal-pad"
-                      placeholder="0"
-                      hint="Leave 0 to disable fixed amount partial payment."
-                    />
-                  </View>
-                </View>
-
-                <TextField
-                  label={`Min ${participantWord}s`}
-                  value={minParticipants}
-                  onChangeText={setMinParticipants}
-                  keyboardType="number-pad"
-                  placeholder="Enter min participants"
-                />
-
-                <TextField
-                  label={`Max ${participantWord}s`}
-                  value={maxParticipants}
-                  onChangeText={setMaxParticipants}
-                  keyboardType="number-pad"
-                  placeholder="Enter max participants"
-                />
-
-                <TextField
-                  label="Guest label"
-                  value={participantLabel}
-                  onChangeText={setParticipantLabel}
-                  maxLength={50}
-                  placeholder="Participant, Player, Guest..."
-                  hint="What one person is called on the customer page."
-                />
-
-                <TextField
-                  label="Shown to customers as"
-                  value={displayLabel}
-                  onChangeText={setDisplayLabel}
-                  maxLength={100}
-                  placeholder="Escape Room, Party Package..."
-                  hint={'Storefront section and badge. Blank keeps "Package".'}
-                />
-
-                <TextField
-                  label="Max tickets per time slot"
-                  value={maxTicketsPerSlot}
-                  onChangeText={setMaxTicketsPerSlot}
-                  keyboardType="number-pad"
-                  placeholder="No limit"
-                  hint="Seats sellable per slot per day. Customers see the live count."
-                />
-
-                {/* Per-additional pricing — only with a max cap and base pricing (web parity). */}
-                {maxParticipants.trim() !== "" && !perPerson && (
-                  <TextField
-                    label="Price per Additional Participant"
-                    value={pricePerAdditional}
-                    onChangeText={setPricePerAdditional}
-                    keyboardType="decimal-pad"
-                    placeholder="Enter price per additional"
-                  />
-                )}
-
-                <SelectField
-                  label="Duration unit"
-                  required
-                  value={durationUnit}
-                  options={DURATION_UNITS}
-                  onSelect={(v) => setDurationUnit(String(v))}
-                />
-                {durationUnit === "hours and minutes" ? (
-                  <View className="flex-row gap-3">
-                    <View className="flex-1">
-                      <TextField
-                        label="Hours"
-                        value={durationHours}
-                        onChangeText={setDurationHours}
-                        keyboardType="number-pad"
-                        placeholder="0"
-                      />
-                    </View>
-                    <View className="flex-1">
-                      <TextField
-                        label="Minutes"
-                        value={durationMinutes}
-                        onChangeText={setDurationMinutes}
-                        keyboardType="number-pad"
-                        placeholder="0"
-                      />
-                    </View>
-                  </View>
-                ) : (
-                  <TextField
-                    label="Duration"
-                    required
-                    value={duration}
-                    onChangeText={setDuration}
-                    keyboardType="decimal-pad"
-                    placeholder="0"
-                  />
-                )}
-              </View>
-            </Section>
-
-            <Section icon="sliders" title="Booking Rules">
-              <View className="gap-4">
-                <View className="flex-row gap-3">
-                  <View className="flex-1">
-                    <TextField
-                      label="Booking window (days)"
-                      value={bookingWindowDays}
-                      onChangeText={setBookingWindowDays}
-                      keyboardType="number-pad"
-                      placeholder="No limit"
-                    />
-                  </View>
-                  <View className="flex-1">
-                    <TextField
-                      label="Min. notice (hours)"
-                      value={minNotice}
-                      onChangeText={setMinNotice}
-                      keyboardType="number-pad"
-                      placeholder="0"
-                    />
-                  </View>
-                </View>
-                <ToggleRow
-                  label="Has guest of honor"
-                  value={hasGoh}
-                  onValueChange={setHasGoh}
-                />
-                <TextField
-                  label="Customer Notes"
-                  value={customerNotes}
-                  onChangeText={setCustomerNotes}
-                  placeholder="Notes shown to customers"
-                  multiline
-                />
-              </View>
-            </Section>
-
-            <Section icon="grid" title="Attractions, Spaces & Add-ons">
-              <View>
-                <SectionLabel>Attractions</SectionLabel>
-                {attractions.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 mb-2">
-                    No attractions available.
-                  </Text>
-                ) : (
-                  <View className="flex-row flex-wrap">
-                    {attractions.map((a) => (
-                      <Chip
-                        key={a.id}
-                        label={a.name}
-                        sub={a.price ? `$${a.price}` : undefined}
-                        selected={attractionSel.includes(a.id)}
-                        onPress={() =>
-                          setAttractionSel((prev) => toggleIn(prev, a.id))
-                        }
-                      />
-                    ))}
-                  </View>
-                )}
-
-                {/* Per-player packages are the room, so the web hides Space here. */}
-                {!perPerson && (
-                  <>
-                    <SectionLabel>Spaces (rooms)</SectionLabel>
-                    {rooms.length === 0 ? (
-                      <Text className="text-sm text-gray-400 dark:text-gray-500 mb-2">
-                        No rooms available.
-                      </Text>
-                    ) : (
-                      <View className="flex-row flex-wrap">
-                        {rooms.map((r) => (
-                          <Chip
-                            key={r.id}
-                            label={r.name}
-                            selected={roomSel.includes(r.id)}
-                            onPress={() =>
-                              setRoomSel((prev) => toggleIn(prev, r.id))
-                            }
-                          />
-                        ))}
-                      </View>
-                    )}
-                  </>
-                )}
-
-                <SectionLabel>Add-ons</SectionLabel>
-                {addOns.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 mb-2">
-                    No add-ons available.
-                  </Text>
-                ) : (
-                  <View className="flex-row flex-wrap">
-                    {addOns.map((a) => (
-                      <Chip
-                        key={a.id}
-                        label={a.name}
-                        sub={a.price ? `$${a.price}` : undefined}
-                        selected={addonOrder.includes(a.id)}
-                        onPress={() =>
-                          setAddonOrder((prev) => toggleIn(prev, a.id))
-                        }
-                      />
-                    ))}
-                  </View>
-                )}
-              </View>
-            </Section>
-
-            <Section icon="tag" title="Promos & Gift Cards">
-              <View>
-                <SectionLabel>Promos</SectionLabel>
-                {promos.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 mb-2">
-                    No active promos.
-                  </Text>
-                ) : (
-                  <View className="flex-row flex-wrap">
-                    {promos.map((p) => (
-                      <Chip
-                        key={p.id}
-                        label={p.name}
-                        sub={p.code}
-                        selected={promoSel.includes(p.id)}
-                        onPress={() =>
-                          setPromoSel((prev) => toggleIn(prev, p.id))
-                        }
-                      />
-                    ))}
-                  </View>
-                )}
-
-                <SectionLabel>Gift cards</SectionLabel>
-                {giftCards.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 mb-2">
-                    No active gift cards.
-                  </Text>
-                ) : (
-                  <View className="flex-row flex-wrap">
-                    {giftCards.map((g) => (
-                      <Chip
-                        key={g.id}
-                        label={g.code}
-                        selected={giftCardSel.includes(g.id)}
-                        onPress={() =>
-                          setGiftCardSel((prev) => toggleIn(prev, g.id))
-                        }
-                      />
-                    ))}
-                  </View>
-                )}
               </View>
             </Section>
 
@@ -1548,7 +1368,390 @@ const EditPackage = () => {
               </View>
             </Section>
 
-            <Section icon="file-text" title="Invitation & Display">
+            <Section icon="info" title="Additional Attractions">
+              {attractions.length === 0 ? (
+                <View className="items-center rounded-2xl border border-dashed border-gray-300 px-5 py-6 dark:border-neutral-700">
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
+                    No attractions available yet
+                  </Text>
+                  <Pressable
+                    onPress={() => router.push("/attractions/create-attraction")}
+                    className="mt-3 flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-4 py-2.5 active:opacity-90"
+                    accessibilityRole="button"
+                  >
+                    <Feather name="plus" size={14} color="#FFFFFF" />
+                    <Text className="text-sm font-semibold text-white">
+                      Create Attraction
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View className="flex-row flex-wrap">
+                  {attractions.map((a) => (
+                    <Chip
+                      key={a.id}
+                      label={a.name}
+                      sub={a.price ? `$${a.price}` : undefined}
+                      selected={attractionSel.includes(a.id)}
+                      onPress={() =>
+                        setAttractionSel((prev) => toggleIn(prev, a.id))
+                      }
+                    />
+                  ))}
+                </View>
+              )}
+            </Section>
+
+            {/* Per-player packages are the room, so the web hides Space here. */}
+            {!perPerson && (
+              <Section
+                icon="home"
+                title="Space"
+                right={
+                  rooms.length > 0 ? (
+                    <Pressable
+                      onPress={() =>
+                        setRoomSel((prev) =>
+                          prev.length === rooms.length
+                            ? []
+                            : rooms.map((r) => r.id),
+                        )
+                      }
+                      className="rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90"
+                      accessibilityRole="button"
+                    >
+                      <Text className="text-xs font-semibold text-white">
+                        {roomSel.length === rooms.length
+                          ? "Deselect All"
+                          : "Select All"}
+                      </Text>
+                    </Pressable>
+                  ) : undefined
+                }
+              >
+                {rooms.length === 0 ? (
+                  <Text className="text-sm text-gray-400 dark:text-gray-500">
+                    No spaces available yet
+                  </Text>
+                ) : (
+                  <View className="flex-row flex-wrap">
+                    {rooms.map((r) => (
+                      <Chip
+                        key={r.id}
+                        label={r.name}
+                        selected={roomSel.includes(r.id)}
+                        onPress={() => setRoomSel((prev) => toggleIn(prev, r.id))}
+                      />
+                    ))}
+                  </View>
+                )}
+              </Section>
+            )}
+
+            <Section
+              icon="info"
+              title="Add-ons"
+              right={
+                addOns.length > 0 ? (
+                  <Pressable
+                    onPress={() =>
+                      setAddonOrder((prev) =>
+                        prev.length === addOns.length
+                          ? []
+                          : addOns.map((a) => a.id),
+                      )
+                    }
+                    className="rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90"
+                    accessibilityRole="button"
+                  >
+                    <Text className="text-xs font-semibold text-white">
+                      {addonOrder.length === addOns.length
+                        ? "Deselect All"
+                        : "Select All"}
+                    </Text>
+                  </Pressable>
+                ) : undefined
+              }
+            >
+              {addOns.length === 0 ? (
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
+                  No add-ons available yet
+                </Text>
+              ) : (
+                <View className="flex-row flex-wrap">
+                  {addOns.map((a) => (
+                    <Chip
+                      key={a.id}
+                      label={a.name}
+                      sub={a.price ? `$${a.price}` : undefined}
+                      selected={addonOrder.includes(a.id)}
+                      onPress={() => setAddonOrder((prev) => toggleIn(prev, a.id))}
+                    />
+                  ))}
+                </View>
+              )}
+            </Section>
+
+            <Section icon="dollar-sign" title="Pricing & Players">
+              <View className="gap-4">
+                <View>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                    Pricing
+                  </Text>
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
+                    Set the base price for this package (before any add-ons or
+                    additional participants)
+                  </Text>
+                  <SegmentedToggle<PackagePricingType>
+                    options={[
+                      { value: "base", label: "Base price" },
+                      {
+                        value: "per_person",
+                        label: `Per ${playerWord.toLowerCase()}`,
+                      },
+                    ]}
+                    value={pricingType}
+                    onChange={(next) => {
+                      setPricingType(next);
+                      // Per-player packages are not room-based (web clears rooms too).
+                      if (next === "per_person") setRoomSel([]);
+                    }}
+                  />
+                  <TextField
+                    label={perPerson ? `Price per ${playerWord}` : "Price"}
+                    required
+                    value={price}
+                    onChangeText={setPrice}
+                    keyboardType="decimal-pad"
+                    placeholder={
+                      perPerson
+                        ? `Amount each ${playerWord.toLowerCase()} pays`
+                        : "Enter price"
+                    }
+                    hint={
+                      perPerson
+                        ? `No base price — the total is this amount times the number of ${playerWord.toLowerCase()}s.`
+                        : undefined
+                    }
+                  />
+                </View>
+
+                <View>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                    Partial Payment Options
+                  </Text>
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
+                    Configure partial payment options for customers (percentage
+                    or fixed amount)
+                  </Text>
+                  <View className="gap-3">
+                    <TextField
+                      label="Partial Payment Percentage (%)"
+                      value={partialPct}
+                      onChangeText={setPartialPct}
+                      keyboardType="number-pad"
+                      placeholder="0"
+                      hint="Leave 0 to disable percentage-based partial payment."
+                    />
+                    <TextField
+                      label="Partial Payment Fixed Amount ($)"
+                      value={partialFixed}
+                      onChangeText={setPartialFixed}
+                      keyboardType="decimal-pad"
+                      placeholder="0"
+                      hint="Leave 0 to disable fixed amount partial payment."
+                    />
+                  </View>
+                </View>
+
+
+                {/* Per-additional pricing — only with a max cap and base pricing (web parity). */}
+                {maxParticipants.trim() !== "" && !perPerson && (
+                  <TextField
+                    label="Price per Additional Participant"
+                    value={pricePerAdditional}
+                    onChangeText={setPricePerAdditional}
+                    keyboardType="decimal-pad"
+                    placeholder="Enter price per additional"
+                  />
+                )}
+
+
+              </View>
+            </Section>
+
+            <Section icon="gift" title="Guest of Honor">
+              <Pressable
+                onPress={() => setHasGoh(!hasGoh)}
+                className="flex-row items-center gap-3 active:opacity-70"
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: hasGoh }}
+              >
+                <Feather
+                  name={hasGoh ? "check-square" : "square"}
+                  size={20}
+                  color={hasGoh ? PRIMARY : "#9CA3AF"}
+                />
+                <Text className="flex-1 text-sm text-gray-900 dark:text-white">
+                  Enable guest of honor fields for this package
+                </Text>
+              </Pressable>
+              <Text className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                When enabled, customers can specify the name, age, and gender of
+                the guest of honor during booking.
+              </Text>
+            </Section>
+
+            <Section icon="file-text" title="Customer Notes">
+              <TextField
+                value={customerNotes}
+                onChangeText={setCustomerNotes}
+                placeholder="e.g., A 4.87% processing fee applies to all card transactions. Please arrive 15 minutes early."
+                multiline
+                hint="These notes will be displayed to customers during booking and included in their confirmation email."
+              />
+            </Section>
+
+            <Section icon="sliders" title="Booking Rules">
+              <View className="gap-5">
+                {/* Booking Window — how far ahead a customer may book. */}
+                <View>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                    Booking Window
+                  </Text>
+                  <Text className="mt-0.5 mb-2 text-xs text-gray-500 dark:text-gray-400">
+                    How far in advance customers can book this package
+                  </Text>
+                  <View className="flex-row flex-wrap">
+                    {BOOKING_WINDOW_PRESETS.map((p) => (
+                      <Chip
+                        key={p.days}
+                        label={p.label}
+                        selected={bookingWindowDays === String(p.days)}
+                        onPress={() => setBookingWindowDays(String(p.days))}
+                      />
+                    ))}
+                  </View>
+                  <View className="mt-1 flex-row items-center gap-2">
+                    <View className="w-24">
+                      <TextField
+                        value={bookingWindowDays}
+                        onChangeText={(t) =>
+                          setBookingWindowDays(t.replace(/\D/g, ""))
+                        }
+                        keyboardType="number-pad"
+                        placeholder="Days"
+                      />
+                    </View>
+                    <Text className="text-sm text-gray-600 dark:text-gray-300">
+                      days
+                    </Text>
+                    <Text className="text-gray-300 dark:text-neutral-700">|</Text>
+                    {/* Blank is "no limit" — the same value the API stores as null. */}
+                    <Pressable
+                      onPress={() => setBookingWindowDays("")}
+                      className={`rounded-lg px-3 py-2 active:opacity-80 ${
+                        bookingWindowDays.trim() === ""
+                          ? "bg-gray-800 dark:bg-neutral-700"
+                          : "border border-gray-200 dark:border-neutral-700"
+                      }`}
+                      accessibilityRole="button"
+                    >
+                      <Text
+                        className={`text-xs font-semibold ${
+                          bookingWindowDays.trim() === ""
+                            ? "text-white"
+                            : "text-gray-700 dark:text-gray-200"
+                        }`}
+                      >
+                        No Limit
+                      </Text>
+                    </Pressable>
+                  </View>
+                  {bookingWindowDays.trim() !== "" && (
+                    <Text className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      Customers can book up to {bookingWindowDays} days
+                      {bookingWindowMonths ? ` (${bookingWindowMonths})` : ""} in
+                      advance
+                    </Text>
+                  )}
+                </View>
+  
+                {/* Advance Booking Time — how close to the slot a customer may book. */}
+                <View>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                    Advance Booking Time{" "}
+                    <Text className="font-normal text-gray-500 dark:text-gray-400">
+                      (optional)
+                    </Text>
+                  </Text>
+                  <Text className="mt-0.5 mb-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                    Set how far in advance customers must book. For example,
+                    setting 48 hours means if a customer visits on Monday at 2:00
+                    PM, the earliest available time slot would be Wednesday at
+                    2:00 PM. This only affects customer-facing bookings — staff
+                    can still book freely.
+                  </Text>
+                  <View className="flex-row flex-wrap">
+                    {ADVANCE_NOTICE_PRESETS.map((p) => (
+                      <Chip
+                        key={p.hours}
+                        label={p.label}
+                        selected={minNotice === String(p.hours)}
+                        onPress={() => setMinNotice(String(p.hours))}
+                      />
+                    ))}
+                  </View>
+                  <View className="mt-1 flex-row items-center gap-2">
+                    <View className="flex-1">
+                      <TextField
+                        value={minNotice}
+                        onChangeText={(t) => setMinNotice(t.replace(/\D/g, ""))}
+                        keyboardType="number-pad"
+                        placeholder="Custom hours (e.g., 24)"
+                      />
+                    </View>
+                    <Text className="text-sm text-gray-600 dark:text-gray-300">
+                      hours
+                    </Text>
+                    {/* Blank / 0 is "no notice needed" — last-minute allowed. */}
+                    <Pressable
+                      onPress={() => setMinNotice("")}
+                      className={`rounded-lg px-3 py-2 active:opacity-80 ${
+                        minNotice.trim() === "" || minNotice === "0"
+                          ? "border border-[#0644C7] bg-[#0644C7]/10"
+                          : "border border-gray-200 dark:border-neutral-700"
+                      }`}
+                      accessibilityRole="button"
+                    >
+                      <Text
+                        className={`text-xs font-semibold ${
+                          minNotice.trim() === "" || minNotice === "0"
+                            ? "text-[#0644C7]"
+                            : "text-gray-700 dark:text-gray-200"
+                        }`}
+                      >
+                        Allow last-minute
+                      </Text>
+                    </Pressable>
+                  </View>
+                  {minNotice.trim() !== "" && minNotice !== "0" && (
+                    <Text className="mt-1.5 text-xs text-[#0644C7]">
+                      Customers must book at least {minNotice} hours (
+                      {(Number(minNotice) / 24).toFixed(1)} days) in advance. Any
+                      time slots within this window from the current time will be
+                      hidden.
+                    </Text>
+                  )}
+                </View>
+              </View>
+            </Section>
+
+            {/* Promos & gift cards are managed on the web, not here — but the
+                package's existing links are still held in state and sent back
+                on save, so editing from the app never drops them. */}
+
+            <Section icon="file-text" title="Invitation Template">
               <View className="gap-4">
                 <View>
                   <SectionLabel>Invitation template (optional)</SectionLabel>
@@ -1628,31 +1831,131 @@ const EditPackage = () => {
                     </Pressable>
                   )}
                 </View>
-
-                <SectionLabel>Review</SectionLabel>
-                <View className="rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 gap-1.5">
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">
-                    {name.trim() || "Untitled package"}
-                  </Text>
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">
-                    {(useCustomCategory ? customCategory : category) || "—"} ·{" "}
-                    {packageType}
-                  </Text>
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">
-                    ${(parseNum(price) ?? 0).toFixed(2)}
-                    {resolvedDuration()
-                      ? ` · ${resolvedDuration()} ${durationUnit}`
-                      : ""}
-                  </Text>
-                  <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                    {attractionSel.length} attractions · {roomSel.length} rooms
-                    · {addonOrder.length} add-ons · {promoSel.length} promos ·{" "}
-                    {giftCardSel.length} gift cards · {schedules.length}{" "}
-                    schedule(s)
-                  </Text>
-                </View>
               </View>
             </Section>
+
+            {/* Live Preview — how the package will read to a customer, updating
+                as the form is filled in. Mirrors the web's sidebar card. */}
+            <View
+              className="rounded-2xl bg-white dark:bg-neutral-900 p-5 mb-4 shadow-sm"
+              style={CARD_SHADOW}
+            >
+              <Text className="text-lg font-bold text-gray-900 dark:text-white mb-4">
+                Live Preview
+              </Text>
+  
+              <View className="flex-row items-start justify-between gap-3">
+                <Text
+                  className={`flex-1 text-xl font-bold ${
+                    name.trim()
+                      ? "text-[#0644C7] dark:text-blue-400"
+                      : "text-gray-300 dark:text-neutral-700"
+                  }`}
+                >
+                  {name.trim() || "Package Name"}
+                </Text>
+                <Text className="text-base font-bold text-gray-900 dark:text-white">
+                  {parseNum(price) != null
+                    ? `$${(parseNum(price) ?? 0).toFixed(2)}`
+                    : "$--"}
+                </Text>
+              </View>
+  
+              <Text
+                className={`mt-0.5 text-xs ${
+                  previewCategory
+                    ? "text-gray-500 dark:text-gray-400"
+                    : "text-gray-300 dark:text-neutral-700"
+                }`}
+              >
+                {previewCategory || "Category"}
+              </Text>
+  
+              <View className="mt-2 flex-row items-center gap-1.5">
+                <Feather name="clock" size={13} color="#6B7280" />
+                <Text className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                  Duration:
+                </Text>
+                <Text className="text-xs text-gray-600 dark:text-gray-300">
+                  {previewDuration}
+                </Text>
+              </View>
+  
+              <View className="mt-1 flex-row items-start gap-1.5">
+                <Feather
+                  name="calendar"
+                  size={13}
+                  color="#6B7280"
+                  style={{ marginTop: 2 }}
+                />
+                <Text className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                  Available:
+                </Text>
+                <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300">
+                  {previewAvailability}
+                </Text>
+              </View>
+
+              {/* Each schedule's window spelled out, since the Available line
+                  above collapses to a count once there is more than one. */}
+              {previewTimeSlots.length > 0 && (
+                <View className="mt-1 flex-row items-start gap-1.5">
+                  <Feather
+                    name="clock"
+                    size={13}
+                    color="#6B7280"
+                    style={{ marginTop: 2 }}
+                  />
+                  <View className="flex-1">
+                    <Text className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                      Time Slots:
+                    </Text>
+                    {previewTimeSlots.map((slot, i) => (
+                      <Text
+                        key={`${slot}-${i}`}
+                        className="ml-1 text-xs text-gray-600 dark:text-gray-300"
+                      >
+                        {slot}
+                      </Text>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              <Text
+                className={`mt-3 text-xs leading-5 ${
+                  description.trim()
+                    ? "text-gray-600 dark:text-gray-300"
+                    : "text-gray-300 dark:text-neutral-700"
+                }`}
+              >
+                {description.trim() || "Description"}
+              </Text>
+  
+              <View className="mt-3 gap-1.5">
+                <Text className="text-xs text-gray-600 dark:text-gray-300">
+                  <Text className="font-bold text-gray-900 dark:text-white">
+                    Attractions:{" "}
+                  </Text>
+                  {previewAttractions}
+                </Text>
+                {/* Always listed, even on a per-player package: the form hides
+                    the Space picker there, but the preview still reports the
+                    state as "No rooms selected" rather than omitting the row. */}
+                <Text className="text-xs text-gray-600 dark:text-gray-300">
+                  <Text className="font-bold text-gray-900 dark:text-white">
+                    SPACE:{" "}
+                  </Text>
+                  {previewSpaces}
+                </Text>
+                <Text className="text-xs text-gray-600 dark:text-gray-300">
+                  <Text className="font-bold text-gray-900 dark:text-white">
+                    Add-ons:{" "}
+                  </Text>
+                  {previewAddOns}
+                </Text>
+              </View>
+            </View>
             {/* Actions scroll with the form, sitting below the last section
                 rather than pinned to the bottom — the Edit Attraction pattern. */}
             <View className="flex-row gap-3 mt-4">

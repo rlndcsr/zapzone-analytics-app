@@ -11,7 +11,10 @@ import { getCurrentUser, getToken } from "../session";
 type Cache = { key: string; fetchedAt: number; data: PackageRow[] };
 let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const cacheKey = (locationId?: number) => String(locationId ?? "all");
+// The kind is part of the key: the two screens hold different slices of the
+// same endpoint, and sharing one cache entry would serve each other's rows.
+const cacheKey = (locationId: number | undefined, kind: PackageKind) =>
+  `${kind}:${locationId ?? "all"}`;
 
 // Set after a mutation (e.g. toggling status) so the list screen knows to
 // force a refetch the next time it regains focus.
@@ -30,12 +33,18 @@ export function consumePackagesStale(): boolean {
   return true;
 }
 
-type UsePackagesParams = { locationId?: number };
+/** Which slice of the catalog a screen wants. */
+export type PackageKind = "regular" | "custom";
+
+type UsePackagesParams = { locationId?: number; kind?: PackageKind };
 
 /** Loads + caches the package list (pull-to-refresh via `refetch`) from the
  *  lightweight GET /api/mobile/packages in one request; views filter/sort client-side. */
-export function usePackages({ locationId }: UsePackagesParams = {}) {
-  const key = cacheKey(locationId);
+export function usePackages({
+  locationId,
+  kind = "regular",
+}: UsePackagesParams = {}) {
+  const key = cacheKey(locationId, kind);
   const cacheFresh =
     !!cache && cache.key === key && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
 
@@ -50,7 +59,7 @@ export function usePackages({ locationId }: UsePackagesParams = {}) {
 
   const sync = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      const k = cacheKey(locationId);
+      const k = cacheKey(locationId, kind);
       const fresh =
         !!cache && cache.key === k && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
 
@@ -85,14 +94,16 @@ export function usePackages({ locationId }: UsePackagesParams = {}) {
       }
 
       try {
-        // Regular packages only, matching the web /packages catalog (custom
-        // types belong to the separate Custom Packages screen).
+        // One endpoint serves both screens: /packages shows the regular
+        // catalog, Custom Packages everything with another package_type.
         const all = await fetchPackages({
           token,
           userId: user?.id,
           locationId,
         });
-        const data = all.filter(isRegularPackage);
+        const data = all.filter((p) =>
+          kind === "custom" ? !isRegularPackage(p) : isRegularPackage(p),
+        );
         cache = { key: k, fetchedAt: Date.now(), data };
         if (isCurrent()) {
           setPackages(data);
@@ -110,7 +121,7 @@ export function usePackages({ locationId }: UsePackagesParams = {}) {
         if (isCurrent()) setLoading(false);
       }
     },
-    [locationId],
+    [locationId, kind],
   );
 
   useEffect(() => {

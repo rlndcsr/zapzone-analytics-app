@@ -15,11 +15,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { InputField } from "../../components/ui/InputField";
+import { StatusModal } from "../../components/ui/StatusModal";
 import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton";
 import { mediaUrl } from "../../lib/api";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { EditProfileSkeleton } from "../../components/ui/skeleton/EditProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
+import { useStatusModal } from "../../lib/hooks/useStatusModal";
 import { getToken } from "../../lib/session";
 import {
   COMPANY_SIZES,
@@ -40,6 +42,7 @@ const EditProfile = () => {
   const insets = useSafeAreaInsets();
   const { user, loading, refresh } = useProfile();
   const [saving, setSaving] = useState(false);
+  const status = useStatusModal();
 
   // Personal information form state.
   const [firstName, setFirstName] = useState("");
@@ -178,12 +181,16 @@ const EditProfile = () => {
       }
 
       await refresh();
-      Alert.alert("Saved", "Your profile has been updated.", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
+      status.show({
+        variant: "success",
+        title: "Changes Saved",
+        message: "Your profile has been updated.",
+        confirmLabel: "Done",
+        onConfirm: () => router.back(),
+      });
     } catch (err) {
-      Alert.alert(
-        "Update failed",
+      status.error(
+        "Update Failed",
         err instanceof Error ? err.message : "Please try again.",
       );
     } finally {
@@ -551,6 +558,9 @@ const EditProfile = () => {
           setDateSheetOpen(false);
         }}
       />
+
+      {/* Save outcome — success and failure, in the app's own dialog. */}
+      <StatusModal {...status.props} />
     </View>
   );
 };

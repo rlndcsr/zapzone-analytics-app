@@ -32,6 +32,11 @@ import {
 } from "../../lib/callToBook";
 import { markPackagesStale } from "../../lib/hooks/usePackages";
 
+import {
+  ADVANCE_NOTICE_PRESETS,
+  BOOKING_WINDOW_PRESETS,
+  bookingWindowMonthsLabel,
+} from "../../lib/packages/bookingWindow";
 import { generateScheduleSlots } from "../../lib/packages/scheduleSlots";
 import { formatDuration } from "../../lib/time";
 import {
@@ -60,29 +65,6 @@ import {
 
 const PRIMARY = "#0644C7";
 
-/** Booking-window shortcuts, in days — the web's 1mo…12mo row (30-day months). */
-const BOOKING_WINDOW_PRESETS = Array.from({ length: 12 }, (_, i) => ({
-  label: `${i + 1}mo`,
-  days: (i + 1) * 30,
-}));
-
-/** Advance-notice shortcuts, in hours — the web's 1h…4 weeks rows. */
-const ADVANCE_NOTICE_PRESETS: { label: string; hours: number }[] = [
-  ...Array.from({ length: 12 }, (_, i) => ({
-    label: `${i + 1} h`,
-    hours: i + 1,
-  })),
-  { label: "1 day", hours: 24 },
-  { label: "2 days", hours: 48 },
-  { label: "3 days", hours: 72 },
-  { label: "4 days", hours: 96 },
-  { label: "5 days", hours: 120 },
-  { label: "6 days", hours: 144 },
-  { label: "1 week", hours: 168 },
-  { label: "2 weeks", hours: 336 },
-  { label: "3 weeks", hours: 504 },
-  { label: "4 weeks", hours: 672 },
-];
 
 const PACKAGE_TYPES: SelectOption[] = [
   { label: "Regular", value: "regular" },
@@ -643,13 +625,9 @@ const CreatePackage = () => {
     </View>
   );
 
-  /** "3 months" for a window that lands on a whole 30-day multiple, else "". */
-  const bookingWindowMonths = useMemo(() => {
-    const days = parseIntOrNull(bookingWindowDays);
-    if (days == null || days <= 0 || days % 30 !== 0) return "";
-    const months = days / 30;
-    return `${months} month${months === 1 ? "" : "s"}`;
-  }, [bookingWindowDays]);
+  const bookingWindowMonths = bookingWindowMonthsLabel(
+    parseIntOrNull(bookingWindowDays),
+  );
 
   /* --- Live Preview: how this package will read to a customer ------------ */
 
@@ -689,18 +667,41 @@ const CreatePackage = () => {
     return `${s.occurrence} ${s.monthlyDay}${window}`;
   }, [schedules]);
 
-  /** Selected names, or the web's greyed "None" when nothing is picked. */
+  /**
+   * One line per schedule — "12:30 PM - 9:30 PM (every 90 min)" — so the whole
+   * week is visible even though the Available line above collapses to a count.
+   */
+  const previewTimeSlots = useMemo(
+    () =>
+      schedules
+        .filter((s) => s.start && s.end)
+        .map(
+          (s) =>
+            `${to12h(s.start)} - ${to12h(s.end)}` +
+            (parseIntOrNull(s.interval)
+              ? ` (every ${parseIntOrNull(s.interval)} min)`
+              : ""),
+        ),
+    [schedules],
+  );
+
+  /** Selected names, or the web's greyed "No X selected" when none are picked. */
   const namesOf = <T extends { id: number; name: string }>(
     all: T[],
     selected: number[],
+    emptyLabel: string,
   ) => {
     const picked = all.filter((x) => selected.includes(x.id)).map((x) => x.name);
-    return picked.length > 0 ? picked.join(", ") : "None";
+    return picked.length > 0 ? picked.join(", ") : emptyLabel;
   };
 
-  const previewAttractions = namesOf(attractions, attractionSel);
-  const previewSpaces = namesOf(rooms, roomSel);
-  const previewAddOns = namesOf(addOns, addonOrder);
+  const previewAttractions = namesOf(
+    attractions,
+    attractionSel,
+    "No attractions selected",
+  );
+  const previewSpaces = namesOf(rooms, roomSel, "No rooms selected");
+  const previewAddOns = namesOf(addOns, addonOrder, "No add-ons selected");
 
   const handleSubmit = async () => {
     // The form is one page now, so every rule runs here rather than gating a
@@ -1938,7 +1939,7 @@ const CreatePackage = () => {
               <Text
                 className={`flex-1 text-xl font-bold ${
                   name.trim()
-                    ? "text-gray-900 dark:text-white"
+                    ? "text-[#0644C7] dark:text-blue-400"
                     : "text-gray-300 dark:text-neutral-700"
                 }`}
               >
@@ -1986,6 +1987,32 @@ const CreatePackage = () => {
               </Text>
             </View>
 
+            {/* Each schedule's window spelled out, since the Available line
+                above collapses to a count once there is more than one. */}
+            {previewTimeSlots.length > 0 && (
+              <View className="mt-1 flex-row items-start gap-1.5">
+                <Feather
+                  name="clock"
+                  size={13}
+                  color="#6B7280"
+                  style={{ marginTop: 2 }}
+                />
+                <View className="flex-1">
+                  <Text className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                    Time Slots:
+                  </Text>
+                  {previewTimeSlots.map((slot, i) => (
+                    <Text
+                      key={`${slot}-${i}`}
+                      className="ml-1 text-xs text-gray-600 dark:text-gray-300"
+                    >
+                      {slot}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            )}
+
             <Text
               className={`mt-3 text-xs leading-5 ${
                 description.trim()
@@ -2003,14 +2030,15 @@ const CreatePackage = () => {
                 </Text>
                 {previewAttractions}
               </Text>
-              {!perPerson && (
-                <Text className="text-xs text-gray-600 dark:text-gray-300">
-                  <Text className="font-bold text-gray-900 dark:text-white">
-                    Space:{" "}
-                  </Text>
-                  {previewSpaces}
+              {/* Always listed, even on a per-player package: the form hides
+                  the Space picker there, but the preview still reports the
+                  state as "No rooms selected" rather than omitting the row. */}
+              <Text className="text-xs text-gray-600 dark:text-gray-300">
+                <Text className="font-bold text-gray-900 dark:text-white">
+                  SPACE:{" "}
                 </Text>
-              )}
+                {previewSpaces}
+              </Text>
               <Text className="text-xs text-gray-600 dark:text-gray-300">
                 <Text className="font-bold text-gray-900 dark:text-white">
                   Add-ons:{" "}
