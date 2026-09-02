@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton";
 import { markGroupInvitesStale } from "../../lib/hooks/useGroupInvites";
@@ -282,6 +283,16 @@ const CreateGroupInvite = () => {
                 containerClassName="flex-1"
               />
             </View>
+            {/* Below the row for the same reason as the error line: a
+                half-width column is too narrow for the chips. */}
+            <EmailSuggestions
+              value={email}
+              onSelect={(next) => {
+                setEmail(next);
+                if (errors.contact)
+                  setErrors((e) => ({ ...e, contact: undefined }));
+              }}
+            />
             {/* Below the row, not under one field — "add an email or phone"
                 belongs to the pair, and wraps badly in a half-width column. */}
             {errors.contact && (

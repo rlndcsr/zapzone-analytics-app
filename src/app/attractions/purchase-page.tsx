@@ -32,6 +32,7 @@ import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { CountryPickerSheet } from "../../components/ui/CountryPickerSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { firstMediaUrl, mediaUrl } from "../../lib/api";
@@ -1211,15 +1212,17 @@ const PurchasePageScreen = () => {
                   />
                 </View>
               </View>
-              <InputField
-                label="Email *"
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@example.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                containerClassName="mb-4"
-              />
+              <View className="mb-4">
+                <InputField
+                  label="Email *"
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <EmailSuggestions value={email} onSelect={setEmail} />
+              </View>
               <InputField
                 label="Phone"
                 value={phone}

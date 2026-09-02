@@ -15,6 +15,7 @@ import {
   type CallToBookEntityType,
 } from "../../services/checkoutConcernsService";
 import { BottomSheet } from "./BottomSheet";
+import { EmailSuggestions } from "./EmailSuggestions";
 
 const TEAL = "#0F766E";
 
@@ -270,6 +271,11 @@ export function CallToBookSheet({
               keyboardType="email-address"
               editable={!submitting}
               className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700"
+            />
+            <EmailSuggestions
+              value={email}
+              onSelect={setEmail}
+              suppressed={submitting}
             />
 
             <Text className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-4 mb-1.5">

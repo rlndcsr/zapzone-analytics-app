@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { eventIsCallToBook } from "../../lib/callToBook";
@@ -903,6 +904,14 @@ const CreateEventPurchaseScreen = () => {
                     <Feather name="check-circle" size={18} color="#22C55E" />
                   ) : undefined
                 }
+              />
+              <EmailSuggestions
+                value={customerEmail}
+                onSelect={(email) => {
+                  setCustomerEmail(email);
+                  setSelectedCustomerId(null);
+                }}
+                suppressed={showCustomerList && foundCustomers.length > 0}
               />
             </View>
             {showCustomerList && foundCustomers.length > 0 && (

@@ -22,6 +22,7 @@ import {
 import QRCode from "react-native-qrcode-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { FieldLabel, SelectField } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
@@ -984,15 +985,23 @@ const EditPurchaseScreen = () => {
               placeholder="Enter customer name"
               containerClassName="mb-4"
             />
-            <InputField
-              label="Email"
-              value={guestEmail}
-              onChangeText={setGuestEmail}
-              placeholder="customer@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              containerClassName="mb-4"
-            />
+            <View className="mb-4">
+              <InputField
+                label="Email"
+                value={guestEmail}
+                onChangeText={setGuestEmail}
+                placeholder="customer@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              {/* An order line's customer details are locked, so there is
+                  nothing to suggest into. */}
+              <EmailSuggestions
+                value={guestEmail}
+                onSelect={setGuestEmail}
+                suppressed={isOrderLine}
+              />
+            </View>
             <InputField
               label="Phone"
               value={guestPhone}

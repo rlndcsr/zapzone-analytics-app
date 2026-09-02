@@ -39,18 +39,33 @@ export function TextField({
   label,
   required,
   hint,
+  disabled = false,
+  editable,
   ...inputProps
 }: {
   label?: string;
   required?: boolean;
   hint?: string;
+  /**
+   * Greys the field out and blocks typing — for a value something else now
+   * controls, where hiding the field would lose the number it holds. The hint
+   * is the place to say what took over.
+   */
+  disabled?: boolean;
 } & TextInputProps) {
+  // Split so no utility is declared twice: repeating bg-/text- across a
+  // conditional suffix leaves nativewind picking a winner rather than us.
+  const tone = disabled
+    ? "bg-gray-100 dark:bg-neutral-800 border-gray-200 dark:border-neutral-800 text-gray-500 dark:text-gray-400"
+    : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800 text-gray-900 dark:text-white";
+
   return (
     <View>
       {label ? <FieldLabel required={required}>{label}</FieldLabel> : null}
       <TextInput
         placeholderTextColor="#9CA3AF"
-        className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white"
+        className={`rounded-xl px-3.5 py-3 border text-sm ${tone}`}
+        editable={disabled ? false : editable}
         {...inputProps}
       />
       {hint ? (

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 
 import { BottomSheet } from "./BottomSheet";
+import { EmailSuggestions } from "./EmailSuggestions";
 
 /** Shared "Send Test Email" sheet — reused by the notification details + list screens. */
 export function SendTestEmailSheet({
@@ -39,6 +40,11 @@ export function SendTestEmailSheet({
           autoCorrect={false}
           className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white"
           style={{ paddingVertical: 10 }}
+        />
+        <EmailSuggestions
+          value={email}
+          onSelect={setEmail}
+          suppressed={sending}
         />
         <Pressable
           onPress={() => onSend(email.trim())}

@@ -711,7 +711,15 @@ export async function updateBookingInternalNotes(
 }
 
 export type PackageOption = { id: number; name: string; price: number | null };
-export type RoomOption = { id: number; name: string };
+export type RoomOption = {
+  id: number;
+  name: string;
+  /**
+   * How often this space opens a new booking, in minutes. Null when it sets
+   * none — the server then leaves the start times to the schedule interval.
+   */
+  bookingInterval: number | null;
+};
 
 /** Loosely pull an array out of the common `{data:{key:[]}}` / `{data:[]}` shapes. */
 function extractList<T>(res: any, key: string): T[] {
@@ -744,15 +752,30 @@ export async function fetchPackages(
   }));
 }
 
+/** Spaces plus the venue-wide booking rules the package form previews against. */
+export type RoomOptions = {
+  rooms: RoomOption[];
+  /**
+   * The gap the server leaves between two bookings in the same space, from
+   * `booking_rules.room_cleanup_minutes`. Null when the API does not report it,
+   * so the caller falls back to its own default rather than assuming zero.
+   */
+  slotCleanupMinutes: number | null;
+};
+
 /**
- * GET /api/rooms?location_id= — selectable spaces/rooms for the Edit form.
+ * GET /api/rooms?location_id= — selectable spaces/rooms plus the cleanup gap.
  * Also paginated (default 15/page, max 500); page through so every space shows.
+ *
+ * The endpoint returns only available spaces unless `is_available` is passed,
+ * which is the same set the server staggers start times across.
  */
-export async function fetchRooms(
+export async function fetchRoomOptions(
   token: string,
   locationId?: number | null,
-): Promise<RoomOption[]> {
+): Promise<RoomOptions> {
   const out: RoomOption[] = [];
+  let slotCleanupMinutes: number | null = null;
   let page = 1;
   let lastPage = 1;
   do {
@@ -761,16 +784,33 @@ export async function fetchRooms(
     const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
       token,
     });
+    const cleanup = res?.data?.slot_cleanup_minutes;
+    if (slotCleanupMinutes == null && cleanup != null) {
+      const minutes = Number(cleanup);
+      if (Number.isFinite(minutes)) slotCleanupMinutes = minutes;
+    }
     for (const r of extractList<any>(res, "rooms")) {
       out.push({
         id: Number(r.id),
         name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+        bookingInterval:
+          r.booking_interval != null && Number.isFinite(Number(r.booking_interval))
+            ? Number(r.booking_interval)
+            : null,
       });
     }
     lastPage = res?.data?.pagination?.last_page ?? page;
     page++;
   } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
-  return out;
+  return { rooms: out, slotCleanupMinutes };
+}
+
+/** Just the spaces, for callers with no interest in the booking rules. */
+export async function fetchRooms(
+  token: string,
+  locationId?: number | null,
+): Promise<RoomOption[]> {
+  return (await fetchRoomOptions(token, locationId)).rooms;
 }
 
 // ---------------------------------------------------------------------------

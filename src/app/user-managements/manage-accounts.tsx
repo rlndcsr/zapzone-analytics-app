@@ -22,6 +22,7 @@ import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import {
   CheckboxRow,
@@ -2049,15 +2050,21 @@ const ManageAccounts = () => {
               </View>
             </View>
 
-            <TextField
-              label="Email"
-              required
-              value={form.email}
-              onChangeText={(v) => setForm((f) => ({ ...f, email: v }))}
-              placeholder="jordan@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+            <View>
+              <TextField
+                label="Email"
+                required
+                value={form.email}
+                onChangeText={(v) => setForm((f) => ({ ...f, email: v }))}
+                placeholder="jordan@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <EmailSuggestions
+                value={form.email}
+                onSelect={(email) => setForm((f) => ({ ...f, email }))}
+              />
+            </View>
 
             <TextField
               label="Phone"
@@ -2498,15 +2505,22 @@ const ManageAccounts = () => {
               />
             )}
 
-            <TextField
-              label="Email Address"
-              value={inviteEmail}
-              onChangeText={setInviteEmail}
-              placeholder="Enter email address"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              editable={!inviting && !inviteSuccess}
-            />
+            <View>
+              <TextField
+                label="Email Address"
+                value={inviteEmail}
+                onChangeText={setInviteEmail}
+                placeholder="Enter email address"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!inviting && !inviteSuccess}
+              />
+              <EmailSuggestions
+                value={inviteEmail}
+                onSelect={setInviteEmail}
+                suppressed={inviting || inviteSuccess}
+              />
+            </View>
 
             {!!inviteLink && (
               <View>

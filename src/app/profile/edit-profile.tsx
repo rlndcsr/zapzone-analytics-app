@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { StatusModal } from "../../components/ui/StatusModal";
 import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton";
@@ -254,16 +255,18 @@ const EditProfile = () => {
                   placeholder="Last name"
                   containerClassName="mb-3"
                 />
-                <InputField
-                  label="Email Address"
-                  icon="mail"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  placeholder="you@example.com"
-                  containerClassName="mb-3"
-                />
+                <View className="mb-3">
+                  <InputField
+                    label="Email Address"
+                    icon="mail"
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    placeholder="you@example.com"
+                  />
+                  <EmailSuggestions value={email} onSelect={setEmail} />
+                </View>
                 <InputField
                   label="Phone Number"
                   icon="phone"
@@ -351,16 +354,21 @@ const EditProfile = () => {
                     </View>
                   </View>
 
-                  <InputField
-                    label="Company Email"
-                    icon="mail"
-                    value={companyEmail}
-                    onChangeText={setCompanyEmail}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    placeholder="company@example.com"
-                    containerClassName="mb-3"
-                  />
+                  <View className="mb-3">
+                    <InputField
+                      label="Company Email"
+                      icon="mail"
+                      value={companyEmail}
+                      onChangeText={setCompanyEmail}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      placeholder="company@example.com"
+                    />
+                    <EmailSuggestions
+                      value={companyEmail}
+                      onSelect={setCompanyEmail}
+                    />
+                  </View>
                   <InputField
                     label="Company Phone"
                     icon="phone"

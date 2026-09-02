@@ -21,6 +21,7 @@ import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import {
   CheckboxRow,
   SelectField,
@@ -2225,15 +2226,21 @@ const ManageAttendants = () => {
               </View>
             </View>
 
-            <TextField
-              label="Email"
-              required
-              value={form.email}
-              onChangeText={(v) => setForm((f) => ({ ...f, email: v }))}
-              placeholder="jordan@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+            <View>
+              <TextField
+                label="Email"
+                required
+                value={form.email}
+                onChangeText={(v) => setForm((f) => ({ ...f, email: v }))}
+                placeholder="jordan@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <EmailSuggestions
+                value={form.email}
+                onSelect={(email) => setForm((f) => ({ ...f, email }))}
+              />
+            </View>
 
             <TextField
               label="Phone"
@@ -2402,15 +2409,22 @@ const ManageAttendants = () => {
               disabled={inviting || inviteSuccess}
             />
 
-            <TextField
-              label="Email Address"
-              value={inviteEmail}
-              onChangeText={setInviteEmail}
-              placeholder="Enter email address"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              editable={!inviting && !inviteSuccess}
-            />
+            <View>
+              <TextField
+                label="Email Address"
+                value={inviteEmail}
+                onChangeText={setInviteEmail}
+                placeholder="Enter email address"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!inviting && !inviteSuccess}
+              />
+              <EmailSuggestions
+                value={inviteEmail}
+                onSelect={setInviteEmail}
+                suppressed={inviting || inviteSuccess}
+              />
+            </View>
 
             {!!inviteLink && (
               <View>
@@ -2532,14 +2546,20 @@ const ManageAttendants = () => {
                 />
               </View>
             </View>
-            <TextField
-              label="Email"
-              value={editLoc.email}
-              onChangeText={(v) => setEditLoc((s) => ({ ...s, email: v }))}
-              placeholder="contact@location.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+            <View>
+              <TextField
+                label="Email"
+                value={editLoc.email}
+                onChangeText={(v) => setEditLoc((s) => ({ ...s, email: v }))}
+                placeholder="contact@location.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <EmailSuggestions
+                value={editLoc.email}
+                onSelect={(email) => setEditLoc((s) => ({ ...s, email }))}
+              />
+            </View>
 
             <Pressable
               onPress={saveEditLocation}

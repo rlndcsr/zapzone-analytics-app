@@ -28,6 +28,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { mediaUrl } from "../../lib/api";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -991,6 +992,7 @@ const EditBookingScreen = () => {
                 autoCapitalize="none"
                 className={inputClass}
               />
+              <EmailSuggestions value={email} onSelect={setEmail} />
             </View>
             <View className="mt-3">
               <FieldLabel>Phone</FieldLabel>

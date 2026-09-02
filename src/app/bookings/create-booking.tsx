@@ -23,6 +23,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "nativewind";
 
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import {
   MONTHS as CALENDAR_MONTHS,
@@ -1821,6 +1822,11 @@ const CreateBookingScreen = () => {
                   placeholder="john.doe@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                />
+                <EmailSuggestions
+                  value={customerEmail}
+                  onSelect={setCustomerEmail}
+                  suppressed={showCustomerList}
                 />
                 <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   We&apos;ll auto-fill info if this customer exists

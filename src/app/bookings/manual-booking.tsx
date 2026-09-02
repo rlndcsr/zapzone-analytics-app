@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
@@ -1334,6 +1335,9 @@ const ManualBookingScreen = () => {
                     />
                   </View>
                 </View>
+                {/* Below the row rather than inside the half-width Email column,
+                    so the chips have the full width to sit on. */}
+                <EmailSuggestions value={email} onSelect={setEmail} />
                 <View className="mt-3">
                   <FieldLabel>Address (Optional)</FieldLabel>
                   <TextInput

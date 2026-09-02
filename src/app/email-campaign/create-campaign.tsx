@@ -21,6 +21,7 @@ import {
   PRIMARY,
   VariablePanel,
 } from "../../components/ui/EmailComposerKit";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { markEmailCampaignsStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
@@ -250,6 +251,9 @@ const CreateCampaign = () => {
                 <Text className="text-sm font-semibold text-[#0644C7]">Add</Text>
               </Pressable>
             </View>
+            {/* Between the field and the addresses already added, so it reads
+                type → suggestion → added. */}
+            <EmailSuggestions value={emailDraft} onSelect={setEmailDraft} />
             {customEmails.length > 0 && (
               <View className="flex-row flex-wrap mt-2">
                 {customEmails.map((e) => (

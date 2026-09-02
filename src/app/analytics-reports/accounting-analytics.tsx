@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SheetSelect } from "../../components/ui/SheetSelect";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
+import { ALL_LOCATIONS_SCOPE } from "../../lib/analytics/accountingScope";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { fetchLocations, type LocationOption } from "../../services/locationsService";
 import {
@@ -39,6 +40,13 @@ const CARD_SHADOW = {
 
 const PRIMARY = "#0644C7";
 type FeatherName = ComponentProps<typeof Feather>["name"];
+
+/**
+ * Report across every location the account can see. The service turns this into
+ * the backend's `location_id=all`; the server decides what "every" means, so a
+ * manager picking it still only ever sees their own venue.
+ */
+const ALL_LOCATIONS = ALL_LOCATIONS_SCOPE;
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 function ymd(d: Date): string {
@@ -154,7 +162,13 @@ const AccountingAnalytics = () => {
   const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [locationId, setLocationId] = useState<number | null>(getCurrentUser()?.location_id ?? null);
+  /**
+   * The chosen scope: a location id, `ALL_LOCATIONS` for a company-wide report,
+   * or null before the options have loaded and one has been picked.
+   */
+  const [locationId, setLocationId] = useState<number | typeof ALL_LOCATIONS | null>(
+    getCurrentUser()?.location_id ?? null,
+  );
   const [start, setStart] = useState(() => ymd(new Date()));
   const [end, setEnd] = useState(() => ymd(new Date()));
   const [viewMode, setViewMode] = useState<"booked_on" | "booked_for">("booked_on");
@@ -188,7 +202,7 @@ const AccountingAnalytics = () => {
       setReport(
         await fetchAccountingReport({
           token,
-          locationId,
+          locationId: locationId === ALL_LOCATIONS ? null : locationId,
           startDate: start,
           endDate: end || undefined,
           viewMode,
@@ -255,6 +269,16 @@ const AccountingAnalytics = () => {
           <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6" style={CARD_SHADOW}>
             <Text className="text-lg font-bold text-gray-900 dark:text-white">Accounting & Analytics</Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">Purchases made on selected dates</Text>
+            {/* The scope the server actually ran on, which is not always the one
+                asked for — a manager picking All Locations still gets their own. */}
+            {report?.locationName ? (
+              <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 mt-1.5">
+                {report.locationName}
+                {report.locationCount > 1
+                  ? ` · ${report.locationCount} locations`
+                  : ""}
+              </Text>
+            ) : null}
           </View>
 
           {/* Controls */}
@@ -264,8 +288,17 @@ const AccountingAnalytics = () => {
                 icon="map-pin"
                 title="Select Location"
                 value={locationId}
-                options={locations.map((l) => ({ label: l.name, value: l.id }))}
-                onSelect={(v) => setLocationId(Number(v))}
+                options={[
+                  // Only worth offering where there is more than one venue to
+                  // total up — a single-location account already sees it all.
+                  ...(locations.length > 1
+                    ? [{ label: "All Locations", value: ALL_LOCATIONS }]
+                    : []),
+                  ...locations.map((l) => ({ label: l.name, value: l.id })),
+                ]}
+                onSelect={(v) =>
+                  setLocationId(v === ALL_LOCATIONS ? ALL_LOCATIONS : Number(v))
+                }
               />
             )}
             <View className="flex-row gap-3">

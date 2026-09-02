@@ -19,6 +19,7 @@ import {
   ToggleRow,
   type SelectOption,
 } from "../../components/ui/FormControls";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { PRIMARY, Section } from "../../components/ui/attractionFormKit";
 import { markContactsStale } from "../../lib/contactsStale";
 import { getToken } from "../../lib/session";
@@ -254,15 +255,20 @@ const EditCustomer = () => {
                   onChangeText={setLastName}
                   placeholder="Last name"
                 />
-                <TextField
-                  label="Email"
-                  required
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="name@example.com"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
+                {/* Wrapped so the chips share the field's slot in the gap
+                    layout instead of taking one of their own. */}
+                <View>
+                  <TextField
+                    label="Email"
+                    required
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="name@example.com"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                  <EmailSuggestions value={email} onSelect={setEmail} />
+                </View>
                 <TextField
                   label="Phone"
                   value={phone}

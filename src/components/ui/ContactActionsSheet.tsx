@@ -22,6 +22,7 @@ import {
   type ContactRow,
 } from "../../services/contactsService";
 import { BottomSheet } from "./BottomSheet";
+import { EmailSuggestions } from "./EmailSuggestions";
 import { SelectField, TextField } from "./FormControls";
 import { StatusBadge } from "./StatusBadge";
 
@@ -402,6 +403,8 @@ export function ContactActionsSheet({
             />
           </View>
         </View>
+        {/* Below the row — a half-width column is too narrow for the chips. */}
+        <EmailSuggestions value={email} onSelect={setEmail} />
 
         <View className="flex-row gap-3">
           <View className="flex-1">

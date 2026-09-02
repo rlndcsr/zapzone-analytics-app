@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { PrimaryButton } from "../../components/ui/PrimaryButton";
 import { markWaiversStale } from "../../lib/hooks/useWaivers";
@@ -497,19 +498,29 @@ const CreateWaiver = () => {
             <Text className="mb-3 text-xs text-gray-500 dark:text-gray-400">
               Enter an email or phone number — the signing link is sent there.
             </Text>
-            <InputField
-              label="Email"
-              icon="mail"
-              value={email}
-              onChangeText={(t) => {
-                setEmail(t);
-                if (errors.contact) setErrors((e) => ({ ...e, contact: undefined }));
-              }}
-              placeholder="guardian@email.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              containerClassName="mb-4"
-            />
+            <View className="mb-4">
+              <InputField
+                label="Email"
+                icon="mail"
+                value={email}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  if (errors.contact)
+                    setErrors((e) => ({ ...e, contact: undefined }));
+                }}
+                placeholder="guardian@email.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <EmailSuggestions
+                value={email}
+                onSelect={(next) => {
+                  setEmail(next);
+                  if (errors.contact)
+                    setErrors((e) => ({ ...e, contact: undefined }));
+                }}
+              />
+            </View>
             <InputField
               label="Phone"
               icon="phone"

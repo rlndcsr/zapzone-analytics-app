@@ -37,7 +37,13 @@ import {
   BOOKING_WINDOW_PRESETS,
   bookingWindowMonthsLabel,
 } from "../../lib/packages/bookingWindow";
-import { generateScheduleSlots } from "../../lib/packages/scheduleSlots";
+import {
+  DEFAULT_SLOT_CLEANUP_MINUTES,
+  resolveScheduleSlots,
+  spaceDrivenIntervalHint,
+  spaceDrivenSourceLabel,
+  spacesDriveStartTimes,
+} from "../../lib/packages/scheduleSlots";
 import { formatDuration } from "../../lib/time";
 import {
   packageDurationMinutes,
@@ -50,7 +56,10 @@ import {
   type AttractionRow,
 } from "../../services/attractionsService";
 import { fetchCategories, type Category } from "../../services/categoriesService";
-import { fetchRooms, type RoomOption } from "../../services/bookingsService";
+import {
+  fetchRoomOptions,
+  type RoomOption,
+} from "../../services/bookingsService";
 import {
   fetchLocations,
   type LocationOption,
@@ -282,6 +291,10 @@ const CreatePackage = () => {
   const [rooms, setRooms] = useState<RoomOption[]>([]);
   const [addOns, setAddOns] = useState<AddOnOption[]>([]);
   const [loadingRelations, setLoadingRelations] = useState(false);
+  /** The venue's cleanup gap between two bookings in one space, from the API. */
+  const [slotCleanupMinutes, setSlotCleanupMinutes] = useState<number | null>(
+    null,
+  );
 
   const [attractionSel, setAttractionSel] = useState<number[]>([]);
   const [roomSel, setRoomSel] = useState<number[]>([]);
@@ -343,6 +356,7 @@ const CreatePackage = () => {
     if (isCompanyAdmin && locationId == null) {
       setAttractions([]);
       setRooms([]);
+      setSlotCleanupMinutes(null);
       setAddOns([]);
       return;
     }
@@ -353,14 +367,18 @@ const CreatePackage = () => {
     const locId = locationId ?? undefined;
     Promise.all([
       fetchAttractions({ token, userId, locationId: locId }).catch(() => []),
-      fetchRooms(token, locId).catch(() => []),
+      fetchRoomOptions(token, locId).catch(() => ({
+        rooms: [],
+        slotCleanupMinutes: null,
+      })),
       fetchAddOns({ token, userId, locationId: locId, perPage: 500 }).catch(
         () => [],
       ),
     ]).then(([atts, rms, ads]) => {
       if (!active) return;
       setAttractions(atts);
-      setRooms(rms);
+      setRooms(rms.rooms);
+      setSlotCleanupMinutes(rms.slotCleanupMinutes);
       setAddOns(ads);
       setLoadingRelations(false);
     });
@@ -536,6 +554,42 @@ const CreatePackage = () => {
     packageDurationMinutes(durationUnit, duration, durationHours, durationMinutes) ||
     null;
 
+  /**
+   * The booking interval of every space this package is being booked into — one
+   * entry per selected space, 0 for a space that sets none, because the server
+   * staggers start times across all of them and sizes the stagger from the
+   * non-zero ones only.
+   *
+   * A selected id missing from `rooms` is dropped rather than counted as 0: the
+   * list holds the location's available spaces, and the server likewise
+   * staggers only across the available ones.
+   */
+  const selectedSpaceIntervals = useMemo(
+    () =>
+      roomSel
+        .map((id) => rooms.find((room) => room.id === id))
+        .filter((room): room is RoomOption => room != null)
+        .map((room) => room.bookingInterval ?? 0),
+    [roomSel, rooms],
+  );
+
+  /** One schedule row's preview, resolved the way the server resolves it. */
+  const resolveSlotsFor = (schedule: { start: string; end: string; interval: string }) =>
+    resolveScheduleSlots({
+      start: schedule.start,
+      end: schedule.end,
+      intervalMinutes: parseIntOrNull(schedule.interval),
+      durationMinutes: sessionMinutes,
+      spaceIntervals: selectedSpaceIntervals,
+      cleanupMinutes: slotCleanupMinutes ?? DEFAULT_SLOT_CLEANUP_MINUTES,
+    });
+
+  /** True while the spaces — not the typed interval — set the start times. */
+  const spacesRunStartTimes = spacesDriveStartTimes(selectedSpaceIntervals);
+  const spaceStagger = spacesRunStartTimes
+    ? Math.min(...selectedSpaceIntervals.filter((m) => m > 0))
+    : null;
+
   const buildSchedulePayload = (): PackageScheduleInput[] =>
     schedules.map((s, index) => ({
       availabilityType: s.type,
@@ -675,14 +729,16 @@ const CreatePackage = () => {
     () =>
       schedules
         .filter((s) => s.start && s.end)
-        .map(
-          (s) =>
+        .map((s) => {
+          // The spaces override the typed interval, so the summary quotes
+          // whichever one actually opens the next start.
+          const every = spaceStagger ?? parseIntOrNull(s.interval);
+          return (
             `${to12h(s.start)} - ${to12h(s.end)}` +
-            (parseIntOrNull(s.interval)
-              ? ` (every ${parseIntOrNull(s.interval)} min)`
-              : ""),
-        ),
-    [schedules],
+            (every ? ` (a start every ${every} min)` : "")
+          );
+        }),
+    [schedules, spaceStagger],
   );
 
   /** Selected names, or the web's greyed "No X selected" when none are picked. */
@@ -1340,10 +1396,15 @@ const CreatePackage = () => {
                         }
                         keyboardType="number-pad"
                         placeholder="30"
+                        // Typing here changes nothing while the spaces are in
+                        // charge, so the field says so instead of inviting an
+                        // edit the server would ignore.
+                        disabled={spacesRunStartTimes}
                         hint={
-                          parseIntOrNull(s.interval)
+                          spaceDrivenIntervalHint(selectedSpaceIntervals) ??
+                          (parseIntOrNull(s.interval)
                             ? `A new start time every ${parseIntOrNull(s.interval)} min.`
-                            : "Minimum 15 minutes."
+                            : "Minimum 15 minutes.")
                         }
                       />
                     </View>
@@ -1368,50 +1429,52 @@ const CreatePackage = () => {
                     onValueChange={(v) => patchSchedule(s.key, { isActive: v })}
                   />
 
-                  {/* Generated Time Slots — what this window + interval will
-                      actually offer, so a misconfiguration is visible before
-                      saving rather than after a customer cannot book. */}
-                  <View className="border-t border-gray-100 dark:border-neutral-800 pt-3">
-                    <Text className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">
-                      Generated Time Slots:
-                    </Text>
-                    {(() => {
-                      if (sessionMinutes == null) {
-                        return (
+                  {/* The starts a customer will actually be offered — run
+                      through the same rule the server applies, and labelled by
+                      whatever drives it, so a misconfiguration is visible
+                      before saving rather than after a customer cannot book. */}
+                  {(() => {
+                    const resolved =
+                      sessionMinutes == null ? null : resolveSlotsFor(s);
+                    const source = resolved
+                      ? spaceDrivenSourceLabel(resolved)
+                      : null;
+                    return (
+                      <View className="border-t border-gray-100 dark:border-neutral-800 pt-3">
+                        <Text className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">
+                          Start times customers will see:
+                          {source ? (
+                            <Text className="font-normal text-gray-500 dark:text-gray-400">
+                              {" "}
+                              {source}
+                            </Text>
+                          ) : null}
+                        </Text>
+                        {resolved == null ? (
                           <Text className="text-xs text-gray-400 dark:text-gray-500">
                             Set the package duration to preview slots.
                           </Text>
-                        );
-                      }
-                      const slots = generateScheduleSlots({
-                        start: s.start,
-                        end: s.end,
-                        intervalMinutes: parseIntOrNull(s.interval),
-                        durationMinutes: sessionMinutes,
-                      });
-                      if (slots.length === 0) {
-                        return (
+                        ) : resolved.slots.length === 0 ? (
                           <Text className="text-xs text-gray-400 dark:text-gray-500">
-                            No valid slots with current configuration
+                            No start times fit inside this window.
                           </Text>
-                        );
-                      }
-                      return (
-                        <View className="flex-row flex-wrap">
-                          {slots.map((slot) => (
-                            <View
-                              key={slot.start}
-                              className="mr-1.5 mb-1.5 rounded border border-gray-200 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
-                            >
-                              <Text className="text-xs text-gray-700 dark:text-gray-200">
-                                {to12h(slot.start)} - {to12h(slot.end)}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      );
-                    })()}
-                  </View>
+                        ) : (
+                          <View className="flex-row flex-wrap">
+                            {resolved.slots.map((slot) => (
+                              <View
+                                key={slot.start}
+                                className="mr-1.5 mb-1.5 rounded border border-gray-200 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                              >
+                                <Text className="text-xs text-gray-700 dark:text-gray-200">
+                                  {to12h(slot.start)} - {to12h(slot.end)}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
                 </View>
               ))}
               {/* Only below an existing list — on an empty form the header and

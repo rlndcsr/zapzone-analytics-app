@@ -26,6 +26,7 @@ import { useColorScheme } from "nativewind";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
@@ -2127,6 +2128,14 @@ const CreatePurchaseScreen = () => {
                     <Feather name="check-circle" size={18} color="#22C55E" />
                   ) : undefined
                 }
+              />
+              <EmailSuggestions
+                value={customerEmail}
+                onSelect={(email) => {
+                  setCustomerEmail(email);
+                  setSelectedCustomerId(null);
+                }}
+                suppressed={showCustomerList && foundCustomers.length > 0}
               />
             </View>
             {showCustomerList && foundCustomers.length > 0 && (

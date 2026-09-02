@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { SheetSelect } from "../../components/ui/SheetSelect";
 import { Toast, type ToastType } from "../../components/ui/Toast";
@@ -286,6 +287,14 @@ function TestSendRow({
           </Text>
         </Pressable>
       </View>
+      {/* This row also serves the SMS channel, where a domain means nothing. */}
+      {keyboardType === "email-address" ? (
+        <EmailSuggestions
+          value={value}
+          onSelect={onChangeText}
+          suppressed={sending}
+        />
+      ) : null}
       {!!result && (
         <Text
           accessibilityLiveRegion="polite"
@@ -1051,6 +1060,14 @@ export default function PhotoSettingsScreen() {
                       }
                       keyboardType="email-address"
                       placeholder="manager@example.com"
+                    />
+                    <EmailSuggestions
+                      value={form.failureNotifyEmail}
+                      onSelect={(email) =>
+                        setForm((f) =>
+                          f ? { ...f, failureNotifyEmail: email } : f,
+                        )
+                      }
                     />
                     <Hint>
                       Delivery failures, kiosk errors, offline displays and

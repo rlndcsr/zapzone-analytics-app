@@ -1,3 +1,4 @@
+import { accountingLocationParam } from "../lib/analytics/accountingScope";
 import { ApiError, apiRequest, apiUrl } from "../lib/api";
 
 /* ================================================================== */
@@ -269,7 +270,11 @@ export type AccountingCategory = {
 };
 
 export type AccountingReport = {
+  /** The scope the server actually reported on — "All Locations" for a
+   *  company-wide run, or the single location's own name. */
   locationName: string;
+  /** How many locations the figures cover. 1 for a single-location report. */
+  locationCount: number;
   summary: AccountingSummary;
   categories: AccountingCategory[];
 };
@@ -291,6 +296,14 @@ function mapSummary(s: RawCatSummary): AccountingSummary {
   };
 }
 
+/**
+ * GET /api/accounting-analytics/report.
+ *
+ * `locationId: null` asks for every location the caller may see — the backend's
+ * `"all"` convention. Scoping stays server-side: a location manager or attendant
+ * who asks for "all" is still pinned to their own location, and a company admin
+ * gets their company. The response names the scope it actually ran on.
+ */
 export async function fetchAccountingReport({
   token,
   locationId,
@@ -299,13 +312,13 @@ export async function fetchAccountingReport({
   viewMode = "booked_on",
 }: {
   token: string;
-  locationId: number;
+  locationId: number | null;
   startDate: string;
   endDate?: string;
   viewMode?: "booked_on" | "booked_for";
 }): Promise<AccountingReport> {
   const qs = new URLSearchParams({
-    location_id: String(locationId),
+    location_id: accountingLocationParam(locationId),
     start_date: startDate,
     view_mode: viewMode,
   });
@@ -341,8 +354,12 @@ export async function fetchAccountingReport({
     };
   });
 
+  const locationCount = num(location.location_count);
+
   return {
     locationName: String(location.name ?? ""),
+    // Absent on an older API, where every report was a single location.
+    locationCount: locationCount > 0 ? locationCount : 1,
     summary: mapSummary(summary),
     categories,
   };
