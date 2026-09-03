@@ -1,174 +1,170 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import {
-  PanResponder,
-  Pressable,
-  Text,
-  View,
-  type LayoutChangeEvent,
-} from "react-native";
+import { PanResponder, Pressable, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import { captureRef } from "react-native-view-shot";
 
-const CANVAS_HEIGHT = 200;
+import {
+  strokesToSvgDataUri,
+  strokeToPath,
+  type Point,
+  type Stroke,
+} from "../../lib/waivers/signaturePath";
 
 /**
- * Finger-drawn signature capture — the mobile counterpart of the web
- * `SignatureCapture`. Strokes are SVG paths (react-native-svg) and the finished
- * drawing is exported as a `data:image/png;base64,...` string via
- * react-native-view-shot, the same format the web canvas `toDataURL` produces,
- * so the API receives an identical `signature_image`. Undo drops the last
- * stroke, Reset clears everything — both mirroring the web buttons.
+ * Draw-with-your-finger signature capture.
+ *
+ * Built on PanResponder and react-native-svg rather than a native canvas: the
+ * app has no rasteriser, and the consumers only need a `data:image/…` string,
+ * so strokes are emitted as an SVG data URI.
+ *
+ * Two callback names are accepted because two screens use this with their own
+ * vocabulary — the attraction purchase page (`onSignatureChange`, where the
+ * signature is required) and the waiver kiosk (`onChange`, where it is
+ * optional because the typed legal name is the binding signature).
  */
 export function SignaturePad({
+  onChange,
   onSignatureChange,
-  required = true,
+  required = false,
   error,
+  height = 180,
+  hint = "Your typed name above is your signature. You may also draw one here.",
 }: {
-  /** Receives the PNG data URL, or null when the pad is empty. */
-  onSignatureChange: (signatureBase64: string | null) => void;
+  /** Fires with the SVG data URI, or null once the pad is cleared/empty. */
+  onChange?: (dataUri: string | null) => void;
+  /** The same callback under the name the purchase page already passes. */
+  onSignatureChange?: (dataUri: string | null) => void;
+  /** Drops "(optional)" from the placeholder and lets the caller show `error`. */
   required?: boolean;
+  /** Validation message rendered beneath the pad. */
   error?: string;
+  height?: number;
+  hint?: string;
 }) {
-  const canvasRef = useRef<View>(null);
-  const [strokes, setStrokes] = useState<string[]>([]);
-  const [current, setCurrent] = useState<string>("");
-  const pointsRef = useRef<string>("");
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [current, setCurrent] = useState<Stroke>([]);
+  const [width, setWidth] = useState(0);
+
+  // The responder is created once, so it reads live values through refs rather
+  // than closing over stale state.
+  const strokesRef = useRef<Stroke[]>([]);
+  const currentRef = useRef<Stroke>([]);
   const widthRef = useRef(0);
 
-  const onLayout = (e: LayoutChangeEvent) => {
-    widthRef.current = e.nativeEvent.layout.width;
-  };
-
-  // Capture after the stroke has painted, so the PNG includes it.
   const emit = useCallback(
-    (nextStrokes: string[]) => {
-      if (nextStrokes.length === 0) {
-        onSignatureChange(null);
-        return;
-      }
-      requestAnimationFrame(async () => {
-        try {
-          const base64 = await captureRef(canvasRef, {
-            format: "png",
-            quality: 1,
-            result: "base64",
-          });
-          onSignatureChange(`data:image/png;base64,${base64}`);
-        } catch {
-          onSignatureChange(null);
-        }
-      });
+    (all: Stroke[]) => {
+      const uri = strokesToSvgDataUri(all, widthRef.current, height);
+      onChange?.(uri);
+      onSignatureChange?.(uri);
     },
-    [onSignatureChange],
+    [onChange, onSignatureChange, height],
   );
 
-  const panResponder = useMemo(
+  const responder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
+        // Hold the gesture once it starts, so a scrolling parent cannot steal
+        // the stroke halfway through a signature.
+        onPanResponderTerminationRequest: () => false,
+
         onPanResponderGrant: (e) => {
-          const { locationX, locationY } = e.nativeEvent;
-          pointsRef.current = `M${locationX.toFixed(2)},${locationY.toFixed(2)}`;
-          setCurrent(pointsRef.current);
+          const p: Point = {
+            x: e.nativeEvent.locationX,
+            y: e.nativeEvent.locationY,
+          };
+          currentRef.current = [p];
+          setCurrent([p]);
         },
         onPanResponderMove: (e) => {
-          const { locationX, locationY } = e.nativeEvent;
-          pointsRef.current += ` L${locationX.toFixed(2)},${locationY.toFixed(2)}`;
-          setCurrent(pointsRef.current);
+          const p: Point = {
+            x: e.nativeEvent.locationX,
+            y: e.nativeEvent.locationY,
+          };
+          currentRef.current = [...currentRef.current, p];
+          setCurrent(currentRef.current);
         },
         onPanResponderRelease: () => {
-          const stroke = pointsRef.current;
-          pointsRef.current = "";
-          setCurrent("");
-          if (!stroke) return;
-          setStrokes((prev) => {
-            const next = [...prev, stroke];
-            emit(next);
-            return next;
-          });
+          if (currentRef.current.length === 0) return;
+          const all = [...strokesRef.current, currentRef.current];
+          strokesRef.current = all;
+          currentRef.current = [];
+          setStrokes(all);
+          setCurrent([]);
+          emit(all);
         },
       }),
     [emit],
   );
 
-  const handleUndo = () => {
-    setStrokes((prev) => {
-      if (prev.length === 0) return prev;
-      const next = prev.slice(0, -1);
-      emit(next);
-      return next;
-    });
-  };
-
-  const handleReset = () => {
-    pointsRef.current = "";
-    setCurrent("");
+  const clear = () => {
+    strokesRef.current = [];
+    currentRef.current = [];
     setStrokes([]);
-    onSignatureChange(null);
+    setCurrent([]);
+    onChange?.(null);
+    onSignatureChange?.(null);
   };
 
-  const paths = current ? [...strokes, current] : strokes;
+  const drawn = strokes.length > 0 || current.length > 0;
 
   return (
     <View>
-      <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-        Signature
-        {required ? <Text className="text-red-500"> *</Text> : null}
-      </Text>
-
       <View
-        ref={canvasRef}
-        collapsable={false}
-        onLayout={onLayout}
-        {...panResponder.panHandlers}
-        style={{ height: CANVAS_HEIGHT }}
-        className={`rounded-xl border-2 border-dashed bg-white overflow-hidden ${
-          error ? "border-red-400" : "border-gray-300 dark:border-neutral-600"
+        onLayout={(e) => {
+          const w = e.nativeEvent.layout.width;
+          widthRef.current = w;
+          setWidth(w);
+        }}
+        {...responder.panHandlers}
+        style={{ height }}
+        className={`items-center justify-center overflow-hidden rounded-xl border bg-gray-50 dark:bg-neutral-800 ${
+          error
+            ? "border-red-400"
+            : "border-gray-200 dark:border-neutral-700"
         }`}
       >
-        <Svg width="100%" height={CANVAS_HEIGHT}>
-          {paths.map((d, i) => (
-            <Path
-              key={i}
-              d={d}
-              stroke="#000000"
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          ))}
-        </Svg>
+        {width > 0 && (
+          <Svg width={width} height={height} style={{ position: "absolute" }}>
+            {[...strokes, current].map((s, i) =>
+              s.length ? (
+                <Path
+                  key={i}
+                  d={strokeToPath(s)}
+                  stroke="#111827"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+              ) : null,
+            )}
+          </Svg>
+        )}
+        {!drawn && (
+          <Text className="text-sm text-gray-400 dark:text-gray-500">
+            {required ? "Sign here" : "Sign here (optional)"}
+          </Text>
+        )}
       </View>
 
-      <View className="flex-row items-center justify-between mt-2">
-        <Text className="text-xs text-gray-400 dark:text-gray-500 flex-1 mr-3">
-          Use your finger to draw your signature above.
+      <View className="mt-2 flex-row items-center justify-between gap-3">
+        <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+          {hint}
         </Text>
-        <View className="flex-row items-center gap-2">
+        {drawn && (
           <Pressable
-            onPress={handleUndo}
-            className="px-3 py-1.5 rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 active:opacity-70"
+            onPress={clear}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Clear signature"
           >
-            <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-              Undo
-            </Text>
+            <Text className="text-xs font-semibold text-[#0644C7]">Clear</Text>
           </Pressable>
-          <Pressable
-            onPress={handleReset}
-            className="px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 active:opacity-70"
-          >
-            <Text className="text-xs font-medium text-red-600 dark:text-red-400">
-              Reset
-            </Text>
-          </Pressable>
-        </View>
+        )}
       </View>
 
-      {error ? (
-        <Text className="text-xs text-red-500 mt-1.5">{error}</Text>
-      ) : null}
+      {error ? <Text className="mt-1 text-xs text-red-500">{error}</Text> : null}
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import * as WebBrowser from "expo-web-browser";
+import { router } from "expo-router";
 import { Alert } from "react-native";
 
 import {
@@ -10,18 +10,18 @@ import { getToken } from "../session";
 /**
  * Open the waiver kiosk for a booking / attraction purchase / event purchase.
  *
- * Mirrors the web `WaiverConnectionPanel.launchKiosk`: ask the backend for a
- * prefilled session bound to the record, then open the returned
- * `/waiver/kiosk-session/{token}` page. The URL must come from the API — the
- * kiosk routes are keyed by access token, so there is no client-side path we
- * can build from an entity id.
+ * Asks the backend for a prefilled session bound to the record — exactly as the
+ * web `WaiverConnectionPanel.launchKiosk` does — then opens the kiosk **inside
+ * the app** rather than handing the customer a browser. The session still has
+ * to come from the API: the kiosk is keyed by access token, so there is no
+ * client-side path that can be built from an entity id.
  *
  * Every staff role may launch it — company_admin, admin, location_manager and
  * attendant all pass the backend's `guardStaff` on POST /waivers/kiosk-session,
  * so there is no role gate here or at any call site (web parity).
  *
  * Failures the backend reports (no template assigned to the activity,
- * out-of-scope record) surface as an Alert; resolves to whether the kiosk was
+ * out-of-scope record) surface as an Alert; resolves to whether the kiosk
  * opened.
  */
 export async function launchKioskSession(
@@ -35,10 +35,25 @@ export async function launchKioskSession(
   }
   try {
     const session = await createKioskSession(token, sourceType, sourceId);
-    if (!session.kioskUrl) {
+
+    if (session.alreadyCompleted) {
+      Alert.alert(
+        "Already signed",
+        "This waiver has already been completed for the booking date.",
+      );
+      return false;
+    }
+
+    // The screen addresses the public endpoints by token, so a session whose
+    // URL we cannot parse is a hard stop — better than opening a blank form.
+    if (!session.accessToken) {
       throw new Error("No kiosk session was returned for this record.");
     }
-    await WebBrowser.openBrowserAsync(session.kioskUrl);
+
+    router.push({
+      pathname: "/waivers/kiosk",
+      params: { token: session.accessToken },
+    });
     return true;
   } catch (e) {
     Alert.alert(

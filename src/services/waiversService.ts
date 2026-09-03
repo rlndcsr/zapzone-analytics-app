@@ -1,4 +1,5 @@
 import { apiRequest, webUrl } from "../lib/api";
+import { kioskAccessTokenFrom } from "../lib/waivers/kioskToken";
 
 /*
  * Waivers API client — mirrors the web admin's `src/services/waiverService.ts`
@@ -1290,7 +1291,209 @@ export type KioskSession = {
   kioskUrl: string | null;
   status: string | null;
   alreadyCompleted: boolean;
+  /**
+   * The access token lifted out of `kioskUrl`. The kiosk routes are keyed by
+   * token, so this is what the in-app kiosk addresses the public endpoints
+   * with — no page load required.
+   */
+  accessToken: string | null;
 };
+
+
+
+/** One child covered by the signer's waiver. */
+export type KioskMinorInput = {
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  relationship: string;
+};
+
+/** Everything POST /waivers/access/{token}/submit accepts. */
+export type KioskSubmission = {
+  adult_first_name: string;
+  adult_last_name: string;
+  adult_email: string;
+  adult_phone: string;
+  /** YYYY-MM-DD; the signer must be 18 or over or the API rejects it. */
+  adult_dob: string;
+  relationship?: string | null;
+  typed_legal_name: string;
+  /** Optional drawn signature as a data URI; the typed name is the signature. */
+  signature_image?: string | null;
+  agreement_accepted: boolean;
+  electronic_consent_accepted?: boolean;
+  photo_video_consent?: boolean;
+  marketing_consent?: boolean;
+  minors?: KioskMinorInput[];
+  device_id?: string | null;
+  read_seconds?: number;
+};
+
+/** The template + prefill behind the kiosk form. */
+export type KioskForm = {
+  /** "completed" when the waiver was already signed for this date. */
+  status: string;
+  alreadyCompleted: boolean;
+  templateId: number | null;
+  title: string;
+  version: number | null;
+  /** Markdown-ish legal body with the venue's values already substituted. */
+  body: string;
+  /** Newline-separated bullets shown in the "Please note" panel. */
+  highlightPoints: string;
+  maxMinors: number;
+  minorSectionEnabled: boolean;
+  dobRequired: boolean;
+  relationshipRequired: boolean;
+  photoVideoReleaseEnabled: boolean;
+  photoVideoReleaseText: string;
+  electronicConsentEnabled: boolean;
+  marketingConsentEnabled: boolean;
+  marketingConsentText: string;
+  marketingHelperText: string;
+  /** Anything the backend already knows about the signer. */
+  prefill: Record<string, unknown>;
+  selectedDate: string | null;
+};
+
+function mapKioskForm(d: Record<string, unknown>): KioskForm {
+  const t = (d.template ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const num = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    status: str(d.status) || "pending",
+    alreadyCompleted: str(d.status) === "completed",
+    templateId: num(t.id),
+    title: str(t.title) || "Waiver & Release of Liability",
+    version: num(t.version),
+    body: str(d.body),
+    highlightPoints: str(t.highlight_points),
+    maxMinors: num(t.max_minors) ?? 10,
+    minorSectionEnabled: t.minor_section_enabled !== false,
+    dobRequired: t.dob_required !== false,
+    relationshipRequired: t.relationship_required === true,
+    photoVideoReleaseEnabled: t.photo_video_release_enabled === true,
+    photoVideoReleaseText: str(t.photo_video_release_text),
+    electronicConsentEnabled: t.electronic_consent_enabled === true,
+    marketingConsentEnabled: t.marketing_consent_enabled === true,
+    marketingConsentText: str(t.marketing_consent_text),
+    marketingHelperText: str(t.marketing_helper_text),
+    prefill: (d.prefill ?? {}) as Record<string, unknown>,
+    selectedDate: typeof d.selected_date === "string" ? d.selected_date : null,
+  };
+}
+
+/**
+ * GET /api/waivers/access/{token} — the kiosk form for a session.
+ *
+ * Public and token-addressed: no bearer token, which is why `publicEndpoint`
+ * is set. A waiver already signed for the date comes back as `completed` with
+ * no template, which the screen reports rather than rendering an empty form.
+ */
+export async function fetchKioskForm(
+  accessToken: string,
+  signal?: AbortSignal,
+): Promise<KioskForm> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: Record<string, unknown>;
+  }>(`/api/waivers/access/${encodeURIComponent(accessToken)}`, {
+    signal,
+    publicEndpoint: true,
+  });
+  return mapKioskForm(res?.data ?? {});
+}
+
+/**
+ * GET /api/waiver-templates/{id}/kiosk-preview — the same form for a template
+ * that is not active yet.
+ *
+ * The public kiosk route serves active templates only, so previewing a draft
+ * has to go through this staff-authenticated endpoint instead. It returns the
+ * same shape, and submission is blocked either way — the sheet says so before
+ * opening it.
+ */
+export async function fetchTemplateKioskPreview(
+  token: string,
+  templateId: number,
+  signal?: AbortSignal,
+): Promise<KioskForm> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: Record<string, unknown>;
+  }>(`/api/waiver-templates/${templateId}/kiosk-preview`, { token, signal });
+  return mapKioskForm(res?.data ?? {});
+}
+
+/**
+ * GET /api/waivers/kiosk/{templateId} — the walk-in kiosk form for a template.
+ *
+ * The generic counterpart to {@link fetchKioskForm}: no booking behind it, so
+ * signer-specific tokens in the body are left blank and there is no prefill.
+ * `locationId` picks which venue's details are substituted, and which location
+ * the resulting waiver is filed against.
+ */
+export async function fetchTemplateKioskForm(
+  templateId: number,
+  opts: { locationId?: number | null; signal?: AbortSignal } = {},
+): Promise<KioskForm> {
+  const params = new URLSearchParams();
+  if (opts.locationId != null) params.append("location_id", String(opts.locationId));
+  const qs = params.toString();
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: Record<string, unknown>;
+  }>(`/api/waivers/kiosk/${templateId}${qs ? `?${qs}` : ""}`, {
+    signal: opts.signal,
+    publicEndpoint: true,
+  });
+  return mapKioskForm(res?.data ?? {});
+}
+
+/**
+ * POST /api/waivers/kiosk/{templateId}/submit — sign a walk-in waiver.
+ *
+ * Creates a fresh completed record rather than filling an assigned one, and is
+ * recorded with source "kiosk".
+ */
+export async function submitTemplateKioskWaiver(
+  templateId: number,
+  payload: KioskSubmission,
+  opts: { locationId?: number | null; selectedDate?: string | null } = {},
+): Promise<{ id: number | null; status: string | null }> {
+  const body: Record<string, unknown> = { ...payload };
+  if (opts.locationId != null) body.location_id = opts.locationId;
+  if (opts.selectedDate) body.selected_date = opts.selectedDate;
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: { id?: number; status?: string };
+  }>(`/api/waivers/kiosk/${templateId}/submit`, {
+    method: "POST",
+    body,
+    publicEndpoint: true,
+  });
+  return { id: res?.data?.id ?? null, status: res?.data?.status ?? null };
+}
+
+/** POST /api/waivers/access/{token}/submit — sign the waiver. */
+export async function submitKioskWaiver(
+  accessToken: string,
+  payload: KioskSubmission,
+): Promise<{ id: number | null; status: string | null }> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: { id?: number; status?: string };
+  }>(`/api/waivers/access/${encodeURIComponent(accessToken)}/submit`, {
+    method: "POST",
+    body: payload,
+    publicEndpoint: true,
+  });
+  return { id: res?.data?.id ?? null, status: res?.data?.status ?? null };
+}
 
 /**
  * POST /api/waivers/kiosk-session — create a prefilled kiosk session bound to a
@@ -1313,16 +1516,21 @@ export async function createKioskSession(
   const res = await apiRequest<{
     success?: boolean;
     data?: {
+      access_token?: string | null;
       kiosk_url?: string | null;
       status?: string | null;
       already_completed?: boolean;
     };
   }>(`/api/waivers/kiosk-session`, { method: "POST", token, body });
   const d = res?.data ?? {};
+  const kioskUrl = d.kiosk_url ?? null;
   return {
-    kioskUrl: d.kiosk_url ?? null,
+    kioskUrl,
     status: d.status ?? null,
     alreadyCompleted: d.already_completed ?? false,
+    // The API returns the token outright for every source type, so prefer it
+    // and only fall back to picking it out of the URL.
+    accessToken: d.access_token?.trim() || kioskAccessTokenFrom(kioskUrl),
   };
 }
 

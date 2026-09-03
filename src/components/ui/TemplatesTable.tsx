@@ -173,14 +173,6 @@ const COLUMNS: Column[] = [
         return (
           <View className="flex-row items-center gap-2">
             <IconButton
-              icon="eye"
-              color="#6B7280"
-              bg="bg-gray-100 dark:bg-neutral-800"
-              label="View template"
-              disabled={ctx.busy}
-              onPress={ctx.onView}
-            />
-            <IconButton
               icon="tablet"
               color={PRIMARY}
               bg="bg-blue-50 dark:bg-blue-900/20"
@@ -190,11 +182,21 @@ const COLUMNS: Column[] = [
             />
             {ctx.canManage && (
               <>
+                {/* Reports state as well as toggling it: green while the
+                    template is active, grey once it is not. */}
                 <IconButton
                   icon="power"
-                  color="#F59E0B"
-                  bg="bg-amber-50 dark:bg-amber-900/20"
-                  label="Toggle template status"
+                  color={_t.status === "active" ? "#059669" : "#9CA3AF"}
+                  bg={
+                    _t.status === "active"
+                      ? "bg-emerald-50 dark:bg-emerald-900/25"
+                      : "bg-gray-100 dark:bg-neutral-800"
+                  }
+                  label={
+                    _t.status === "active"
+                      ? "Deactivate template"
+                      : "Activate template"
+                  }
                   disabled={ctx.busy}
                   onPress={ctx.onToggleStatus}
                 />
@@ -221,14 +223,6 @@ const COLUMNS: Column[] = [
       }
       return (
         <View className="flex-row items-center gap-2">
-          <IconButton
-            icon="eye"
-            color="#6B7280"
-            bg="bg-gray-100 dark:bg-neutral-800"
-            label="View template"
-            disabled={ctx.busy}
-            onPress={ctx.onView}
-          />
           {ctx.canManage && (
             <IconButton
               icon="rotate-ccw"
