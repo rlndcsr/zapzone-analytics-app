@@ -23,6 +23,18 @@ export function usePulse(): SharedValue<number> {
   return pulse;
 }
 
+/**
+ * The skeleton base tone — a single unanimated placeholder. Size/shape come
+ * entirely from `className`. Use this directly when the placeholder is animated
+ * by something other than the opacity pulse (a shimmer sweeping over it, say),
+ * so the base tone stays defined in one place.
+ */
+export function SkeletonSurface({ className }: { className: string }) {
+  return (
+    <View className={`bg-gray-200 dark:bg-neutral-700 rounded-md ${className}`} />
+  );
+}
+
 /** A single pulsing placeholder. Size/shape come entirely from `className`. */
 export function SkeletonBlock({
   pulse,
@@ -35,9 +47,7 @@ export function SkeletonBlock({
 
   return (
     <Animated.View style={animatedStyle}>
-      <View
-        className={`bg-gray-200 dark:bg-neutral-700 rounded-md ${className}`}
-      />
+      <SkeletonSurface className={className} />
     </Animated.View>
   );
 }
