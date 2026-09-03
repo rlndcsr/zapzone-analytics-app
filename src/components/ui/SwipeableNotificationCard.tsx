@@ -173,7 +173,15 @@ export function SwipeableNotificationCard({
   return (
     <ReanimatedSwipeable
       ref={swipeableRef}
-      containerStyle={{ marginBottom: 12 }}
+      // Swipeable's own container style is `overflow: 'hidden'`, and the row is
+      // laid out to exactly the card's box. That clips the card's shadow at its
+      // own bounding rectangle, so the only shadow left is the part *inside* the
+      // box — the four wedges between the card's 16px corner arc and the square
+      // corner — which reads as a gray square backing around the rounded corners.
+      // Letting the row overflow lets the shadow fall outside the box again, so
+      // the card renders like every other card in the app. The action layers keep
+      // their own `overflow: 'hidden'`, so they stay clipped to the row.
+      containerStyle={{ marginBottom: 12, overflow: 'visible' }}
       friction={2}
       leftThreshold={40}
       rightThreshold={40}
