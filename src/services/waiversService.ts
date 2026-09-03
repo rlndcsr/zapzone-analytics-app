@@ -1,4 +1,4 @@
-import { ApiError, apiRequest, webUrl } from "../lib/api";
+import { ApiError, apiRequest, apiUrl, webUrl } from "../lib/api";
 import {
   classifyLookupFailure,
   classifyLookupResponse,
@@ -1757,4 +1757,243 @@ export async function fetchEntityWaivers(
       pending: s.pending ?? 0,
     },
   };
+}
+
+/* ------------------------------------------------------- Post-waiver ads -- */
+
+/**
+ * Where an ad stands right now, derived server-side from its enabled flag and
+ * its schedule (`WaiverTemplateAd::status()`), so the app never computes it
+ * from the dates and ends up disagreeing with the rotation.
+ */
+export type WaiverAdStatus = "active" | "scheduled" | "expired" | "disabled";
+
+export type WaiverAd = {
+  id: number;
+  templateId: number;
+  /** Empty means every location — the same "all" semantics targeting uses
+   *  elsewhere in the product (promos, gift cards, custom fields). */
+  locationIds: number[];
+  locationNames: string[];
+  name: string | null;
+  imagePath: string | null;
+  destinationUrl: string | null;
+  isEnabled: boolean;
+  /** Shown only when no ordinary ad is eligible. At most one per template. */
+  isFallback: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  position: number;
+  status: WaiverAdStatus;
+};
+
+/** Per-template ad behaviour, stored on the template rather than on any one ad. */
+export type WaiverAdSettings = {
+  adsEnabled: boolean;
+  rotationMode: "random" | "ordered";
+  /** The backend clamps this to 1-10 seconds. */
+  displaySeconds: number;
+};
+
+const AD_STATUSES = ["active", "scheduled", "expired", "disabled"];
+
+function mapWaiverAd(raw: Record<string, unknown>): WaiverAd {
+  const num = (v: unknown, fallback = 0) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  const ids = Array.isArray(raw.location_ids) ? raw.location_ids : [];
+  const names = Array.isArray(raw.location_names) ? raw.location_names : [];
+  const status = String(raw.status ?? "");
+  return {
+    id: num(raw.id),
+    templateId: num(raw.waiver_template_id),
+    locationIds: ids.map((v) => num(v)).filter((v) => v > 0),
+    locationNames: names.filter(
+      (v): v is string => typeof v === "string" && !!v,
+    ),
+    name: str(raw.name),
+    imagePath: str(raw.image_path),
+    destinationUrl: str(raw.destination_url),
+    isEnabled: raw.is_enabled !== false,
+    isFallback: raw.is_fallback === true,
+    startsAt: str(raw.starts_at),
+    endsAt: str(raw.ends_at),
+    position: num(raw.position),
+    // Take the server's word, but never render an unknown string as a chip.
+    status: AD_STATUSES.includes(status)
+      ? (status as WaiverAdStatus)
+      : "active",
+  };
+}
+
+function mapAdSettings(
+  raw: Record<string, unknown> | undefined,
+): WaiverAdSettings {
+  const s = raw ?? {};
+  const seconds = Number(s.ads_display_seconds);
+  return {
+    adsEnabled: s.ads_enabled === true,
+    rotationMode: s.ads_rotation_mode === "ordered" ? "ordered" : "random",
+    displaySeconds: Number.isFinite(seconds) && seconds > 0 ? seconds : 5,
+  };
+}
+
+/** GET /api/waiver-templates/{id}/ads — the rotation plus its settings. */
+export async function fetchTemplateAds(
+  token: string,
+  templateId: number,
+  signal?: AbortSignal,
+): Promise<{ settings: WaiverAdSettings; ads: WaiverAd[] }> {
+  const res = await apiRequest<{
+    success?: boolean;
+    data?: {
+      settings?: Record<string, unknown>;
+      ads?: Record<string, unknown>[];
+    };
+  }>(`/api/waiver-templates/${templateId}/ads`, { token, signal });
+  return {
+    settings: mapAdSettings(res?.data?.settings),
+    ads: (res?.data?.ads ?? []).map(mapWaiverAd),
+  };
+}
+
+/** A picked image, in the shape React Native's FormData takes. */
+export type WaiverAdImage = { uri: string; name: string; type: string };
+
+export type WaiverAdInput = {
+  name?: string;
+  destinationUrl?: string;
+  /** Empty targets every location; a location manager is pinned to their own. */
+  locationIds?: number[];
+  startsAt?: string | null;
+  endsAt?: string | null;
+  isEnabled?: boolean;
+  isFallback?: boolean;
+};
+
+/** The fields create and update share. */
+function appendAdFields(form: FormData, input: WaiverAdInput): void {
+  if (input.name != null) form.append("name", input.name);
+  if (input.destinationUrl) form.append("destination_url", input.destinationUrl);
+  (input.locationIds ?? []).forEach((id) =>
+    form.append("location_ids[]", String(id)),
+  );
+  if (input.startsAt) form.append("starts_at", input.startsAt);
+  if (input.endsAt) form.append("ends_at", input.endsAt);
+  if (input.isEnabled != null)
+    form.append("is_enabled", input.isEnabled ? "1" : "0");
+  if (input.isFallback != null)
+    form.append("is_fallback", input.isFallback ? "1" : "0");
+}
+
+async function submitAdForm(
+  url: string,
+  token: string,
+  form: FormData,
+): Promise<WaiverAd> {
+  // A direct fetch, so React Native sets the multipart boundary itself — the
+  // same shape the photo and membership uploads use.
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(
+      (data?.message as string) || "That ad could not be saved.",
+    );
+  }
+  return mapWaiverAd((data?.data ?? {}) as Record<string, unknown>);
+}
+
+/**
+ * POST /api/waiver-templates/{id}/ads — add an ad. The image is required here
+ * (png/jpg/jpeg/webp, up to 8 MB).
+ */
+export async function createTemplateAd(
+  token: string,
+  templateId: number,
+  image: WaiverAdImage,
+  input: WaiverAdInput,
+): Promise<WaiverAd> {
+  const form = new FormData();
+  form.append("image", image as unknown as Blob);
+  appendAdFields(form, input);
+  return submitAdForm(
+    apiUrl(`/api/waiver-templates/${templateId}/ads`),
+    token,
+    form,
+  );
+}
+
+/**
+ * POST /api/waiver-ads/{id} — update an ad. The backend's update route is a
+ * POST so a replacement image can travel with it; the image is optional here.
+ * `clearSchedule` / `clearLink` are how the server is told to blank a field
+ * rather than leave it as it was.
+ */
+export async function updateTemplateAd(
+  token: string,
+  adId: number,
+  input: WaiverAdInput & {
+    image?: WaiverAdImage | null;
+    clearSchedule?: boolean;
+    clearLink?: boolean;
+  },
+): Promise<WaiverAd> {
+  const form = new FormData();
+  if (input.image) form.append("image", input.image as unknown as Blob);
+  appendAdFields(form, input);
+  if (input.clearSchedule) form.append("clear_schedule", "1");
+  if (input.clearLink) form.append("clear_link", "1");
+  // An empty set means "every location". The server only acts on it when the
+  // field is present, so it has to be sent explicitly rather than omitted.
+  if (input.locationIds && input.locationIds.length === 0)
+    form.append("location_ids", "");
+  return submitAdForm(apiUrl(`/api/waiver-ads/${adId}`), token, form);
+}
+
+/** DELETE /api/waiver-ads/{id} — removes the ad and its stored image. */
+export async function deleteTemplateAd(
+  token: string,
+  adId: number,
+): Promise<void> {
+  await apiRequest(`/api/waiver-ads/${adId}`, { method: "DELETE", token });
+}
+
+/**
+ * PUT /api/waiver-templates/{id}/ads/reorder — set the rotation order.
+ * Company admins only; a location-bound user is refused with a 403.
+ */
+export async function reorderTemplateAds(
+  token: string,
+  templateId: number,
+  orderedIds: number[],
+): Promise<void> {
+  await apiRequest(`/api/waiver-templates/${templateId}/ads/reorder`, {
+    method: "PUT",
+    token,
+    body: { ordered_ids: orderedIds },
+  });
+}
+
+/** PATCH /api/waiver-templates/{id}/ad-settings — rotation behaviour. */
+export async function updateTemplateAdSettings(
+  token: string,
+  templateId: number,
+  settings: Partial<WaiverAdSettings>,
+): Promise<WaiverAdSettings> {
+  const body: Record<string, unknown> = {};
+  if (settings.adsEnabled != null) body.ads_enabled = settings.adsEnabled;
+  if (settings.rotationMode) body.ads_rotation_mode = settings.rotationMode;
+  if (settings.displaySeconds != null)
+    body.ads_display_seconds = settings.displaySeconds;
+  const res = await apiRequest<{ data?: Record<string, unknown> }>(
+    `/api/waiver-templates/${templateId}/ad-settings`,
+    { method: "PATCH", token, body },
+  );
+  return mapAdSettings(res?.data);
 }

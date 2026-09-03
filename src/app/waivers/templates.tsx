@@ -1,4 +1,4 @@
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -31,6 +31,7 @@ import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteTemplate,
+  fetchTemplates,
   forceDeleteTemplate,
   restoreTemplate,
   setTemplateStatus,
@@ -158,7 +159,16 @@ const Templates = () => {
   const [statusFilter, setStatusFilter] = useState<TemplateStatus | "all">(
     "all",
   );
-  const [showDeleted, setShowDeleted] = useState(false);
+  /**
+   * Deleted templates sit in their own collapsible section below the list, the
+   * way the web presents them, rather than swapping the whole screen into a
+   * "trash mode" — the live list stays on screen while you restore something.
+   * Loaded on first expand, as the web does, so the extra request only happens
+   * for someone who actually looks.
+   */
+  const [showTrashed, setShowTrashed] = useState(false);
+  const [trashed, setTrashed] = useState<WaiverTemplate[]>([]);
+  const [trashedLoading, setTrashedLoading] = useState(false);
   const [sheet, setSheet] = useState<null | "status">(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actionsTemplate, setActionsTemplate] = useState<WaiverTemplate | null>(
@@ -180,13 +190,35 @@ const Templates = () => {
   const filters = useMemo(
     () => ({
       search: debouncedSearch || undefined,
-      status: !showDeleted && statusFilter !== "all" ? statusFilter : undefined,
-      trashed: showDeleted,
+      status: statusFilter !== "all" ? statusFilter : undefined,
     }),
-    [debouncedSearch, statusFilter, showDeleted],
+    [debouncedSearch, statusFilter],
   );
 
   const { templates, loading, error, refetch } = useWaiverTemplates(filters);
+
+  /** The trashed list, fetched separately so the live list is never replaced. */
+  const loadTrashed = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+    setTrashedLoading(true);
+    try {
+      setTrashed(await fetchTemplates(token, { trashed: true }));
+    } catch {
+      // A failure leaves the section empty rather than blocking the screen;
+      // pull-to-refresh or reopening it tries again.
+      setTrashed([]);
+    } finally {
+      setTrashedLoading(false);
+    }
+  }, []);
+
+  const toggleTrashed = useCallback(() => {
+    setShowTrashed((open) => {
+      if (!open) void loadTrashed();
+      return !open;
+    });
+  }, [loadTrashed]);
 
   // Client-side pagination over the loaded templates list.
   const [page, setPage] = useState(1);
@@ -199,16 +231,16 @@ const Templates = () => {
   // Reset to the first page whenever the result set changes / filters move.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, showDeleted, perPage]);
+  }, [debouncedSearch, statusFilter, perPage]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refetch();
+      await Promise.all([refetch(), showTrashed ? loadTrashed() : null]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [refetch, showTrashed, loadTrashed]);
 
   useFocusEffect(
     useCallback(() => {
@@ -227,7 +259,9 @@ const Templates = () => {
       await fn();
       setActionsTemplate(null);
       markTemplatesStale();
-      await refetch();
+      // Both lists can move on one action — deleting drops out of the live
+      // list and into the trash, restoring goes the other way.
+      await Promise.all([refetch(), showTrashed ? loadTrashed() : null]);
     } catch (e) {
       Alert.alert(
         failMsg,
@@ -284,11 +318,20 @@ const Templates = () => {
     );
   };
 
+  /** Post-waiver ads for a template — the table icon and the actions sheet
+   *  both come through here so they cannot drift. */
+  const openAds = (t: WaiverTemplate) => {
+    router.push({
+      pathname: "/waivers/template-ads",
+      params: { templateId: String(t.id), title: t.title },
+    } as never);
+  };
+
   // Card taps open the editor when the user can manage the template; otherwise
-  // (or in the deleted/trash view) they open the actions sheet. Table rows are
-  // not tappable at all — there, everything goes through the Actions cell.
+  // they open the actions sheet. Table rows are not tappable at all — there,
+  // everything goes through the Actions cell.
   const openTemplate = (t: WaiverTemplate) => {
-    if (!showDeleted && canManage) {
+    if (canManage) {
       router.push(`/waivers/create-template?id=${t.id}` as never);
     } else {
       setActionsTemplate(t);
@@ -315,22 +358,10 @@ const Templates = () => {
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
             Templates
           </Text>
-          <Pressable
-            onPress={() => setShowDeleted((v) => !v)}
-            className={`p-2 rounded-full ${
-              showDeleted
-                ? "bg-blue-100 dark:bg-blue-900/30"
-                : "bg-gray-100 dark:bg-neutral-800"
-            }`}
-            accessibilityRole="button"
-            accessibilityLabel="Toggle deleted templates"
-          >
-            <Feather
-              name="trash-2"
-              size={18}
-              color={showDeleted ? PRIMARY : headerIcon}
-            />
-          </Pressable>
+          {/* Deleted templates live in their own labelled section below the
+              list, so the header needs no control — this keeps the title
+              centred against the back button. */}
+          <View className="h-9 w-9" />
         </View>
       </View>
 
@@ -351,12 +382,10 @@ const Templates = () => {
         <View className="px-5">
           <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
             <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              {showDeleted ? "Deleted Templates" : "Waiver Templates"}
+              Waiver Templates
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {showDeleted
-                ? "Restore or permanently remove trashed templates"
-                : "Reusable legal text assigned to activities"}
+              Reusable legal text assigned to activities
             </Text>
           </View>
 
@@ -389,22 +418,20 @@ const Templates = () => {
             )}
           </View>
 
-          {/* Status filter (hidden in deleted view) */}
-          {!showDeleted && (
-            <Pressable
-              onPress={() => setSheet("status")}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
+          {/* Status filter */}
+          <Pressable
+            onPress={() => setSheet("status")}
+            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
+          >
+            <Feather name="check-circle" size={16} color={PRIMARY} />
+            <Text
+              className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+              numberOfLines={1}
             >
-              <Feather name="check-circle" size={16} color={PRIMARY} />
-              <Text
-                className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-                numberOfLines={1}
-              >
-                {statusLabel}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          )}
+              {statusLabel}
+            </Text>
+            <Feather name="chevron-down" size={14} color="#9CA3AF" />
+          </Pressable>
 
           {!loading && error && (
             <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
@@ -419,7 +446,7 @@ const Templates = () => {
             <View className="flex-row items-center justify-between gap-2 mb-4">
               <View className="flex-row items-center gap-2 shrink">
                 <Text className="shrink text-lg font-bold text-gray-900 dark:text-white">
-                  {showDeleted ? "Trash" : "All Templates"}
+                  All Templates
                 </Text>
                 <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
                   <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -436,21 +463,15 @@ const Templates = () => {
           ) : !error && templates.length === 0 ? (
             <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
               <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather
-                  name={showDeleted ? "trash-2" : "layout"}
-                  size={26}
-                  color="#9CA3AF"
-                />
+                <Feather name="layout" size={26} color="#9CA3AF" />
               </View>
               <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                {showDeleted ? "Trash is empty" : "No templates found"}
+                No templates found
               </Text>
               <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {showDeleted
-                  ? "Deleted templates will appear here."
-                  : canManage
-                    ? "Tap + to create your first template."
-                    : "No templates match your search."}
+                {canManage
+                  ? "Tap + to create your first template."
+                  : "No templates match your search."}
               </Text>
             </View>
           ) : (
@@ -461,7 +482,7 @@ const Templates = () => {
                 {viewMode === "table" ? (
                   <TemplatesTable
                     templates={paged}
-                    deleted={showDeleted}
+                    deleted={false}
                     canManage={canManage}
                     isCompanyAdmin={isCompanyAdmin}
                     busy={busy}
@@ -472,6 +493,7 @@ const Templates = () => {
                         `/waivers/create-template?id=${t.id}` as never,
                       )
                     }
+                    onAds={openAds}
                     onToggleStatus={onToggleStatus}
                     onDelete={onDelete}
                     onRestore={onRestore}
@@ -482,7 +504,7 @@ const Templates = () => {
                     <TemplateCard
                       key={t.id}
                       template={t}
-                      deleted={showDeleted}
+                      deleted={false}
                       onPress={() => openTemplate(t)}
                       onMore={() => setActionsTemplate(t)}
                     />
@@ -498,6 +520,118 @@ const Templates = () => {
               </View>
             )
           )}
+
+          {/* Deleted templates — a disclosure below the live list, matching the
+              web. Restore and permanent delete sit inline on each row there, so
+              they do here too rather than behind a menu. */}
+          <View className="mt-2 mb-6">
+            <Pressable
+              onPress={toggleTrashed}
+              className="flex-row items-center gap-2 py-2 active:opacity-70"
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showTrashed }}
+              accessibilityLabel="Deleted templates"
+            >
+              <Feather
+                name={showTrashed ? "chevron-down" : "chevron-right"}
+                size={16}
+                color="#9CA3AF"
+              />
+              <Feather name="trash-2" size={14} color="#9CA3AF" />
+              <Text className="text-sm text-gray-500 dark:text-gray-400">
+                Deleted templates
+              </Text>
+              {showTrashed && trashed.length > 0 && (
+                <View className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-neutral-800">
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {trashed.length}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+
+            {showTrashed && (
+              <View className="mt-2">
+                {trashedLoading ? (
+                  <View className="items-center rounded-2xl border border-gray-100 bg-white py-8 dark:border-neutral-800 dark:bg-neutral-900">
+                    <ActivityIndicator color="#9CA3AF" />
+                  </View>
+                ) : trashed.length === 0 ? (
+                  <View className="items-center rounded-2xl border border-gray-100 bg-white py-8 dark:border-neutral-800 dark:bg-neutral-900">
+                    <Text className="text-sm text-gray-400 dark:text-gray-500">
+                      No deleted templates.
+                    </Text>
+                  </View>
+                ) : (
+                  trashed.map((t) => (
+                    <View
+                      key={t.id}
+                      className="mb-2 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+                    >
+                      <View className="flex-row items-start justify-between gap-3">
+                        <View className="flex-1">
+                          <Text
+                            className="text-sm font-semibold text-gray-600 dark:text-gray-300"
+                            numberOfLines={1}
+                          >
+                            {t.title}
+                          </Text>
+                          {t.internalDescription ? (
+                            <Text
+                              className="mt-0.5 text-xs text-gray-400 dark:text-gray-500"
+                              numberOfLines={1}
+                            >
+                              {t.internalDescription}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Text className="text-xs text-gray-400 dark:text-gray-500">
+                          v{t.currentVersion}
+                        </Text>
+                      </View>
+
+                      <Text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        Deleted {t.deletedAt ? formatDate(t.deletedAt) : "—"}
+                      </Text>
+
+                      <View className="mt-3 flex-row gap-2">
+                        {canManage && (
+                          <Pressable
+                            disabled={busy}
+                            onPress={() => onRestore(t)}
+                            className={`flex-row items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 active:opacity-80 dark:bg-emerald-900/25 ${
+                              busy ? "opacity-60" : ""
+                            }`}
+                            accessibilityRole="button"
+                          >
+                            <Feather name="rotate-ccw" size={13} color="#047857" />
+                            <Text className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                              Restore
+                            </Text>
+                          </Pressable>
+                        )}
+                        {isCompanyAdmin && (
+                          <Pressable
+                            disabled={busy}
+                            onPress={() => onForceDelete(t)}
+                            className={`flex-row items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 active:opacity-80 dark:bg-red-900/25 ${
+                              busy ? "opacity-60" : ""
+                            }`}
+                            accessibilityRole="button"
+                          >
+                            <Feather name="trash-2" size={13} color="#B91C1C" />
+                            <Text className="text-xs font-medium text-red-700 dark:text-red-300">
+                              Delete permanently
+                            </Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
+          </View>
         </View>
       </ScrollView>
 
@@ -554,7 +688,7 @@ const Templates = () => {
             </View>
           )}
 
-          {actionsTemplate && !showDeleted && (
+          {actionsTemplate && (
             <>
               <Pressable
                 onPress={() => {
@@ -581,6 +715,23 @@ const Templates = () => {
                   <Feather name="edit-2" size={18} color={PRIMARY} />
                   <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
                     Edit template
+                  </Text>
+                </Pressable>
+              )}
+              {canManage && (
+                <Pressable
+                  onPress={() => {
+                    const t = actionsTemplate;
+                    setActionsTemplate(null);
+                    openAds(t);
+                  }}
+                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+                >
+                  {/* Ionicons, not Feather: the web marks post-waiver ads
+                      with a megaphone and Feather has no equivalent. */}
+                  <Ionicons name="megaphone-outline" size={18} color={PRIMARY} />
+                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
+                    Post-waiver ads
                   </Text>
                 </Pressable>
               )}
@@ -618,34 +769,6 @@ const Templates = () => {
             </>
           )}
 
-          {actionsTemplate && showDeleted && (
-            <>
-              {canManage && (
-                <Pressable
-                  disabled={busy}
-                  onPress={() => onRestore(actionsTemplate)}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  <Feather name="rotate-ccw" size={18} color="#10B981" />
-                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                    Restore template
-                  </Text>
-                </Pressable>
-              )}
-              {isCompanyAdmin && (
-                <Pressable
-                  disabled={busy}
-                  onPress={() => onForceDelete(actionsTemplate)}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  <Feather name="trash" size={18} color="#DC2626" />
-                  <Text className="text-base font-medium text-red-600 ">
-                    Delete permanently
-                  </Text>
-                </Pressable>
-              )}
-            </>
-          )}
         </View>
       </BottomSheet>
 

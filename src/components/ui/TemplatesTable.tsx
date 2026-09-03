@@ -1,4 +1,4 @@
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { memo, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
@@ -35,22 +35,31 @@ type RowContext = {
   onView: () => void;
   onKiosk: () => void;
   onEdit: () => void;
+  onAds: () => void;
   onToggleStatus: () => void;
   onDelete: () => void;
   onRestore: () => void;
   onForceDelete: () => void;
 };
 
-/** Small square icon button used in the Actions cell. */
+/**
+ * Small square icon button used in the Actions cell.
+ *
+ * Feather covers every glyph here bar one: the web marks post-waiver ads with a
+ * megaphone, which Feather has no equivalent for, so `ionicon` opts that one
+ * button into Ionicons rather than settling for a different symbol.
+ */
 const IconButton = ({
   icon,
+  ionicon,
   color,
   bg,
   label,
   disabled,
   onPress,
 }: {
-  icon: React.ComponentProps<typeof Feather>["name"];
+  icon?: React.ComponentProps<typeof Feather>["name"];
+  ionicon?: React.ComponentProps<typeof Ionicons>["name"];
   color: string;
   bg: string;
   label: string;
@@ -67,7 +76,11 @@ const IconButton = ({
       disabled ? "opacity-40" : "active:opacity-70"
     }`}
   >
-    <Feather name={icon} size={15} color={color} />
+    {ionicon ? (
+      <Ionicons name={ionicon} size={15} color={color} />
+    ) : icon ? (
+      <Feather name={icon} size={15} color={color} />
+    ) : null}
   </Pressable>
 );
 
@@ -208,6 +221,15 @@ const COLUMNS: Column[] = [
                   disabled={ctx.busy}
                   onPress={ctx.onEdit}
                 />
+                {/* Sits between edit and delete, as it does on the web row. */}
+                <IconButton
+                  ionicon="megaphone-outline"
+                  color="#6B7280"
+                  bg="bg-gray-100 dark:bg-neutral-800"
+                  label="Post-waiver ads"
+                  disabled={ctx.busy}
+                  onPress={ctx.onAds}
+                />
                 <IconButton
                   icon="trash-2"
                   color="#EF4444"
@@ -266,6 +288,7 @@ export const TemplatesTable = memo(function TemplatesTable({
   onView,
   onKiosk,
   onEdit,
+  onAds,
   onToggleStatus,
   onDelete,
   onRestore,
@@ -279,6 +302,7 @@ export const TemplatesTable = memo(function TemplatesTable({
   onView: (t: WaiverTemplate) => void;
   onKiosk: (t: WaiverTemplate) => void;
   onEdit: (t: WaiverTemplate) => void;
+  onAds: (t: WaiverTemplate) => void;
   onToggleStatus: (t: WaiverTemplate) => void;
   onDelete: (t: WaiverTemplate) => void;
   onRestore: (t: WaiverTemplate) => void;
@@ -326,6 +350,7 @@ export const TemplatesTable = memo(function TemplatesTable({
               onView: () => onView(t),
               onKiosk: () => onKiosk(t),
               onEdit: () => onEdit(t),
+              onAds: () => onAds(t),
               onToggleStatus: () => onToggleStatus(t),
               onDelete: () => onDelete(t),
               onRestore: () => onRestore(t),
