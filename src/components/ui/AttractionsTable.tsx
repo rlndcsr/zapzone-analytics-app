@@ -19,6 +19,7 @@ import {
   type FeatherIconName,
 } from "../../lib/attractions/attractionDisplay";
 import { buildPurchaseLink } from "../../lib/attractions/purchaseLink";
+import { normalizeCategory } from "../../lib/venueCategories";
 import type { AttractionRow } from "../../services/attractionsService";
 
 // Comfortable, SaaS-style row rhythm. These are floors (minHeight) — real
@@ -359,9 +360,12 @@ const COLUMNS: Column[] = [
     label: "Category",
     group: "Attraction",
     width: 130,
+    // Grouped under one name, matching the chips above the table: the web
+    // normalises this in its row mapper, which mobile cannot do because the
+    // same mapper feeds the edit and duplicate forms.
     render: (a) => (
       <Text numberOfLines={1} className={CELL_TEXT}>
-        {a.category}
+        {normalizeCategory(a.category)}
       </Text>
     ),
   },

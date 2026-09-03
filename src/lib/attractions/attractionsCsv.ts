@@ -1,5 +1,6 @@
 import type { AttractionRow } from "../../services/attractionsService";
 import { formatDateTimeET } from "../date/venueTime";
+import { normalizeCategory } from "../venueCategories";
 import { formatDurationDisplay } from "./attractionDisplay";
 import { buildPurchaseLink } from "./purchaseLink";
 
@@ -39,7 +40,9 @@ const COLUMNS: { label: string; value: (a: AttractionRow) => Cell }[] = [
   { label: "Order", value: (a) => a.displayOrder ?? 0 },
   { label: "ID", value: (a) => a.id },
   { label: "Attraction", value: (a) => a.name },
-  { label: "Category", value: (a) => a.category },
+  // Grouped, as the web's export is: its row mapper normalises before the CSV
+  // is built. The JSON export deliberately stays raw — see AttractionsExportSheet.
+  { label: "Category", value: (a) => normalizeCategory(a.category) },
   { label: "Description", value: (a) => a.description },
   { label: "Location", value: (a) => a.locationName },
   { label: "Price", value: (a) => Number(a.price).toFixed(2) },

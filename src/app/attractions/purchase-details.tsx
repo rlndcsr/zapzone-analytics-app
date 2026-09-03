@@ -25,6 +25,7 @@ import { StatusBadge } from "../../components/ui/StatusBadge";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   deleteAttractionPurchase,
   fetchAttractionPurchaseDetail,
@@ -419,7 +420,9 @@ const PurchaseDetailsScreen = () => {
               icon="map-pin"
               label="Attraction Name"
               value={detail.attractionName}
-              extra={[detail.category]}
+              // Grouped, matching the category badge on the guest's own
+              // purchased tickets in the web app.
+              extra={[normalizeCategory(detail.category)]}
             />
             <InfoTile
               icon="tag"

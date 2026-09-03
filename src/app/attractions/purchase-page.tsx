@@ -62,6 +62,7 @@ import {
   type DayOff,
 } from "../../services/dayOffsService";
 import { getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   fetchAttractionDetail,
   fetchAttractionSlotAvailability,
@@ -1021,8 +1022,10 @@ const PurchasePageScreen = () => {
                   {detail.name}
                 </Text>
                 <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
+                  {/* The group, not the difficulty — the same badge the web
+                      storefront shows a guest. */}
                   <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                    {detail.category}
+                    {normalizeCategory(detail.category)}
                   </Text>
                 </View>
               </View>
