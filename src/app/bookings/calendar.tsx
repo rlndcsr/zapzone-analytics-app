@@ -662,8 +662,13 @@ const BookingCalendar = () => {
           </View>
 
           {/* Category tabs — All / <package & attraction categories> / Events,
-              filtering bookings and the ticket overlay together (web parity). */}
-          {!loading && <CalendarCategoryTabs filter={categoryFilter} />}
+              filtering bookings and the ticket overlay together (web parity).
+              Rendered outside the loading swap below so the tabs hold their
+              place while the calendar shows its skeleton; a refresh keeps the
+              cached bookings, so they keep their selection and counts. On a cold
+              load there is nothing to build categories from yet, so the tabs
+              hold the row with placeholders. */}
+          <CalendarCategoryTabs filter={categoryFilter} loading={loading} />
 
           {/* Error */}
           {!loading && error && (
