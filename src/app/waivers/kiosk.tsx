@@ -14,6 +14,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { InputField } from "../../components/ui/InputField";
+import { KioskAdModal } from "../../components/ui/KioskAdModal";
+import {
+  KioskReturningPanel,
+  KioskSavedSignerFields,
+} from "../../components/ui/KioskReturningPanel";
 import { SignaturePad } from "../../components/ui/SignaturePad";
 import { StatusModal } from "../../components/ui/StatusModal";
 import { useStatusModal } from "../../lib/hooks/useStatusModal";
@@ -23,10 +28,13 @@ import {
   fetchKioskForm,
   fetchTemplateKioskForm,
   fetchTemplateKioskPreview,
+  minorCapReached,
   submitKioskWaiver,
   submitTemplateKioskWaiver,
+  type KioskAd,
   type KioskForm,
   type KioskMinorInput,
+  type ReturningProfile,
 } from "../../services/waiversService";
 
 const PRIMARY = "#0644C7";
@@ -71,6 +79,62 @@ const Label = ({
     {children}
     {required ? <Text className="text-red-500"> *</Text> : null}
   </Text>
+);
+
+const KioskShell = ({
+  title,
+  subtitle,
+  insets,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  insets: { top: number; bottom: number };
+  children: React.ReactNode;
+}) => (
+  <View className="flex-1 bg-gray-50 dark:bg-black">
+    <KeyboardAvoidingView
+      className="flex-1"
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        className="flex-1"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          padding: 16,
+          paddingTop: insets.top + 16,
+          paddingBottom: insets.bottom + 32,
+        }}
+      >
+        <Pressable
+          onPress={() => router.back()}
+          className="mb-3 flex-row items-center gap-1.5 self-start rounded-full bg-white px-3 py-2 active:opacity-70 dark:bg-neutral-900"
+          accessibilityRole="button"
+          accessibilityLabel="Leave the kiosk"
+        >
+          <Feather name="chevron-left" size={16} color="#374151" />
+          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+            Back
+          </Text>
+        </Pressable>
+
+        <View className="mb-4 items-center rounded-2xl bg-[#1D3FCF] px-5 py-7">
+          <View className="mb-3 h-12 w-12 items-center justify-center rounded-xl bg-white/15">
+            <Feather name="file-text" size={22} color="#FFFFFF" />
+          </View>
+          <Text className="text-center text-lg font-bold text-white">
+            {title}
+          </Text>
+          <Text className="mt-1 text-center text-sm text-white/80">
+            {subtitle}
+          </Text>
+        </View>
+
+        {children}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  </View>
 );
 
 /** White card with a titled header, matching the web's panels. */
@@ -186,6 +250,16 @@ const WaiverKiosk = () => {
   const [minors, setMinors] = useState<DraftMinor[]>([]);
   const [minorKey, setMinorKey] = useState(1);
 
+  const [phase, setPhase] = useState<"start" | "lookup" | "form">("form");
+  const [profile, setProfile] = useState<ReturningProfile | null>(null);
+  const [selectedDependentIds, setSelectedDependentIds] = useState<number[]>(
+    [],
+  );
+
+  /** The ad the submission came back with, held until the guest dismisses it. */
+  const [ad, setAd] = useState<KioskAd | null>(null);
+  const [adWaiverId, setAdWaiverId] = useState<number | null>(null);
+
   // Sign & agree
   const [typedName, setTypedName] = useState("");
   /** Optional drawn signature as an SVG data URI; null when the pad is empty. */
@@ -219,6 +293,15 @@ const WaiverKiosk = () => {
         if (signal?.aborted) return;
         setForm(data);
         setLoadError(null);
+
+        // The New/Returning choice only exists where the company has turned the
+        // flow on, and only for a walk-in: a session-addressed kiosk was opened
+        // for a known booking, so there is nobody to look up.
+        setPhase(
+          data.settings.returningEnabled && !token && !isPreview
+            ? "start"
+            : "form",
+        );
 
         // Seed whatever the booking already told us about the signer. A
         // walk-in has no prefill, so this leaves the form empty.
@@ -256,7 +339,15 @@ const WaiverKiosk = () => {
 
   const addMinor = () => {
     if (!form) return;
-    if (minors.length >= form.maxMinors) {
+    // Saved dependents already joining today count against the same cap the
+    // backend applies to the merged list.
+    if (
+      minorCapReached(
+        form.maxMinors,
+        selectedDependentIds.length,
+        minors.length,
+      )
+    ) {
       status.info(
         "Minor limit reached",
         `This waiver covers up to ${form.maxMinors} children.`,
@@ -349,16 +440,34 @@ const WaiverKiosk = () => {
           relationship: m.relationship,
         })),
         read_seconds: Math.max(0, Math.round((Date.now() - openedAt) / 1000)),
+        // Returning customers: the server re-reads the signer from the saved
+        // record and merges these dependents with any new ones in `minors`.
+        // The adult_* fields above still travel because validation requires
+        // them — they are simply overwritten server-side.
+        ...(profile
+          ? {
+              waiver_profile_id: profile.id,
+              selected_dependent_ids: selectedDependentIds,
+            }
+          : {}),
       };
 
       // A session fills the waiver it was created for; a walk-in creates a
       // fresh one against the template.
-      if (token) {
-        await submitKioskWaiver(token, submission);
-      } else {
-        await submitTemplateKioskWaiver(templateId!, submission, { locationId });
-      }
+      const result = token
+        ? await submitKioskWaiver(token, submission, { kiosk: true })
+        : await submitTemplateKioskWaiver(templateId!, submission, {
+            locationId,
+          });
       markWaiversStale();
+
+      // An ad takes over the confirmation; without one the kiosk keeps its
+      // original success modal exactly as before.
+      if (result.ad) {
+        setAd(result.ad);
+        setAdWaiverId(result.id);
+        return;
+      }
       status.show({
         variant: "success",
         title: "Waiver Signed",
@@ -427,6 +536,86 @@ const WaiverKiosk = () => {
     );
   }
 
+  /* --- returning-customer phases ---------------------------------------- */
+
+  if (phase === "start") {
+    return (
+      <KioskShell
+        title={form.title}
+        subtitle="Welcome! Choose an option to begin"
+        insets={insets}
+      >
+        <View className="mb-4 gap-3">
+          <Pressable
+            onPress={() => setPhase("form")}
+            className="rounded-xl bg-[#1D3FCF] py-5 active:opacity-90"
+            accessibilityRole="button"
+          >
+            <Text className="text-center text-lg font-semibold text-white">
+              New Customer
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setPhase("lookup")}
+            className="rounded-xl border-2 border-blue-200 bg-white py-5 active:opacity-80 dark:border-blue-900/50 dark:bg-neutral-900"
+            accessibilityRole="button"
+          >
+            <Text className="text-center text-lg font-semibold text-[#0644C7] dark:text-blue-300">
+              Returning Customer
+            </Text>
+          </Pressable>
+        </View>
+      </KioskShell>
+    );
+  }
+
+  if (phase === "lookup") {
+    return (
+      <KioskShell
+        title={form.title}
+        subtitle={
+          profile
+            ? "Please review your saved information"
+            : "Returning customer"
+        }
+        insets={insets}
+      >
+        <KioskReturningPanel
+          templateId={templateId!}
+          profile={profile}
+          maxMinors={form.maxMinors}
+          dependentsEnabled={form.minorSectionEnabled && form.maxMinors > 0}
+          onFound={setProfile}
+          onContinue={({ profile: found, selectedDependentIds: ids }) => {
+            // The signer's saved details fill the (read-only) form fields;
+            // validation still requires them and the server rewrites them from
+            // the same record on submit.
+            setFirstName(found.firstName);
+            setLastName(found.lastName);
+            setEmail(found.email ?? "");
+            setPhone(found.phone ?? "");
+            const [y, m, d] = (found.dateOfBirth ?? "").split("-");
+            setDobYear(y ?? "");
+            setDobMonth(m ?? "");
+            setDobDay(d ?? "");
+            setSelectedDependentIds(ids);
+            setPhase("form");
+          }}
+          onNewCustomer={() => {
+            setProfile(null);
+            setSelectedDependentIds([]);
+            setPhase("form");
+          }}
+          onCancel={() => {
+            setProfile(null);
+            setSelectedDependentIds([]);
+            setPhase("start");
+          }}
+        />
+      </KioskShell>
+    );
+  }
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       <KeyboardAvoidingView
@@ -486,86 +675,102 @@ const WaiverKiosk = () => {
             </View>
           )}
 
-          <Panel title="Your Information">
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <Label required>First Name</Label>
-                <InputField
-                  label=""
-                  value={firstName}
-                  onChangeText={setFirstName}
-                  autoCapitalize="words"
-                  containerClassName="mb-3"
-                />
-              </View>
-              <View className="flex-1">
-                <Label required>Last Name</Label>
-                <InputField
-                  label=""
-                  value={lastName}
-                  onChangeText={setLastName}
-                  autoCapitalize="words"
-                  containerClassName="mb-3"
-                />
-              </View>
-            </View>
+          {/* A returning guest signs under the record the server will re-read
+              anyway, so their details are shown rather than offered for edit. */}
+          {profile && (
+            <Panel title="Your Information">
+              <KioskSavedSignerFields profile={profile} />
+            </Panel>
+          )}
 
-            <Label required>Email</Label>
-            <InputField
-              label=""
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              containerClassName="mb-3"
-            />
+          {!profile && (
+            <Panel title="Your Information">
+              <View className="flex-row gap-3">
+                <View className="flex-1">
+                  <Label required>First Name</Label>
+                  <InputField
+                    label=""
+                    value={firstName}
+                    onChangeText={setFirstName}
+                    autoCapitalize="words"
+                    containerClassName="mb-3"
+                  />
+                </View>
+                <View className="flex-1">
+                  <Label required>Last Name</Label>
+                  <InputField
+                    label=""
+                    value={lastName}
+                    onChangeText={setLastName}
+                    autoCapitalize="words"
+                    containerClassName="mb-3"
+                  />
+                </View>
+              </View>
 
-            <Label required>Phone</Label>
-            <InputField
-              label=""
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-              containerClassName="mb-3"
-            />
+              <Label required>Email</Label>
+              <InputField
+                label=""
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                containerClassName="mb-3"
+              />
 
-            <Label required>Date of Birth</Label>
-            <View className="flex-row gap-2">
-              <View className="flex-1">
-                <TextInput
-                  value={dobMonth}
-                  onChangeText={(t) => setDobMonth(t.replace(/\D/g, "").slice(0, 2))}
-                  placeholder="Month"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="number-pad"
-                  className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
-                />
+              <Label required>Phone</Label>
+              <InputField
+                label=""
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                containerClassName="mb-3"
+              />
+
+              <Label required>Date of Birth</Label>
+              <View className="flex-row gap-2">
+                <View className="flex-1">
+                  <TextInput
+                    value={dobMonth}
+                    onChangeText={(t) =>
+                      setDobMonth(t.replace(/\D/g, "").slice(0, 2))
+                    }
+                    placeholder="Month"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
+                  />
+                </View>
+                <View className="flex-1">
+                  <TextInput
+                    value={dobDay}
+                    onChangeText={(t) =>
+                      setDobDay(t.replace(/\D/g, "").slice(0, 2))
+                    }
+                    placeholder="Day"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
+                  />
+                </View>
+                <View className="flex-1">
+                  <TextInput
+                    value={dobYear}
+                    onChangeText={(t) =>
+                      setDobYear(t.replace(/\D/g, "").slice(0, 4))
+                    }
+                    placeholder="Year"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
+                  />
+                </View>
               </View>
-              <View className="flex-1">
-                <TextInput
-                  value={dobDay}
-                  onChangeText={(t) => setDobDay(t.replace(/\D/g, "").slice(0, 2))}
-                  placeholder="Day"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="number-pad"
-                  className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
-                />
-              </View>
-              <View className="flex-1">
-                <TextInput
-                  value={dobYear}
-                  onChangeText={(t) => setDobYear(t.replace(/\D/g, "").slice(0, 4))}
-                  placeholder="Year"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="number-pad"
-                  className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
-                />
-              </View>
-            </View>
-            <Text className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-              The signer must be 18 or over.
-            </Text>
-          </Panel>
+              <Text className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                The signer must be 18 or over.
+              </Text>
+            </Panel>
+          )}
 
           {form.minorSectionEnabled && (
             <Panel
@@ -626,7 +831,9 @@ const WaiverKiosk = () => {
                       <View className="flex-1">
                         <TextInput
                           value={m.lastName}
-                          onChangeText={(t) => patchMinor(m.key, { lastName: t })}
+                          onChangeText={(t) =>
+                            patchMinor(m.key, { lastName: t })
+                          }
                           placeholder="Last name"
                           placeholderTextColor="#9CA3AF"
                           className="rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
@@ -688,7 +895,9 @@ const WaiverKiosk = () => {
                         return (
                           <Pressable
                             key={r}
-                            onPress={() => patchMinor(m.key, { relationship: r })}
+                            onPress={() =>
+                              patchMinor(m.key, { relationship: r })
+                            }
                             className={`mb-2 mr-2 rounded-lg border px-3 py-1.5 active:opacity-80 ${
                               on
                                 ? "border-[#0644C7] bg-[#0644C7]"
@@ -807,7 +1016,8 @@ const WaiverKiosk = () => {
 
             <View className="border-t border-gray-100 pt-2 dark:border-neutral-800">
               <CheckRow checked={agreed} onToggle={() => setAgreed((v) => !v)}>
-                I have read, understand, and agree to the terms of this waiver. *
+                I have read, understand, and agree to the terms of this waiver.
+                *
               </CheckRow>
             </View>
           </Panel>
@@ -832,6 +1042,23 @@ const WaiverKiosk = () => {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* The post-waiver ad beat. Only mounts when the submission came back
+          with one; dismissing it leaves the kiosk exactly where the plain
+          success modal would have. */}
+      <KioskAdModal
+        visible={!!ad}
+        ad={ad}
+        waiverId={adWaiverId}
+        signerFirstName={firstName.trim() || null}
+        closeLabel="Done"
+        closingText="Closing"
+        onClose={() => {
+          setAd(null);
+          setAdWaiverId(null);
+          router.back();
+        }}
+      />
 
       <StatusModal {...status.props} />
     </View>

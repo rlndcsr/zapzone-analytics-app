@@ -1,30 +1,30 @@
-import { apiRequest, webUrl } from "../lib/api";
+import { ApiError, apiRequest, webUrl } from "../lib/api";
+import {
+  classifyLookupFailure,
+  classifyLookupResponse,
+  mapKioskAd,
+  mapKioskSettings,
+  type KioskAd,
+  type KioskSettings,
+  type ReturningLookupResult,
+} from "../lib/waivers/kioskContract";
 import { kioskAccessTokenFrom } from "../lib/waivers/kioskToken";
 
-/*
- * Waivers API client — mirrors the web admin's `src/services/waiverService.ts`
- * against the same Laravel backend. All endpoints are under `/api` and require a
- * Sanctum bearer token (passed explicitly per call, like the other services).
- *
- * Backend authorization (enforced server-side; the mobile UI mirrors it so we
- * never surface an action the caller's role would be rejected for):
- *   - Lists are auto-scoped to the caller's company; managers/attendants are
- *     further locked to their own location_id.
- *   - assign / group-invite create: admin or location_manager (attendant blocked).
- *   - delete waiver: company_admin only.
- *   - template writes: admin, or manager when settings.manager_can_build_templates.
- *   - print/export: admin, or manager when settings.manager_print_export_enabled.
- *   - deletion log: admin, or manager when settings.manager_can_view_deletion_log.
- */
+export {
+  adHoldSeconds,
+  minorCapReached,
+  type KioskAd,
+  type KioskSettings,
+  type ReturningDependent,
+  type ReturningLookupResult,
+  type ReturningLookupStatus,
+  type ReturningProfile
+} from "../lib/waivers/kioskContract";
 
 /* ------------------------------------------------------------------ enums -- */
 
 export type WaiverStatus =
-  | "pending"
-  | "completed"
-  | "expired"
-  | "replaced"
-  | "deleted";
+  "pending" | "completed" | "expired" | "replaced" | "deleted";
 
 export type MarketingConsentStatus = "not_opted_in" | "opted_in" | "withdrawn";
 
@@ -85,11 +85,7 @@ export type Waiver = {
   eventId: number | null;
   eventName: string | null;
   attractionPurchaseId: number | null;
-  /**
-   * Participant check-in timestamp (nullable ISO string). Mirrors the web
-   * admin's `Waiver.checked_in_at`; its truthiness drives the "Checked In" vs
-   * "Not Checked In" badge (the web never uses a separate boolean).
-   */
+
   checkedInAt: string | null;
 };
 
@@ -555,8 +551,7 @@ type WaiverPeriodSummaryResponse = {
     minors_covered?: number | string | null;
     people_covered?: number | string | null;
     minor_age_brackets?:
-      | { bracket?: string | null; count?: number | string | null }[]
-      | null;
+      { bracket?: string | null; count?: number | string | null }[] | null;
   } | null;
 };
 
@@ -640,7 +635,8 @@ export type AssignWaiverInput = {
 /* --------------------------------------------------- purchase link search -- */
 
 /** The three transaction types a waiver can be tied to (mirrors the web). */
-export type PurchaseLinkType = "booking" | "attraction_purchase" | "event_purchase";
+export type PurchaseLinkType =
+  "booking" | "attraction_purchase" | "event_purchase";
 
 /** A single searchable transaction the waiver can link to. */
 export type PurchaseLink = {
@@ -1052,10 +1048,11 @@ export async function fetchWaiverReport(
     params.append("end_date", range.endDate);
   }
   const qs = params.toString();
-  const res = await apiRequest<{ success: boolean; type: string; data: unknown }>(
-    `/api/waivers/reports/${type}${qs ? `?${qs}` : ""}`,
-    { token, signal },
-  );
+  const res = await apiRequest<{
+    success: boolean;
+    type: string;
+    data: unknown;
+  }>(`/api/waivers/reports/${type}${qs ? `?${qs}` : ""}`, { token, signal });
   return res?.data ?? null;
 }
 
@@ -1217,10 +1214,7 @@ export async function updateWaiverSettings(
 
 /** The entity kinds a waiver can be connected to (mirrors the web panel). */
 export type WaiverEntityType =
-  | "booking"
-  | "attraction_purchase"
-  | "event_purchase"
-  | "customer";
+  "booking" | "attraction_purchase" | "event_purchase" | "customer";
 
 /** One waiver connected to an entity (flattened GET /api/waivers/for row). */
 export type ConnectedWaiver = {
@@ -1272,7 +1266,8 @@ export function buildTemplateKioskUrl(
 ): string {
   const params = new URLSearchParams();
   if (opts.preview) params.set("preview", "1");
-  if (opts.locationId != null) params.set("location_id", String(opts.locationId));
+  if (opts.locationId != null)
+    params.set("location_id", String(opts.locationId));
   const qs = params.toString();
   return webUrl(`/waiver/kiosk/${templateId}${qs ? `?${qs}` : ""}`);
 }
@@ -1298,8 +1293,6 @@ export type KioskSession = {
    */
   accessToken: string | null;
 };
-
-
 
 /** One child covered by the signer's waiver. */
 export type KioskMinorInput = {
@@ -1328,6 +1321,25 @@ export type KioskSubmission = {
   minors?: KioskMinorInput[];
   device_id?: string | null;
   read_seconds?: number;
+  /**
+   * Returning customer only. The server re-reads the signer's details from the
+   * saved record and ignores the adult_* fields sent alongside — they are still
+   * required by validation, so the form keeps sending them.
+   */
+  waiver_profile_id?: number;
+  /**
+   * Saved dependents joining this visit. Anyone new travels in `minors` as
+   * usual — the backend merges the two into the final minor list, so there is
+   * no separate "new dependents" field.
+   */
+  selected_dependent_ids?: number[];
+};
+
+/** What a submission tells us back: the record, and possibly an ad to show. */
+export type KioskSubmitResult = {
+  id: number | null;
+  status: string | null;
+  ad: KioskAd | null;
 };
 
 /** The template + prefill behind the kiosk form. */
@@ -1355,6 +1367,8 @@ export type KioskForm = {
   /** Anything the backend already knows about the signer. */
   prefill: Record<string, unknown>;
   selectedDate: string | null;
+  /** Kiosk-wide switches from `data.settings`. */
+  settings: KioskSettings;
 };
 
 function mapKioskForm(d: Record<string, unknown>): KioskForm {
@@ -1384,6 +1398,7 @@ function mapKioskForm(d: Record<string, unknown>): KioskForm {
     marketingHelperText: str(t.marketing_helper_text),
     prefill: (d.prefill ?? {}) as Record<string, unknown>,
     selectedDate: typeof d.selected_date === "string" ? d.selected_date : null,
+    settings: mapKioskSettings(d.settings),
   };
 }
 
@@ -1442,7 +1457,8 @@ export async function fetchTemplateKioskForm(
   opts: { locationId?: number | null; signal?: AbortSignal } = {},
 ): Promise<KioskForm> {
   const params = new URLSearchParams();
-  if (opts.locationId != null) params.append("location_id", String(opts.locationId));
+  if (opts.locationId != null)
+    params.append("location_id", String(opts.locationId));
   const qs = params.toString();
   const res = await apiRequest<{
     success?: boolean;
@@ -1464,35 +1480,136 @@ export async function submitTemplateKioskWaiver(
   templateId: number,
   payload: KioskSubmission,
   opts: { locationId?: number | null; selectedDate?: string | null } = {},
-): Promise<{ id: number | null; status: string | null }> {
+): Promise<KioskSubmitResult> {
   const body: Record<string, unknown> = { ...payload };
   if (opts.locationId != null) body.location_id = opts.locationId;
   if (opts.selectedDate) body.selected_date = opts.selectedDate;
   const res = await apiRequest<{
     success?: boolean;
-    data?: { id?: number; status?: string };
+    data?: { id?: number; status?: string; ad?: unknown };
   }>(`/api/waivers/kiosk/${templateId}/submit`, {
     method: "POST",
     body,
     publicEndpoint: true,
   });
-  return { id: res?.data?.id ?? null, status: res?.data?.status ?? null };
+  return {
+    id: res?.data?.id ?? null,
+    status: res?.data?.status ?? null,
+    ad: mapKioskAd(res?.data?.ad),
+  };
 }
 
-/** POST /api/waivers/access/{token}/submit — sign the waiver. */
+/**
+ * POST /api/waivers/access/{token}/submit — sign the waiver.
+ *
+ * `kiosk: true` tells the backend this was signed at a kiosk rather than on the
+ * guest's own device, which is what makes it answer with an ad to show.
+ */
 export async function submitKioskWaiver(
   accessToken: string,
   payload: KioskSubmission,
-): Promise<{ id: number | null; status: string | null }> {
+  opts: { kiosk?: boolean } = {},
+): Promise<KioskSubmitResult> {
   const res = await apiRequest<{
     success?: boolean;
-    data?: { id?: number; status?: string };
+    data?: { id?: number; status?: string; ad?: unknown };
   }>(`/api/waivers/access/${encodeURIComponent(accessToken)}/submit`, {
     method: "POST",
-    body: payload,
+    body: opts.kiosk ? { ...payload, kiosk: true } : payload,
     publicEndpoint: true,
   });
-  return { id: res?.data?.id ?? null, status: res?.data?.status ?? null };
+  return {
+    id: res?.data?.id ?? null,
+    status: res?.data?.status ?? null,
+    ad: mapKioskAd(res?.data?.ad),
+  };
+}
+
+/* ------------------------------------------- Returning customers (kiosk) -- */
+
+/**
+ * POST /api/waivers/kiosk/{templateId}/lookup — find a returning guest by phone.
+ *
+ * Public and throttled (10/min per IP), so a 429 is a normal outcome at a busy
+ * kiosk rather than an error: it comes back as `rate_limited` so the screen can
+ * ask the guest to wait instead of showing a failure. Every other transport
+ * failure resolves to `error` with the server's message — the kiosk always has
+ * "continue as a new customer" available, so a lookup never dead-ends.
+ */
+export async function lookupReturningCustomer(
+  templateId: number,
+  phone: string,
+  signal?: AbortSignal,
+): Promise<ReturningLookupResult> {
+  try {
+    const res = await apiRequest<{
+      success?: boolean;
+      data?: { status?: string; profile?: unknown };
+    }>(`/api/waivers/kiosk/${templateId}/lookup`, {
+      method: "POST",
+      body: { phone },
+      publicEndpoint: true,
+      signal,
+    });
+    return classifyLookupResponse(res?.data?.status, res?.data?.profile);
+  } catch (e) {
+    return classifyLookupFailure(
+      e instanceof ApiError ? e.status : 0,
+      e instanceof Error ? e.message : null,
+    );
+  }
+}
+
+/* -------------------------------------------------- Post-waiver ad sends -- */
+
+/** Where the ad's extra details get sent. The backend accepts these two only. */
+export type AdLearnMoreChannel = "email" | "sms";
+
+/**
+ * POST /api/waivers/ads/learn-more — send the ad's details to the guest.
+ *
+ * The backend answers with a guest-facing sentence on both success and failure
+ * (no destination on file, expired request, send failed), so the message is
+ * passed straight through rather than being reworded here.
+ */
+export async function sendAdLearnMore(
+  waiverId: number,
+  adId: number,
+  channel: AdLearnMoreChannel,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await apiRequest<{ success?: boolean; message?: string }>(
+      `/api/waivers/ads/learn-more`,
+      {
+        method: "POST",
+        body: { waiver_id: waiverId, ad_id: adId, channel },
+        publicEndpoint: true,
+      },
+    );
+    return {
+      ok: res?.success !== false,
+      message:
+        res?.message ||
+        (channel === "email"
+          ? "Additional information sent by email."
+          : "Additional information sent by text."),
+    };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 429) {
+      return {
+        ok: false,
+        message:
+          "That has been requested a few times already. Please wait a moment.",
+      };
+    }
+    return {
+      ok: false,
+      message:
+        e instanceof Error && e.message
+          ? e.message
+          : "The message could not be sent. Please try again.",
+    };
+  }
 }
 
 /**
@@ -1504,7 +1621,11 @@ export async function createKioskSession(
   token: string,
   sourceType: KioskSourceType,
   sourceId: number,
-  opts: { templateId?: number; selectedDate?: string; locationId?: number } = {},
+  opts: {
+    templateId?: number;
+    selectedDate?: string;
+    locationId?: number;
+  } = {},
 ): Promise<KioskSession> {
   const body: Record<string, unknown> = {
     source_type: sourceType,
