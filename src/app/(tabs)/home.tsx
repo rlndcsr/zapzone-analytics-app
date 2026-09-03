@@ -81,6 +81,11 @@ import {
   resolveMetricValue,
 } from "../../lib/dashboard/dashboardConfig";
 import {
+  METRIC_CARD_PADDING,
+  METRIC_CARD_SHADOW,
+  METRIC_CARD_SURFACE,
+} from "../../lib/dashboard/metricCardStyle";
+import {
   setTimeframeSelection,
   useTimeframeSelection,
 } from "../../lib/dashboard/timeframeStore";
@@ -228,14 +233,8 @@ const MetricCard = ({
     <Pressable
       onPress={interactive ? () => onPress(metric.key) : undefined}
       disabled={!interactive}
-      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-5 m-1.5 shadow-sm border border-gray-100 dark:border-neutral-800"
-      style={{
-        shadowColor: "#424242",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        elevation: 1,
-      }}
+      className={`${METRIC_CARD_SURFACE} ${METRIC_CARD_PADDING}`}
+      style={METRIC_CARD_SHADOW}
     >
       <View className="flex-row items-center justify-between mb-3">
         <MetricIconBadge metric={metric} layoutKey={layoutKey} index={index} />

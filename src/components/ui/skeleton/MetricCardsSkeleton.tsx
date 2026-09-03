@@ -10,6 +10,11 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
+import {
+  METRIC_CARD_PADDING,
+  METRIC_CARD_SHADOW,
+  METRIC_CARD_SURFACE,
+} from "../../../lib/dashboard/metricCardStyle";
 import { SkeletonSurface } from "./SkeletonBlock";
 
 // Matches the number of cards in the dashboard grid so swapping skeleton ->
@@ -153,7 +158,18 @@ function SkeletonLine({
   );
 }
 
-/** Matches MetricCard: label + title, icon badge, value, subtitle. */
+/**
+ * Mirrors MetricCard (see `MetricCard` in app/(tabs)/home.tsx) box for box: an
+ * icon badge and info affordance on one row, then the title, the value and the
+ * subtitle stacked beneath it.
+ *
+ * The `line` heights are the line-heights Tailwind pairs with the real card's
+ * font sizes, in the same rem units: text-sm -> 1.25rem (h-5), text-3xl ->
+ * 2.25rem (h-9), text-xs -> 1rem (h-4). RN lays a single line of text out at
+ * exactly its line-height, so each placeholder row occupies the vertical space
+ * of the text it stands in for whatever NativeWind's rem base is set to. Every
+ * margin below is the real card's own.
+ */
 function MetricCardSkeleton({
   progress,
   highlight,
@@ -164,34 +180,27 @@ function MetricCardSkeleton({
   gradientId: string;
 }) {
   return (
-    <View
-      className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl m-1.5 shadow-sm"
-      style={{
-        shadowColor: "#424242",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-      }}
-    >
+    <View className={METRIC_CARD_SURFACE} style={METRIC_CARD_SHADOW}>
       {/* The card's padding lives on this inner box so the shimmer overlay's
           absolute inset lines up with the card's edges rather than its content. */}
-      <View className="p-5">
-        {/* Row 1: label + title (left) + icon badge (right) */}
-        <View className="flex-row items-start justify-between mb-4">
-          <View className="flex-1 mr-2">
-            {/* label (text-xs, uppercase) */}
-            <SkeletonLine width="w-16" line="h-4" />
-            {/* title (text-sm, mt-1) */}
-            <SkeletonLine width="w-24" line="h-5" bar="h-4" className="mt-1" />
-          </View>
+      <View className={METRIC_CARD_PADDING}>
+        {/* Header row: MetricIconBadge on the left (w-10 h-10 rounded-xl), the
+            info button on the right. `items-center` and mb-3 are MetricCard's
+            own; the info glyph is `<Info size={14} />`, a pixel size rather
+            than a rem one, so it is spelled out as pixels here too. */}
+        <View className="flex-row items-center justify-between mb-3">
           <SkeletonSurface className="w-10 h-10 rounded-xl" />
+          <SkeletonSurface className="w-[14px] h-[14px] rounded-full" />
         </View>
 
-        {/* value (text-3xl) */}
+        {/* title (text-sm font-semibold, mb-2) */}
+        <SkeletonLine width="w-24" line="h-5" bar="h-4" className="mb-2" />
+
+        {/* value (text-3xl font-bold) */}
         <SkeletonLine width="w-16" line="h-9" bar="h-7" />
+
         {/* subtitle (text-xs, mt-1.5) */}
-        <SkeletonLine width="w-20" line="h-4" className="mt-1.5" />
+        <SkeletonLine width="w-24" line="h-4" className="mt-1.5" />
       </View>
 
       <ShimmerOverlay
