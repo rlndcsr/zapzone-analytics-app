@@ -9,6 +9,17 @@ import {
   type ReturningLookupResult,
 } from "../lib/waivers/kioskContract";
 import { kioskAccessTokenFrom } from "../lib/waivers/kioskToken";
+import type {
+  VisitPeriodScope,
+  WaiverTimeframe,
+} from "../lib/waivers/visitPeriod";
+
+export {
+  VISIT_PERIOD_OPTIONS,
+  visitPeriodScope,
+  type VisitPeriodScope,
+  type WaiverTimeframe,
+} from "../lib/waivers/visitPeriod";
 
 export {
   adHoldSeconds,
@@ -422,10 +433,44 @@ function mapInvite(raw: RawInvite): GroupInvite {
 
 /* ------------------------------------------------------- Waiver Records -- */
 
+/**
+ * Write the date half of a request. The precedence — `all`, then a timeframe,
+ * then a single day — is the web's, and matters: sending a timeframe alongside
+ * `date` would leave the server's single-day fallback unreachable. Shared by the
+ * list and the period summary so the two always ask for the same window.
+ */
+function appendVisitPeriod(
+  params: URLSearchParams,
+  scope: VisitPeriodScope & { date?: string },
+): void {
+  if (scope.all) {
+    params.append("all", "1");
+    return;
+  }
+  if (scope.timeframe) {
+    params.append("timeframe", scope.timeframe);
+    if (scope.timeframe === "custom") {
+      if (scope.startDate) params.append("start_date", scope.startDate);
+      if (scope.endDate) params.append("end_date", scope.endDate);
+    }
+    return;
+  }
+  if (scope.date) params.append("date", scope.date);
+}
+
 export type WaiverSearchFilters = {
   status?: WaiverStatus;
   /** `all=1` ignores the date filter (browse across all dates). */
   all?: boolean;
+  /**
+   * A visit period, resolved by the same server helper the dashboard card uses
+   * so the two cannot disagree. Takes precedence over `date`.
+   */
+  timeframe?: WaiverTimeframe;
+  /** Both required by `timeframe: "custom"`; ignored otherwise. YYYY-MM-DD. */
+  startDate?: string;
+  endDate?: string;
+  /** A single venue day. The server's fallback when no timeframe is sent. */
   date?: string;
   adultName?: string;
   email?: string;
@@ -453,8 +498,7 @@ function buildWaiverParams(
     per_page: String(perPage),
     page: String(page),
   });
-  if (filters.all) params.append("all", "1");
-  else if (filters.date) params.append("date", filters.date);
+  appendVisitPeriod(params, filters);
   if (filters.status) params.append("status", filters.status);
   if (filters.adultName?.trim())
     params.append("adult_name", filters.adultName.trim());
@@ -557,9 +601,14 @@ type WaiverPeriodSummaryResponse = {
 
 /** The date scope to summarise — the same one the list request is using. */
 export type WaiverPeriodScope = {
-  /** True for "All Dates"; the backend then ignores the date window. */
+  /** True for "All Time"; the backend then ignores the date window. */
   all?: boolean;
-  /** A single venue day (YYYY-MM-DD), used when `all` is false. */
+  /** A visit period, resolved server-side exactly as the list resolves it. */
+  timeframe?: WaiverTimeframe;
+  /** Both required by `timeframe: "custom"`. YYYY-MM-DD. */
+  startDate?: string;
+  endDate?: string;
+  /** A single venue day (YYYY-MM-DD), used when neither of the above is set. */
   date?: string;
   /** Narrow to one location; omit for every location the user can read. */
   locationId?: number;
@@ -576,8 +625,7 @@ export async function fetchWaiverPeriodSummary(
   signal?: AbortSignal,
 ): Promise<WaiverPeriodSummary | null> {
   const params = new URLSearchParams();
-  if (scope.all) params.append("all", "1");
-  else if (scope.date) params.append("date", scope.date);
+  appendVisitPeriod(params, scope);
   if (scope.locationId != null)
     params.append("location_id", String(scope.locationId));
 

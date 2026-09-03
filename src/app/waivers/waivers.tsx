@@ -21,7 +21,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
+import {
+  DateRangeSheet,
+  formatShortDate,
+} from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import {
@@ -56,6 +59,9 @@ import {
   type WaiverSearchFilters,
   type WaiverSource,
   type WaiverStatus,
+  VISIT_PERIOD_OPTIONS,
+  visitPeriodScope,
+  type WaiverTimeframe,
 } from "../../services/waiversService";
 
 const PRIMARY = "#0644C7";
@@ -186,11 +192,9 @@ const STATUS_OPTIONS: { label: string; value: WaiverStatus }[] = [
   { label: "Replaced", value: "replaced" },
 ];
 
-type DateFilter = "all" | "today";
-const DATE_OPTIONS: { label: string; value: DateFilter }[] = [
-  { label: "All Dates", value: "all" },
-  { label: "Today", value: "today" },
-];
+/** The web Records page's Visit Period dropdown, defined once in lib/waivers. */
+type DateFilter = WaiverTimeframe;
+const DATE_OPTIONS = VISIT_PERIOD_OPTIONS;
 
 const PER_PAGE_OPTIONS = [5, 10, 25, 50];
 
@@ -318,6 +322,10 @@ const Waivers = () => {
 
   const [statusFilter, setStatusFilter] = useState<WaiverStatus>("completed");
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
+  /** Endpoints for "Custom Range"; both default to today, as on the web. */
+  const [customFrom, setCustomFrom] = useState(() => todayKey());
+  const [customTo, setCustomTo] = useState(() => todayKey());
+  const [showRangePicker, setShowRangePicker] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sheet, setSheet] = useState<null | "status" | "date" | "manage">(null);
@@ -364,16 +372,25 @@ const Waivers = () => {
     return () => clearTimeout(t);
   }, [search]);
 
+  /**
+   * The date half of a request. Shared by the list and the summary line so the
+   * two always count the same period — they are shown side by side, and a
+   * mismatch reads as a bug in the data rather than in the filter.
+   */
+  const dateScope = useMemo(
+    () => visitPeriodScope(dateFilter, customFrom, customTo),
+    [dateFilter, customFrom, customTo],
+  );
+
   // Reset to page 1 whenever a filter changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, dateFilter, debouncedSearch, perPage, filters]);
+  }, [statusFilter, dateScope, debouncedSearch, perPage, filters]);
 
   const searchFilters = useMemo<WaiverSearchFilters>(
     () => ({
       status: statusFilter,
-      all: dateFilter === "all",
-      date: dateFilter === "today" ? todayKey() : undefined,
+      ...dateScope,
       adultName: debouncedSearch || undefined,
       source:
         filters.source === "all" ? undefined : (filters.source as WaiverSource),
@@ -384,7 +401,7 @@ const Waivers = () => {
     }),
     [
       statusFilter,
-      dateFilter,
+      dateScope,
       debouncedSearch,
       filters.source,
       filters.marketing,
@@ -402,13 +419,7 @@ const Waivers = () => {
   // exactly why the counts and the dashboard looked like they disagreed.
   // Not narrowed by the workspace location, matching the list request (which
   // applies location client-side), so the two counts stay comparable.
-  const periodScope = useMemo(
-    () => ({
-      all: dateFilter === "all",
-      date: dateFilter === "today" ? todayKey() : undefined,
-    }),
-    [dateFilter],
-  );
+  const periodScope = useMemo(() => ({ ...dateScope }), [dateScope]);
   const { summary: periodSummary } = useWaiverPeriodSummary(
     periodScope,
     statsNonce,
@@ -436,8 +447,12 @@ const Waivers = () => {
 
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "Completed";
+  // A custom range names its own dates — "Custom Range" alone would not tell
+  // the user which period they are looking at.
   const dateLabel =
-    DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "Today";
+    dateFilter === "custom"
+      ? `${formatShortDate(customFrom)} – ${formatShortDate(customTo)}`
+      : (DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "Today");
 
   // Template + location choices derived from the loaded page, exactly as the
   // web builds its Template / Location filter options.
@@ -1007,9 +1022,14 @@ const Waivers = () => {
               <Pressable
                 key={option.value}
                 onPress={() => {
-                  setDateFilter(option.value);
                   setSheet(null);
+                  // A custom range is not a period until both ends are picked,
+                  // so the calendar opens before the filter is applied.
+                  if (option.value === "custom") setShowRangePicker(true);
+                  else setDateFilter(option.value);
                 }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
                 className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
@@ -1033,6 +1053,22 @@ const Waivers = () => {
           })}
         </ScrollView>
       </BottomSheet>
+
+      {/* Custom range calendar — the mobile stand-in for the web's two date
+          inputs. Applying it is what commits the "custom" period; closing
+          without applying leaves the previous period in place. */}
+      <DateRangeSheet
+        visible={showRangePicker}
+        initialStart={customFrom}
+        initialEnd={customTo}
+        onClose={() => setShowRangePicker(false)}
+        onApply={(start, end) => {
+          setCustomFrom(start);
+          setCustomTo(end);
+          setDateFilter("custom");
+          setShowRangePicker(false);
+        }}
+      />
 
       {/* Manage — sub-module navigation plus Export. Group Invites isn't listed
           here; it has its own card in the shortcut grid above. */}
