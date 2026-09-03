@@ -528,7 +528,7 @@ const Location = () => {
               </View>
 
               {loading ? (
-                <OverviewCardsSkeleton />
+                <OverviewCardsSkeleton count={perPage} />
               ) : (
                 <>
                   {paged.map((loc) => (
