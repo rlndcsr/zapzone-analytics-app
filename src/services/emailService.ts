@@ -551,7 +551,9 @@ type RawNotificationDetail = RawNotification & {
   send_after_hours?: number | null;
   email_template_id?: number | null;
   location?: { name?: string | null } | null;
-  email_template?: { name?: string | null } | null;
+  /** The serialized relation, which the API names `template` — not to be
+   *  confused with `email_template_id`, the write-payload column above. */
+  template?: { name?: string | null } | null;
   created_at?: string | null;
 };
 
@@ -576,7 +578,7 @@ export async function fetchEmailNotificationDetail(
     customEmails: Array.isArray(d.custom_emails) ? d.custom_emails : [],
     subject: d.subject?.trim() || "",
     body: d.body ?? "",
-    templateName: d.email_template?.name ?? null,
+    templateName: d.template?.name ?? null,
     emailTemplateId: d.email_template_id ?? null,
     includeQrCode: !!d.include_qr_code,
     isActive: d.is_active !== false,
