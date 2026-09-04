@@ -5,9 +5,18 @@ import { ApiError, apiRequest, apiUrl } from "../lib/api";
 /* Shared                                                              */
 /* ================================================================== */
 
-type RangeParams = { token: string; from?: string; to?: string; locationId?: number };
+type RangeParams = {
+  token: string;
+  from?: string;
+  to?: string;
+  locationId?: number;
+};
 
-function rangeQuery({ from, to, locationId }: Omit<RangeParams, "token">): string {
+function rangeQuery({
+  from,
+  to,
+  locationId,
+}: Omit<RangeParams, "token">): string {
   const qs = new URLSearchParams();
   if (from) qs.append("from", from);
   if (to) qs.append("to", to);
@@ -38,7 +47,12 @@ export type PageOverview = {
   avgDurationMs: number;
 };
 
-export async function fetchPageOverview({ token, from, to, locationId }: RangeParams): Promise<PageOverview> {
+export async function fetchPageOverview({
+  token,
+  from,
+  to,
+  locationId,
+}: RangeParams): Promise<PageOverview> {
   const res = await apiRequest<{ data?: Record<string, unknown> }>(
     `/api/page-analytics/overview${rangeQuery({ from, to, locationId })}`,
     { token },
@@ -60,16 +74,30 @@ export async function fetchPageOverview({ token, from, to, locationId }: RangePa
 
 export type PageLive = { activeVisitors: number; activeSessions: number };
 
-export async function fetchPageLive({ token, locationId }: { token: string; locationId?: number }): Promise<PageLive> {
+export async function fetchPageLive({
+  token,
+  locationId,
+}: {
+  token: string;
+  locationId?: number;
+}): Promise<PageLive> {
   const res = await apiRequest<{ data?: Record<string, unknown> }>(
     `/api/page-analytics/live${rangeQuery({ locationId })}`,
     { token },
   );
   const d = res.data ?? {};
-  return { activeVisitors: num(d.active_visitors), activeSessions: num(d.active_sessions) };
+  return {
+    activeVisitors: num(d.active_visitors),
+    activeSessions: num(d.active_sessions),
+  };
 }
 
-export type TimeseriesPoint = { bucket: string; views: number; conversions: number; revenue: number };
+export type TimeseriesPoint = {
+  bucket: string;
+  views: number;
+  conversions: number;
+  revenue: number;
+};
 
 export async function fetchPageTimeseries({
   token,
@@ -77,10 +105,11 @@ export async function fetchPageTimeseries({
   to,
   locationId,
 }: RangeParams): Promise<{ bucket: string; series: TimeseriesPoint[] }> {
-  const res = await apiRequest<{ data?: { bucket?: string; series?: Record<string, unknown>[] } }>(
-    `/api/page-analytics/timeseries${rangeQuery({ from, to, locationId })}`,
-    { token },
-  );
+  const res = await apiRequest<{
+    data?: { bucket?: string; series?: Record<string, unknown>[] };
+  }>(`/api/page-analytics/timeseries${rangeQuery({ from, to, locationId })}`, {
+    token,
+  });
   const series = (res.data?.series ?? []).map((r) => ({
     bucket: String(r.bucket ?? ""),
     views: num(r.page_views),
@@ -90,7 +119,12 @@ export async function fetchPageTimeseries({
   return { bucket: res.data?.bucket ?? "day", series };
 }
 
-export type TopPage = { path: string; views: number; conversions: number; revenue: number };
+export type TopPage = {
+  path: string;
+  views: number;
+  conversions: number;
+  revenue: number;
+};
 
 export async function fetchTopPages(p: RangeParams): Promise<TopPage[]> {
   const res = await apiRequest<{ data?: Record<string, unknown>[] }>(
@@ -134,10 +168,17 @@ export async function fetchTopEntities(
 
 export type TrafficSources = {
   direct: { visits: number; conversions: number; revenue: number };
-  referrers: { referrer: string; visits: number; conversions: number; revenue: number }[];
+  referrers: {
+    referrer: string;
+    visits: number;
+    conversions: number;
+    revenue: number;
+  }[];
 };
 
-export async function fetchTrafficSources(p: RangeParams): Promise<TrafficSources> {
+export async function fetchTrafficSources(
+  p: RangeParams,
+): Promise<TrafficSources> {
   const res = await apiRequest<{ data?: Record<string, unknown> }>(
     `/api/page-analytics/sources${rangeQuery(p)}`,
     { token: p.token },
@@ -162,15 +203,19 @@ export async function fetchTrafficSources(p: RangeParams): Promise<TrafficSource
 
 export type DeviceSlice = { label: string; views: number };
 
-export async function fetchDevices(
-  p: RangeParams,
-): Promise<{ devices: DeviceSlice[]; browsers: DeviceSlice[]; oses: DeviceSlice[] }> {
-  const res = await apiRequest<{ data?: Record<string, Record<string, unknown>[]> }>(
-    `/api/page-analytics/devices${rangeQuery(p)}`,
-    { token: p.token },
-  );
+export async function fetchDevices(p: RangeParams): Promise<{
+  devices: DeviceSlice[];
+  browsers: DeviceSlice[];
+  oses: DeviceSlice[];
+}> {
+  const res = await apiRequest<{
+    data?: Record<string, Record<string, unknown>[]>;
+  }>(`/api/page-analytics/devices${rangeQuery(p)}`, { token: p.token });
   const d = res.data ?? {};
-  const pick = (rows: Record<string, unknown>[] | undefined, key: string): DeviceSlice[] =>
+  const pick = (
+    rows: Record<string, unknown>[] | undefined,
+    key: string,
+  ): DeviceSlice[] =>
     (rows ?? []).map((r) => ({
       label: String(r[key] ?? r.label ?? "Unknown") || "Unknown",
       views: num(r.views),
@@ -195,9 +240,16 @@ export async function fetchFunnel(p: RangeParams): Promise<FunnelStep[]> {
   }));
 }
 
-export type LandingPage = { path: string; sessions: number; conversions: number; revenue: number };
+export type LandingPage = {
+  path: string;
+  sessions: number;
+  conversions: number;
+  revenue: number;
+};
 
-export async function fetchLandingPages(p: RangeParams): Promise<LandingPage[]> {
+export async function fetchLandingPages(
+  p: RangeParams,
+): Promise<LandingPage[]> {
   const res = await apiRequest<{ data?: Record<string, unknown>[] }>(
     `/api/page-analytics/landing-pages${rangeQuery(p)}`,
     { token: p.token },
@@ -219,7 +271,9 @@ export type ConversionRow = {
   utmCampaign: string;
 };
 
-export async function fetchRecentConversions(p: RangeParams): Promise<ConversionRow[]> {
+export async function fetchRecentConversions(
+  p: RangeParams,
+): Promise<ConversionRow[]> {
   const res = await apiRequest<{ data?: Record<string, unknown>[] }>(
     `/api/page-analytics/conversions${rangeQuery(p)}`,
     { token: p.token },
@@ -296,26 +350,20 @@ function mapSummary(s: RawCatSummary): AccountingSummary {
   };
 }
 
-/**
- * GET /api/accounting-analytics/report.
- *
- * `locationId: null` asks for every location the caller may see — the backend's
- * `"all"` convention. Scoping stays server-side: a location manager or attendant
- * who asks for "all" is still pinned to their own location, and a company admin
- * gets their company. The response names the scope it actually ran on.
- */
 export async function fetchAccountingReport({
   token,
   locationId,
   startDate,
   endDate,
   viewMode = "booked_on",
+  categoryFilter,
 }: {
   token: string;
   locationId: number | null;
   startDate: string;
   endDate?: string;
   viewMode?: "booked_on" | "booked_for";
+  categoryFilter?: string;
 }): Promise<AccountingReport> {
   const qs = new URLSearchParams({
     location_id: accountingLocationParam(locationId),
@@ -323,6 +371,7 @@ export async function fetchAccountingReport({
     view_mode: viewMode,
   });
   if (endDate) qs.append("end_date", endDate);
+  if (categoryFilter) qs.append("category_filter", categoryFilter);
 
   const res = await apiRequest<{ data?: Record<string, unknown> }>(
     `/api/accounting-analytics/report?${qs.toString()}`,
@@ -347,7 +396,11 @@ export async function fetchAccountingReport({
     }));
     return {
       name: String(c.name ?? "—"),
-      informational: !!c.informational || String(c.name ?? "").toLowerCase().includes("add-on"),
+      informational:
+        !!c.informational ||
+        String(c.name ?? "")
+          .toLowerCase()
+          .includes("add-on"),
       itemCount: items.length,
       total: num(catSummary.gross_sales),
       items,
@@ -369,11 +422,6 @@ export async function fetchAccountingReport({
 /* Performance (company) Analytics                                     */
 /* ================================================================== */
 
-/**
- * One `key_metrics` entry. The backend sends either a period-over-period
- * `change` string ("+12.5% vs last period") or a static `info` note, never
- * both — the web colors `change` green/red by its sign and leaves `info` gray.
- */
 export type KeyMetric = {
   value: number;
   change: string | null;
@@ -381,7 +429,6 @@ export type KeyMetric = {
   trend: "up" | "down" | null;
 };
 
-/** The web's `key_metrics` block; the last two are only sent when events exist. */
 export type KeyMetrics = {
   totalRevenue: KeyMetric;
   totalLocations: KeyMetric;
@@ -393,21 +440,15 @@ export type KeyMetrics = {
   activeEvents: KeyMetric | null;
 };
 
-/** The backend `waivers` block: KPI summary plus the three chart series. */
 export type WaiverAnalytics = {
   summary: WaiverSummary;
-  /** Waivers created per bucket; longer ranges are grouped by month. */
   perDay: { label: string; count: number }[];
   ageBrackets: { bracket: string; count: number }[];
-  /**
-   * The covered minors' ages as of each waiver's date. Empty when no signed
-   * waiver in the period listed a minor with a date of birth.
-   */
+
   minorAgeBrackets: { bracket: string; count: number }[];
   bySource: { source: string; count: number }[];
 };
 
-/** Backend `waivers.summary`; the whole block is absent when waivers are unused. */
 export type WaiverSummary = {
   total: number;
   completed: number;
@@ -424,16 +465,16 @@ export type WaiverSummary = {
 };
 
 export type PerformanceReport = {
-  /** Company header — drives the "All N locations" subtitle. */
   company: { id: number | null; name: string; totalLocations: number };
-  /** The six-to-eight KPI cards above the charts. */
   keyMetrics: KeyMetrics;
-  /** Every location the filter can pick from (backend `available_locations`). */
   availableLocations: { id: number; name: string }[];
-  /** Daily/monthly trend: revenue (left axis) + package bookings (right axis). */
   revenueTrend: { label: string; revenue: number; bookings: number }[];
-  /** Per-location revenue + package count (bar chart + Top Locations table). */
-  locationPerformance: { name: string; locationId: number | null; revenue: number; packages: number }[];
+  locationPerformance: {
+    name: string;
+    locationId: number | null;
+    revenue: number;
+    packages: number;
+  }[];
   packageDistribution: { name: string; value: number; count: number }[];
   peakHours: { hour: string; count: number }[];
   dailyPerformance: { day: string; revenue: number; participants: number }[];
@@ -570,12 +611,6 @@ export async function fetchCompanyAnalytics({
 /* Performance (location) Analytics                                    */
 /* ================================================================== */
 
-/**
- * The web's `/manager/analytics` payload (`GET /api/analytics/location`) — a
- * different report from the company one above: it is scoped to the manager's
- * own location and carries hourly/weekly series the company report has no
- * equivalent for.
- */
 export type LocationReport = {
   location: { id: number | null; name: string; fullAddress: string };
   keyMetrics: {
@@ -643,20 +678,12 @@ export type LocationReport = {
   }[];
 };
 
-/**
- * A period-over-period metric. The web appends "vs last period" to every
- * `change` string on this page, so do it here rather than in the screen.
- */
 function mapChangeMetric(raw: unknown): KeyMetric | null {
   const m = mapKeyMetric(raw);
   if (!m) return null;
   return { ...m, change: m.change ? `${m.change} vs last period` : null };
 }
 
-/**
- * An "N of M active" metric (active packages / attractions / events). The web
- * shows that sentence in the change slot and always colors it green.
- */
 function mapActiveMetric(raw: unknown): KeyMetric | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -670,7 +697,8 @@ function mapActiveMetric(raw: unknown): KeyMetric | null {
 }
 
 /** Thousands-separated, matching the screens' own formatting. */
-const count = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+const count = (n: number) =>
+  n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 /** "Mon, Jan 5" — the web's `displayDate` for the Daily Performance axis. */
 function dailyLabel(day: string, date: string): string {
@@ -788,12 +816,7 @@ export async function fetchLocationAnalytics({
 
 /** The web's export modal sections, same ids and order. */
 export type LocationExportSection =
-  | "metrics"
-  | "revenue"
-  | "packages"
-  | "attractions"
-  | "timeslots"
-  | "events";
+  "metrics" | "revenue" | "packages" | "attractions" | "timeslots" | "events";
 
 /**
  * POST /api/analytics/location/export — returns the raw file body. Bypasses
