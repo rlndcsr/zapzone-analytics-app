@@ -20,6 +20,7 @@ import { formatDurationDisplay } from "../../lib/attractions/attractionDisplay";
 import { mediaUrl } from "../../lib/api";
 import { getToken } from "../../lib/session";
 import { formatTimeRange } from "../../lib/time";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   deleteAttraction,
   duplicateAttraction,
@@ -375,7 +376,7 @@ export function AttractionActionsSheet({
             <View className="flex-row items-center gap-2 mt-1">
               <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
                 <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                  {detail.category}
+                  {normalizeCategory(detail.category)}
                 </Text>
               </View>
               <StatusBadge status={detail.status} />
@@ -424,7 +425,11 @@ export function AttractionActionsSheet({
 
             <SectionTitle>Attraction Details</SectionTitle>
             <View className="flex-row flex-wrap -mx-1.5">
-              <DetailTile icon="tag" label="Category" value={detail.category} />
+              <DetailTile
+                icon="tag"
+                label="Category"
+                value={normalizeCategory(detail.category)}
+              />
               <DetailTile
                 icon="dollar-sign"
                 label="Price"

@@ -37,8 +37,8 @@ import {
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import {
   ALL_CATEGORIES,
-  buildCategoryOptions,
   CategoryChips,
+  buildCategoryOptions,
 } from "../../components/ui/CategoryChips";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
@@ -72,6 +72,7 @@ import {
 } from "../../lib/hooks/useAttractions";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   bulkDeleteAttractions,
   bulkSetAttractionsActive,
@@ -124,12 +125,6 @@ const KpiCard = ({
   </View>
 );
 
-/**
- * One of the module's square shortcut cards (Check-in, Manage Purchases, Create
- * Purchase). They wrap two-per-row, so the cards are sized by their container
- * rather than their content and every one of them is built from here — a third
- * shortcut cannot drift from the first two.
- */
 const ShortcutCard = ({
   icon,
   title,
@@ -140,7 +135,6 @@ const ShortcutCard = ({
   icon: FeatherIconName;
   title: string;
   subtitle: string;
-  /** The blue call to action in the card's footer. */
   action: string;
   route: string;
 }) => (
@@ -150,9 +144,6 @@ const ShortcutCard = ({
     accessibilityLabel={title}
     className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
     style={{
-      // Structural, so it is a style and not a `w-[48%]` class: a utility that
-      // has not made it into the generated stylesheet yet would collapse the
-      // card to its content width and break the grid.
       width: "48%",
       shadowColor: "#424242",
       shadowOffset: { width: 0, height: 1 },
@@ -193,8 +184,6 @@ const Attractions = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  // Scope to the global workspace location (company_admin); managers stay
-  // backend-scoped. Reactive so switching location refetches server-side.
   const activeLocation = useActiveLocation();
   const activeLocationId =
     activeLocation.id === "all" ? undefined : activeLocation.id;
@@ -209,7 +198,6 @@ const Attractions = () => {
   );
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showColumnsSheet, setShowColumnsSheet] = useState(false);
-  // Which table columns are on. Starts at the web's default-visible set.
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
     defaultAttractionColumnKeys,
   );
@@ -219,20 +207,13 @@ const Attractions = () => {
   const [showExportSheet, setShowExportSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
     useState<AttractionRow | null>(null);
-  // Row whose "Set Status" picker sheet is open; `statusBusy` locks it while
-  // the activate/deactivate PATCH is in flight.
   const [statusAttraction, setStatusAttraction] =
     useState<AttractionRow | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
-  // Presentation layout only — table by default, card view on toggle. Kept in
-  // component state so it survives filter/search/page changes while mounted and
-  // never triggers a refetch (both layouts read the same `paged` collection).
   const [viewMode, setViewMode] = useState<ViewMode>("table");
-  // Bulk-selection (table view only). Single source of truth for which rows are
-  // selected; `bulkBusy` marks the in-flight bulk action so the toolbar locks.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState<BulkAction | null>(null);
 
@@ -245,29 +226,19 @@ const Attractions = () => {
     }
   }, [refetch]);
 
-  // After creating an attraction, refetch on return so the new item + KPIs show
-  // without a manual pull-to-refresh.
   useFocusEffect(
     useCallback(() => {
       if (consumeAttractionsStale()) refetch();
     }, [refetch]),
   );
 
-  // The global workspace location already scopes the fetch server-side, so the
-  // loaded list is the location-scoped set for the KPIs and the list.
   const locationScoped = attractions;
 
-  // Category options derived from the (location-scoped) data — no extra call.
-  // One counted list feeds both the chips and the sheet's Category dropdown, so
-  // the two surfaces always offer the same choices.
   const categories = useMemo(
     () => buildCategoryOptions(locationScoped.map((a) => a.category)),
     [locationScoped],
   );
 
-  // Drop a selection the visible set no longer holds (e.g. after switching
-  // location), so the list can never be filtered down to nothing by a key with
-  // no chip left to clear it — the same rule the calendar tabs follow.
   useEffect(() => {
     if (
       filters.category !== ALL_CATEGORIES &&
@@ -277,8 +248,6 @@ const Attractions = () => {
     }
   }, [categories, filters.category]);
 
-  // KPI values — identical math to the web /attractions metrics, computed over
-  // the location-scoped set so the cards react to the location filter.
   const kpis = useMemo(() => {
     const total = locationScoped.length;
     const active = locationScoped.filter((a) => a.status === "active").length;
@@ -291,10 +260,6 @@ const Attractions = () => {
     return { total, active, inactive, avgPrice, capacity };
   }, [locationScoped]);
 
-  // Search + the full web-admin filter set over the location-scoped data, in the
-  // web table's row order. Predicate semantics mirror the web `useAdminTable`
-  // exactly (select equality, inclusive numeric ranges with empty = unbounded,
-  // inclusive YYYY-MM-DD created-date range). All client-side, like the web.
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     const priceMin =
@@ -322,7 +287,6 @@ const Attractions = () => {
         )
           return false;
         if (filters.durationType !== "all") {
-          // 0/null duration = "Unlimited" (matches web isUnlimitedDuration).
           const unlimited = !a.duration;
           if (filters.durationType === "unlimited" && !unlimited) return false;
           if (filters.durationType === "timed" && unlimited) return false;
@@ -347,8 +311,9 @@ const Attractions = () => {
           if (createdEnd && date > createdEnd) return false;
         }
         if (term) {
+          const category = normalizeCategory(a.category);
           const haystack =
-            `${a.name} ${a.description} ${a.locationName} ${a.category}`.toLowerCase();
+            `${a.name} ${a.description} ${a.locationName} ${category}`.toLowerCase();
           if (!haystack.includes(term)) return false;
         }
         return true;
@@ -356,22 +321,16 @@ const Attractions = () => {
       .sort(compareAttractionsByDisplayOrder);
   }, [locationScoped, search, filters]);
 
-  // Client-side pagination over the filtered list (matches the notifications
-  // pagination: 5 / 10 / 15 per page with Previous / Next).
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page, perPage],
   );
 
-  // Reset to the first page whenever the filters or page size change so we
-  // never land on a now-empty page.
   useEffect(() => {
     setPage(1);
   }, [search, filters, activeLocationId, perPage]);
 
-  // Keep the current page valid after the list shrinks (e.g. a bulk delete):
-  // clamp down so the user stays on the nearest still-populated page.
   useEffect(() => {
     if (page > lastPage) setPage(lastPage);
   }, [page, lastPage]);

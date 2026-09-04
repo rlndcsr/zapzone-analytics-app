@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 
+import { normalizeCategory } from "../../lib/venueCategories";
 import type { AttractionRow } from "../../services/attractionsService";
 import { BottomSheet } from "./BottomSheet";
 
@@ -73,6 +74,9 @@ export function AttractionsExportSheet({
     try {
       const FileSystem = await import("expo-file-system/legacy");
       const Sharing = await import("expo-sharing");
+      // `a.category` is the stored value, never the normalized display one: the
+      // Import sheet reads this file back, so normalizing here would rewrite a
+      // stored "Advanced" to "Escape Room" and lose the difficulty.
       const cleaned = chosen.map((a) => ({
         name: a.name,
         description: a.description,
@@ -175,7 +179,7 @@ export function AttractionsExportSheet({
                   </Text>
                   <View className="flex-row items-center gap-1.5 mt-0.5">
                     <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {a.category} • {money(a.price)}
+                      {normalizeCategory(a.category)} • {money(a.price)}
                     </Text>
                     <Text
                       className={`text-xs font-semibold capitalize ${

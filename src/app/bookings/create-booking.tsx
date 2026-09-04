@@ -62,6 +62,7 @@ import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
 import { formatDuration } from "../../lib/time";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -1494,7 +1495,7 @@ const CreateBookingScreen = () => {
                               <View className="flex-row items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
                                 <Feather name="tag" size={10} color="#6B7280" />
                                 <Text className="text-[11px] text-gray-700 dark:text-gray-200">
-                                  {p.category}
+                                  {normalizeCategory(p.category)}
                                 </Text>
                               </View>
                             )}
@@ -2121,7 +2122,7 @@ const CreateBookingScreen = () => {
                   {!!pkg.category && (
                     <View className="rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
                       <Text className="text-[11px] text-gray-700 dark:text-gray-200">
-                        {pkg.category}
+                        {normalizeCategory(pkg.category)}
                       </Text>
                     </View>
                   )}
@@ -2704,7 +2705,7 @@ const CreateBookingScreen = () => {
                     </Text>
                     {!!pkg.category && (
                       <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                        {pkg.category}
+                        {normalizeCategory(pkg.category)}
                       </Text>
                     )}
                     <Text className="mt-1 text-lg font-bold text-gray-900 dark:text-white">

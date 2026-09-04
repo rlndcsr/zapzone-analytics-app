@@ -21,6 +21,7 @@ import {
   usePackages,
 } from "../../lib/hooks/usePackages";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   deletePackage,
   togglePackageStatus,
@@ -115,7 +116,7 @@ const CustomPackages = () => {
     return packages.filter(
       (p) =>
         p.name.toLowerCase().includes(term) ||
-        p.category.toLowerCase().includes(term) ||
+        normalizeCategory(p.category).toLowerCase().includes(term) ||
         p.locationName.toLowerCase().includes(term),
     );
   }, [packages, search]);
@@ -380,7 +381,7 @@ const CustomPackages = () => {
                     {!!pkg.category && (
                       <View className="rounded-md border border-blue-100 bg-blue-50 px-2.5 py-1 dark:border-blue-800 dark:bg-blue-900/30">
                         <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                          {pkg.category}
+                          {normalizeCategory(pkg.category)}
                         </Text>
                       </View>
                     )}

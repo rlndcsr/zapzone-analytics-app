@@ -57,6 +57,7 @@ import {
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -1171,7 +1172,7 @@ const ManualBookingScreen = () => {
                       {!!pkg.category && (
                         <View className="px-1.5 py-0.5 rounded bg-[#0644C7]/10">
                           <Text className="text-[10px] font-medium text-[#0644C7]">
-                            {pkg.category}
+                            {normalizeCategory(pkg.category)}
                           </Text>
                         </View>
                       )}
@@ -1250,7 +1251,7 @@ const ManualBookingScreen = () => {
                               {!!p.category && (
                                 <View className="px-1.5 py-0.5 rounded bg-[#0644C7]/10">
                                   <Text className="text-[10px] font-medium text-[#0644C7]">
-                                    {p.category}
+                                    {normalizeCategory(p.category)}
                                   </Text>
                                 </View>
                               )}

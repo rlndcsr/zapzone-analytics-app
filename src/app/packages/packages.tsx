@@ -33,6 +33,7 @@ import {
 } from "../../lib/hooks/usePackages";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   bulkImportPackages,
   deletePackage,
@@ -234,12 +235,16 @@ const Packages = () => {
     null | "import" | "export" | "delete"
   >(null);
 
-  // Filter options derived from the fetched data.
+  // Filter options derived from the fetched data. Normalized on the way in, so
+  // the escape-room difficulties ("Beginner", "Advanced", …) collapse into one
+  // "Escape Room" chip instead of one chip each — as on the web.
   const categoryOptions = useMemo(
     () => [
       "All Categories",
       ...Array.from(
-        new Set(packages.map((p) => p.category).filter(Boolean)),
+        new Set(
+          packages.map((p) => normalizeCategory(p.category)).filter(Boolean),
+        ),
       ).sort(),
     ],
     [packages],
@@ -265,8 +270,10 @@ const Packages = () => {
         !query ||
         p.name.toLowerCase().includes(query) ||
         p.description.toLowerCase().includes(query);
+      // Both sides normalize, so the chip and the rows it selects still agree.
       const matchesCategory =
-        category === "All Categories" || p.category === category;
+        category === "All Categories" ||
+        normalizeCategory(p.category) === normalizeCategory(category);
       const matchesLocation =
         activeLocation.id === "all" || p.locationName === activeLocation.name;
       return matchesSearch && matchesCategory && matchesLocation;
@@ -284,8 +291,8 @@ const Packages = () => {
         aValue = Number(a.price) || 0;
         bValue = Number(b.price) || 0;
       } else if (sortKey === "Category") {
-        aValue = a.category.toLowerCase();
-        bValue = b.category.toLowerCase();
+        aValue = normalizeCategory(a.category).toLowerCase();
+        bValue = normalizeCategory(b.category).toLowerCase();
       } else {
         // Display Order
         aValue = a.displayOrder;
@@ -496,6 +503,9 @@ const Packages = () => {
     }
     setBusyAction("export");
     try {
+      // `p.category` is the stored value, never the normalized display one: the
+      // export feeds the bulk import back, so normalizing here would rewrite a
+      // stored "Advanced" to "Escape Room" and lose the difficulty.
       const rows = filtered.map((p) => ({
         name: p.name,
         description: p.description,
@@ -924,7 +934,7 @@ const Packages = () => {
                     <View className="flex-row items-center gap-2 mt-3">
                       <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-md">
                         <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                          {pkg.category}
+                          {normalizeCategory(pkg.category)}
                         </Text>
                       </View>
                       {pkg.bufferHours != null && (

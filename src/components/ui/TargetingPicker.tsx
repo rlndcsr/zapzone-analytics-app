@@ -10,6 +10,7 @@ import {
 } from "react-native";
 
 import { getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   fetchTargetingOptions,
   type TargetingItem,
@@ -200,11 +201,14 @@ export function TargetingPicker({
     return map;
   }, [options]);
 
+  // Deduped on the normalized value, so the escape-room difficulties collapse
+  // into one "Escape Room" chip rather than one chip per difficulty.
   const categories = useMemo(() => {
     const all = new Set<string>();
     GROUPS.forEach((g) =>
       (options?.[g.key] ?? []).forEach((item) => {
-        if (item.category) all.add(item.category);
+        const c = normalizeCategory(item.category);
+        if (c) all.add(c);
       }),
     );
     return [...all].sort();
@@ -218,11 +222,14 @@ export function TargetingPicker({
     const term = search.trim().toLowerCase();
     return items.filter((item) => {
       if (venueScope.length && !venueScope.includes(item.locationId)) return false;
-      if (categoryFilter.length && !categoryFilter.includes(item.category))
+      if (
+        categoryFilter.length &&
+        !categoryFilter.includes(normalizeCategory(item.category))
+      )
         return false;
       if (
         term &&
-        !`${item.name} ${venueName[item.locationId] ?? ""} ${item.category}`
+        !`${item.name} ${venueName[item.locationId] ?? ""} ${normalizeCategory(item.category)}`
           .toLowerCase()
           .includes(term)
       )
@@ -489,7 +496,9 @@ export function TargetingPicker({
                     name={item.name}
                     subtitle={
                       `${venueName[item.locationId] ?? `Venue ${item.locationId}`}` +
-                      (item.category ? ` · ${item.category}` : "")
+                      (normalizeCategory(item.category)
+                        ? ` · ${normalizeCategory(item.category)}`
+                        : "")
                     }
                     disabled={disabled}
                     onPress={() => toggle(group.axis, item.id)}

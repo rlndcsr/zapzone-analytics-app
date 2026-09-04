@@ -12,6 +12,7 @@ import {
 
 import { getToken } from "../../lib/session";
 import { formatDuration, formatTimeRange } from "../../lib/time";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   deletePackage,
   duplicatePackage,
@@ -301,7 +302,7 @@ export function PackageActionsSheet({
               </Text>
               <View className="flex-row items-center gap-2 mt-1.5">
                 <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  {detail.category || "No category"}
+                  {normalizeCategory(detail.category) || "No category"}
                 </Text>
                 <StatusBadge status={detail.isActive ? "active" : "inactive"} />
               </View>
@@ -338,7 +339,7 @@ export function PackageActionsSheet({
                 <DetailTile
                   icon="tag"
                   label="Category"
-                  value={detail.category || "No category"}
+                  value={normalizeCategory(detail.category) || "No category"}
                 />
                 {!!detail.packageType && (
                   <DetailTile

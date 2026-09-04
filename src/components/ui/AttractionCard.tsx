@@ -10,6 +10,7 @@ import {
   formatCreatedAt,
   formatMoney,
 } from "../../lib/attractions/attractionDisplay";
+import { normalizeCategory } from "../../lib/venueCategories";
 import type { AttractionRow } from "../../services/attractionsService";
 
 /**
@@ -81,7 +82,7 @@ export const AttractionCard = ({
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
         <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
           <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-            {attraction.category}
+            {normalizeCategory(attraction.category)}
           </Text>
         </View>
         <Text className="text-sm font-bold text-gray-900 dark:text-white">

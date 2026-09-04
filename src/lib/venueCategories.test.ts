@@ -89,3 +89,79 @@ describe("what the helper deliberately leaves alone", () => {
     assert.equal(normalizeCategory(undefined), "");
   });
 });
+
+/**
+ * The screens keep their rows raw and normalize at each read site instead, so
+ * these cover the four shapes that read sites take. They mirror the actual
+ * expressions in packages.tsx, custom-packages.tsx, attractions.tsx,
+ * create-purchase.tsx and TargetingPicker.tsx — if one of those is rewritten to
+ * compare or serialise a category differently, the matching case here is what
+ * says whether the new shape still holds.
+ */
+describe("the read-side shapes the screens use", () => {
+  const rows = [
+    { name: "Vault Break", category: "Beginner", price: 30 },
+    { name: "Lost Tomb", category: "Advanced", price: 45 },
+    { name: "Cell Block", category: "Escape Room", price: 40 },
+    { name: "Lane Party", category: "Bowling", price: 25 },
+    { name: "Unfiled", category: "", price: 10 },
+  ];
+
+  it("collapses the aliases into one filter option", () => {
+    // packages.tsx `categoryOptions`, TargetingPicker's `categories`.
+    const options = Array.from(
+      new Set(rows.map((r) => normalizeCategory(r.category)).filter(Boolean)),
+    ).sort();
+
+    assert.deepEqual(options, ["Bowling", ESCAPE_ROOM_CATEGORY]);
+  });
+
+  it("selects every variant when both sides of the filter normalize", () => {
+    // packages.tsx `matchesCategory`. The chip carries the normalized label,
+    // the rows carry the stored word — only normalizing both makes them agree.
+    const selected = ESCAPE_ROOM_CATEGORY;
+    const matched = rows.filter(
+      (r) => normalizeCategory(r.category) === normalizeCategory(selected),
+    );
+
+    assert.deepEqual(
+      matched.map((r) => r.name),
+      ["Vault Break", "Lost Tomb", "Cell Block"],
+    );
+  });
+
+  it("would miss the difficulties if only one side normalized", () => {
+    const missed = rows.filter((r) => r.category === ESCAPE_ROOM_CATEGORY);
+
+    assert.deepEqual(
+      missed.map((r) => r.name),
+      ["Cell Block"],
+    );
+  });
+
+  it("finds a stored difficulty by its displayed category", () => {
+    // The search haystacks in attractions.tsx / custom-packages.tsx /
+    // create-purchase.tsx: typing "escape room" has to reach "Beginner".
+    const term = "escape room";
+    const hits = rows.filter((r) =>
+      `${r.name} ${normalizeCategory(r.category)}`.toLowerCase().includes(term),
+    );
+
+    assert.deepEqual(
+      hits.map((r) => r.name),
+      ["Vault Break", "Lost Tomb", "Cell Block"],
+    );
+  });
+
+  it("keeps the stored word in an export payload", () => {
+    // packages.tsx `runExport` and AttractionsExportSheet: the file is read
+    // back by the importer, so normalizing here would rewrite "Advanced" to
+    // "Escape Room" on the next round trip and lose the difficulty.
+    const exported = rows.map((r) => ({ name: r.name, category: r.category }));
+
+    assert.deepEqual(
+      exported.map((r) => r.category),
+      ["Beginner", "Advanced", "Escape Room", "Bowling", ""],
+    );
+  });
+});

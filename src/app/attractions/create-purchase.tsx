@@ -74,6 +74,7 @@ import {
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { normalizeCategory } from "../../lib/venueCategories";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
   attractionPurchaseQrValue,
@@ -335,7 +336,7 @@ const AttractionCard = ({
           {attraction.name}
         </Text>
         <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
-          {attraction.category}
+          {normalizeCategory(attraction.category)}
         </Text>
         <View className="flex-row items-center justify-between">
           <Text className="text-lg font-bold text-[#0644C7] dark:text-blue-400">
@@ -680,7 +681,7 @@ const CreatePurchaseScreen = () => {
     return attractions.filter(
       (a) =>
         a.name.toLowerCase().includes(term) ||
-        a.category.toLowerCase().includes(term),
+        normalizeCategory(a.category).toLowerCase().includes(term),
     );
   }, [attractions, search]);
 
@@ -2582,7 +2583,7 @@ const CreatePurchaseScreen = () => {
                       </Pressable>
                     </View>
                     <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {selected.category}
+                      {normalizeCategory(selected.category)}
                     </Text>
                     <Text className="text-sm font-bold text-[#0644C7] dark:text-blue-400 mt-1">
                       {money(selected.price)}
