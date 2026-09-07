@@ -134,7 +134,6 @@ export function KioskReturningPanel({
   onCancel,
 }: {
   templateId: number;
-  /** Null until a lookup succeeds; set by the caller from `onFound`. */
   profile: ReturningProfile | null;
   maxMinors: number;
   dependentsEnabled: boolean;
@@ -167,8 +166,6 @@ export function KioskReturningPanel({
     setLooking(false);
 
     if (res.status === "found") {
-      // The service only reports `found` with a readable profile; treating a
-      // missing one as a miss keeps the guest moving either way.
       if (res.profile) onFound(res.profile);
       else setOutcome("not_found");
       return;

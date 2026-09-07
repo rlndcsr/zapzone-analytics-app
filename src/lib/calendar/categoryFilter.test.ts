@@ -46,7 +46,6 @@ describe("counting a window of calendar rows", () => {
     assert.equal(escapeRoom[0].count, 3);
     assert.equal(escapeRoom[0].label, ESCAPE_ROOM_CATEGORY);
 
-    // The unrelated category is untouched and still its own pill.
     assert.deepEqual(
       categories.map((c) => c.key).sort(),
       ["Birthday", ESCAPE_ROOM_CATEGORY].sort(),
@@ -62,7 +61,6 @@ describe("counting a window of calendar rows", () => {
     assert.equal(categories.length, 1);
     assert.equal(categories[0].key, ESCAPE_ROOM_CATEGORY);
     assert.equal(categories[0].count, 2);
-    // Both sources are tracked, so the pill still tints as mixed.
     assert.deepEqual(categories[0].sources.sort(), ["attraction", "booking"]);
   });
 
@@ -84,7 +82,6 @@ describe("counting a window of calendar rows", () => {
 
 describe("filtering by the folded group", () => {
   it("selecting Escape Room matches every difficulty beneath it", () => {
-    // What each screen does: compare the row's key against the chosen key.
     const rows = [
       { category: "Beginner" },
       { category: "Advanced" },

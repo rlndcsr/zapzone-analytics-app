@@ -1,6 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Image,
+  Modal,
+  Pressable,
+  Text,
+  View,
+} from "react-native";
 
 import { mediaUrl } from "../../lib/api";
 import {
@@ -9,28 +16,12 @@ import {
   type KioskAd,
 } from "../../services/waiversService";
 
-/** How long the plain confirmation holds before the ad slides in — the web's
- *  own beat, and what its `2 + display_seconds` total is built from. */
 const CONFIRM_BEAT_SECONDS = 2;
-/** Interacting with Learn More must not let the kiosk close underneath the
- *  guest; these are the floors the web holds the countdown to. */
 const CHOOSING_FLOOR_SECONDS = 25;
 const RESULT_FLOOR_SECONDS = 12;
 
 type LearnMoreStep = "idle" | "choose" | "sending" | "done";
 
-/**
- * The post-waiver ad beat.
- *
- * Shown after a kiosk submission that came back with an ad. It holds for the
- * backend's configured duration and then hands the kiosk back to the caller,
- * unless the guest is partway through Learn More — sending never gets cut off,
- * and both outcomes buy enough time to be read.
- *
- * `visible` is the caller's single source of truth: the countdown only runs
- * while it is true, and every timer is torn down when it goes false, so a kiosk
- * running waiver after waiver never accumulates loops.
- */
 export function KioskAdModal({
   visible,
   ad,
@@ -42,7 +33,6 @@ export function KioskAdModal({
 }: {
   visible: boolean;
   ad: KioskAd | null;
-  /** The completed waiver the ad was shown against; Learn More needs it. */
   waiverId: number | null;
   signerFirstName?: string | null;
   onClose: () => void;
@@ -55,13 +45,9 @@ export function KioskAdModal({
   const [message, setMessage] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
-  // Read through a ref so the countdown effect can own the interval outright
-  // rather than resubscribing every time the parent re-renders.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // Fresh ad, fresh beat. Keyed on the ad's identity so reopening the modal for
-  // the next guest always restarts from the full duration.
   useEffect(() => {
     if (!visible || !ad) return;
     setSecondsLeft(CONFIRM_BEAT_SECONDS + ad.displaySeconds);
@@ -70,7 +56,6 @@ export function KioskAdModal({
     setFailed(false);
   }, [visible, ad]);
 
-  // The countdown. Runs only while open, and clears on close/unmount.
   useEffect(() => {
     if (!visible || !ad) return;
     const tick = setInterval(
@@ -80,8 +65,6 @@ export function KioskAdModal({
     return () => clearInterval(tick);
   }, [visible, ad]);
 
-  // Auto-close, held off while a send is in flight so the guest always sees the
-  // outcome of something they asked for.
   useEffect(() => {
     if (!visible || !ad) return;
     if (secondsLeft === 0 && step !== "sending") onCloseRef.current();
@@ -100,8 +83,6 @@ export function KioskAdModal({
       const res = await sendAdLearnMore(waiverId, ad.id, channel);
       setMessage(res.message);
       setFailed(!res.ok);
-      // A failure drops back to the choice so the guest can try the other
-      // channel; a success rests on the confirmation.
       setStep(res.ok ? "done" : "choose");
       setSecondsLeft((s) => Math.max(s, RESULT_FLOOR_SECONDS));
     },
@@ -123,8 +104,6 @@ export function KioskAdModal({
     >
       <View className="flex-1 items-center justify-center bg-black/60 p-5">
         <View className="w-full max-w-md overflow-hidden rounded-2xl bg-white dark:bg-neutral-900">
-          {/* Confirmation strip — the ad never replaces the fact that the
-              waiver was signed. */}
           <View className="flex-row items-center gap-2 border-b border-gray-100 px-5 py-4 dark:border-neutral-800">
             <View className="h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
               <Feather name="check" size={12} color="#16A34A" />
@@ -184,7 +163,9 @@ export function KioskAdModal({
                       accessibilityRole="button"
                       accessibilityState={{ disabled: sending }}
                     >
-                      {sending && <ActivityIndicator size="small" color="#FFFFFF" />}
+                      {sending && (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      )}
                       <Text className="text-center text-sm font-semibold text-white">
                         {sending ? "Sending…" : opt.label}
                       </Text>
