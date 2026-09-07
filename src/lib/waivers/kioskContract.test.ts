@@ -5,6 +5,7 @@ import {
   adHoldSeconds,
   classifyLookupFailure,
   classifyLookupResponse,
+  isValidKioskPhone,
   mapKioskAd,
   mapKioskSettings,
   mapReturningProfile,
@@ -122,8 +123,9 @@ describe("reading a returning customer's saved record", () => {
     first_name: "Dana",
     last_name: "Reyes",
     email: "dana@example.com",
+    has_email: true,
     phone: "(555) 010-2030",
-    date_of_birth: "1990-04-11",
+    age: 36,
     dependents: [
       { id: 5, first_name: "Kit", last_name: "Reyes", age: 7, relationship: "Daughter" },
       { id: 6, first_name: "Sam", last_name: "Reyes", age: 11, relationship: null },
@@ -135,7 +137,30 @@ describe("reading a returning customer's saved record", () => {
     assert.equal(p?.id, 42);
     assert.equal(p?.firstName, "Dana");
     assert.equal(p?.email, "dana@example.com");
-    assert.equal(p?.dateOfBirth, "1990-04-11");
+    assert.equal(p?.age, 36);
+  });
+
+  it("never carries a date of birth for the adult signer", () => {
+    const p = mapReturningProfile(PROFILE);
+    assert.equal(p && "dateOfBirth" in p, false);
+  });
+
+  it("reads a missing profile age as unknown rather than zero", () => {
+    const { age: _age, ...rest } = PROFILE;
+    const p = mapReturningProfile(rest);
+    assert.equal(p?.age, null);
+  });
+
+  it("reads has_email even when email itself is withheld", () => {
+    const p = mapReturningProfile({ ...PROFILE, email: null, has_email: true });
+    assert.equal(p?.email, null);
+    assert.equal(p?.hasEmail, true);
+  });
+
+  it("defaults hasEmail to false when the server omits it", () => {
+    const { has_email: _hasEmail, ...rest } = PROFILE;
+    const p = mapReturningProfile(rest);
+    assert.equal(p?.hasEmail, false);
   });
 
   it("carries dependents as an age, which is all the public lookup returns", () => {
@@ -213,6 +238,43 @@ describe("what a lookup came back as", () => {
     assert.equal(classifyLookupResponse("something_new", null).status, "not_found");
     assert.equal(classifyLookupResponse(undefined, null).status, "not_found");
   });
+
+  it("preserves the lookup token on a found record", () => {
+    const r = classifyLookupResponse("found", PROFILE, "opaque-token-123");
+    assert.equal(r.lookupToken, "opaque-token-123");
+  });
+
+  it("carries no token when a found record has no readable profile", () => {
+    const r = classifyLookupResponse("found", null, "opaque-token-123");
+    assert.equal(r.lookupToken, null);
+  });
+
+  it("carries no token for needs_staff, not_found, or an unrecognised status", () => {
+    assert.equal(
+      classifyLookupResponse("needs_staff", null, "token").lookupToken,
+      null,
+    );
+    assert.equal(
+      classifyLookupResponse("not_found", null, "token").lookupToken,
+      null,
+    );
+    assert.equal(
+      classifyLookupResponse("something_new", null, "token").lookupToken,
+      null,
+    );
+  });
+
+  it("treats a missing or non-string token as no token", () => {
+    assert.equal(classifyLookupResponse("found", PROFILE).lookupToken, null);
+    assert.equal(
+      classifyLookupResponse("found", PROFILE, null).lookupToken,
+      null,
+    );
+    assert.equal(
+      classifyLookupResponse("found", PROFILE, 12345).lookupToken,
+      null,
+    );
+  });
 });
 
 describe("when a lookup fails", () => {
@@ -237,6 +299,40 @@ describe("when a lookup fails", () => {
     const r = classifyLookupFailure(0, null);
     assert.equal(r.status, "error");
     assert.ok(r.message && r.message.length > 0);
+  });
+
+  it("never carries a lookup token on any failure", () => {
+    assert.equal(classifyLookupFailure(429).lookupToken, null);
+    assert.equal(classifyLookupFailure(503, "x").lookupToken, null);
+  });
+});
+
+describe("validating the kiosk lookup phone number", () => {
+  it("accepts a plain 10-digit number", () => {
+    assert.equal(isValidKioskPhone("5551234567"), true);
+  });
+
+  it("accepts a formatted 10-digit number", () => {
+    assert.equal(isValidKioskPhone("(555) 123-4567"), true);
+  });
+
+  it("strips a leading US country code before checking", () => {
+    assert.equal(isValidKioskPhone("15551234567"), true);
+    assert.equal(isValidKioskPhone("+1 (555) 123-4567"), true);
+  });
+
+  it("rejects a number that is too short", () => {
+    assert.equal(isValidKioskPhone("555123"), false);
+  });
+
+  it("rejects a number that is too long even after a leading 1", () => {
+    // An 11-digit number starting with something other than a stripped "1"
+    // followed by exactly 10 digits should not validate.
+    assert.equal(isValidKioskPhone("25551234567"), false);
+  });
+
+  it("rejects an empty string", () => {
+    assert.equal(isValidKioskPhone(""), false);
   });
 });
 

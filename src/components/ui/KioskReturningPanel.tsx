@@ -9,6 +9,7 @@ import {
 } from "react-native";
 
 import {
+  isValidKioskPhone,
   lookupReturningCustomer,
   type ReturningDependent,
   type ReturningProfile,
@@ -39,8 +40,12 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
 
 export function KioskSavedSignerFields({
   profile,
+  dobConfirmationRequired = false,
 }: {
   profile: ReturningProfile;
+  /** True when a separate, editable "Confirm your date of birth" input is
+   *  rendered alongside these fields — swaps the info note to mention it. */
+  dobConfirmationRequired?: boolean;
 }) {
   return (
     <>
@@ -52,15 +57,21 @@ export function KioskSavedSignerFields({
           <ReadOnlyField label="Last Name" value={profile.lastName} />
         </View>
       </View>
-      <ReadOnlyField label="Email" value={profile.email ?? ""} />
+      <ReadOnlyField
+        label="Email"
+        value={profile.email ?? (profile.hasEmail ? "On file" : "")}
+      />
       <ReadOnlyField label="Phone" value={profile.phone ?? ""} />
-      <ReadOnlyField label="Date of Birth" value={profile.dateOfBirth ?? ""} />
+      <ReadOnlyField
+        label="Age"
+        value={profile.age != null ? `${profile.age}` : ""}
+      />
 
       <View className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-neutral-700 dark:bg-neutral-800/60">
         <Text className="text-[11px] leading-relaxed text-gray-600 dark:text-gray-300">
-          This is the information saved on your record and it cannot be changed
-          here. If anything is wrong, please ask a Location Manager or Admin at
-          the front desk to update it for you.
+          {dobConfirmationRequired
+            ? "Your saved details are shown above and can't be changed here. Please confirm your date of birth below to continue. If anything else is wrong, ask a Location Manager or Admin at the front desk to update it for you."
+            : "This is the information saved on your record and it cannot be changed here. If anything is wrong, please ask a Location Manager or Admin at the front desk to update it for you."}
         </Text>
       </View>
     </>
@@ -137,7 +148,7 @@ export function KioskReturningPanel({
   profile: ReturningProfile | null;
   maxMinors: number;
   dependentsEnabled: boolean;
-  onFound: (profile: ReturningProfile) => void;
+  onFound: (profile: ReturningProfile, lookupToken: string | null) => void;
   onContinue: (selection: {
     profile: ReturningProfile;
     selectedDependentIds: number[];
@@ -146,6 +157,7 @@ export function KioskReturningPanel({
   onCancel: () => void;
 }) {
   const [phone, setPhone] = useState("");
+  const [lastName, setLastName] = useState("");
   const [looking, setLooking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<
@@ -155,18 +167,27 @@ export function KioskReturningPanel({
 
   const runLookup = async () => {
     const value = phone.trim();
+    const surname = lastName.trim();
     if (!value) {
       setError("Please enter your phone number.");
+      return;
+    }
+    if (!isValidKioskPhone(value)) {
+      setError("Please enter your full 10-digit phone number.");
+      return;
+    }
+    if (!surname) {
+      setError("Please enter your last name.");
       return;
     }
     setLooking(true);
     setError(null);
     setOutcome("idle");
-    const res = await lookupReturningCustomer(templateId, value);
+    const res = await lookupReturningCustomer(templateId, value, surname);
     setLooking(false);
 
     if (res.status === "found") {
-      if (res.profile) onFound(res.profile);
+      if (res.profile) onFound(res.profile, res.lookupToken);
       else setOutcome("not_found");
       return;
     }
@@ -184,6 +205,7 @@ export function KioskReturningPanel({
 
   const retry = () => {
     setPhone("");
+    setLastName("");
     setOutcome("idle");
     setError(null);
   };
@@ -249,8 +271,8 @@ export function KioskReturningPanel({
           Welcome back
         </Text>
         <Text className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Enter the phone number on your account and we will bring up your saved
-          details.
+          Enter the phone number and last name on your account and we will
+          bring up your saved details.
         </Text>
 
         <Text className="mb-1.5 mt-5 text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -266,11 +288,29 @@ export function KioskReturningPanel({
           placeholderTextColor="#9CA3AF"
           keyboardType="phone-pad"
           maxLength={30}
+          returnKeyType="next"
+          editable={!looking}
+          className="rounded-lg border border-gray-200 px-3 py-3 text-base text-gray-900 dark:border-neutral-700 dark:text-white"
+          accessibilityLabel="Phone number"
+        />
+
+        <Text className="mb-1.5 mt-4 text-sm font-semibold text-gray-800 dark:text-gray-100">
+          Last Name
+        </Text>
+        <TextInput
+          value={lastName}
+          onChangeText={(t) => {
+            setLastName(t);
+            if (error) setError(null);
+          }}
+          placeholder="Last name on your waiver"
+          placeholderTextColor="#9CA3AF"
+          autoCapitalize="words"
           returnKeyType="search"
           onSubmitEditing={runLookup}
           editable={!looking}
           className="rounded-lg border border-gray-200 px-3 py-3 text-base text-gray-900 dark:border-neutral-700 dark:text-white"
-          accessibilityLabel="Phone number"
+          accessibilityLabel="Last name"
         />
         {error && (
           <Text className="mt-2 text-xs text-red-600 dark:text-red-400">

@@ -67,8 +67,17 @@ export type ReturningProfile = {
   firstName: string;
   lastName: string;
   email: string | null;
+  /** True when the server holds an email for this profile, even if `email`
+   *  itself is withheld — lets the UI say "On file" instead of leaving the
+   *  row looking empty. */
+  hasEmail: boolean;
   phone: string | null;
-  dateOfBirth: string | null;
+  /**
+   * Server-computed age, never the exact date of birth — the kiosk must not
+   * disclose a looked-up guest's DOB. The signer confirms their own DOB by
+   * typing it on the form instead of having it shown back to them.
+   */
+  age: number | null;
   dependents: ReturningDependent[];
 };
 
@@ -81,13 +90,15 @@ export function mapReturningProfile(raw: unknown): ReturningProfile | null {
   const id = Number(d.id);
   if (!Number.isFinite(id) || id <= 0) return null;
   const rawDependents = Array.isArray(d.dependents) ? d.dependents : [];
+  const age = Number(d.age);
   return {
     id,
     firstName: str(d.first_name) ?? "",
     lastName: str(d.last_name) ?? "",
     email: str(d.email),
+    hasEmail: d.has_email === true,
     phone: str(d.phone),
-    dateOfBirth: str(d.date_of_birth),
+    age: Number.isFinite(age) ? age : null,
     dependents: rawDependents.flatMap((entry) => {
       const r = (entry ?? {}) as Record<string, unknown>;
       const depId = Number(r.id);
@@ -113,22 +124,29 @@ export type ReturningLookupResult = {
   status: ReturningLookupStatus;
   profile: ReturningProfile | null;
   message: string | null;
+  /**
+   * Binds this lookup to the submission that follows it. Opaque to the
+   * client — held in memory only for the active flow, never persisted.
+   */
+  lookupToken: string | null;
 };
 
 export function classifyLookupResponse(
   status: unknown,
   profile: unknown,
+  lookupToken?: unknown,
 ): ReturningLookupResult {
+  const token = str(lookupToken);
   if (status === "found") {
     const mapped = mapReturningProfile(profile);
     return mapped
-      ? { status: "found", profile: mapped, message: null }
-      : { status: "not_found", profile: null, message: null };
+      ? { status: "found", profile: mapped, message: null, lookupToken: token }
+      : { status: "not_found", profile: null, message: null, lookupToken: null };
   }
   if (status === "needs_staff") {
-    return { status: "needs_staff", profile: null, message: null };
+    return { status: "needs_staff", profile: null, message: null, lookupToken: null };
   }
-  return { status: "not_found", profile: null, message: null };
+  return { status: "not_found", profile: null, message: null, lookupToken: null };
 }
 
 export const RATE_LIMITED_MESSAGE =
@@ -146,13 +164,24 @@ export function classifyLookupFailure(
       status: "rate_limited",
       profile: null,
       message: RATE_LIMITED_MESSAGE,
+      lookupToken: null,
     };
   }
   return {
     status: "error",
     profile: null,
     message: message || LOOKUP_FAILED_MESSAGE,
+    lookupToken: null,
   };
+}
+
+/**
+ * True for a US phone number with exactly 10 digits once a leading "1"
+ * country code is stripped — the same shape the web kiosk's lookup requires.
+ */
+export function isValidKioskPhone(raw: string): boolean {
+  const digits = raw.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  return digits.length === 10;
 }
 
 export function minorCapReached(

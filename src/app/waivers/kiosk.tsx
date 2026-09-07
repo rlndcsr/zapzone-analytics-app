@@ -81,6 +81,61 @@ const Label = ({
   </Text>
 );
 
+/**
+ * Month/Day/Year entry for the signer's date of birth — shared by the
+ * new-customer path and the returning-customer confirmation. Deliberately
+ * never receives a value derived from a looked-up record: a returning
+ * customer always starts these blank and types their own DOB.
+ */
+const DobFields = ({
+  month,
+  day,
+  year,
+  onMonth,
+  onDay,
+  onYear,
+}: {
+  month: string;
+  day: string;
+  year: string;
+  onMonth: (v: string) => void;
+  onDay: (v: string) => void;
+  onYear: (v: string) => void;
+}) => (
+  <View className="flex-row gap-2">
+    <View className="flex-1">
+      <TextInput
+        value={month}
+        onChangeText={(t) => onMonth(t.replace(/\D/g, "").slice(0, 2))}
+        placeholder="Month"
+        placeholderTextColor="#9CA3AF"
+        keyboardType="number-pad"
+        className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
+      />
+    </View>
+    <View className="flex-1">
+      <TextInput
+        value={day}
+        onChangeText={(t) => onDay(t.replace(/\D/g, "").slice(0, 2))}
+        placeholder="Day"
+        placeholderTextColor="#9CA3AF"
+        keyboardType="number-pad"
+        className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
+      />
+    </View>
+    <View className="flex-1">
+      <TextInput
+        value={year}
+        onChangeText={(t) => onYear(t.replace(/\D/g, "").slice(0, 4))}
+        placeholder="Year"
+        placeholderTextColor="#9CA3AF"
+        keyboardType="number-pad"
+        className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
+      />
+    </View>
+  </View>
+);
+
 const KioskShell = ({
   title,
   subtitle,
@@ -255,6 +310,9 @@ const WaiverKiosk = () => {
   const [selectedDependentIds, setSelectedDependentIds] = useState<number[]>(
     [],
   );
+  /** From the lookup response; held only for the active flow, never
+   *  persisted, cleared on any reset. Sent back on a returning submission. */
+  const [lookupToken, setLookupToken] = useState<string | null>(null);
 
   /** The ad the submission came back with, held until the guest dismisses it. */
   const [ad, setAd] = useState<KioskAd | null>(null);
@@ -448,6 +506,7 @@ const WaiverKiosk = () => {
           ? {
               waiver_profile_id: profile.id,
               selected_dependent_ids: selectedDependentIds,
+              ...(lookupToken ? { lookup_token: lookupToken } : {}),
             }
           : {}),
       };
@@ -585,29 +644,30 @@ const WaiverKiosk = () => {
           profile={profile}
           maxMinors={form.maxMinors}
           dependentsEnabled={form.minorSectionEnabled && form.maxMinors > 0}
-          onFound={setProfile}
+          onFound={(found, token) => {
+            setProfile(found);
+            setLookupToken(token);
+          }}
           onContinue={({ profile: found, selectedDependentIds: ids }) => {
-            // The signer's saved details fill the (read-only) form fields;
-            // validation still requires them and the server rewrites them from
-            // the same record on submit.
+            // The signer's saved details fill the (read-only) form fields.
+            // DOB is deliberately left blank — it is never disclosed from the
+            // looked-up record; the signer confirms it themselves below.
             setFirstName(found.firstName);
             setLastName(found.lastName);
             setEmail(found.email ?? "");
             setPhone(found.phone ?? "");
-            const [y, m, d] = (found.dateOfBirth ?? "").split("-");
-            setDobYear(y ?? "");
-            setDobMonth(m ?? "");
-            setDobDay(d ?? "");
             setSelectedDependentIds(ids);
             setPhase("form");
           }}
           onNewCustomer={() => {
             setProfile(null);
+            setLookupToken(null);
             setSelectedDependentIds([]);
             setPhase("form");
           }}
           onCancel={() => {
             setProfile(null);
+            setLookupToken(null);
             setSelectedDependentIds([]);
             setPhase("start");
           }}
@@ -676,10 +736,24 @@ const WaiverKiosk = () => {
           )}
 
           {/* A returning guest signs under the record the server will re-read
-              anyway, so their details are shown rather than offered for edit. */}
+              anyway, so their details are shown rather than offered for edit —
+              except DOB, which is never disclosed from the saved record and
+              must be confirmed by typing it in below. */}
           {profile && (
             <Panel title="Your Information">
-              <KioskSavedSignerFields profile={profile} />
+              <KioskSavedSignerFields profile={profile} dobConfirmationRequired />
+              <Label required>Confirm Your Date of Birth</Label>
+              <DobFields
+                month={dobMonth}
+                day={dobDay}
+                year={dobYear}
+                onMonth={setDobMonth}
+                onDay={setDobDay}
+                onYear={setDobYear}
+              />
+              <Text className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                The signer must be 18 or over.
+              </Text>
             </Panel>
           )}
 
@@ -728,44 +802,14 @@ const WaiverKiosk = () => {
               />
 
               <Label required>Date of Birth</Label>
-              <View className="flex-row gap-2">
-                <View className="flex-1">
-                  <TextInput
-                    value={dobMonth}
-                    onChangeText={(t) =>
-                      setDobMonth(t.replace(/\D/g, "").slice(0, 2))
-                    }
-                    placeholder="Month"
-                    placeholderTextColor="#9CA3AF"
-                    keyboardType="number-pad"
-                    className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextInput
-                    value={dobDay}
-                    onChangeText={(t) =>
-                      setDobDay(t.replace(/\D/g, "").slice(0, 2))
-                    }
-                    placeholder="Day"
-                    placeholderTextColor="#9CA3AF"
-                    keyboardType="number-pad"
-                    className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextInput
-                    value={dobYear}
-                    onChangeText={(t) =>
-                      setDobYear(t.replace(/\D/g, "").slice(0, 4))
-                    }
-                    placeholder="Year"
-                    placeholderTextColor="#9CA3AF"
-                    keyboardType="number-pad"
-                    className="rounded-lg border border-gray-200 px-3 py-3 text-sm text-gray-900 dark:border-neutral-700 dark:text-white"
-                  />
-                </View>
-              </View>
+              <DobFields
+                month={dobMonth}
+                day={dobDay}
+                year={dobYear}
+                onMonth={setDobMonth}
+                onDay={setDobDay}
+                onYear={setDobYear}
+              />
               <Text className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 The signer must be 18 or over.
               </Text>

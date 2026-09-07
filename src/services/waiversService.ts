@@ -23,6 +23,7 @@ export {
 
 export {
   adHoldSeconds,
+  isValidKioskPhone,
   minorCapReached,
   type KioskAd,
   type KioskSettings,
@@ -1381,6 +1382,11 @@ export type KioskSubmission = {
    * no separate "new dependents" field.
    */
   selected_dependent_ids?: number[];
+  /**
+   * Binds this submission to the lookup that found the profile. Opaque;
+   * omitted entirely when the lookup didn't return one.
+   */
+  lookup_token?: string | null;
 };
 
 /** What a submission tells us back: the record, and possibly an ad to show. */
@@ -1576,7 +1582,9 @@ export async function submitKioskWaiver(
 /* ------------------------------------------- Returning customers (kiosk) -- */
 
 /**
- * POST /api/waivers/kiosk/{templateId}/lookup — find a returning guest by phone.
+ * POST /api/waivers/kiosk/{templateId}/lookup — find a returning guest by
+ * phone + last name. The surname is a second identity factor alongside the
+ * phone number, matching the web kiosk's own lookup contract.
  *
  * Public and throttled (10/min per IP), so a 429 is a normal outcome at a busy
  * kiosk rather than an error: it comes back as `rate_limited` so the screen can
@@ -1587,19 +1595,24 @@ export async function submitKioskWaiver(
 export async function lookupReturningCustomer(
   templateId: number,
   phone: string,
+  lastName: string,
   signal?: AbortSignal,
 ): Promise<ReturningLookupResult> {
   try {
     const res = await apiRequest<{
       success?: boolean;
-      data?: { status?: string; profile?: unknown };
+      data?: { status?: string; profile?: unknown; lookup_token?: string | null };
     }>(`/api/waivers/kiosk/${templateId}/lookup`, {
       method: "POST",
-      body: { phone },
+      body: { phone, last_name: lastName },
       publicEndpoint: true,
       signal,
     });
-    return classifyLookupResponse(res?.data?.status, res?.data?.profile);
+    return classifyLookupResponse(
+      res?.data?.status,
+      res?.data?.profile,
+      res?.data?.lookup_token,
+    );
   } catch (e) {
     return classifyLookupFailure(
       e instanceof ApiError ? e.status : 0,
