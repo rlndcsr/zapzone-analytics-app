@@ -564,7 +564,6 @@ const GiftCards = () => {
           <View className="flex-row bg-gray-100 dark:bg-neutral-800 rounded-xl p-1 mb-4">
             {[
               { label: "Fixed Value", value: "fixed" as const },
-              { label: "Percentage", value: "percentage" as const },
             ].map((opt) => {
               const active = cType === opt.value;
               return (
