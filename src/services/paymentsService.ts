@@ -103,14 +103,15 @@ const TYPE_LABELS: Record<string, string> = {
   attraction_purchase: "Attraction",
   event_purchase: "Event",
   ticket_order: "Bulk Order",
+  gift_card: "Gift Card",
 };
 
 /**
- * Reduce whatever `payable_type` arrives to one of the four morph-map keys. The
+ * Reduce whatever `payable_type` arrives to one of the five morph-map keys. The
  * backend registers them as "booking" / "attraction_purchase" /
- * "event_purchase" / "ticket_order", but a payload serialized without the morph
- * map spells them as class names, so match on substrings the way the web's
- * `normalizePayableType` does.
+ * "event_purchase" / "ticket_order" / "gift_card", but a payload serialized
+ * without the morph map spells them as class names, so match on substrings the
+ * way the web's `normalizePayableType` does.
  */
 function normalizePayableType(type: string | null | undefined): string | null {
   if (!type) return null;
@@ -122,6 +123,7 @@ function normalizePayableType(type: string | null | undefined): string | null {
   if (t.includes("eventpurchase") || t.includes("event_purchase")) {
     return "event_purchase";
   }
+  if (t.includes("giftcard") || t.includes("gift_card")) return "gift_card";
   if (t.includes("booking")) return "booking";
   return t;
 }

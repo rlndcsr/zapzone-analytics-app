@@ -79,6 +79,7 @@ function statusPill(status: string): { pill: string; text: string; icon: Feather
  */
 function typeIcon(typeLabel: string): FeatherName {
   const t = typeLabel.toLowerCase();
+  if (t.includes("gift")) return "gift";
   if (t.includes("bulk") || t.includes("order")) return "shopping-cart";
   if (t.includes("package")) return "package";
   if (t.includes("attraction")) return "zap";

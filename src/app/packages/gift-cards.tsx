@@ -1,7 +1,8 @@
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,16 +24,27 @@ import {
   targetingPayload,
   type TargetingValue,
 } from "../../components/ui/TargetingSelector";
+import { venueDateKey } from "../../lib/date/venueTime";
+import {
+  describeSellResult,
+  GIFT_CARD_SELL_MAX,
+  GIFT_CARD_SELL_MIN,
+  GIFT_CARD_SELL_PRESETS,
+  isValidPurchaserEmail,
+  validateSellAmount,
+} from "../../lib/giftCards/sellGiftCard";
+import { useAsyncList } from "../../lib/hooks/useAsyncList";
+import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
+import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createGiftCard,
   deleteGiftCard,
   fetchGiftCardList,
+  purchaseGiftCard,
   type GiftCardInput,
   type GiftCardRow,
+  type PurchasedGiftCard,
 } from "../../services/giftCardsService";
-import { venueDateKey } from "../../lib/date/venueTime";
-import { useAsyncList } from "../../lib/hooks/useAsyncList";
-import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
 
@@ -169,14 +181,16 @@ function Field({
   keyboardType,
   multiline,
   prefix,
+  autoCapitalize,
 }: {
   label: string;
   value: string;
   onChangeText: (t: string) => void;
   placeholder?: string;
-  keyboardType?: "default" | "number-pad" | "decimal-pad";
+  keyboardType?: "default" | "number-pad" | "decimal-pad" | "email-address" | "phone-pad";
   multiline?: boolean;
   prefix?: string;
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
 }) {
   return (
     <View className="mb-4">
@@ -199,6 +213,7 @@ function Field({
           placeholder={placeholder}
           placeholderTextColor="#9CA3AF"
           keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
           multiline={multiline}
           className="flex-1 py-3 text-sm text-gray-900 dark:text-white"
           style={multiline ? { minHeight: 72, textAlignVertical: "top" } : undefined}
@@ -337,6 +352,119 @@ const GiftCards = () => {
     }
   };
 
+  // --- Sell (counter sale) ---
+  const currentUser = getCurrentUser();
+  const isCompanyAdmin = currentUser?.role === "company_admin";
+  const { locations: sellLocations, loading: sellLocationsLoading } =
+    useLocationOptions();
+
+  const [showSell, setShowSell] = useState(false);
+  const [sAmount, setSAmount] = useState("");
+  const [sPurchaserName, setSPurchaserName] = useState("");
+  const [sPurchaserEmail, setSPurchaserEmail] = useState("");
+  const [sPurchaserPhone, setSPurchaserPhone] = useState("");
+  const [sLocationId, setSLocationId] = useState<number | null>(null);
+  const [sPaymentMethod, setSPaymentMethod] = useState<"cash" | "in-store">(
+    "cash",
+  );
+  const [selling, setSelling] = useState(false);
+  const [soldCard, setSoldCard] = useState<PurchasedGiftCard | null>(null);
+  const [sellMessage, setSellMessage] = useState("");
+  const [sellCodeCopied, setSellCodeCopied] = useState(false);
+  const sellCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (sellCopyTimerRef.current) clearTimeout(sellCopyTimerRef.current);
+    };
+  }, []);
+
+  const openSell = () => {
+    setSAmount("");
+    setSPurchaserName("");
+    setSPurchaserEmail("");
+    setSPurchaserPhone("");
+    // Non-admins are scoped to their own venue, same as Create — only company
+    // admins pick from the location list below.
+    setSLocationId(isCompanyAdmin ? null : (currentUser?.location_id ?? null));
+    setSPaymentMethod("cash");
+    setSelling(false);
+    setSoldCard(null);
+    setSellMessage("");
+    setSellCodeCopied(false);
+    setShowSell(true);
+  };
+
+  const closeSell = () => {
+    setShowSell(false);
+    setSoldCard(null);
+    setSellMessage("");
+    setSellCodeCopied(false);
+  };
+
+  const handleCopySoldCode = async (code: string) => {
+    await Clipboard.setStringAsync(code);
+    setSellCodeCopied(true);
+    if (sellCopyTimerRef.current) clearTimeout(sellCopyTimerRef.current);
+    sellCopyTimerRef.current = setTimeout(() => setSellCodeCopied(false), 2000);
+  };
+
+  const handleSell = async () => {
+    if (selling) return;
+    const token = getToken();
+    if (!token) return;
+
+    const effectiveLocationId = isCompanyAdmin
+      ? sLocationId
+      : (currentUser?.location_id ?? null);
+    if (!effectiveLocationId) {
+      Alert.alert(
+        "Location required",
+        "Please select the location making this sale.",
+      );
+      return;
+    }
+    const amountResult = validateSellAmount(sAmount);
+    if (!amountResult.ok) {
+      Alert.alert("Invalid amount", amountResult.message);
+      return;
+    }
+    const name = sPurchaserName.trim();
+    if (!name) {
+      Alert.alert("Purchaser name required", "Please enter the purchaser's name.");
+      return;
+    }
+    const email = sPurchaserEmail.trim();
+    if (!isValidPurchaserEmail(email)) {
+      Alert.alert("Invalid email", "Please enter a valid purchaser email.");
+      return;
+    }
+
+    setSelling(true);
+    try {
+      const result = await purchaseGiftCard(token, {
+        location_id: effectiveLocationId,
+        amount: amountResult.amount,
+        payment_method: sPaymentMethod,
+        purchaser_name: name,
+        purchaser_email: email,
+        purchaser_phone: sPurchaserPhone.trim() || undefined,
+      });
+      // A duplicate is still a successful sale — same card, different message.
+      const { card, message } = describeSellResult(result);
+      setSoldCard(card);
+      setSellMessage(message);
+      await refetch();
+    } catch (err) {
+      Alert.alert(
+        "Sale failed",
+        err instanceof Error ? err.message : "Could not sell the gift card.",
+      );
+    } finally {
+      setSelling(false);
+    }
+  };
+
   const confirmDelete = (card: GiftCardRow) => {
     Alert.alert("Delete gift card", `Delete "${card.code}"?`, [
       { text: "Cancel", style: "cancel" },
@@ -404,13 +532,24 @@ const GiftCards = () => {
             </Text>
           </View>
 
-          {/* Create */}
+          {/* Sell (primary) + Create (secondary) — two adjacent primary
+              buttons read badly, so Sell takes the emphasis, matching the
+              web admin's header once Sell Gift Card was added there. */}
+          <Pressable
+            onPress={openSell}
+            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-3"
+          >
+            <Feather name="shopping-cart" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              Sell Gift Card
+            </Text>
+          </Pressable>
           <Pressable
             onPress={openCreate}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-4"
+            className="flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 px-4 py-3.5 rounded-xl active:opacity-80 mb-4"
           >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
+            <Feather name="plus" size={16} color={PRIMARY} />
+            <Text className="text-sm font-semibold text-[#0644C7]">
               Create Gift Card
             </Text>
           </Pressable>
@@ -643,6 +782,218 @@ const GiftCards = () => {
               </Text>
             )}
           </Pressable>
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Sell Gift Card (counter sale) */}
+      <BottomSheet
+        visible={showSell}
+        onClose={closeSell}
+        title="Sell Gift Card"
+      >
+        <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
+          {soldCard ? (
+            <View>
+              <View className="flex-row items-center gap-2 mb-4">
+                <Feather name="check-circle" size={18} color="#16a34a" />
+                <Text className="text-sm font-medium text-green-700 dark:text-green-400">
+                  {sellMessage}
+                </Text>
+              </View>
+              <View className="border-2 border-blue-200 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/10 rounded-2xl p-6 items-center mb-4">
+                <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Gift Card Code
+                </Text>
+                <Text className="font-mono text-2xl font-bold tracking-wider text-gray-900 dark:text-white text-center">
+                  {soldCard.code}
+                </Text>
+                <Text className="text-lg font-semibold text-gray-900 dark:text-white mt-3">
+                  ${Number(soldCard.initial_value).toFixed(2)}
+                </Text>
+                {!!soldCard.location && (
+                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    {soldCard.location}
+                  </Text>
+                )}
+              </View>
+              <Text className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+                Give this code to the customer — it&apos;s what they redeem. A
+                copy was emailed to {soldCard.emailed_to}.
+              </Text>
+              <View className="flex-row gap-3">
+                <Pressable
+                  onPress={() => handleCopySoldCode(soldCard.code)}
+                  className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3 rounded-xl active:opacity-90"
+                >
+                  <Feather
+                    name={sellCodeCopied ? "check" : "copy"}
+                    size={16}
+                    color="#FFFFFF"
+                  />
+                  <Text className="text-sm font-semibold text-white">
+                    {sellCodeCopied ? "Copied!" : "Copy code"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={closeSell}
+                  className="flex-1 items-center justify-center py-3 rounded-xl border border-gray-300 dark:border-neutral-600"
+                >
+                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    Done
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <View>
+              <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+                Amount ($)
+              </Text>
+              <View className="flex-row flex-wrap gap-2 mb-2">
+                {GIFT_CARD_SELL_PRESETS.map((amount) => {
+                  const active = Number(sAmount) === amount;
+                  return (
+                    <Pressable
+                      key={amount}
+                      onPress={() => setSAmount(String(amount))}
+                      className={`px-4 py-2 rounded-lg border ${
+                        active
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-semibold ${
+                          active ? "text-white" : "text-gray-700 dark:text-gray-200"
+                        }`}
+                      >
+                        ${amount}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Field
+                label="Custom Amount"
+                value={sAmount}
+                onChangeText={setSAmount}
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+                prefix="$"
+              />
+              <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-3 mb-4">
+                Pick a preset or enter any amount from ${GIFT_CARD_SELL_MIN} to $
+                {GIFT_CARD_SELL_MAX}.
+              </Text>
+
+              <Field
+                label="Purchaser Name"
+                value={sPurchaserName}
+                onChangeText={setSPurchaserName}
+                placeholder="Jane Doe"
+              />
+              <Field
+                label="Purchaser Email"
+                value={sPurchaserEmail}
+                onChangeText={setSPurchaserEmail}
+                placeholder="jane@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <Field
+                label="Purchaser Phone (optional)"
+                value={sPurchaserPhone}
+                onChangeText={setSPurchaserPhone}
+                placeholder="+1 555 000 0000"
+                keyboardType="phone-pad"
+              />
+
+              {isCompanyAdmin && (
+                <View className="mb-4">
+                  <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+                    Location
+                  </Text>
+                  {sellLocationsLoading ? (
+                    <ActivityIndicator color={PRIMARY} />
+                  ) : (
+                    <View className="border border-gray-200 dark:border-neutral-700 rounded-xl overflow-hidden">
+                      {sellLocations.map((loc) => {
+                        const active = sLocationId === loc.id;
+                        return (
+                          <Pressable
+                            key={loc.id}
+                            onPress={() => setSLocationId(loc.id)}
+                            className={`flex-row items-center justify-between px-4 py-3 ${
+                              active
+                                ? "bg-blue-50 dark:bg-blue-900/20"
+                                : "bg-white dark:bg-neutral-900"
+                            }`}
+                          >
+                            <Text
+                              className={`text-sm ${
+                                active
+                                  ? "font-semibold text-blue-600 dark:text-blue-400"
+                                  : "text-gray-700 dark:text-gray-200"
+                              }`}
+                            >
+                              {loc.name}
+                            </Text>
+                            {active && (
+                              <Feather name="check" size={16} color={PRIMARY} />
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+                Payment Method
+              </Text>
+              <View className="flex-row gap-2 mb-5">
+                {(["cash", "in-store"] as const).map((method) => {
+                  const active = sPaymentMethod === method;
+                  return (
+                    <Pressable
+                      key={method}
+                      onPress={() => setSPaymentMethod(method)}
+                      className={`flex-1 items-center py-2.5 rounded-xl border ${
+                        active
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-semibold ${
+                          active ? "text-white" : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {method === "cash" ? "Cash" : "In-Store"}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Pressable
+                onPress={handleSell}
+                disabled={selling}
+                className={`flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 ${
+                  selling ? "opacity-60" : ""
+                }`}
+              >
+                {selling ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text className="text-sm font-semibold text-white">
+                    Complete Sale
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          )}
         </ScrollView>
       </BottomSheet>
     </View>

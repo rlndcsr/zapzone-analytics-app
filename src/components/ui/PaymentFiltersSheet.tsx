@@ -69,13 +69,14 @@ const METHOD_OPTS: SelectOption[] = [
   { label: "In-Store", value: "in-store" },
 ];
 
-// The four payable kinds the backend's morph map registers.
+// The five payable kinds the backend's morph map registers.
 const TYPE_OPTS: SelectOption[] = [
   { label: "All Types", value: "all" },
   { label: "Bookings", value: "booking" },
   { label: "Attractions", value: "attraction_purchase" },
   { label: "Events", value: "event_purchase" },
   { label: "Bulk Orders", value: "ticket_order" },
+  { label: "Gift Cards", value: "gift_card" },
 ];
 
 const RECORD_OPTS: SelectOption[] = [
