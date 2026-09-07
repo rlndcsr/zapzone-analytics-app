@@ -20,6 +20,8 @@ import {
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { bookingDurationMinutes, buildCalendarEventDraft } from "../../lib/calendarEvent";
+import { addEventToCalendar } from "../../lib/nativeCalendar";
 import { getToken } from "../../lib/session";
 import { deleteBooking, type BookingDetail } from "../../services/bookingsService";
 import { BookingQRModal } from "./BookingQRModal";
@@ -165,6 +167,7 @@ type Props = {
 export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }: Props) {
   const [showQR, setShowQR] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [addingToCalendar, setAddingToCalendar] = useState(false);
 
   // Never leave the QR overlay open across opens/closes of this view.
   useEffect(() => {
@@ -216,6 +219,42 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
     detail.type === "package" ? "Package Booking" : capitalize(detail.type);
   const remaining = Math.max(0, detail.totalAmount - detail.amountPaid);
 
+  // Null when the booking has no valid scheduled date/time — the action is
+  // hidden rather than falling back to midnight or any other placeholder.
+  const calendarDraft = buildCalendarEventDraft({
+    title: `Zap Zone: ${detail.packageName}`,
+    date: detail.date,
+    time: detail.time,
+    durationMinutes: bookingDurationMinutes(detail.duration, detail.durationUnit),
+    location: detail.locationName,
+    description: detail.referenceNumber
+      ? `Booking reference: ${detail.referenceNumber}`
+      : undefined,
+  });
+
+  const handleAddToCalendar = async () => {
+    if (!calendarDraft || addingToCalendar) return;
+    setAddingToCalendar(true);
+    try {
+      const result = await addEventToCalendar(calendarDraft);
+      if (result.ok) {
+        Alert.alert("Added to Calendar", "This booking was added to your calendar.");
+      } else if (result.reason === "permission-denied") {
+        Alert.alert(
+          "Permission needed",
+          "Allow calendar access so this booking can be saved to your calendar.",
+        );
+      } else {
+        Alert.alert(
+          "Couldn't add to calendar",
+          result.message ?? "The booking could not be added to your calendar.",
+        );
+      }
+    } finally {
+      setAddingToCalendar(false);
+    }
+  };
+
   return (
     <>
       <BottomSheet visible={visible} onClose={onClose} title="Booking Details">
@@ -251,6 +290,27 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
               </Pressable>
             )}
           </View>
+
+          {!!calendarDraft && (
+            <Pressable
+              onPress={handleAddToCalendar}
+              disabled={addingToCalendar}
+              className={`mt-3 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center flex-row justify-center gap-2 active:opacity-80 ${
+                addingToCalendar ? "opacity-60" : ""
+              }`}
+            >
+              {addingToCalendar ? (
+                <ActivityIndicator size="small" color="#0644C7" />
+              ) : (
+                <>
+                  <Calendar size={16} color="#0644C7" />
+                  <Text className="text-sm font-semibold text-[#0644C7]">
+                    Add to Calendar
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          )}
 
           {/* Booking Information */}
           <Section title="Booking Information">

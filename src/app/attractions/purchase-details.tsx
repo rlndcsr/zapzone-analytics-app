@@ -22,8 +22,13 @@ import { BulkOrderNotice } from "../../components/ui/BulkOrderNotice";
 import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
 import { PurchaseQRSheet } from "../../components/ui/PurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import {
+  attractionDurationMinutes,
+  buildCalendarEventDraft,
+} from "../../lib/calendarEvent";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
+import { addEventToCalendar } from "../../lib/nativeCalendar";
 import { getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
@@ -176,11 +181,13 @@ const PurchaseDetailsScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const [showQR, setShowQR] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [addingToCalendar, setAddingToCalendar] = useState(false);
 
   const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
   const [waiversLoading, setWaiversLoading] = useState(true);
 
   const deleteLockRef = useRef(false);
+  const calendarLockRef = useRef(false);
 
   const loadDetail = useCallback(async () => {
     if (purchaseId == null || Number.isNaN(purchaseId)) {
@@ -350,6 +357,44 @@ const PurchaseDetailsScreen = () => {
     );
   }
 
+  // Null when the purchase has no valid scheduled date/time (a scheduled date
+  // with no scheduled time counts as invalid — no midnight fallback). The
+  // screen shows no location field today, so the event omits it too.
+  const calendarDraft = buildCalendarEventDraft({
+    title: `Zap Zone: ${detail.attractionName}`,
+    date: detail.scheduledDate,
+    time: detail.scheduledTime,
+    durationMinutes: attractionDurationMinutes(detail.duration, detail.durationUnit),
+    description: `Attraction purchase #${detail.id} — ${detail.quantity} ticket${
+      detail.quantity > 1 ? "s" : ""
+    }.`,
+  });
+
+  const handleAddToCalendar = async () => {
+    if (!calendarDraft || calendarLockRef.current) return;
+    calendarLockRef.current = true;
+    setAddingToCalendar(true);
+    try {
+      const result = await addEventToCalendar(calendarDraft);
+      if (result.ok) {
+        Alert.alert("Added to Calendar", "This purchase was added to your calendar.");
+      } else if (result.reason === "permission-denied") {
+        Alert.alert(
+          "Permission needed",
+          "Allow calendar access so this purchase can be saved to your calendar.",
+        );
+      } else {
+        Alert.alert(
+          "Couldn't add to calendar",
+          result.message ?? "The purchase could not be added to your calendar.",
+        );
+      }
+    } finally {
+      setAddingToCalendar(false);
+      calendarLockRef.current = false;
+    }
+  };
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       <Header />
@@ -385,6 +430,27 @@ const PurchaseDetailsScreen = () => {
             </Text>
           </Pressable>
         </View>
+
+        {!!calendarDraft && (
+          <Pressable
+            onPress={handleAddToCalendar}
+            disabled={addingToCalendar}
+            className={`flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70 mb-4 ${
+              addingToCalendar ? "opacity-60" : ""
+            }`}
+          >
+            {addingToCalendar ? (
+              <ActivityIndicator size="small" color="#6B7280" />
+            ) : (
+              <>
+                <Feather name="calendar" size={16} color="#6B7280" />
+                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  Add to Calendar
+                </Text>
+              </>
+            )}
+          </Pressable>
+        )}
 
         <BulkOrderNotice
           ticketOrderId={detail.ticketOrderId}

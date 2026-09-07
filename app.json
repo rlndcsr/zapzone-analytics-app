@@ -51,6 +51,13 @@
       "expo-secure-store",
       "expo-sharing",
       [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow ZapZone to add booking, attraction, and event reminders to your calendar.",
+          "remindersPermission": false
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Allow ZapZone to access your camera to scan ticket QR codes for check-in and to take customer photos.",

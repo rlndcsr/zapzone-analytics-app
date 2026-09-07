@@ -20,6 +20,7 @@
     "expo": "~55.0.28",
     "expo-application": "~55.0.17",
     "expo-blur": "~55.0.16",
+    "expo-calendar": "~55.0.19",
     "expo-camera": "~55.0.21",
     "expo-clipboard": "~55.0.15",
     "expo-constants": "~55.0.17",
