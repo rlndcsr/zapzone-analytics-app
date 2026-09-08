@@ -832,6 +832,8 @@ export type Space = {
   id: number;
   name: string;
   capacity: number | null;
+  /** Null for a company-wide space with no single location. */
+  locationId: number | null;
   breaks: SpaceBreak[];
 };
 
@@ -883,6 +885,12 @@ export async function fetchSpaces({
         id: Number(r.id),
         name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
         capacity: r.capacity != null ? Number(r.capacity) : null,
+        locationId:
+          r.location_id != null
+            ? Number(r.location_id)
+            : r.location?.id != null
+              ? Number(r.location.id)
+              : null,
         breaks: (r.break_time ?? []).map((b) => ({
           days: Array.isArray(b.days)
             ? b.days.map((d) => String(d).toLowerCase())
@@ -1107,6 +1115,11 @@ export async function updateAreaGroupInterval(
 export type ScheduleBooking = {
   id: number;
   roomId: number | null;
+  /** For a roomless booking, groups it into a virtual (no-room) timeline column. */
+  packageId: number | null;
+  /** Raw package category — web parity: SpaceSchedule groups by this, not the
+   *  display-label-preferring `packageCategory` the general Booking type uses. */
+  packageCategory: string;
   referenceNumber: string | null;
   status: string;
   time: string | null; // HH:MM start
@@ -1132,7 +1145,7 @@ type RawScheduleBooking = {
   amount_paid?: number | string | null;
   payment_status?: string | null;
   guest_name?: string | null;
-  package?: { name?: string | null } | null;
+  package?: { id?: number | null; name?: string | null; category?: string | null } | null;
   customer?: { first_name?: string | null; last_name?: string | null } | null;
 };
 
@@ -1154,6 +1167,8 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
   return {
     id: raw.id,
     roomId: raw.room_id ?? null,
+    packageId: raw.package?.id ?? null,
+    packageCategory: raw.package?.category?.trim() || "",
     referenceNumber: raw.reference_number ?? null,
     status: raw.status ?? "pending",
     time: toTime(raw.booking_time),
@@ -1179,11 +1194,15 @@ export async function fetchDaySchedule({
   token,
   date,
   userId,
+  locationId,
   signal,
 }: {
   token: string;
   date: string;
   userId?: number;
+  /** Web parity: `bookingService.getBookings({ location_id })` — filters
+   *  server-side to the active workspace location (company_admin only). */
+  locationId?: number;
   signal?: AbortSignal;
 }): Promise<ScheduleBooking[]> {
   const out: ScheduleBooking[] = [];
@@ -1196,6 +1215,7 @@ export async function fetchDaySchedule({
       page: String(page),
     });
     if (userId != null) params.append("user_id", String(userId));
+    if (locationId != null) params.append("location_id", String(locationId));
     const res = await apiRequest<{
       data?: {
         bookings?: RawScheduleBooking[];

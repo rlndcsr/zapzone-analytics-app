@@ -19,17 +19,22 @@ type DayCache = { key: string; fetchedAt: number; data: ScheduleBooking[] };
 const dayCache = new Map<string, DayCache>();
 
 const userKey = (userId?: number) => String(userId ?? "me");
-const dayKey = (userId: number | undefined, date: string) =>
-  `${userKey(userId)}|${date}`;
+const dayKey = (userId: number | undefined, date: string, locationId?: number) =>
+  `${userKey(userId)}|${date}|${locationId ?? "all"}`;
 
 /**
  * Loads the spaces and the selected day's bookings for the Space Schedule.
- * `date` is a YYYY-MM-DD key. Scoped by the current user (backend limits to the
- * user's location), so no location filter is needed — matching the web.
+ * `date` is a YYYY-MM-DD key. Bookings are additionally scoped by
+ * `locationId` when given — the active workspace location for a company_admin
+ * (web parity: `effectiveLocationId`); managers/attendants are auto-scoped to
+ * their own location server-side either way, so `locationId` stays undefined
+ * for them. Spaces are NOT filtered here — like the web, every space loads
+ * once and the screen filters `displaySpaces` itself, since a space has no
+ * per-request location filter on its own list endpoint.
  */
-export function useSpaceSchedule(date: string) {
+export function useSpaceSchedule(date: string, locationId?: number) {
   const userId = getCurrentUser()?.id;
-  const dKey = dayKey(userId, date);
+  const dKey = dayKey(userId, date, locationId);
   const uKey = userKey(userId);
 
   const daySeed = dayCache.get(dKey);
@@ -102,7 +107,7 @@ export function useSpaceSchedule(date: string) {
       }
 
       try {
-        const data = await fetchDaySchedule({ token, date, userId });
+        const data = await fetchDaySchedule({ token, date, userId, locationId });
         dayCache.set(dKey, { key: dKey, fetchedAt: Date.now(), data });
         if (isCurrent()) {
           setBookings(data);
@@ -118,7 +123,7 @@ export function useSpaceSchedule(date: string) {
         if (isCurrent()) setLoading(false);
       }
     },
-    [dKey, date, userId],
+    [dKey, date, userId, locationId],
   );
 
   useEffect(() => {

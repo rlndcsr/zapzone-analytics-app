@@ -194,3 +194,21 @@ export function venueDateKey(iso: string | null | undefined): string | null {
   const { year, month, day } = venueParts(date);
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
+
+/** The venue's wall-clock "now" — web parity: `utils/timeFormat.ts` getMichiganNow(). */
+export type VenueNow = VenueParts;
+
+/** Venue wall-clock "now", broken into parts — for a live current-time indicator. */
+export function venueNow(): VenueNow {
+  return venueParts(new Date());
+}
+
+/**
+ * Today's calendar date at the venue, as a local midnight `Date` — for "is this
+ * today" comparisons that must not drift with the device's own time zone. Web
+ * parity: `michiganToday()` (CalendarView.tsx / SpaceSchedule.tsx).
+ */
+export function venueToday(): Date {
+  const { year, month, day } = venueNow();
+  return new Date(year, month - 1, day);
+}

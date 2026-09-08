@@ -29,6 +29,7 @@ import {
   useCategoryFilter,
 } from "../../lib/calendar/categoryFilter";
 import { packageColor } from "../../lib/calendar/packageColors";
+import { venueToday } from "../../lib/date/venueTime";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import {
   useScheduledExtras,
@@ -246,7 +247,7 @@ const BookingCalendar = () => {
   const activeLocationId =
     activeLocation.id === "all" ? undefined : activeLocation.id;
 
-  const today = useMemo(() => new Date(), []);
+  const today = useMemo(() => venueToday(), []);
   const todayKey = dateKey(today);
 
   const [viewMode, setViewMode] = useState<ViewMode>("month");
@@ -420,7 +421,7 @@ const BookingCalendar = () => {
   };
 
   const goToToday = () => {
-    setAnchor(new Date());
+    setAnchor(venueToday());
     setViewMode("day");
   };
 
