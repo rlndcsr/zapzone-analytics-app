@@ -4,6 +4,7 @@ import {
   RefreshControl,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { router } from "expo-router";
@@ -23,15 +24,33 @@ import {
   categoryKeyOf,
   useCategoryFilter,
 } from "../../lib/calendar/categoryFilter";
+import {
+  buildColumns,
+  timeToMinutes,
+} from "../../lib/bookings/spaceScheduleGrid";
+import {
+  computeSlotWindow,
+  distinctStartMinutes,
+  placeByColumn,
+  SLOT_MINUTES,
+  type SlotPlacement,
+} from "../../lib/calendar/dayGrid";
+import { packageColor } from "../../lib/calendar/packageColors";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import { useAttractionPurchases } from "../../lib/hooks/useAttractionPurchases";
+import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useSpaces } from "../../lib/hooks/useSpaceSchedule";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
 import {
+  AlertTriangle,
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  EyeOff,
+  Search,
   Users,
   MapPin,
   Clock,
@@ -87,6 +106,21 @@ const WEEKDAY_FULL = [
   "Friday",
   "Saturday",
 ];
+
+const WEEKDAY_ABBR = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+// Geometry of the day / week grids. Both put a fixed time gutter on the left
+// and scroll their columns sideways, so the widths below are what one column
+// costs the reader in horizontal scrolling.
+const TIME_COL_WIDTH = 72;
+const DAY_COL_WIDTH = 148;
+const WEEK_COL_WIDTH = 200;
+const GRID_HEADER_HEIGHT = 48;
+/** One 15-minute row of the day grid. */
+const SLOT_HEIGHT = 44;
+/** A week card is a fixed height so every column's rows stay aligned. */
+const WEEK_CARD_HEIGHT = 104;
+const WEEK_ROW_MIN_HEIGHT = 64;
 
 // Accent colors for the two per-day activity types (match the web calendar).
 const BOOKING_TINT = "#2563EB";
@@ -188,6 +222,14 @@ const formatMoney = (value: number) =>
     maximumFractionDigits: 2,
   })}`;
 
+/** A minute-of-day as a wall-clock label, e.g. 1110 → "6:30 PM". */
+const slotLabel = (mins: number): string => {
+  const h24 = Math.floor(mins / 60) % 24;
+  const m = ((mins % 60) + 60) % 60;
+  const meridian = h24 >= 12 ? "PM" : "AM";
+  return `${h24 % 12 || 12}:${pad2(m)} ${meridian}`;
+};
+
 function formatTime(time: string | null): string {
   if (!time) return "Any time";
   const [hStr, mStr] = time.split(":");
@@ -201,6 +243,19 @@ function formatTime(time: string | null): string {
 /** The scheduled calendar day for a purchase (scheduled date, else created). */
 const purchaseDateKey = (p: PurchaseRow): string =>
   (p.scheduledDate ?? p.createdAt ?? "").substring(0, 10);
+
+/** One thing shown in a week cell — a booking or an attraction purchase. */
+type WeekEntry = { key: string; time: string | null; dateKey: string } & (
+  | { kind: "booking"; booking: CalendarBooking }
+  | { kind: "attraction"; purchase: PurchaseRow }
+);
+
+/** One row of the week grid: a start time, and what starts then, per day. */
+type WeekRow = {
+  minutes: number;
+  height: number;
+  byDay: Record<string, WeekEntry[]>;
+};
 
 type DayGroup = {
   bookings: CalendarBooking[];
@@ -373,6 +428,150 @@ const AttractionCard = ({
   );
 };
 
+/**
+ * A booking laid over its space column, sized by its duration and narrowed to
+ * a lane when it clashes with another booking in the same space.
+ */
+const DayBookingBlock = ({
+  placement,
+  onPress,
+}: {
+  placement: SlotPlacement<CalendarBooking>;
+  onPress: () => void;
+}) => {
+  const booking = placement.item;
+  const tone = packageColor(booking.packageName);
+  const status = statusStyle(booking.status);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        position: "absolute",
+        top: placement.slotIndex * SLOT_HEIGHT + 2,
+        height: placement.slotSpan * SLOT_HEIGHT - 4,
+        left: `${(100 / placement.laneCount) * placement.lane}%`,
+        width: `${100 / placement.laneCount}%`,
+        backgroundColor: tone.bg,
+        borderLeftColor: status.color,
+      }}
+      className="rounded-md border-l-4 px-1.5 py-1 overflow-hidden active:opacity-80"
+      accessibilityRole="button"
+      accessibilityLabel={`${booking.customerName}, ${booking.packageName}, ${formatTime(booking.time)}`}
+    >
+      <Text
+        className="text-[10px] font-semibold"
+        style={{ color: tone.text }}
+        numberOfLines={1}
+      >
+        {slotLabel(placement.startMin)}–{slotLabel(placement.endMin)}
+        {placement.clipped ? "+" : ""}
+      </Text>
+      <Text className="text-xs font-bold text-gray-900" numberOfLines={1}>
+        {booking.customerName}
+      </Text>
+      <Text
+        className="text-[10px]"
+        style={{ color: tone.text }}
+        numberOfLines={1}
+      >
+        {booking.roomName || booking.packageName}
+      </Text>
+      <Text
+        className="text-[10px] font-semibold mt-auto"
+        style={{ color: status.color }}
+        numberOfLines={1}
+      >
+        {status.label}
+      </Text>
+    </Pressable>
+  );
+};
+
+/** One card in a week cell. */
+const WeekEntryCard = ({
+  entry,
+  onBooking,
+  onAttraction,
+}: {
+  entry: WeekEntry;
+  onBooking: (id: number) => void;
+  onAttraction: (id: number) => void;
+}) => {
+  if (entry.kind === "attraction") {
+    const purchase = entry.purchase;
+    return (
+      <Pressable
+        onPress={() => onAttraction(purchase.id)}
+        style={{ height: WEEK_CARD_HEIGHT }}
+        className="rounded-xl border border-purple-200 dark:border-purple-900/40 bg-purple-50/70 dark:bg-purple-900/10 p-2 mb-1.5 active:opacity-80"
+      >
+        <Text
+          className="text-xs font-bold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {purchase.customerName}
+        </Text>
+        <Text
+          className="text-[10px] font-semibold uppercase tracking-wide text-purple-600 dark:text-purple-400 mt-0.5"
+          numberOfLines={1}
+        >
+          {purchase.attractionName}
+        </Text>
+        <View className="flex-row items-center gap-1 mt-1">
+          <Ticket size={10} color="#9ca3af" />
+          <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+            {purchase.quantity} ticket{purchase.quantity === 1 ? "" : "s"}
+          </Text>
+        </View>
+        <Text className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 mt-auto">
+          View details
+        </Text>
+      </Pressable>
+    );
+  }
+
+  const booking = entry.booking;
+  const tone = packageColor(booking.packageName);
+  return (
+    <Pressable
+      onPress={() => onBooking(booking.id)}
+      style={{ height: WEEK_CARD_HEIGHT, backgroundColor: tone.bg }}
+      className="rounded-xl p-2 mb-1.5 active:opacity-80"
+    >
+      <Text className="text-xs font-bold text-gray-900" numberOfLines={1}>
+        {booking.customerName}
+      </Text>
+      <Text
+        className="text-[10px] font-semibold uppercase tracking-wide mt-0.5"
+        style={{ color: tone.text }}
+        numberOfLines={1}
+      >
+        {booking.packageName}
+      </Text>
+      {!!booking.locationName && (
+        <View className="flex-row items-center gap-1 mt-1">
+          <MapPin size={10} color="#6b7280" />
+          <Text className="text-[10px] text-gray-600 flex-1" numberOfLines={1}>
+            {booking.locationName}
+          </Text>
+        </View>
+      )}
+      <View className="flex-row items-center gap-1 mt-0.5">
+        <Users size={10} color="#6b7280" />
+        <Text className="text-[10px] text-gray-600">
+          {booking.participants}
+        </Text>
+      </View>
+      <Text
+        className="text-[10px] font-semibold mt-auto"
+        style={{ color: tone.text }}
+      >
+        View details
+      </Text>
+    </Pressable>
+  );
+};
+
 /** The two-section day body (Package Bookings + Attraction Purchases). */
 const DaySections = ({
   group,
@@ -463,6 +662,9 @@ const Calendar = () => {
   // Day whose detail sheet is open (YYYY-MM-DD), or null when closed.
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Day / week grid filters.
+  const [search, setSearch] = useState("");
+  const [hideEmptySpaces, setHideEmptySpaces] = useState(false);
 
   const {
     totalCount: unreadNotificationsCount,
@@ -494,18 +696,24 @@ const Calendar = () => {
 
   const { purchases, refetch: refetchPurchases } = useAttractionPurchases();
 
+  // Spaces are the day grid's columns; a space carries only a location id, so
+  // the locations list supplies the label under each column head.
+  const { spaces, refetch: refetchSpaces } = useSpaces();
+  const { locations } = useLocationOptions();
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await Promise.all([
         refetchBookings(),
         refetchPurchases(),
+        refetchSpaces(),
         refreshNotifications(),
       ]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetchBookings, refetchPurchases, refreshNotifications]);
+  }, [refetchBookings, refetchPurchases, refetchSpaces, refreshNotifications]);
 
   // Attraction purchases within the visible window, keyed by scheduled day.
   const purchasesInWindow = useMemo(
@@ -591,6 +799,158 @@ const Calendar = () => {
     });
   }, [anchor]);
 
+  /* ---------------------------------------------------------- day grid --- */
+
+  const spaceById = useMemo(
+    () => new Map(spaces.map((s) => [s.id, s])),
+    [spaces],
+  );
+  const locationNameById = useMemo(
+    () => new Map(locations.map((l) => [l.id, l.name])),
+    [locations],
+  );
+  const knownRoomIds = useMemo(
+    () => new Set(spaces.map((s) => s.id)),
+    [spaces],
+  );
+
+  /** Location label for a space column, or null for a company-wide space. */
+  const spaceLocationLabel = useCallback(
+    (roomId: number | null): string | null => {
+      if (roomId == null) return null;
+      const locationId = spaceById.get(roomId)?.locationId ?? null;
+      if (locationId == null) return null;
+      return locationNameById.get(locationId) ?? null;
+    },
+    [spaceById, locationNameById],
+  );
+
+  const matchesSearch = useCallback(
+    (name: string, phone: string | null) => {
+      const term = search.trim().toLowerCase();
+      if (!term) return true;
+      return `${name} ${phone ?? ""}`.toLowerCase().includes(term);
+    },
+    [search],
+  );
+
+  const dayBookings = useMemo(
+    () =>
+      (byDate[startDate]?.bookings ?? []).filter((b) =>
+        matchesSearch(b.customerName, b.customerPhone),
+      ),
+    [byDate, startDate, matchesSearch],
+  );
+  const dayAttractions = useMemo(
+    () =>
+      (byDate[startDate]?.attractions ?? []).filter((p) =>
+        matchesSearch(p.customerName, p.phone),
+      ),
+    [byDate, startDate, matchesSearch],
+  );
+
+  const dayColumns = useMemo(
+    () =>
+      buildColumns({
+        spaces,
+        bookings: dayBookings,
+        hideEmptySpaces,
+        knownRoomIds,
+      }),
+    [spaces, dayBookings, hideEmptySpaces, knownRoomIds],
+  );
+  const dayWindow = useMemo(() => computeSlotWindow(dayBookings), [dayBookings]);
+  const daySlots = useMemo(
+    () =>
+      Array.from(
+        { length: dayWindow.slots },
+        (_, i) => dayWindow.start + i * SLOT_MINUTES,
+      ),
+    [dayWindow],
+  );
+  const dayPlacements = useMemo(
+    () =>
+      placeByColumn({
+        columns: dayColumns,
+        items: dayBookings,
+        window: dayWindow,
+        knownRoomIds,
+      }),
+    [dayColumns, dayBookings, dayWindow, knownRoomIds],
+  );
+  /** Room columns the "hide empty spaces" toggle is currently holding back. */
+  const hiddenSpaceCount = hideEmptySpaces
+    ? spaces.length - dayColumns.filter((c) => !c.virtual).length
+    : 0;
+
+  /* --------------------------------------------------------- week grid --- */
+
+  const weekEntries = useMemo<WeekEntry[]>(() => {
+    const out: WeekEntry[] = [];
+    for (const day of weekDays) {
+      const key = dateKey(day);
+      const group = byDate[key];
+      if (!group) continue;
+      for (const booking of group.bookings) {
+        if (!matchesSearch(booking.customerName, booking.customerPhone)) continue;
+        out.push({
+          kind: "booking",
+          key: `b-${booking.id}`,
+          time: booking.time,
+          dateKey: key,
+          booking,
+        });
+      }
+      for (const purchase of group.attractions) {
+        if (!matchesSearch(purchase.customerName, purchase.phone)) continue;
+        out.push({
+          kind: "attraction",
+          key: `a-${purchase.id}`,
+          time: purchase.scheduledTime,
+          dateKey: key,
+          purchase,
+        });
+      }
+    }
+    return out;
+  }, [weekDays, byDate, matchesSearch]);
+
+  const weekRows = useMemo<WeekRow[]>(
+    () =>
+      distinctStartMinutes(weekEntries).map((minutes) => {
+        const byDay: Record<string, WeekEntry[]> = {};
+        let tallest = 0;
+        for (const entry of weekEntries) {
+          if (timeToMinutes(entry.time) !== minutes) continue;
+          const list = (byDay[entry.dateKey] ??= []);
+          list.push(entry);
+          tallest = Math.max(tallest, list.length);
+        }
+        return {
+          minutes,
+          byDay,
+          height: Math.max(
+            WEEK_ROW_MIN_HEIGHT,
+            tallest * (WEEK_CARD_HEIGHT + 6) + 12,
+          ),
+        };
+      }),
+    [weekEntries],
+  );
+  const weekEntryCount = weekEntries.length;
+
+  /* ------------------------------------------------- shared empty state --- */
+
+  const isSearching = search.trim().length > 0;
+  const emptyGridTitle = isSearching
+    ? "No matching bookings"
+    : categoryFilter.isAll
+      ? "No activity"
+      : "Nothing in the selected categories";
+  const emptyGridHint = isSearching
+    ? "Nothing here matches that customer name or phone."
+    : "There is nothing scheduled in this period.";
+
   const step = (dir: number) => {
     const next = new Date(anchor);
     if (viewMode === "month") next.setMonth(anchor.getMonth() + dir);
@@ -599,10 +959,19 @@ const Calendar = () => {
     setAnchor(next);
   };
 
-  const goToToday = () => {
-    setAnchor(new Date());
-    setViewMode("day");
-  };
+  const goToToday = () => setAnchor(new Date());
+
+  /** Whether the visible period already contains today (Today reads as on). */
+  const isAnchoredOnToday = useMemo(() => {
+    if (viewMode === "day") return dateKey(anchor) === todayKey;
+    if (viewMode === "week") {
+      return todayKey >= dateKey(weekDays[0]) && todayKey <= dateKey(weekDays[6]);
+    }
+    return (
+      anchor.getFullYear() === today.getFullYear() &&
+      anchor.getMonth() === today.getMonth()
+    );
+  }, [viewMode, anchor, weekDays, todayKey, today]);
 
   const headerLabel = useMemo(() => {
     if (viewMode === "month") {
@@ -681,8 +1050,8 @@ const Calendar = () => {
           />
 
           {/* View-mode filter */}
-          <View className="flex-row bg-white dark:bg-neutral-900 rounded-xl p-1.5 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
-            {(["month", "week", "day"] as ViewMode[]).map((mode) => {
+          <View className="flex-row bg-white dark:bg-neutral-900 rounded-xl p-1.5 mb-4 shadow-sm border border-gray-100 dark:border-neutral-800">
+            {(["day", "week", "month"] as ViewMode[]).map((mode) => {
               const active = viewMode === mode;
               const IconComponent = getViewIcon(mode);
               return (
@@ -707,32 +1076,106 @@ const Calendar = () => {
                 </Pressable>
               );
             })}
-            <Pressable
-              onPress={goToToday}
-              className="flex-1 py-2.5 rounded-lg items-center bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
-            >
-              <Text className="text-sm font-semibold text-[#0644C7]">Today</Text>
-            </Pressable>
           </View>
 
-          {/* Period navigation */}
-          <View className="flex-row items-center justify-between mb-5">
+          {/* Period navigation — arrows either side of the label, Today at the
+              right so it reads as a jump rather than a fourth view mode. */}
+          <View className="flex-row items-center gap-2 mb-4">
             <Pressable
               onPress={() => step(-1)}
               className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
+              accessibilityRole="button"
+              accessibilityLabel="Previous"
             >
               <ChevronLeft size={20} color="#6b7280" />
             </Pressable>
-            <Text className="text-base font-bold text-gray-900 dark:text-white flex-1 text-center mx-2">
+            <Text
+              className="text-base font-bold text-gray-900 dark:text-white flex-1 text-center"
+              numberOfLines={1}
+            >
               {headerLabel}
             </Text>
             <Pressable
               onPress={() => step(1)}
               className="w-10 h-10 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 items-center justify-center shadow-sm"
+              accessibilityRole="button"
+              accessibilityLabel="Next"
             >
               <ChevronRight size={20} color="#6b7280" />
             </Pressable>
+            <Pressable
+              onPress={goToToday}
+              className={`px-4 h-10 rounded-full items-center justify-center border ${
+                isAnchoredOnToday
+                  ? "bg-[#0644C7] border-[#0644C7]"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+              }`}
+            >
+              <Text
+                className={`text-sm font-semibold ${
+                  isAnchoredOnToday ? "text-white" : "text-[#0644C7]"
+                }`}
+              >
+                Today
+              </Text>
+            </Pressable>
           </View>
+
+          {/* Search + space visibility — the day and week grids are filtered by
+              customer, and the day grid can drop the spaces nothing is booked
+              into (58 columns is a lot of scrolling for one booking). */}
+          {viewMode !== "month" && (
+            <View className="flex-row items-center gap-2 mb-4">
+              <View className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-xl px-3 h-11">
+                <Search size={16} color="#9ca3af" />
+                <TextInput
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Search customer name or phone"
+                  placeholderTextColor="#9ca3af"
+                  className="flex-1 text-sm text-gray-900 dark:text-white"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {search.length > 0 && (
+                  <Pressable
+                    onPress={() => setSearch("")}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear search"
+                  >
+                    <XCircle size={16} color="#9ca3af" />
+                  </Pressable>
+                )}
+              </View>
+              {viewMode === "day" && (
+                <Pressable
+                  onPress={() => setHideEmptySpaces((v) => !v)}
+                  className={`flex-row items-center gap-1.5 px-3 h-11 rounded-xl border ${
+                    hideEmptySpaces
+                      ? "bg-[#0644C7]/10 dark:bg-[#0644C7]/20 border-[#0644C7]/40"
+                      : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                  }`}
+                  accessibilityRole="button"
+                  accessibilityState={{ checked: hideEmptySpaces }}
+                >
+                  {hideEmptySpaces ? (
+                    <EyeOff size={16} color="#0644C7" />
+                  ) : (
+                    <Eye size={16} color="#6b7280" />
+                  )}
+                  <Text
+                    className={`text-xs font-semibold ${
+                      hideEmptySpaces
+                        ? "text-[#0644C7]"
+                        : "text-gray-500 dark:text-gray-400"
+                    }`}
+                  >
+                    {hideEmptySpaces ? "Empty hidden" : "All spaces"}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           {/* Category tabs — All / <package & attraction categories>, filtering
               bookings and attraction tickets together (web parity). Rendered
@@ -868,88 +1311,308 @@ const Calendar = () => {
           {viewMode === "week" && loading && <CalendarWeekSkeleton />}
           {viewMode === "day" && loading && <CalendarDaySkeleton />}
 
-          {/* ---- WEEK ---- */}
-          {viewMode === "week" &&
-            !loading &&
-            weekDays.map((d) => {
-              const key = dateKey(d);
-              const group = byDate[key];
-              const isToday = key === todayKey;
-              const hasActivity =
-                (group?.bookings.length ?? 0) > 0 ||
-                (group?.attractionTickets ?? 0) > 0;
-              return (
-                <Pressable
-                  key={key}
-                  disabled={!hasActivity}
-                  onPress={() => hasActivity && setSelectedDayKey(key)}
-                  className={`mb-3 rounded-2xl p-4 bg-white dark:bg-neutral-900 border ${
-                    isToday
-                      ? "border-[#0644C7]/40"
-                      : "border-gray-100 dark:border-neutral-800"
-                  } ${hasActivity ? "active:opacity-80" : ""}`}
-                >
-                  <View className="flex-row items-center gap-3">
-                    <View
-                      className={`w-10 h-10 rounded-full items-center justify-center ${
-                        isToday
-                          ? "bg-[#0644C7]"
-                          : "bg-gray-100 dark:bg-neutral-800"
-                      }`}
-                    >
-                      <Text
-                        className={`text-sm font-bold ${
-                          isToday
-                            ? "text-white"
-                            : "text-gray-700 dark:text-gray-300"
-                        }`}
-                      >
-                        {d.getDate()}
-                      </Text>
-                    </View>
-                    <View className="flex-1">
-                      <Text
-                        className={`text-sm font-semibold ${
-                          isToday
-                            ? "text-[#0644C7]"
-                            : "text-gray-900 dark:text-white"
-                        }`}
-                      >
-                        {WEEKDAY_FULL[d.getDay()]}
-                      </Text>
-                      <Text className="text-xs text-gray-400 dark:text-gray-500">
-                        {hasActivity ? summaryText(group) : "No activity"}
-                      </Text>
-                    </View>
-                    {hasActivity && <ChevronRight size={18} color="#9ca3af" />}
-                  </View>
-                </Pressable>
-              );
-            })}
-
-          {/* ---- DAY ---- */}
-          {viewMode === "day" && !loading && (
-            <>
-              <View className="flex-row items-center gap-3 mb-4">
-                <View className="w-10 h-10 rounded-full bg-[#0644C7] items-center justify-center">
-                  <Text className="text-white font-bold text-sm">
-                    {anchor.getDate()}
+          {/* ---- WEEK ----
+              Time down the side, one column per day, a card per booking. Rows
+              are the distinct start times in the week rather than a fixed
+              hourly ruler, so a quiet week stays a few rows tall. */}
+          {viewMode === "week" && !loading && (
+            <View className="rounded-2xl overflow-hidden bg-white dark:bg-neutral-900 shadow-sm border border-gray-100 dark:border-neutral-800">
+              {weekRows.length === 0 ? (
+                <View className="p-8 items-center">
+                  <CalendarIcon size={30} color="#9ca3af" />
+                  <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
+                    {emptyGridTitle}
+                  </Text>
+                  <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
+                    {emptyGridHint}
                   </Text>
                 </View>
-                <View>
-                  <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                    {WEEKDAY_FULL[anchor.getDay()]}
+              ) : (
+                <View className="flex-row">
+                  {/* Fixed time gutter */}
+                  <View
+                    style={{ width: TIME_COL_WIDTH }}
+                    className="border-r border-gray-100 dark:border-neutral-800"
+                  >
+                    <View
+                      style={{ height: GRID_HEADER_HEIGHT }}
+                      className="flex-row items-center gap-1 px-3 border-b border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50"
+                    >
+                      <Clock size={12} color="#6b7280" />
+                      <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                        Time
+                      </Text>
+                    </View>
+                    {weekRows.map((row) => (
+                      <View
+                        key={row.minutes}
+                        style={{ height: row.height }}
+                        className="px-3 pt-2 border-b border-gray-100 dark:border-neutral-800"
+                      >
+                        <Text className="text-xs font-semibold text-[#0644C7]">
+                          {slotLabel(row.minutes)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View className="flex-row">
+                      {weekDays.map((day) => {
+                        const key = dateKey(day);
+                        const isToday = key === todayKey;
+                        return (
+                          <View
+                            key={key}
+                            style={{ width: WEEK_COL_WIDTH }}
+                            className="border-r border-gray-100 dark:border-neutral-800"
+                          >
+                            <Pressable
+                              onPress={() => {
+                                setAnchor(new Date(day));
+                                setViewMode("day");
+                              }}
+                              style={{ height: GRID_HEADER_HEIGHT }}
+                              className={`px-3 justify-center border-b border-gray-100 dark:border-neutral-800 ${
+                                isToday
+                                  ? "bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
+                                  : "bg-gray-50 dark:bg-neutral-800/50"
+                              }`}
+                            >
+                              <Text
+                                className={`text-[11px] font-bold tracking-wide ${
+                                  isToday
+                                    ? "text-[#0644C7]"
+                                    : "text-gray-500 dark:text-gray-400"
+                                }`}
+                              >
+                                {WEEKDAY_ABBR[day.getDay()]}
+                              </Text>
+                              <Text
+                                className={`text-[11px] ${
+                                  isToday
+                                    ? "text-[#0644C7]"
+                                    : "text-gray-400 dark:text-gray-500"
+                                }`}
+                              >
+                                {MONTH_SHORT[day.getMonth()].toUpperCase()}{" "}
+                                {day.getDate()}
+                              </Text>
+                            </Pressable>
+
+                            {weekRows.map((row) => {
+                              const entries = row.byDay[key] ?? [];
+                              return (
+                                <View
+                                  key={row.minutes}
+                                  style={{ height: row.height }}
+                                  className="px-2 py-1.5 border-b border-gray-100 dark:border-neutral-800"
+                                >
+                                  {entries.length === 0 ? (
+                                    <Text className="text-gray-300 dark:text-neutral-700 text-xs">
+                                      –
+                                    </Text>
+                                  ) : (
+                                    entries.map((entry) => (
+                                      <WeekEntryCard
+                                        key={entry.key}
+                                        entry={entry}
+                                        onBooking={openBooking}
+                                        onAttraction={openAttraction}
+                                      />
+                                    ))
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                </View>
+              )}
+
+              <View className="px-4 py-2.5 border-t border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50">
+                <Text className="text-xs text-gray-500 dark:text-gray-400">
+                  <Text className="font-semibold text-[#0644C7]">
+                    {weekEntryCount}
+                  </Text>{" "}
+                  {weekEntryCount === 1 ? "entry" : "entries"} across 7 days
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* ---- DAY ----
+              The space grid: one column per space, 15-minute slots down the
+              side, bookings laid over their column. Same column model as the
+              Space Schedule, so a booking with no room gets a virtual column
+              of its own rather than being dropped. */}
+          {viewMode === "day" && !loading && (
+            <>
+              <View className="rounded-2xl overflow-hidden bg-white dark:bg-neutral-900 shadow-sm border border-gray-100 dark:border-neutral-800">
+                <View className="px-4 py-3 border-b border-gray-100 dark:border-neutral-800">
+                  <Text className="text-base font-bold text-gray-900 dark:text-white">
+                    {headerLabel}
                   </Text>
-                  <Text className="text-xs text-gray-400 dark:text-gray-500">
-                    {summaryText(byDate[startDate]) || "No activity"}
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    <Text className="font-semibold text-[#0644C7]">
+                      {dayBookings.length}
+                    </Text>{" "}
+                    {dayBookings.length === 1 ? "booking" : "bookings"}
+                  </Text>
+                </View>
+
+                {dayColumns.length === 0 ? (
+                  <View className="p-8 items-center">
+                    <CalendarIcon size={30} color="#9ca3af" />
+                    <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
+                      {emptyGridTitle}
+                    </Text>
+                    <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
+                      {emptyGridHint}
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="flex-row">
+                    {/* Fixed time gutter */}
+                    <View
+                      style={{ width: TIME_COL_WIDTH }}
+                      className="border-r border-gray-100 dark:border-neutral-800"
+                    >
+                      <View
+                        style={{ height: GRID_HEADER_HEIGHT }}
+                        className="flex-row items-center gap-1 px-3 border-b border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50"
+                      >
+                        <Clock size={12} color="#6b7280" />
+                        <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                          Time
+                        </Text>
+                      </View>
+                      {daySlots.map((minutes) => (
+                        <View
+                          key={minutes}
+                          style={{ height: SLOT_HEIGHT }}
+                          className="px-3 pt-1 border-b border-gray-100 dark:border-neutral-800"
+                        >
+                          <Text className="text-xs font-medium text-[#0644C7]">
+                            {slotLabel(minutes)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View className="flex-row">
+                        {dayColumns.map((column) => (
+                          <View
+                            key={column.key}
+                            style={{ width: DAY_COL_WIDTH }}
+                            className="border-r border-gray-100 dark:border-neutral-800"
+                          >
+                            <View
+                              style={{ height: GRID_HEADER_HEIGHT }}
+                              className="px-2 items-center justify-center border-b border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50"
+                            >
+                              <Text
+                                className="text-xs font-bold text-gray-900 dark:text-white"
+                                numberOfLines={1}
+                              >
+                                {column.name}
+                              </Text>
+                              {column.virtual ? (
+                                <View className="flex-row items-center gap-1 mt-0.5">
+                                  <AlertTriangle size={10} color="#F59E0B" />
+                                  <Text className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                    No room
+                                  </Text>
+                                </View>
+                              ) : (
+                                !!spaceLocationLabel(column.roomId) && (
+                                  <View className="flex-row items-center gap-1 mt-0.5">
+                                    <MapPin size={10} color="#9ca3af" />
+                                    <Text
+                                      className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink"
+                                      numberOfLines={1}
+                                    >
+                                      {spaceLocationLabel(column.roomId)}
+                                    </Text>
+                                  </View>
+                                )
+                              )}
+                            </View>
+
+                            <View
+                              style={{ height: daySlots.length * SLOT_HEIGHT }}
+                            >
+                              {daySlots.map((minutes) => (
+                                <View
+                                  key={minutes}
+                                  style={{ height: SLOT_HEIGHT }}
+                                  className="items-center justify-center border-b border-gray-100 dark:border-neutral-800"
+                                >
+                                  <Text className="text-gray-300 dark:text-neutral-700 text-xs">
+                                    –
+                                  </Text>
+                                </View>
+                              ))}
+
+                              {(dayPlacements.get(column.key) ?? []).map(
+                                (placement) => (
+                                  <DayBookingBlock
+                                    key={placement.item.id}
+                                    placement={placement}
+                                    onPress={() =>
+                                      openBooking(placement.item.id)
+                                    }
+                                  />
+                                ),
+                              )}
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  </View>
+                )}
+
+                <View className="px-4 py-2.5 border-t border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50">
+                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    <Text className="font-semibold text-[#0644C7]">
+                      {dayBookings.length}
+                    </Text>{" "}
+                    {dayBookings.length === 1 ? "booking" : "bookings"} across{" "}
+                    <Text className="font-semibold text-gray-700 dark:text-gray-200">
+                      {dayColumns.length}
+                    </Text>{" "}
+                    {dayColumns.length === 1 ? "column" : "columns"}
+                    {hiddenSpaceCount > 0
+                      ? ` · ${hiddenSpaceCount} empty space${hiddenSpaceCount === 1 ? "" : "s"} hidden`
+                      : ""}
                   </Text>
                 </View>
               </View>
-              <DaySections
-                group={byDate[startDate]}
-                onBooking={openBooking}
-                onAttraction={openAttraction}
-              />
+
+              {/* Attraction tickets have no space of their own, so they sit
+                  under the grid rather than in it. */}
+              {dayAttractions.length > 0 && (
+                <View className="mt-5">
+                  <View className="flex-row items-center gap-2 mb-3">
+                    <Ticket size={16} color={ATTRACTION_TINT} />
+                    <Text className="text-sm font-bold text-gray-700 dark:text-gray-200">
+                      Attraction Purchases ({dayAttractions.length})
+                    </Text>
+                  </View>
+                  {dayAttractions.map((purchase) => (
+                    <AttractionCard
+                      key={purchase.id}
+                      purchase={purchase}
+                      onPress={() => openAttraction(purchase.id)}
+                    />
+                  ))}
+                </View>
+              )}
             </>
           )}
 

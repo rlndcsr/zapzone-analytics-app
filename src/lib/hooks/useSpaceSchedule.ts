@@ -23,6 +23,69 @@ const dayKey = (userId: number | undefined, date: string, locationId?: number) =
   `${userKey(userId)}|${date}|${locationId ?? "all"}`;
 
 /**
+ * Read the session-wide spaces cache, refreshing it when stale (or when
+ * `force` says to). Returns null when there is nothing to show — no token, or
+ * the request failed and the cache was empty.
+ */
+async function loadSpaces(
+  uKey: string,
+  userId: number | undefined,
+  force: boolean,
+): Promise<Space[] | null> {
+  const fresh =
+    !!spacesCache &&
+    spacesCache.key === uKey &&
+    Date.now() - spacesCache.fetchedAt < CACHE_TTL_MS;
+  if (fresh && !force) return spacesCache!.data;
+
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const data = await fetchSpaces({ token, userId });
+    spacesCache = { key: uKey, fetchedAt: Date.now(), data };
+    return data;
+  } catch (err) {
+    console.error("Spaces load error:", err);
+    return null;
+  }
+}
+
+/**
+ * Just the spaces, for screens that lay bookings out in space columns without
+ * needing this hook's day fetch (the Calendar tab's day grid). Shares the same
+ * session cache, so mounting it after the Space Schedule costs nothing.
+ */
+export function useSpaces() {
+  const userId = getCurrentUser()?.id;
+  const uKey = userKey(userId);
+
+  const [spaces, setSpaces] = useState<Space[]>(
+    spacesCache && spacesCache.key === uKey ? spacesCache.data : [],
+  );
+  const mountedRef = useRef(true);
+
+  const sync = useCallback(
+    async (force: boolean) => {
+      const data = await loadSpaces(uKey, userId, force);
+      if (data && mountedRef.current) setSpaces(data);
+    },
+    [uKey, userId],
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    sync(false);
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [sync]);
+
+  const refetch = useCallback(() => sync(true), [sync]);
+
+  return { spaces, refetch };
+}
+
+/**
  * Loads the spaces and the selected day's bookings for the Space Schedule.
  * `date` is a YYYY-MM-DD key. Bookings are additionally scoped by
  * `locationId` when given — the active workspace location for a company_admin
@@ -53,23 +116,8 @@ export function useSpaceSchedule(date: string, locationId?: number) {
 
   const syncSpaces = useCallback(
     async (force: boolean) => {
-      const fresh =
-        !!spacesCache &&
-        spacesCache.key === uKey &&
-        Date.now() - spacesCache.fetchedAt < CACHE_TTL_MS;
-      if (fresh && !force) {
-        setSpaces(spacesCache!.data);
-        return;
-      }
-      const token = getToken();
-      if (!token) return;
-      try {
-        const data = await fetchSpaces({ token, userId });
-        spacesCache = { key: uKey, fetchedAt: Date.now(), data };
-        setSpaces(data);
-      } catch (err) {
-        console.error("Spaces load error:", err);
-      }
+      const data = await loadSpaces(uKey, userId, force);
+      if (data) setSpaces(data);
     },
     [uKey, userId],
   );

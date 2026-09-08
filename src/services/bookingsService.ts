@@ -31,8 +31,14 @@ export type CalendarBooking = {
   customerEmail: string | null;
   customerPhone: string | null;
   roomName: string;
+  /** Room the booking occupies when one is assigned — the day grid keys its
+   *  space columns off this, falling back to `packageId` when it is null. */
+  roomId: number | null;
+  packageId: number | null;
   duration: number | null;
   durationUnit: string;
+  /** `duration` normalised to whole minutes, for placing it on a time grid. */
+  durationMinutes: number;
   paymentMethod: string | null;
   /** Settlement state ("paid" / "partial" / …), drives the amount colour. */
   paymentStatus: string | null;
@@ -137,11 +143,14 @@ type RawBooking = {
   special_requests?: string | null;
   payment_status?: string | null;
   package?: {
+    id?: number | null;
     name?: string | null;
     category?: string | null;
     display_label?: string | null;
   } | null;
-  room?: { name?: string | null } | null;
+  room_id?: number | null;
+  package_id?: number | null;
+  room?: { id?: number | null; name?: string | null } | null;
   location?: { name?: string | null } | null;
   customer?: {
     first_name?: string | null;
@@ -286,9 +295,15 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     customerPhone:
       raw.customer?.phone?.trim() || raw.guest_phone?.trim() || null,
     roomName: raw.room?.name?.trim() || "",
+    roomId: raw.room_id ?? raw.room?.id ?? null,
+    packageId: raw.package_id ?? raw.package?.id ?? null,
     duration:
       durationRaw != null && !Number.isNaN(durationRaw) ? durationRaw : null,
     durationUnit: raw.duration_unit ?? "minutes",
+    durationMinutes: durationToMinutes(
+      durationRaw != null && !Number.isNaN(durationRaw) ? durationRaw : 0,
+      raw.duration_unit,
+    ),
     paymentMethod: raw.payment_method ?? null,
     paymentStatus: raw.payment_status ?? null,
     locationName: raw.location?.name?.trim() || "",
@@ -1229,6 +1244,67 @@ export async function fetchDaySchedule({
     page++;
   } while (page <= lastPage && page <= SYNC_MAX_PAGES);
   return out;
+}
+
+/** Statuses that occupy a space, so only these are counted per day. */
+const COUNTED_SCHEDULE_STATUSES = new Set(["confirmed", "checked-in", "pending"]);
+
+/**
+ * GET /api/bookings?date_from=&date_to= — how many space-occupying bookings
+ * (confirmed / checked-in / pending) fall on each date of an inclusive range,
+ * keyed by "YYYY-MM-DD". Backs the Space Schedule's week-strip badges.
+ *
+ * The web counts the same statuses out of its local booking cache; mobile has
+ * no such cache, so it asks the range endpoint once for the whole week rather
+ * than fetching seven separate days. `locationId` scopes to the active
+ * workspace location exactly like `fetchDaySchedule` — managers/attendants are
+ * scoped server-side either way.
+ */
+export async function fetchBookingCountsByDate({
+  token,
+  from,
+  to,
+  userId,
+  locationId,
+  signal,
+}: {
+  token: string;
+  /** Inclusive range start, "YYYY-MM-DD". */
+  from: string;
+  /** Inclusive range end, "YYYY-MM-DD". */
+  to: string;
+  userId?: number;
+  locationId?: number;
+  signal?: AbortSignal;
+}): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const params = new URLSearchParams({
+      date_from: from,
+      date_to: to,
+      per_page: String(PER_PAGE),
+      page: String(page),
+    });
+    if (userId != null) params.append("user_id", String(userId));
+    if (locationId != null) params.append("location_id", String(locationId));
+    const res = await apiRequest<{
+      data?: {
+        bookings?: { booking_date?: string | null; status?: string | null }[];
+        pagination?: { last_page?: number };
+      };
+    }>(`/api/bookings?${params.toString()}`, { token, signal });
+    for (const raw of res?.data?.bookings ?? []) {
+      // booking_date comes back as a bare date, but tolerate a timestamp.
+      const key = String(raw.booking_date ?? "").split("T")[0];
+      if (!key || !COUNTED_SCHEDULE_STATUSES.has(String(raw.status ?? ""))) continue;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    lastPage = res?.data?.pagination?.last_page ?? page;
+    page++;
+  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
+  return counts;
 }
 
 /**

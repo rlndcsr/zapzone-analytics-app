@@ -21,6 +21,7 @@ import { CalendarDaySkeleton } from "../../components/ui/skeleton/CalendarSkelet
 import { packageColor } from "../../lib/calendar/packageColors";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useSpaceSchedule } from "../../lib/hooks/useSpaceSchedule";
+import { useWeekBookingCounts } from "../../lib/hooks/useWeekBookingCounts";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
   buildColumns,
@@ -63,6 +64,7 @@ const MONTH_NAMES = [
 const WEEKDAY_FULL = [
   "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 ];
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const PICKER_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -807,14 +809,32 @@ const SpaceScheduleScreen = () => {
     effectiveLocationId,
   );
 
+  // The week strip runs from today forward (web parity: SpaceSchedule's
+  // `weekDays`), so it re-anchors when the venue day rolls over rather than
+  // following the date the user has navigated to.
+  const weekDays = useMemo(() => {
+    const base = new Date(nowTick.year, nowTick.month - 1, nowTick.day);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      return d;
+    });
+  }, [nowTick.year, nowTick.month, nowTick.day]);
+
+  const { counts: weekCounts, refetch: refetchWeekCounts } = useWeekBookingCounts(
+    dateKey(weekDays[0]),
+    dateKey(weekDays[6]),
+    effectiveLocationId,
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refetch();
+      await Promise.all([refetch(), refetchWeekCounts()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [refetch, refetchWeekCounts]);
 
   // Day-offs for the resolved location — feeds the closure bands.
   const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
@@ -1222,6 +1242,73 @@ const SpaceScheduleScreen = () => {
 
           <GridListToggle mode={viewMode} onChange={setViewMode} />
         </View>
+
+        {/* Week strip — the next 7 days with their booking counts */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          className="-mx-1 mt-3"
+          contentContainerStyle={{ paddingHorizontal: 4 }}
+        >
+          {weekDays.map((day) => {
+            const key = dateKey(day);
+            const count = weekCounts[key] ?? 0;
+            const selected = key === selectedKey;
+            const isToday = key === todayKey;
+            return (
+              <Pressable
+                key={key}
+                onPress={() => setSelectedDate(new Date(day))}
+                className={`mx-1 items-center px-3 py-1.5 rounded-xl border ${
+                  selected
+                    ? "bg-[#0644C7]/10 dark:bg-[#0644C7]/20 border-[#0644C7]/40"
+                    : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                }`}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${WEEKDAY_FULL[day.getDay()]} ${MONTH_NAMES[day.getMonth()]} ${day.getDate()}, ${count} ${count === 1 ? "booking" : "bookings"}`}
+              >
+                <Text
+                  className={`text-[10px] uppercase tracking-wide font-semibold ${
+                    selected || isToday
+                      ? "text-[#0644C7]"
+                      : "text-gray-400 dark:text-gray-500"
+                  }`}
+                >
+                  {isToday ? "Today" : WEEKDAY_SHORT[day.getDay()]}
+                </Text>
+                <View className="flex-row items-center gap-1 mt-0.5">
+                  <Text
+                    className={`text-sm font-bold ${
+                      selected ? "text-[#0644C7]" : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {day.getDate()}
+                  </Text>
+                  {count > 0 && (
+                    <View
+                      className={`px-1.5 rounded-full ${
+                        selected
+                          ? "bg-[#0644C7]/20"
+                          : "bg-gray-100 dark:bg-neutral-800"
+                      }`}
+                    >
+                      <Text
+                        className={`text-[10px] font-bold ${
+                          selected
+                            ? "text-[#0644C7]"
+                            : "text-gray-500 dark:text-gray-400"
+                        }`}
+                      >
+                        {count}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
         {/* Day summary */}
         <View className="flex-row items-center gap-3 mt-3">
