@@ -73,13 +73,30 @@ export async function validatePromoCode({
   return mapResult(res);
 }
 
+/** One thing being purchased, for the gift card's own targeting check (its
+ *  `location_ids` / `package_ids` / `attraction_ids` / `event_ids`). The
+ *  server decides eligibility from this — nothing here is evaluated client-side. */
+export type CheckoutItem = { type: "attraction" | "event" | "package"; id: number };
+
+type ValidateGiftCardParams = ValidateParams & {
+  /**
+   * The cart contents being purchased, when there is a cart to describe (an
+   * onsite attraction/event purchase or a bulk ticket order). Omit for a flow
+   * with no such list — the booking wizard validates against a single
+   * package the server already knows from the booking being built, and has
+   * never needed to send this.
+   */
+  items?: CheckoutItem[];
+};
+
 /** POST /api/gift-cards/validate-code — quote a gift card against the subtotal. */
 export async function validateGiftCardCode({
   token,
   code,
   subtotal,
   locationId,
-}: ValidateParams): Promise<DiscountCodeResult> {
+  items,
+}: ValidateGiftCardParams): Promise<DiscountCodeResult> {
   const res = await apiRequest<RawResult>("/api/gift-cards/validate-code", {
     method: "POST",
     token,
@@ -87,6 +104,7 @@ export async function validateGiftCardCode({
       code: code.trim(),
       subtotal,
       ...(locationId != null ? { location_id: locationId } : {}),
+      ...(items && items.length ? { items } : {}),
     },
   });
   return mapResult(res);

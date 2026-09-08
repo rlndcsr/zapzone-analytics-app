@@ -154,6 +154,8 @@ export type TicketOrderCheckInResult = {
 };
 
 export type TicketOrderCheckoutInput = {
+  /** Redeemed server-side against the order's total when present. */
+  gift_card_code?: string;
   customer_id?: number;
   guest_name?: string;
   guest_email?: string;

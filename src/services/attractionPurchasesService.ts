@@ -197,6 +197,8 @@ export type PurchaseAddonInput = {
  * `POST /api/payments/charge`, exactly as the web `CreatePurchase` does.
  */
 export type CreateAttractionPurchaseInput = {
+  /** Redeemed server-side against this purchase's total when present. */
+  gift_card_code?: string;
   attraction_id: number;
   customer_id?: number;
   guest_name: string;

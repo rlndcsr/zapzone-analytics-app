@@ -188,6 +188,8 @@ export type EventPurchaseAddonInput = {
  * on submit as `applied_fees` / `applied_discounts` (same as the web).
  */
 export type CreateEventPurchaseInput = {
+  /** Redeemed server-side against this purchase's total when present. */
+  gift_card_code?: string;
   event_id: number;
   customer_id?: number | null;
   guest_name: string;

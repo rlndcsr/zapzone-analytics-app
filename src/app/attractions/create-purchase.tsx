@@ -31,6 +31,10 @@ import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
 import { Toast, type ToastType } from "../../components/ui/Toast";
+import {
+  GiftCardCheckoutField,
+  type AppliedGiftCard,
+} from "../../components/gift-cards/GiftCardCheckoutField";
 import { firstMediaUrl, mediaUrl } from "../../lib/api";
 import {
   attractionIsCallToBook,
@@ -61,6 +65,12 @@ import {
   DEFAULT_MAX_QUANTITY,
 } from "../../lib/addOnQuantity";
 import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import {
+  amountDueAfterGiftCard,
+  giftCardCodeField,
+  giftCardDiscountFor,
+  reconcileGiftCardPurchase,
+} from "../../lib/giftCards/checkoutGiftCard";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
@@ -83,6 +93,7 @@ import {
 } from "../../lib/payments/useQrDataUri";
 import {
   createAttractionPurchase,
+  fetchAttractionPurchase,
   type CreateAttractionPurchaseInput,
 } from "../../services/attractionPurchasesService";
 import {
@@ -458,6 +469,11 @@ const CreatePurchaseScreen = () => {
   const [scheduledTime, setScheduledTime] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("authorize.net");
   const [sendEmail, setSendEmail] = useState(true);
+  /** Applied at most one at a time; validated against the running subtotal,
+   *  redeemed server-side when the purchase/order is created (web parity:
+   *  commit "gift cards: apply a card at checkout, claim codes, and buy by
+   *  amount"). Shared by the single-purchase and bulk-order paths below. */
+  const [giftCard, setGiftCard] = useState<AppliedGiftCard | null>(null);
 
   // Card (Authorize.Net) fields — same anatomy as the web Card Details panel.
   const [cardNumber, setCardNumber] = useState("");
@@ -1115,11 +1131,52 @@ const CreatePurchaseScreen = () => {
     leave();
   };
 
+  /**
+   * What the gift card field validates against — the same item set the order
+   * quote itself prices (committed lines plus whatever is still being
+   * configured), or the single attraction being purchased. Web parity:
+   * `giftCardItems`/`giftCardSubtotal`.
+   */
+  const orderItemsForGiftCard = currentLine ? [...orderLines, currentLine] : orderLines;
+  const giftCardItems = orderMode
+    ? orderItemsForGiftCard.map((l) => ({ type: l.type, id: l.id }))
+    : selected
+      ? [{ type: "attraction" as const, id: selected.id }]
+      : [];
+  const giftCardSubtotal = orderMode ? (orderQuote?.totalAmount ?? 0) : total;
+
+  /** Single-purchase amount due after the gift card — `total` is always known
+   *  locally, unlike the order's server-priced total below. */
+  const singleGiftCardDue = amountDueAfterGiftCard(total, giftCard);
+  /**
+   * Order amount due after the gift card, or `null` while the server quote
+   * hasn't loaded yet. `null` must NOT be read as "nothing due" — see
+   * `cardEntryRequired` below, which defaults to requiring the card until the
+   * quote proves otherwise.
+   */
+  const orderGiftCardDue =
+    orderQuote != null ? amountDueAfterGiftCard(orderQuote.totalAmount, giftCard) : null;
+  /**
+   * Whether the card leg still needs card details. Only an actually-applied
+   * gift card may lift this — never a merely-zero total on its own (a free
+   * item with no gift card must still behave exactly as it did before this
+   * feature) — and only once we KNOW (from the server-priced total) that it
+   * covers the whole order; an unloaded order quote keeps the requirement in
+   * force, exactly as if no gift card were applied.
+   */
+  const cardEntryRequired = !giftCard
+    ? true
+    : orderMode
+      ? orderGiftCardDue == null || orderGiftCardDue > 0
+      : singleGiftCardDue > 0;
+
   const cardValid = validateCardNumber(cardNumber);
   const cardIncomplete =
     !cardNumber || !cardMonth || !cardYear || !cardCVV || !cardValid;
   const cardLegBlocked =
-    paymentMethod === "authorize.net" && (cardIncomplete || authorizeUnavailable);
+    paymentMethod === "authorize.net" &&
+    cardEntryRequired &&
+    (cardIncomplete || authorizeUnavailable);
 
   /** A named customer is required on both paths — an id from the lookup counts. */
   const customerReady = Boolean(selectedCustomerId || customerName.trim());
@@ -1214,7 +1271,7 @@ const CreatePurchaseScreen = () => {
     }
 
     const isCardPayment = paymentMethod === "authorize.net";
-    if (isCardPayment) {
+    if (isCardPayment && cardEntryRequired) {
       const reason = cardPreflightError();
       if (reason) {
         setPaymentError(reason);
@@ -1224,6 +1281,7 @@ const CreatePurchaseScreen = () => {
     }
 
     const order = await checkoutTicketOrder(token, items, {
+      ...giftCardCodeField(giftCard),
       customer_id: selectedCustomerId ?? undefined,
       guest_name: customerName.trim() || "Walk-in Customer",
       guest_email: customerEmail.trim() || undefined,
@@ -1241,6 +1299,42 @@ const CreatePurchaseScreen = () => {
       await storeTicketOrderQrCode(token, order.id, qrCode, order.qrToken);
     }
 
+    // `order` is already the server's own fresh record from the create call
+    // above, so — unlike the single-purchase path — no separate re-read is
+    // needed to reconcile what a gift card actually redeemed. The server
+    // remains authoritative either way: this never charges the client's own
+    // pre-computed order total.
+    let orderChargeAmount = order.totalAmount;
+    if (giftCard && isCardPayment) {
+      const outcome = reconcileGiftCardPurchase({
+        totalAmount: order.totalAmount,
+        amountPaid: order.amountPaid,
+        status: order.status,
+        cardDetailsComplete: !cardIncomplete,
+      });
+
+      if (outcome.action === "settled") {
+        markOrderListsStale();
+        Alert.alert(
+          "Order created",
+          `${order.referenceNumber}\nYour gift card covered the full amount.`,
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+        return;
+      }
+      if (outcome.action === "retry") {
+        await rollbackTicketOrder(token, order.id);
+        const message =
+          outcome.reasonCode === "price-changed"
+            ? "The price of this order changed while you were checking out. Nothing was charged and your gift card was not used — please try again."
+            : `This order still owes ${money(outcome.serverDue)}. Please enter your card details and try again.`;
+        setPaymentError(message);
+        Alert.alert("Couldn't create order", message);
+        return;
+      }
+      orderChargeAmount = outcome.amount;
+    }
+
     if (isCardPayment) {
       let response;
       try {
@@ -1255,7 +1349,7 @@ const CreatePurchaseScreen = () => {
           authorizeCredentials!,
           {
             location_id: order.locationId,
-            amount: order.totalAmount,
+            amount: orderChargeAmount,
             order_id: order.referenceNumber.slice(0, 20),
             description: `Ticket order ${order.referenceNumber}`,
             customer_id: selectedCustomerId ?? undefined,
@@ -1328,9 +1422,13 @@ const CreatePurchaseScreen = () => {
     }
 
     markOrderListsStale();
+    const chargedNote =
+      giftCard && isCardPayment && orderChargeAmount !== order.totalAmount
+        ? ` (${money(orderChargeAmount)} charged · gift card covered ${money(order.totalAmount - orderChargeAmount)})`
+        : "";
     Alert.alert(
       "Order created",
-      `${order.referenceNumber}\n${money(order.totalAmount)} · ${items.length} item${items.length > 1 ? "s" : ""}${
+      `${order.referenceNumber}\n${money(order.totalAmount)}${chargedNote} · ${items.length} item${items.length > 1 ? "s" : ""}${
         paymentMethod === "paylater" ? "\nNothing collected — payment is due later." : ""
       }`,
       [{ text: "OK", onPress: () => router.back() }],
@@ -1402,7 +1500,7 @@ const CreatePurchaseScreen = () => {
     }
 
     const isCardPayment = paymentMethod === "authorize.net";
-    if (isCardPayment) {
+    if (isCardPayment && cardEntryRequired) {
       const reason = cardPreflightError();
       if (reason) {
         setPaymentError(reason);
@@ -1427,15 +1525,21 @@ const CreatePurchaseScreen = () => {
     // A cash amount is bounded by the order total, so an over-typed figure can
     // never be recorded as paid.
     const typedPaid = clampAmount(amountPaid, total);
+    // Web parity: a card payment with a gift card applied posts amount_paid
+    // as 0 rather than the pre-discount total — the server redeems the
+    // gift_card_code and is the one to say what actually got paid.
     const paid = isPayLater
       ? 0
       : isCardPayment
-        ? total
+        ? giftCard
+          ? 0
+          : total
         : typedPaid > 0
           ? typedPaid
           : total;
 
     const input: CreateAttractionPurchaseInput = {
+      ...giftCardCodeField(giftCard),
       attraction_id: selected.id,
       customer_id: selectedCustomerId ?? undefined,
       guest_name: customerName.trim() || "Walk-in Customer",
@@ -1474,6 +1578,49 @@ const CreatePurchaseScreen = () => {
       const { id: purchaseId } = await createAttractionPurchase(token, input);
       markAttractionPurchasesStale();
 
+      // The server is authoritative for what a gift card actually redeemed —
+      // re-read the purchase it just created rather than trust our own
+      // pre-computed total, then decide whether a card charge is even needed
+      // (web parity: PurchaseAttraction.tsx runs the same re-read +
+      // settle/retry/charge dance after creating the purchase).
+      let chargeAmount = total;
+      if (giftCard && isCardPayment) {
+        const record = await fetchAttractionPurchase({ token, purchaseId }).catch(
+          () => null,
+        );
+        const outcome = record
+          ? reconcileGiftCardPurchase({
+              totalAmount: record.totalAmount,
+              amountPaid: record.amountPaid,
+              status: record.status,
+              cardDetailsComplete: !cardIncomplete,
+            })
+          : // A failed re-read proves nothing was settled — treat it the same
+            // as an unconfirmed record rather than guess at its state.
+            ({ action: "retry", reasonCode: "price-changed", serverDue: 0 } as const);
+
+        if (outcome.action === "settled") {
+          setPaymentError("");
+          Alert.alert(
+            "Purchase confirmed",
+            `${selected.name}\nYour gift card covered the full amount.`,
+            [{ text: "OK", onPress: () => router.back() }],
+          );
+          return;
+        }
+        if (outcome.action === "retry") {
+          await rollbackAttractionPurchase(token, purchaseId);
+          const message =
+            outcome.reasonCode === "price-changed"
+              ? "The price of this purchase changed while you were checking out. Nothing was charged and your gift card was not used — please try again."
+              : `This purchase still owes ${money(outcome.serverDue)}. Please enter your card details and try again.`;
+          setPaymentError(message);
+          Alert.alert("Couldn't complete purchase", message);
+          return;
+        }
+        chargeAmount = outcome.amount;
+      }
+
       if (isCardPayment) {
         // The QR rides along on the charge so the receipt email carries a
         // scannable ticket, exactly as the web attaches `qr_code`.
@@ -1492,7 +1639,7 @@ const CreatePurchaseScreen = () => {
             authorizeCredentials!,
             {
               location_id: effectiveLocationId,
-              amount: total,
+              amount: chargeAmount,
               order_id: `A${selected.id}-${String(Date.now()).slice(-8)}`,
               description: `Attraction Purchase: ${selected.name}`,
               customer_id: selectedCustomerId ?? undefined,
@@ -1539,7 +1686,9 @@ const CreatePurchaseScreen = () => {
         setPaymentError("");
         Alert.alert(
           "Purchase confirmed",
-          `${money(total)} · ${selected.name}\n${
+          `${money(chargeAmount)} charged${
+            giftCard ? ` · gift card covered ${money(total - chargeAmount)}` : ""
+          } · ${selected.name}\n${
             sendEmail ? "Receipt sent to email." : "Email not sent per request."
           }`,
           [{ text: "OK", onPress: () => router.back() }],
@@ -2214,6 +2363,23 @@ const CreatePurchaseScreen = () => {
                   })}
                 </View>
 
+                <View className="mb-4">
+                  <FieldLabel>Have a gift card?</FieldLabel>
+                  <GiftCardCheckoutField
+                    locationId={orderLocationId}
+                    items={giftCardItems}
+                    subtotal={giftCardSubtotal}
+                    applied={giftCard}
+                    onApplied={setGiftCard}
+                    disabled={submitting || isProcessingPayment}
+                  />
+                  {!cardEntryRequired && giftCard && (
+                    <Text className="mt-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                      Covers the full amount — no card needed.
+                    </Text>
+                  )}
+                </View>
+
                 {paymentMethod === "paylater" && (
                   <View className="flex-row gap-2 rounded-lg border border-orange-200 dark:border-orange-900/40 bg-orange-50 dark:bg-orange-900/20 p-4">
                     <Feather name="info" size={16} color="#EA580C" />
@@ -2478,6 +2644,26 @@ const CreatePurchaseScreen = () => {
                       {money(orderQuote.totalAmount)}
                     </Text>
                   </View>
+                  {giftCard && giftCardDiscountFor(giftCard, orderQuote.totalAmount) > 0 && (
+                    <>
+                      <View className="flex-row justify-between mt-2">
+                        <Text className="text-sm text-emerald-700 dark:text-emerald-400">
+                          Gift card {giftCard.code}
+                        </Text>
+                        <Text className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                          −{money(giftCardDiscountFor(giftCard, orderQuote.totalAmount))}
+                        </Text>
+                      </View>
+                      <View className="flex-row justify-between mt-1">
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                          Amount Due
+                        </Text>
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {money(orderGiftCardDue ?? orderQuote.totalAmount)}
+                        </Text>
+                      </View>
+                    </>
+                  )}
                 </View>
               )}
 
@@ -2535,7 +2721,9 @@ const CreatePurchaseScreen = () => {
                     <Feather name="shopping-cart" size={18} color="#FFFFFF" />
                     <Text className="text-base font-semibold text-white">
                       Create order
-                      {orderQuote ? ` · ${money(orderQuote.totalAmount)}` : ""}
+                      {orderQuote
+                        ? ` · ${money(orderGiftCardDue ?? orderQuote.totalAmount)}`
+                        : ""}
                     </Text>
                   </>
                 )}
@@ -2672,6 +2860,26 @@ const CreatePurchaseScreen = () => {
                     {money(total)}
                   </Text>
                 </View>
+                {giftCard && giftCardDiscountFor(giftCard, total) > 0 && (
+                  <>
+                    <View className="flex-row justify-between mt-2">
+                      <Text className="text-sm text-emerald-700 dark:text-emerald-400">
+                        Gift card {giftCard.code}
+                      </Text>
+                      <Text className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                        −{money(giftCardDiscountFor(giftCard, total))}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between mt-1">
+                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                        Amount Due
+                      </Text>
+                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {money(singleGiftCardDue)}
+                      </Text>
+                    </View>
+                  </>
+                )}
                 {paymentMethod === "paylater" && (
                   <View className="flex-row justify-between mt-1">
                     <Text className="text-sm font-semibold text-orange-700 dark:text-orange-400">
@@ -2716,7 +2924,9 @@ const CreatePurchaseScreen = () => {
                     <>
                       <Feather name="shopping-cart" size={18} color="#FFFFFF" />
                       <Text className="text-base font-semibold text-white">
-                        Complete Purchase
+                        {giftCard && singleGiftCardDue === 0
+                          ? "Complete with Gift Card"
+                          : "Complete Purchase"}
                       </Text>
                     </>
                   )}
