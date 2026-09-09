@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { AppUpdateGate } from "../components/AppUpdateGate";
 import { AuthGuard } from "../components/AuthGuard";
+import { ChangeReasonHost } from "../components/ui/ChangeReasonHost";
 import {
   AUTH_SCREEN_OPTIONS,
   stackScreenOptions,
@@ -90,6 +91,9 @@ export default function RootLayout() {
       </Stack>
 
       <AppUpdateGate />
+      {/* Prompts for a reason whenever a booking mutation comes back 422
+          asking for one, then retries — see lib/changeReasonPrompt.ts. */}
+      <ChangeReasonHost />
     </GestureHandlerRootView>
   );
 }
