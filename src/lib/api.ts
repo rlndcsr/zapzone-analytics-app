@@ -6,6 +6,13 @@ import {
   resolveMediaPathList,
 } from "./mediaPath";
 import {
+  bodyCarriesChangeReason,
+  describeChangeReasonRequest,
+  requestChangeReason,
+  requiresChangeReason,
+  withChangeReason,
+} from "./changeReasonPrompt";
+import {
   handleUnauthorized,
   isSessionInvalidated,
   touchSession,
@@ -140,6 +147,12 @@ type RequestOptions = {
    * doesn't extend the inactivity window, since no user action caused it.
    */
   publicEndpoint?: boolean;
+  /**
+   * Internal: set automatically when `apiRequest` retries itself after a
+   * change-reason prompt, so a second 422 for the same request can never
+   * prompt again. Never set this yourself.
+   */
+  _reasonRetried?: boolean;
 };
 
 export async function apiRequest<T>(
@@ -151,6 +164,7 @@ export async function apiRequest<T>(
     token,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     publicEndpoint = false,
+    _reasonRetried = false,
   }: RequestOptions = {},
 ): Promise<T> {
   // After a 401 teardown, silently drop pending/new authenticated requests.
@@ -244,6 +258,31 @@ export async function apiRequest<T>(
       handleUnauthorized();
       return neverSettles<T>();
     }
+    // The backend requires a reason on certain mutations (currently booking
+    // changes) and answers 422 with errors.change_reason BEFORE mutating
+    // anything, so prompting and retrying here is safe. This fires for any
+    // endpoint that starts requiring one — no per-service wiring needed.
+    if (
+      !publicEndpoint &&
+      !_reasonRetried &&
+      requiresChangeReason(response.status, data) &&
+      !bodyCarriesChangeReason(body)
+    ) {
+      const { summary, destructive } = describeChangeReasonRequest(method, path);
+      const reason = await requestChangeReason({ summary, destructive });
+      if (reason) {
+        return apiRequest<T>(path, {
+          method,
+          body: withChangeReason(body, reason),
+          signal,
+          token,
+          timeoutMs,
+          publicEndpoint,
+          _reasonRetried: true,
+        });
+      }
+    }
+
     const message =
       typeof data?.message === "string"
         ? data.message

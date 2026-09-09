@@ -2136,3 +2136,26 @@ export async function createBooking(
     customerId: res.data.customer_id ?? null,
   };
 }
+
+/** Preset reasons for the change-reason prompt, plus whether the backend
+ *  currently requires one at all (a company/location-level policy). */
+export type ChangeReasonOptions = {
+  presets: string[];
+  policy: "off" | "guest_visible" | "all";
+};
+
+/** GET /api/bookings/change-reason-options — feeds the change-reason prompt's preset chips. */
+export async function fetchChangeReasonOptions(
+  token: string,
+  signal?: AbortSignal,
+): Promise<ChangeReasonOptions> {
+  const res = await apiRequest<{
+    success: boolean;
+    data: { presets?: string[] | null; policy?: string | null };
+  }>("/api/bookings/change-reason-options", { token, signal });
+  const policy = res?.data?.policy;
+  return {
+    presets: Array.isArray(res?.data?.presets) ? res.data.presets : [],
+    policy: policy === "off" || policy === "all" ? policy : "guest_visible",
+  };
+}
