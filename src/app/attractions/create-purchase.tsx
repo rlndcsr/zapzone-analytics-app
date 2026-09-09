@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
+import { useColorScheme } from "nativewind";
 import {
   useCallback,
   useEffect,
@@ -21,8 +22,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColorScheme } from "nativewind";
 
+import {
+  GiftCardCheckoutField,
+  type AppliedGiftCard,
+} from "../../components/gift-cards/GiftCardCheckoutField";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
@@ -32,39 +36,23 @@ import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import {
-  GiftCardCheckoutField,
-  type AppliedGiftCard,
-} from "../../components/gift-cards/GiftCardCheckoutField";
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+} from "../../lib/addOnQuantity";
 import { firstMediaUrl, mediaUrl } from "../../lib/api";
 import {
-  attractionIsCallToBook,
-  eventIsCallToBook,
-} from "../../lib/callToBook";
-import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
-import { convertTo12Hour } from "../../lib/time";
+  formatDurationDisplay,
+  PRICING_SUFFIX,
+} from "../../lib/attractions/attractionDisplay";
 import {
   availableTimeSlotsForDate,
   computeDayOffAvailability,
 } from "../../lib/attractions/dayOffAvailability";
 import {
-  PRICING_SUFFIX,
-  formatDurationDisplay,
-} from "../../lib/attractions/attractionDisplay";
+  attractionIsCallToBook,
+  eventIsCallToBook,
+} from "../../lib/callToBook";
 import { toKey } from "../../lib/date/calendar";
-import {
-  buildSlotRemainingMap,
-  clampToRemaining,
-  isLowRemaining,
-  isSoldOut,
-  quantityCeiling,
-  remainingForSlot,
-  type SlotRemainingMap,
-} from "../../lib/ticketLimits";
-import {
-  clampAddOnQuantity,
-  DEFAULT_MAX_QUANTITY,
-} from "../../lib/addOnQuantity";
-import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
 import {
   amountDueAfterGiftCard,
   giftCardCodeField,
@@ -74,6 +62,12 @@ import {
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
+import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import {
+  credentialsMatchChargeLocation,
+  STALE_GATEWAY_LOCATION_MESSAGE,
+} from "../../lib/payments/acceptJsLocation";
 import {
   CARD_MONTHS,
   cardYears,
@@ -83,25 +77,38 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
-import { getCurrentUser, getToken } from "../../lib/session";
-import { normalizeCategory } from "../../lib/venueCategories";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
   attractionPurchaseQrValue,
   ticketOrderQrValue,
   useQrDataUri,
 } from "../../lib/payments/useQrDataUri";
+import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  buildSlotRemainingMap,
+  clampToRemaining,
+  isLowRemaining,
+  isSoldOut,
+  quantityCeiling,
+  remainingForSlot,
+  type SlotRemainingMap,
+} from "../../lib/ticketLimits";
+import { convertTo12Hour } from "../../lib/time";
+import { normalizeCategory } from "../../lib/venueCategories";
 import {
   createAttractionPurchase,
   fetchAttractionPurchase,
   type CreateAttractionPurchaseInput,
 } from "../../services/attractionPurchasesService";
 import {
-  fetchAttractionSlotAvailability,
   fetchAttractions,
+  fetchAttractionSlotAvailability,
   type AttractionRow,
 } from "../../services/attractionsService";
-import { searchCustomers, type CustomerHit } from "../../services/customersService";
+import {
+  searchCustomers,
+  type CustomerHit,
+} from "../../services/customersService";
 import {
   fetchDayOffsByLocation,
   type DayOff,
@@ -279,7 +286,11 @@ const Stepper = ({
           : "border-gray-300 dark:border-neutral-600"
       }`}
     >
-      <Feather name="minus" size={16} color={value <= min ? "#D1D5DB" : "#374151"} />
+      <Feather
+        name="minus"
+        size={16}
+        color={value <= min ? "#D1D5DB" : "#374151"}
+      />
     </Pressable>
     <Text className="w-8 text-center text-base font-semibold text-gray-900 dark:text-white">
       {value}
@@ -293,7 +304,11 @@ const Stepper = ({
           : "border-gray-300 dark:border-neutral-600"
       }`}
     >
-      <Feather name="plus" size={16} color={value >= max ? "#D1D5DB" : "#374151"} />
+      <Feather
+        name="plus"
+        size={16}
+        color={value >= max ? "#D1D5DB" : "#374151"}
+      />
     </Pressable>
   </View>
 );
@@ -313,7 +328,11 @@ const Thumb = ({
     className="rounded-lg overflow-hidden border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800 items-center justify-center"
   >
     {uri ? (
-      <Image source={{ uri }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+      <Image
+        source={{ uri }}
+        style={{ width: "100%", height: "100%" }}
+        contentFit="cover"
+      />
     ) : (
       <Text className="text-[10px] text-gray-400">{placeholder}</Text>
     )}
@@ -358,12 +377,19 @@ const AttractionCard = ({
             </Text>
           </Text>
           <Text className="text-xs text-gray-500 dark:text-gray-400">
-            {formatDurationDisplay(attraction.duration, attraction.durationUnit)}
+            {formatDurationDisplay(
+              attraction.duration,
+              attraction.durationUnit,
+            )}
           </Text>
         </View>
       </View>
       {!!onClear && (
-        <Pressable onPress={onClear} hitSlop={8} accessibilityLabel="Clear selection">
+        <Pressable
+          onPress={onClear}
+          hitSlop={8}
+          accessibilityLabel="Clear selection"
+        >
           <Feather name="x" size={18} color="#9CA3AF" />
         </Pressable>
       )}
@@ -467,7 +493,8 @@ const CreatePurchaseScreen = () => {
   const [addonQty, setAddonQty] = useState<Record<number, number>>({});
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("authorize.net");
+  const [paymentMethod, setPaymentMethod] =
+    useState<PaymentMethod>("authorize.net");
   const [sendEmail, setSendEmail] = useState(true);
   /** Applied at most one at a time; validated against the running subtotal,
    *  redeemed server-side when the purchase/order is created (web parity:
@@ -484,6 +511,12 @@ const CreatePurchaseScreen = () => {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [authorizeCredentials, setAuthorizeCredentials] =
     useState<AuthorizeNetPublicKey | null>(null);
+  /** The location `authorizeCredentials` was actually fetched for — Accept.js
+   *  binds a token to the api_login_id that minted it, so this must match the
+   *  location about to be charged before we ever tokenize (web parity: "Bind
+   *  Accept.js credentials to the location being charged"). */
+  const [authorizeCredentialsLocationId, setAuthorizeCredentialsLocationId] =
+    useState<number | null>(null);
   /** True once the public-key lookup has confirmed this location has no active
    *  merchant account — the web's "Authorize.Net Not Configured" modal. */
   const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
@@ -493,7 +526,9 @@ const CreatePurchaseScreen = () => {
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
+    null,
+  );
   const [foundCustomers, setFoundCustomers] = useState<CustomerHit[]>([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showCustomerList, setShowCustomerList] = useState(false);
@@ -501,19 +536,15 @@ const CreatePurchaseScreen = () => {
   const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [sheet, setSheet] = useState<null | "month" | "year">(null);
-  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(
-    null,
-  );
+  const [toast, setToast] = useState<{
+    message: string;
+    type: ToastType;
+  } | null>(null);
 
-  /*
-   * Bulk order mode (web `bulkMode`). A single purchase writes one attraction
-   * purchase and charges it; an order collects many lines — attraction *and*
-   * event tickets — into one ticket order with one payment and one QR code. The
-   * server prices an order, so the local pricing pipeline below only ever drives
-   * the single-purchase path.
-   */
   const [bulkMode, setBulkMode] = useState(false);
-  const [itemTab, setItemTab] = useState<"attractions" | "events">("attractions");
+  const [itemTab, setItemTab] = useState<"attractions" | "events">(
+    "attractions",
+  );
   const [orderLines, setOrderLines] = useState<CartItem[]>([]);
   const [orderQuote, setOrderQuote] = useState<CartQuote | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<EventRow | null>(null);
@@ -599,7 +630,9 @@ const CreatePurchaseScreen = () => {
         if (!active) return;
         setFoundCustomers(hits);
         setShowCustomerList(hits.length > 0);
-        const exact = hits.find((c) => c.email.toLowerCase() === email.toLowerCase());
+        const exact = hits.find(
+          (c) => c.email.toLowerCase() === email.toLowerCase(),
+        );
         if (exact) {
           setSelectedCustomerId(exact.id);
           setCustomerName(`${exact.firstName} ${exact.lastName}`.trim());
@@ -642,17 +675,25 @@ const CreatePurchaseScreen = () => {
     if (paymentMethod !== "authorize.net") return;
     const locationId = orderLocationId;
     if (locationId == null) return;
+    // Clear immediately on location change — a token minted for the OLD
+    // location must never sit around usable while the new location's fetch
+    // is still in flight (web parity: credentials are bound to the location
+    // being charged).
+    setAuthorizeCredentials(null);
+    setAuthorizeCredentialsLocationId(null);
     const token = getToken();
     if (!token) return;
     const controller = new AbortController();
     fetchAuthorizeNetPublicKey(token, locationId, controller.signal)
       .then((creds) => {
         setAuthorizeCredentials(creds.apiLoginId ? creds : null);
+        setAuthorizeCredentialsLocationId(creds.apiLoginId ? locationId : null);
         setAuthorizeUnavailable(!creds.apiLoginId);
       })
       .catch(() => {
         if (controller.signal.aborted) return;
         setAuthorizeCredentials(null);
+        setAuthorizeCredentialsLocationId(null);
         setAuthorizeUnavailable(true);
       });
     return () => controller.abort();
@@ -815,7 +856,9 @@ const CreatePurchaseScreen = () => {
   }, [selectedEvent?.id, selectedEvent?.startDate, eventDate]);
 
   /** Tickets left for the picked event slot, or null when the event is uncapped. */
-  const eventSlotLeft = eventTime ? (eventSlotsLeft?.[eventTime] ?? null) : null;
+  const eventSlotLeft = eventTime
+    ? (eventSlotsLeft?.[eventTime] ?? null)
+    : null;
   const eventQtyMax = quantityCeiling(eventSlotLeft, 99);
   /**
    * A capped event can only be sold against a specific slot — the same gate the
@@ -1038,7 +1081,10 @@ const CreatePurchaseScreen = () => {
     // (the same attraction, date and time twice). A counter makes the committed
     // key unique, so removing one line can never take its twin with it.
     lineSeqRef.current += 1;
-    const line = { ...currentLine, key: `${currentLine.key}#${lineSeqRef.current}` };
+    const line = {
+      ...currentLine,
+      key: `${currentLine.key}#${lineSeqRef.current}`,
+    };
     setOrderLines((prev) => [...prev, line]);
     resetItemForm();
     setToast({
@@ -1137,7 +1183,9 @@ const CreatePurchaseScreen = () => {
    * configured), or the single attraction being purchased. Web parity:
    * `giftCardItems`/`giftCardSubtotal`.
    */
-  const orderItemsForGiftCard = currentLine ? [...orderLines, currentLine] : orderLines;
+  const orderItemsForGiftCard = currentLine
+    ? [...orderLines, currentLine]
+    : orderLines;
   const giftCardItems = orderMode
     ? orderItemsForGiftCard.map((l) => ({ type: l.type, id: l.id }))
     : selected
@@ -1155,7 +1203,9 @@ const CreatePurchaseScreen = () => {
    * quote proves otherwise.
    */
   const orderGiftCardDue =
-    orderQuote != null ? amountDueAfterGiftCard(orderQuote.totalAmount, giftCard) : null;
+    orderQuote != null
+      ? amountDueAfterGiftCard(orderQuote.totalAmount, giftCard)
+      : null;
   /**
    * Whether the card leg still needs card details. Only an actually-applied
    * gift card may lift this — never a merely-zero total on its own (a free
@@ -1240,6 +1290,13 @@ const CreatePurchaseScreen = () => {
       return "Test card numbers are not allowed. Please use a real card.";
     if (!authorizeCredentials?.apiLoginId)
       return "Payment system not initialized. Please reopen this screen and try again.";
+    if (
+      !credentialsMatchChargeLocation(
+        authorizeCredentialsLocationId,
+        orderLocationId,
+      )
+    )
+      return STALE_GATEWAY_LOCATION_MESSAGE;
     return null;
   };
 
@@ -1330,6 +1387,21 @@ const CreatePurchaseScreen = () => {
             : `This order still owes ${money(outcome.serverDue)}. Please enter your card details and try again.`;
         setPaymentError(message);
         Alert.alert("Couldn't create order", message);
+        return;
+      }
+      // A gift card that didn't fully cover the order can reach this branch
+      // without ever running cardPreflightError() (it only runs when
+      // cardEntryRequired), so the credential/location check has to be
+      // repeated here before charging.
+      if (
+        !credentialsMatchChargeLocation(
+          authorizeCredentialsLocationId,
+          order.locationId,
+        )
+      ) {
+        await rollbackTicketOrder(token, order.id);
+        setPaymentError(STALE_GATEWAY_LOCATION_MESSAGE);
+        Alert.alert("Couldn't create order", STALE_GATEWAY_LOCATION_MESSAGE);
         return;
       }
       orderChargeAmount = outcome.amount;
@@ -1429,7 +1501,9 @@ const CreatePurchaseScreen = () => {
     Alert.alert(
       "Order created",
       `${order.referenceNumber}\n${money(order.totalAmount)}${chargedNote} · ${items.length} item${items.length > 1 ? "s" : ""}${
-        paymentMethod === "paylater" ? "\nNothing collected — payment is due later." : ""
+        paymentMethod === "paylater"
+          ? "\nNothing collected — payment is due later."
+          : ""
       }`,
       [{ text: "OK", onPress: () => router.back() }],
     );
@@ -1478,7 +1552,10 @@ const CreatePurchaseScreen = () => {
     // web's `selectedAttraction.locationId`.
     const effectiveLocationId = selected.locationId;
     if (effectiveLocationId == null) {
-      Alert.alert("Location unavailable", "This attraction has no location set.");
+      Alert.alert(
+        "Location unavailable",
+        "This attraction has no location set.",
+      );
       return;
     }
     if (!scheduledDate || !scheduledTime) {
@@ -1514,7 +1591,11 @@ const CreatePurchaseScreen = () => {
       .map(([idStr, qty]) => {
         const addOn = selected.addOns.find((a) => a.id === Number(idStr));
         return addOn
-          ? { addon_id: addOn.id, quantity: qty, price_at_purchase: addOn.price }
+          ? {
+              addon_id: addOn.id,
+              quantity: qty,
+              price_at_purchase: addOn.price,
+            }
           : null;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
@@ -1550,7 +1631,11 @@ const CreatePurchaseScreen = () => {
       total_amount: total,
       amount_paid: paid,
       currency: "USD",
-      method: isPayLater ? "paylater" : isCardPayment ? "authorize.net" : "cash",
+      method: isPayLater
+        ? "paylater"
+        : isCardPayment
+          ? "authorize.net"
+          : "cash",
       payment_method: paymentMethod,
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
       location_id: effectiveLocationId,
@@ -1561,7 +1646,8 @@ const CreatePurchaseScreen = () => {
         notes.trim() ||
         `Attraction Purchase: ${selected.name} (${quantity} ticket${quantity > 1 ? "s" : ""})`,
       send_email: paymentMethod === "in-store" ? sendEmail : false,
-      additional_addons: additionalAddons.length > 0 ? additionalAddons : undefined,
+      additional_addons:
+        additionalAddons.length > 0 ? additionalAddons : undefined,
       applied_fees: appliedFees.length > 0 ? appliedFees : undefined,
       discount_amount:
         specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
@@ -1585,9 +1671,10 @@ const CreatePurchaseScreen = () => {
       // settle/retry/charge dance after creating the purchase).
       let chargeAmount = total;
       if (giftCard && isCardPayment) {
-        const record = await fetchAttractionPurchase({ token, purchaseId }).catch(
-          () => null,
-        );
+        const record = await fetchAttractionPurchase({
+          token,
+          purchaseId,
+        }).catch(() => null);
         const outcome = record
           ? reconcileGiftCardPurchase({
               totalAmount: record.totalAmount,
@@ -1597,7 +1684,11 @@ const CreatePurchaseScreen = () => {
             })
           : // A failed re-read proves nothing was settled — treat it the same
             // as an unconfirmed record rather than guess at its state.
-            ({ action: "retry", reasonCode: "price-changed", serverDue: 0 } as const);
+            ({
+              action: "retry",
+              reasonCode: "price-changed",
+              serverDue: 0,
+            } as const);
 
         if (outcome.action === "settled") {
           setPaymentError("");
@@ -1616,6 +1707,24 @@ const CreatePurchaseScreen = () => {
               : `This purchase still owes ${money(outcome.serverDue)}. Please enter your card details and try again.`;
           setPaymentError(message);
           Alert.alert("Couldn't complete purchase", message);
+          return;
+        }
+        // A gift card that didn't fully cover the purchase can reach this
+        // branch without ever running cardPreflightError() (it only runs
+        // when cardEntryRequired), so the credential/location check has to
+        // be repeated here before charging.
+        if (
+          !credentialsMatchChargeLocation(
+            authorizeCredentialsLocationId,
+            effectiveLocationId,
+          )
+        ) {
+          await rollbackAttractionPurchase(token, purchaseId);
+          setPaymentError(STALE_GATEWAY_LOCATION_MESSAGE);
+          Alert.alert(
+            "Couldn't complete purchase",
+            STALE_GATEWAY_LOCATION_MESSAGE,
+          );
           return;
         }
         chargeAmount = outcome.amount;
@@ -1687,7 +1796,9 @@ const CreatePurchaseScreen = () => {
         Alert.alert(
           "Purchase confirmed",
           `${money(chargeAmount)} charged${
-            giftCard ? ` · gift card covered ${money(total - chargeAmount)}` : ""
+            giftCard
+              ? ` · gift card covered ${money(total - chargeAmount)}`
+              : ""
           } · ${selected.name}\n${
             sendEmail ? "Receipt sent to email." : "Email not sent per request."
           }`,
@@ -1711,7 +1822,11 @@ const CreatePurchaseScreen = () => {
     }
   };
 
-  const paymentOptions: { key: PaymentMethod; label: string; icon: IconName }[] = [
+  const paymentOptions: {
+    key: PaymentMethod;
+    label: string;
+    icon: IconName;
+  }[] = [
     { key: "authorize.net", label: "Authorize.Net", icon: "credit-card" },
     { key: "in-store", label: "In-Store", icon: "dollar-sign" },
     { key: "paylater", label: "Pay Later", icon: "clock" },
@@ -1752,10 +1867,11 @@ const CreatePurchaseScreen = () => {
           className="flex-1"
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
+          contentContainerStyle={{
+            padding: 20,
+            paddingBottom: insets.bottom + 40,
+          }}
         >
-          
-
           {/* Single purchase / Bulk order */}
           <View className="mb-4 self-start">
             <Segmented
@@ -1776,9 +1892,10 @@ const CreatePurchaseScreen = () => {
                   Bulk order mode
                 </Text>
                 <Text className="mt-1 text-xs text-blue-700 dark:text-blue-400">
-                  Configure an item below, press &quot;Add item to order&quot; in
-                  the Order panel, repeat for every ticket, then press &quot;Create
-                  order&quot; — one order, one payment, one QR code.
+                  Configure an item below, press &quot;Add item to order&quot;
+                  in the Order panel, repeat for every ticket, then press
+                  &quot;Create order&quot; — one order, one payment, one QR
+                  code.
                 </Text>
               </View>
             </View>
@@ -1848,159 +1965,159 @@ const CreatePurchaseScreen = () => {
                       />
                     </View>
                   ) : (
-                  <>
-                  <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
-                    Event date
-                  </Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    className="-mx-1"
-                  >
-                    {eventDateOptions.map((date) => {
-                      const active =
-                        (eventDate || selectedEvent.startDate) === date;
-                      return (
-                        <Pressable
-                          key={date}
-                          onPress={() => {
-                            setEventDate(date);
-                            setEventTime("");
-                          }}
-                          className={`mx-1 rounded-lg border px-3 py-2 ${
-                            active
-                              ? "border-[#0644C7] bg-[#0644C7]"
-                              : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-                          }`}
-                        >
-                          <Text
-                            className={`text-xs font-semibold ${
-                              active
-                                ? "text-white"
-                                : "text-gray-700 dark:text-gray-200"
-                            }`}
-                          >
-                            {date}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-
-                  {/* Time — only shown once the date has bookable slots, as on
-                      the web. A slot that is already sold out is not returned by
-                      the API, so it never appears here. */}
-                  {loadingEventSlots ? (
-                    <View className="mt-4 flex-row items-center gap-2">
-                      <ActivityIndicator size="small" color={PRIMARY} />
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        Loading available times…
-                      </Text>
-                    </View>
-                  ) : eventSlots.length > 0 ? (
                     <>
                       <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
-                        Time
+                        Event date
                       </Text>
                       <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
                         className="-mx-1"
                       >
-                        {eventSlots.map((slot) => {
-                          const active = eventTime === slot;
-                          const left = eventSlotsLeft?.[slot] ?? null;
-                          const soldOut = isSoldOut(left);
+                        {eventDateOptions.map((date) => {
+                          const active =
+                            (eventDate || selectedEvent.startDate) === date;
                           return (
                             <Pressable
-                              key={slot}
+                              key={date}
                               onPress={() => {
-                                setEventTime(slot);
-                                setEventQty((prev) =>
-                                  clampToRemaining(prev, left),
-                                );
+                                setEventDate(date);
+                                setEventTime("");
                               }}
-                              disabled={soldOut}
-                              accessibilityState={{ disabled: soldOut }}
-                              className={`mx-1 items-center rounded-lg border px-3 py-2 ${
-                                soldOut
-                                  ? "border-gray-200 bg-gray-50 opacity-50 dark:border-neutral-800 dark:bg-neutral-900"
-                                  : active
-                                    ? "border-[#0644C7] bg-[#0644C7]"
-                                    : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                              className={`mx-1 rounded-lg border px-3 py-2 ${
+                                active
+                                  ? "border-[#0644C7] bg-[#0644C7]"
+                                  : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
                               }`}
                             >
                               <Text
                                 className={`text-xs font-semibold ${
-                                  soldOut
-                                    ? "text-gray-400 dark:text-gray-500"
-                                    : active
-                                      ? "text-white"
-                                      : "text-gray-700 dark:text-gray-200"
+                                  active
+                                    ? "text-white"
+                                    : "text-gray-700 dark:text-gray-200"
                                 }`}
                               >
-                                {convertTo12Hour(slot)}
+                                {date}
                               </Text>
-                              {/* Every branch keeps a `dark:` class so the
-                                  css-interop feature set stays stable when the
-                                  chip is selected (a post-mount upgrade throws). */}
-                              {left != null && (
-                                <Text
-                                  className={`text-[10px] font-semibold ${
-                                    soldOut
-                                      ? "text-red-600 dark:text-red-400"
-                                      : active
-                                        ? "text-white/80 dark:text-white/80"
-                                        : isLowRemaining(left)
-                                          ? "text-amber-600 dark:text-amber-400"
-                                          : "text-emerald-600 dark:text-emerald-400"
-                                  }`}
-                                >
-                                  {soldOut ? "Sold out" : `${left} left`}
-                                </Text>
-                              )}
                             </Pressable>
                           );
                         })}
                       </ScrollView>
-                      {eventNeedsTime && !eventTime && (
-                        <Text className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
-                          Pick a time — this event limits tickets per slot.
+
+                      {/* Time — only shown once the date has bookable slots, as on
+                      the web. A slot that is already sold out is not returned by
+                      the API, so it never appears here. */}
+                      {loadingEventSlots ? (
+                        <View className="mt-4 flex-row items-center gap-2">
+                          <ActivityIndicator size="small" color={PRIMARY} />
+                          <Text className="text-xs text-gray-500 dark:text-gray-400">
+                            Loading available times…
+                          </Text>
+                        </View>
+                      ) : eventSlots.length > 0 ? (
+                        <>
+                          <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+                            Time
+                          </Text>
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            className="-mx-1"
+                          >
+                            {eventSlots.map((slot) => {
+                              const active = eventTime === slot;
+                              const left = eventSlotsLeft?.[slot] ?? null;
+                              const soldOut = isSoldOut(left);
+                              return (
+                                <Pressable
+                                  key={slot}
+                                  onPress={() => {
+                                    setEventTime(slot);
+                                    setEventQty((prev) =>
+                                      clampToRemaining(prev, left),
+                                    );
+                                  }}
+                                  disabled={soldOut}
+                                  accessibilityState={{ disabled: soldOut }}
+                                  className={`mx-1 items-center rounded-lg border px-3 py-2 ${
+                                    soldOut
+                                      ? "border-gray-200 bg-gray-50 opacity-50 dark:border-neutral-800 dark:bg-neutral-900"
+                                      : active
+                                        ? "border-[#0644C7] bg-[#0644C7]"
+                                        : "border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                                  }`}
+                                >
+                                  <Text
+                                    className={`text-xs font-semibold ${
+                                      soldOut
+                                        ? "text-gray-400 dark:text-gray-500"
+                                        : active
+                                          ? "text-white"
+                                          : "text-gray-700 dark:text-gray-200"
+                                    }`}
+                                  >
+                                    {convertTo12Hour(slot)}
+                                  </Text>
+                                  {/* Every branch keeps a `dark:` class so the
+                                  css-interop feature set stays stable when the
+                                  chip is selected (a post-mount upgrade throws). */}
+                                  {left != null && (
+                                    <Text
+                                      className={`text-[10px] font-semibold ${
+                                        soldOut
+                                          ? "text-red-600 dark:text-red-400"
+                                          : active
+                                            ? "text-white/80 dark:text-white/80"
+                                            : isLowRemaining(left)
+                                              ? "text-amber-600 dark:text-amber-400"
+                                              : "text-emerald-600 dark:text-emerald-400"
+                                      }`}
+                                    >
+                                      {soldOut ? "Sold out" : `${left} left`}
+                                    </Text>
+                                  )}
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                          {eventNeedsTime && !eventTime && (
+                            <Text className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+                              Pick a time — this event limits tickets per slot.
+                            </Text>
+                          )}
+                        </>
+                      ) : (
+                        <Text className="mt-4 text-[11px] text-amber-600 dark:text-amber-400">
+                          No available time slots for this date.
                         </Text>
                       )}
                     </>
-                  ) : (
-                    <Text className="mt-4 text-[11px] text-amber-600 dark:text-amber-400">
-                      No available time slots for this date.
-                    </Text>
-                  )}
-                  </>
                   )}
 
                   {eventCallToBook ? null : (
-                  <>
-                  <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
-                    Tickets
-                  </Text>
-                  <Stepper
-                    value={eventQty}
-                    onChange={setEventQty}
-                    min={1}
-                    max={eventQtyMax}
-                  />
-                  {eventSlotLeft != null && (
-                    <Text
-                      className={`mt-1.5 text-[11px] font-semibold ${
-                        isLowRemaining(eventSlotLeft)
-                          ? "text-amber-700 dark:text-amber-400"
-                          : "text-emerald-700 dark:text-emerald-400"
-                      }`}
-                    >
-                      {eventSlotLeft} ticket{eventSlotLeft === 1 ? "" : "s"} left
-                      for this time
-                    </Text>
-                  )}
-                  </>
+                    <>
+                      <Text className="mt-4 mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+                        Tickets
+                      </Text>
+                      <Stepper
+                        value={eventQty}
+                        onChange={setEventQty}
+                        min={1}
+                        max={eventQtyMax}
+                      />
+                      {eventSlotLeft != null && (
+                        <Text
+                          className={`mt-1.5 text-[11px] font-semibold ${
+                            isLowRemaining(eventSlotLeft)
+                              ? "text-amber-700 dark:text-amber-400"
+                              : "text-emerald-700 dark:text-emerald-400"
+                          }`}
+                        >
+                          {eventSlotLeft} ticket{eventSlotLeft === 1 ? "" : "s"}{" "}
+                          left for this time
+                        </Text>
+                      )}
+                    </>
                   )}
                 </View>
               ) : loadingEvents ? (
@@ -2140,7 +2257,9 @@ const CreatePurchaseScreen = () => {
                   }
                   value={paymentMethod === "paylater" ? "0" : amountPaid}
                   onChangeText={setAmountPaid}
-                  onBlur={() => setAmountPaid(clampAmountText(amountPaid, total))}
+                  onBlur={() =>
+                    setAmountPaid(clampAmountText(amountPaid, total))
+                  }
                   editable={paymentMethod !== "paylater"}
                   placeholder="0.00"
                   keyboardType="decimal-pad"
@@ -2188,7 +2307,9 @@ const CreatePurchaseScreen = () => {
                           </Text>
                           <Text className="text-[10px] text-gray-500 dark:text-gray-400">
                             {money(addOn.price)} each
-                            {addOn.minQuantity > 1 ? ` · min ${addOn.minQuantity}` : ""}
+                            {addOn.minQuantity > 1
+                              ? ` · min ${addOn.minQuantity}`
+                              : ""}
                           </Text>
                         </View>
                         <Stepper
@@ -2267,7 +2388,9 @@ const CreatePurchaseScreen = () => {
                   setCustomerEmail(t);
                   setSelectedCustomerId(null);
                 }}
-                onFocus={() => foundCustomers.length > 0 && setShowCustomerList(true)}
+                onFocus={() =>
+                  foundCustomers.length > 0 && setShowCustomerList(true)
+                }
                 placeholder="customer@example.com"
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -2338,7 +2461,8 @@ const CreatePurchaseScreen = () => {
                         onPress={() => {
                           setPaymentMethod(opt.key);
                           setPaymentError("");
-                          if (opt.key === "in-store") setAmountPaid(String(total));
+                          if (opt.key === "in-store")
+                            setAmountPaid(String(total));
                         }}
                         className={`flex-1 items-center justify-center gap-1 py-3 rounded-lg border ${
                           active
@@ -2353,7 +2477,9 @@ const CreatePurchaseScreen = () => {
                         />
                         <Text
                           className={`text-xs font-semibold ${
-                            active ? "text-white" : "text-gray-600 dark:text-gray-300"
+                            active
+                              ? "text-white"
+                              : "text-gray-600 dark:text-gray-300"
                           }`}
                         >
                           {opt.label}
@@ -2388,8 +2514,8 @@ const CreatePurchaseScreen = () => {
                         Payment will be collected later
                       </Text>
                       <Text className="text-xs text-orange-700 dark:text-orange-400 mt-1">
-                        No payment is being processed now. Customer will pay at a
-                        later time.
+                        No payment is being processed now. Customer will pay at
+                        a later time.
                       </Text>
                     </View>
                   </View>
@@ -2405,11 +2531,16 @@ const CreatePurchaseScreen = () => {
                         inline here — cash and pay-later still work. */}
                     {authorizeUnavailable && (
                       <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 p-2.5">
-                        <Feather name="alert-triangle" size={13} color="#B45309" />
+                        <Feather
+                          name="alert-triangle"
+                          size={13}
+                          color="#B45309"
+                        />
                         <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
                           This location has no active Authorize.Net account, so
-                          cards can&apos;t be charged. Use In-Store or Pay Later,
-                          or ask an administrator to connect the merchant account.
+                          cards can&apos;t be charged. Use In-Store or Pay
+                          Later, or ask an administrator to connect the merchant
+                          account.
                         </Text>
                       </View>
                     )}
@@ -2443,7 +2574,11 @@ const CreatePurchaseScreen = () => {
                         className="flex-1 text-sm text-gray-900 dark:text-white"
                       />
                       {!!cardNumber && cardValid && (
-                        <Feather name="check-circle" size={16} color="#16A34A" />
+                        <Feather
+                          name="check-circle"
+                          size={16}
+                          color="#16A34A"
+                        />
                       )}
                     </View>
                     {!!cardNumber && (
@@ -2525,8 +2660,8 @@ const CreatePurchaseScreen = () => {
               <View className="mb-4 overflow-hidden rounded-lg border border-gray-100 dark:border-neutral-800">
                 {orderLines.length === 0 && !currentLine && (
                   <Text className="p-4 text-center text-sm text-gray-400 dark:text-gray-500">
-                    No items yet — pick an attraction or event above to start the
-                    order.
+                    No items yet — pick an attraction or event above to start
+                    the order.
                   </Text>
                 )}
 
@@ -2644,38 +2779,50 @@ const CreatePurchaseScreen = () => {
                       {money(orderQuote.totalAmount)}
                     </Text>
                   </View>
-                  {giftCard && giftCardDiscountFor(giftCard, orderQuote.totalAmount) > 0 && (
-                    <>
-                      <View className="flex-row justify-between mt-2">
-                        <Text className="text-sm text-emerald-700 dark:text-emerald-400">
-                          Gift card {giftCard.code}
-                        </Text>
-                        <Text className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-                          −{money(giftCardDiscountFor(giftCard, orderQuote.totalAmount))}
-                        </Text>
-                      </View>
-                      <View className="flex-row justify-between mt-1">
-                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                          Amount Due
-                        </Text>
-                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {money(orderGiftCardDue ?? orderQuote.totalAmount)}
-                        </Text>
-                      </View>
-                    </>
-                  )}
+                  {giftCard &&
+                    giftCardDiscountFor(giftCard, orderQuote.totalAmount) >
+                      0 && (
+                      <>
+                        <View className="flex-row justify-between mt-2">
+                          <Text className="text-sm text-emerald-700 dark:text-emerald-400">
+                            Gift card {giftCard.code}
+                          </Text>
+                          <Text className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                            −
+                            {money(
+                              giftCardDiscountFor(
+                                giftCard,
+                                orderQuote.totalAmount,
+                              ),
+                            )}
+                          </Text>
+                        </View>
+                        <View className="flex-row justify-between mt-1">
+                          <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                            Amount Due
+                          </Text>
+                          <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                            {money(orderGiftCardDue ?? orderQuote.totalAmount)}
+                          </Text>
+                        </View>
+                      </>
+                    )}
                 </View>
               )}
 
               <Pressable
                 onPress={addCurrentToOrder}
-                disabled={submitting || (itemTab === "events" ? !selectedEvent : !selected)}
+                disabled={
+                  submitting ||
+                  (itemTab === "events" ? !selectedEvent : !selected)
+                }
                 className={`mb-2 h-12 flex-row items-center justify-center gap-2 rounded-lg border-2 border-dashed ${
                   currentLine
                     ? "border-[#0644C7] bg-[#0644C7]/5"
                     : "border-blue-300 dark:border-blue-900/60"
                 } ${
-                  submitting || (itemTab === "events" ? !selectedEvent : !selected)
+                  submitting ||
+                  (itemTab === "events" ? !selectedEvent : !selected)
                     ? "opacity-40"
                     : "active:opacity-70"
                 }`}
@@ -2690,15 +2837,16 @@ const CreatePurchaseScreen = () => {
                 selected &&
                 (!scheduledDate || !scheduledTime) && (
                   <Text className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
-                    Needs a visit date &amp; time — set them in Purchase Details.
+                    Needs a visit date &amp; time — set them in Purchase
+                    Details.
                   </Text>
                 )}
 
               <View className="mb-3 flex-row items-start gap-2">
                 <Feather name="mail" size={13} color="#9CA3AF" />
                 <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
-                  The receipt emails automatically when the customer has an email
-                  on file.
+                  The receipt emails automatically when the customer has an
+                  email on file.
                 </Text>
               </View>
 
@@ -2748,207 +2896,220 @@ const CreatePurchaseScreen = () => {
               )}
             </Section>
           ) : (
-          /* Order summary */
-          <Section title="Order Summary">
-            {selected ? (
-              <>
-                <View className="flex-row items-start gap-3 mb-4 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800">
-                  <Thumb uri={mediaUrl(selected.images[0])} size={56} placeholder="N/A" />
-                  <View className="flex-1">
-                    <View className="flex-row items-start justify-between gap-1">
-                      <Text
-                        className="flex-1 text-sm font-semibold text-gray-800 dark:text-white"
-                        numberOfLines={1}
-                      >
-                        {selected.name}
+            /* Order summary */
+            <Section title="Order Summary">
+              {selected ? (
+                <>
+                  <View className="flex-row items-start gap-3 mb-4 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800">
+                    <Thumb
+                      uri={mediaUrl(selected.images[0])}
+                      size={56}
+                      placeholder="N/A"
+                    />
+                    <View className="flex-1">
+                      <View className="flex-row items-start justify-between gap-1">
+                        <Text
+                          className="flex-1 text-sm font-semibold text-gray-800 dark:text-white"
+                          numberOfLines={1}
+                        >
+                          {selected.name}
+                        </Text>
+                        <Pressable
+                          onPress={() => setSelected(null)}
+                          hitSlop={8}
+                          accessibilityLabel="Remove attraction"
+                        >
+                          <Feather name="x" size={14} color="#9CA3AF" />
+                        </Pressable>
+                      </View>
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        {normalizeCategory(selected.category)}
                       </Text>
-                      <Pressable
-                        onPress={() => setSelected(null)}
-                        hitSlop={8}
-                        accessibilityLabel="Remove attraction"
-                      >
-                        <Feather name="x" size={14} color="#9CA3AF" />
-                      </Pressable>
+                      <Text className="text-sm font-bold text-[#0644C7] dark:text-blue-400 mt-1">
+                        {money(selected.price)}
+                        <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                          {" "}
+                          {pricingSuffix(selected.pricingType)}
+                        </Text>
+                      </Text>
                     </View>
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {normalizeCategory(selected.category)}
+                  </View>
+
+                  <View className="flex-row justify-between mb-2">
+                    <Text className="text-sm text-gray-500 dark:text-gray-400">
+                      Qty: {quantity} × {money(selected.price)}
                     </Text>
-                    <Text className="text-sm font-bold text-[#0644C7] dark:text-blue-400 mt-1">
-                      {money(selected.price)}
-                      <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
-                        {" "}
-                        {pricingSuffix(selected.pricingType)}
-                      </Text>
+                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                      {money(subtotal)}
                     </Text>
                   </View>
-                </View>
 
-                <View className="flex-row justify-between mb-2">
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">
-                    Qty: {quantity} × {money(selected.price)}
-                  </Text>
-                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                    {money(subtotal)}
-                  </Text>
-                </View>
+                  {orderedAddOns
+                    .filter((a) => (addonQty[a.id] ?? 0) > 0)
+                    .map((a) => (
+                      <View
+                        key={a.id}
+                        className="flex-row justify-between mb-2"
+                      >
+                        <Text
+                          className="flex-1 mr-2 text-sm text-gray-500 dark:text-gray-400"
+                          numberOfLines={1}
+                        >
+                          {a.name} × {addonQty[a.id]}
+                        </Text>
+                        <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                          {money(a.price * (addonQty[a.id] ?? 0))}
+                        </Text>
+                      </View>
+                    ))}
 
-                {orderedAddOns
-                  .filter((a) => (addonQty[a.id] ?? 0) > 0)
-                  .map((a) => (
-                    <View key={a.id} className="flex-row justify-between mb-2">
+                  {discountNum > 0 && (
+                    <View className="flex-row justify-between mb-2">
+                      <Text className="text-sm text-red-500">Discount</Text>
+                      <Text className="text-sm font-medium text-red-500">
+                        -{money(discountNum)}
+                      </Text>
+                    </View>
+                  )}
+
+                  {specialPricing?.has_special_pricing &&
+                    specialPricing.discounts_applied.map((d, i) => (
+                      <View key={i} className="flex-row justify-between mb-2">
+                        <Text
+                          className="flex-1 mr-2 text-sm text-green-700 dark:text-green-400"
+                          numberOfLines={1}
+                        >
+                          {d.name}
+                        </Text>
+                        <Text className="text-sm font-medium text-green-700 dark:text-green-400">
+                          -{money(d.discount_amount)}
+                        </Text>
+                      </View>
+                    ))}
+
+                  {feeBreakdown?.fees.map((f) => (
+                    <View
+                      key={f.fee_support_id}
+                      className="flex-row justify-between mb-2"
+                    >
                       <Text
                         className="flex-1 mr-2 text-sm text-gray-500 dark:text-gray-400"
                         numberOfLines={1}
                       >
-                        {a.name} × {addonQty[a.id]}
+                        {f.fee_name} ({f.fee_label})
+                        {f.fee_application_type === "inclusive"
+                          ? " · Included"
+                          : ""}
                       </Text>
                       <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                        {money(a.price * (addonQty[a.id] ?? 0))}
+                        {f.fee_application_type === "additive"
+                          ? `+${money(f.fee_amount)}`
+                          : money(f.fee_amount)}
                       </Text>
                     </View>
                   ))}
 
-                {discountNum > 0 && (
-                  <View className="flex-row justify-between mb-2">
-                    <Text className="text-sm text-red-500">Discount</Text>
-                    <Text className="text-sm font-medium text-red-500">
-                      -{money(discountNum)}
+                  <View className="flex-row justify-between pt-3 mt-1 border-t border-gray-200 dark:border-neutral-700">
+                    <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                      Total
+                    </Text>
+                    <Text className="text-lg font-bold text-gray-900 dark:text-white">
+                      {money(total)}
                     </Text>
                   </View>
-                )}
-
-                {specialPricing?.has_special_pricing &&
-                  specialPricing.discounts_applied.map((d, i) => (
-                    <View key={i} className="flex-row justify-between mb-2">
-                      <Text
-                        className="flex-1 mr-2 text-sm text-green-700 dark:text-green-400"
-                        numberOfLines={1}
-                      >
-                        {d.name}
-                      </Text>
-                      <Text className="text-sm font-medium text-green-700 dark:text-green-400">
-                        -{money(d.discount_amount)}
-                      </Text>
-                    </View>
-                  ))}
-
-                {feeBreakdown?.fees.map((f) => (
-                  <View
-                    key={f.fee_support_id}
-                    className="flex-row justify-between mb-2"
-                  >
-                    <Text
-                      className="flex-1 mr-2 text-sm text-gray-500 dark:text-gray-400"
-                      numberOfLines={1}
-                    >
-                      {f.fee_name} ({f.fee_label})
-                      {f.fee_application_type === "inclusive" ? " · Included" : ""}
-                    </Text>
-                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                      {f.fee_application_type === "additive"
-                        ? `+${money(f.fee_amount)}`
-                        : money(f.fee_amount)}
-                    </Text>
-                  </View>
-                ))}
-
-                <View className="flex-row justify-between pt-3 mt-1 border-t border-gray-200 dark:border-neutral-700">
-                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                    Total
-                  </Text>
-                  <Text className="text-lg font-bold text-gray-900 dark:text-white">
-                    {money(total)}
-                  </Text>
-                </View>
-                {giftCard && giftCardDiscountFor(giftCard, total) > 0 && (
-                  <>
-                    <View className="flex-row justify-between mt-2">
-                      <Text className="text-sm text-emerald-700 dark:text-emerald-400">
-                        Gift card {giftCard.code}
-                      </Text>
-                      <Text className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-                        −{money(giftCardDiscountFor(giftCard, total))}
-                      </Text>
-                    </View>
-                    <View className="flex-row justify-between mt-1">
-                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                        Amount Due
-                      </Text>
-                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {money(singleGiftCardDue)}
-                      </Text>
-                    </View>
-                  </>
-                )}
-                {paymentMethod === "paylater" && (
-                  <View className="flex-row justify-between mt-1">
-                    <Text className="text-sm font-semibold text-orange-700 dark:text-orange-400">
-                      Amount Due Now
-                    </Text>
-                    <Text className="text-sm font-semibold text-orange-700 dark:text-orange-400">
-                      $0.00
-                    </Text>
-                  </View>
-                )}
-
-                <View className="mt-4 mb-4">
-                  <CheckboxRow
-                    checked={sendEmail}
-                    onToggle={() => setSendEmail((v) => !v)}
-                    label={
-                      <View className="flex-row items-center gap-1.5">
-                        <Feather name="mail" size={14} color="#9CA3AF" />
-                        <Text className="text-sm text-gray-700 dark:text-gray-200">
-                          Send email receipt
+                  {giftCard && giftCardDiscountFor(giftCard, total) > 0 && (
+                    <>
+                      <View className="flex-row justify-between mt-2">
+                        <Text className="text-sm text-emerald-700 dark:text-emerald-400">
+                          Gift card {giftCard.code}
+                        </Text>
+                        <Text className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                          −{money(giftCardDiscountFor(giftCard, total))}
                         </Text>
                       </View>
-                    }
-                  />
-                </View>
-
-                <Pressable
-                  onPress={handleSubmit}
-                  disabled={submitDisabled}
-                  className={`h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] ${
-                    submitDisabled ? "opacity-50" : "active:opacity-90"
-                  }`}
-                >
-                  {submitting || isProcessingPayment ? (
-                    <>
-                      <ActivityIndicator color="#FFFFFF" />
-                      <Text className="text-base font-semibold text-white">
-                        Processing...
-                      </Text>
-                    </>
-                  ) : (
-                    <>
-                      <Feather name="shopping-cart" size={18} color="#FFFFFF" />
-                      <Text className="text-base font-semibold text-white">
-                        {giftCard && singleGiftCardDue === 0
-                          ? "Complete with Gift Card"
-                          : "Complete Purchase"}
-                      </Text>
+                      <View className="flex-row justify-between mt-1">
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                          Amount Due
+                        </Text>
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {money(singleGiftCardDue)}
+                        </Text>
+                      </View>
                     </>
                   )}
-                </Pressable>
+                  {paymentMethod === "paylater" && (
+                    <View className="flex-row justify-between mt-1">
+                      <Text className="text-sm font-semibold text-orange-700 dark:text-orange-400">
+                        Amount Due Now
+                      </Text>
+                      <Text className="text-sm font-semibold text-orange-700 dark:text-orange-400">
+                        $0.00
+                      </Text>
+                    </View>
+                  )}
 
-                {/* What is still missing, one step at a time — the web's
+                  <View className="mt-4 mb-4">
+                    <CheckboxRow
+                      checked={sendEmail}
+                      onToggle={() => setSendEmail((v) => !v)}
+                      label={
+                        <View className="flex-row items-center gap-1.5">
+                          <Feather name="mail" size={14} color="#9CA3AF" />
+                          <Text className="text-sm text-gray-700 dark:text-gray-200">
+                            Send email receipt
+                          </Text>
+                        </View>
+                      }
+                    />
+                  </View>
+
+                  <Pressable
+                    onPress={handleSubmit}
+                    disabled={submitDisabled}
+                    className={`h-14 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] ${
+                      submitDisabled ? "opacity-50" : "active:opacity-90"
+                    }`}
+                  >
+                    {submitting || isProcessingPayment ? (
+                      <>
+                        <ActivityIndicator color="#FFFFFF" />
+                        <Text className="text-base font-semibold text-white">
+                          Processing...
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <Feather
+                          name="shopping-cart"
+                          size={18}
+                          color="#FFFFFF"
+                        />
+                        <Text className="text-base font-semibold text-white">
+                          {giftCard && singleGiftCardDue === 0
+                            ? "Complete with Gift Card"
+                            : "Complete Purchase"}
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+
+                  {/* What is still missing, one step at a time — the web's
                     `submitBlockers[0]` under its own submit button. */}
-                {purchaseBlockers.length > 0 && !submitting && (
-                  <Text className="mt-2 text-center text-[11px] text-amber-700 dark:text-amber-400">
-                    {purchaseBlockers[0]}
+                  {purchaseBlockers.length > 0 && !submitting && (
+                    <Text className="mt-2 text-center text-[11px] text-amber-700 dark:text-amber-400">
+                      {purchaseBlockers[0]}
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <View className="items-center py-8">
+                  <Feather name="shopping-cart" size={44} color="#D1D5DB" />
+                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-4">
+                    Select an attraction to begin
                   </Text>
-                )}
-              </>
-            ) : (
-              <View className="items-center py-8">
-                <Feather name="shopping-cart" size={44} color="#D1D5DB" />
-                <Text className="text-sm text-gray-500 dark:text-gray-400 mt-4">
-                  Select an attraction to begin
-                </Text>
-              </View>
-            )}
-          </Section>
+                </View>
+              )}
+            </Section>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -2992,7 +3153,9 @@ const CreatePurchaseScreen = () => {
                 >
                   {option}
                 </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+                {isSelected && (
+                  <Feather name="check" size={16} color="#3B82F6" />
+                )}
               </Pressable>
             );
           })}
@@ -3017,12 +3180,12 @@ const CreatePurchaseScreen = () => {
         }
         entityType={callToBookOpen === "event" ? "event" : "attraction"}
         entityId={
-          (callToBookOpen === "event" ? selectedEvent?.id : selected?.id) ?? null
+          (callToBookOpen === "event" ? selectedEvent?.id : selected?.id) ??
+          null
         }
         entityName={
-          (callToBookOpen === "event"
-            ? selectedEvent?.name
-            : selected?.name) ?? null
+          (callToBookOpen === "event" ? selectedEvent?.name : selected?.name) ??
+          null
         }
         initialName={customerName}
         initialPhone={customerPhone}

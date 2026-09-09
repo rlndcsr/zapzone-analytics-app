@@ -22,20 +22,35 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import {
+  GiftCardCheckoutField,
+  type AppliedGiftCard,
+} from "../../components/gift-cards/GiftCardCheckoutField";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import {
-  GiftCardCheckoutField,
-  type AppliedGiftCard,
-} from "../../components/gift-cards/GiftCardCheckoutField";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+  clampAddOnQuantity,
+  DEFAULT_MAX_QUANTITY,
+} from "../../lib/addOnQuantity";
 import { eventIsCallToBook } from "../../lib/callToBook";
+import {
+  amountDueAfterGiftCard,
+  giftCardCodeField,
+  giftCardDiscountFor,
+  reconcileGiftCardPurchase,
+} from "../../lib/giftCards/checkoutGiftCard";
+import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
+import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import {
+  credentialsMatchChargeLocation,
+  STALE_GATEWAY_LOCATION_MESSAGE,
+} from "../../lib/payments/acceptJsLocation";
 import {
   CARD_MONTHS,
   cardYears,
@@ -48,27 +63,26 @@ import {
 import { rollbackEventPurchase } from "../../lib/payments/rollback";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
-  clampAddOnQuantity,
-  DEFAULT_MAX_QUANTITY,
-} from "../../lib/addOnQuantity";
-import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
-import {
-  amountDueAfterGiftCard,
-  giftCardCodeField,
-  giftCardDiscountFor,
-  reconcileGiftCardPurchase,
-} from "../../lib/giftCards/checkoutGiftCard";
-import {
   clampToRemaining,
   isLowRemaining,
   isSoldOut,
   quantityCeiling,
 } from "../../lib/ticketLimits";
 import {
+  searchCustomers,
+  type CustomerHit,
+} from "../../services/customersService";
+import {
   createEventPurchase,
   fetchEventPurchaseDetail,
   type CreateEventPurchaseInput,
 } from "../../services/eventPurchasesService";
+import {
+  fetchEventAvailableDates,
+  fetchEventAvailableTimeSlots,
+  fetchEvents,
+  type EventRow,
+} from "../../services/eventsService";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -78,13 +92,6 @@ import {
   processCardPayment,
   type AuthorizeNetPublicKey,
 } from "../../services/paymentsService";
-import {
-  fetchEventAvailableDates,
-  fetchEventAvailableTimeSlots,
-  fetchEvents,
-  type EventRow,
-} from "../../services/eventsService";
-import { searchCustomers, type CustomerHit } from "../../services/customersService";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -102,8 +109,18 @@ type PaymentMethod = "authorize.net" | "in-store" | "paylater";
 const pad = (n: number) => String(n).padStart(2, "0");
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
 function formatTime(value: string): string {
@@ -127,7 +144,9 @@ const money = (n: number) => `$${n.toFixed(2)}`;
  *  otherwise), capped so the picker stays reasonable. */
 function eventDateOptions(event: EventRow): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = [];
-  const start = new Date(`${(event.startDate || "").substring(0, 10)}T00:00:00`);
+  const start = new Date(
+    `${(event.startDate || "").substring(0, 10)}T00:00:00`,
+  );
   if (Number.isNaN(start.getTime())) return out;
   if (event.dateType !== "date_range" || !event.endDate) {
     const v = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
@@ -179,7 +198,9 @@ const Section = ({
       <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
         <Feather name={icon} size={16} color={PRIMARY} />
       </View>
-      <Text className="text-base font-bold text-gray-900 dark:text-white">{title}</Text>
+      <Text className="text-base font-bold text-gray-900 dark:text-white">
+        {title}
+      </Text>
     </View>
     {children}
   </View>
@@ -234,10 +255,16 @@ const Stepper = ({
       onPress={() => onChange(Math.max(min, value - 1))}
       disabled={value <= min}
       className={`w-9 h-9 rounded-full items-center justify-center border ${
-        value <= min ? "border-gray-200 dark:border-neutral-800" : "border-gray-300 dark:border-neutral-600"
+        value <= min
+          ? "border-gray-200 dark:border-neutral-800"
+          : "border-gray-300 dark:border-neutral-600"
       }`}
     >
-      <Feather name="minus" size={16} color={value <= min ? "#D1D5DB" : "#374151"} />
+      <Feather
+        name="minus"
+        size={16}
+        color={value <= min ? "#D1D5DB" : "#374151"}
+      />
     </Pressable>
     <Text className="w-8 text-center text-base font-semibold text-gray-900 dark:text-white">
       {value}
@@ -246,10 +273,16 @@ const Stepper = ({
       onPress={() => onChange(Math.min(max, value + 1))}
       disabled={value >= max}
       className={`w-9 h-9 rounded-full items-center justify-center border ${
-        value >= max ? "border-gray-200 dark:border-neutral-800" : "border-gray-300 dark:border-neutral-600"
+        value >= max
+          ? "border-gray-200 dark:border-neutral-800"
+          : "border-gray-300 dark:border-neutral-600"
       }`}
     >
-      <Feather name="plus" size={16} color={value >= max ? "#D1D5DB" : "#374151"} />
+      <Feather
+        name="plus"
+        size={16}
+        color={value >= max ? "#D1D5DB" : "#374151"}
+      />
     </Pressable>
   </View>
 );
@@ -264,7 +297,9 @@ const CreateEventPurchaseScreen = () => {
   // Location (company admins) — options from dashboard metrics locationStats.
   // Default to "All Locations" (null), like the web, so every location's
   // events are available until one is chosen.
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
+    null,
+  );
   const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
   const locationOptions = useMemo(() => {
     if (!metrics?.locationStats) return [];
@@ -325,6 +360,12 @@ const CreateEventPurchaseScreen = () => {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [authorizeCredentials, setAuthorizeCredentials] =
     useState<AuthorizeNetPublicKey | null>(null);
+  /** The location `authorizeCredentials` was actually fetched for — Accept.js
+   *  binds a token to the api_login_id that minted it, so this must match the
+   *  location about to be charged before we ever tokenize (web parity: "Bind
+   *  Accept.js credentials to the location being charged"). */
+  const [authorizeCredentialsLocationId, setAuthorizeCredentialsLocationId] =
+    useState<number | null>(null);
   /** This event's location has no active merchant account (web's
    *  "Authorize.Net Not Configured" modal). */
   const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
@@ -338,7 +379,9 @@ const CreateEventPurchaseScreen = () => {
    * A slot that is already full is dropped from `time_slots` server-side, so a
    * sold-out time is simply not offered (the web behaves the same way).
    */
-  const [slotsLeft, setSlotsLeft] = useState<Record<string, number> | null>(null);
+  const [slotsLeft, setSlotsLeft] = useState<Record<string, number> | null>(
+    null,
+  );
   const [loadingDates, setLoadingDates] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
@@ -370,7 +413,10 @@ const CreateEventPurchaseScreen = () => {
     if (!token) return;
     setLoadingDates(true);
     try {
-      const fetched = await fetchEventAvailableDates({ token, eventId: event.id });
+      const fetched = await fetchEventAvailableDates({
+        token,
+        eventId: event.id,
+      });
       const dates =
         fetched.length > 0
           ? fetched
@@ -392,7 +438,9 @@ const CreateEventPurchaseScreen = () => {
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
+    null,
+  );
   const [foundCustomers, setFoundCustomers] = useState<CustomerHit[]>([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showCustomerList, setShowCustomerList] = useState(false);
@@ -423,17 +471,24 @@ const CreateEventPurchaseScreen = () => {
   const [callToBookOpen, setCallToBookOpen] = useState(false);
   useEffect(() => {
     if (paymentMethod !== "authorize.net" || cardLocationId == null) return;
+
+    setAuthorizeCredentials(null);
+    setAuthorizeCredentialsLocationId(null);
     const token = getToken();
     if (!token) return;
     const controller = new AbortController();
     fetchAuthorizeNetPublicKey(token, cardLocationId, controller.signal)
       .then((creds) => {
         setAuthorizeCredentials(creds.apiLoginId ? creds : null);
+        setAuthorizeCredentialsLocationId(
+          creds.apiLoginId ? cardLocationId : null,
+        );
         setAuthorizeUnavailable(!creds.apiLoginId);
       })
       .catch(() => {
         if (controller.signal.aborted) return;
         setAuthorizeCredentials(null);
+        setAuthorizeCredentialsLocationId(null);
         setAuthorizeUnavailable(true);
       });
     return () => controller.abort();
@@ -457,7 +512,9 @@ const CreateEventPurchaseScreen = () => {
         if (!active) return;
         setFoundCustomers(hits);
         setShowCustomerList(hits.length > 0);
-        const exact = hits.find((c) => c.email.toLowerCase() === email.toLowerCase());
+        const exact = hits.find(
+          (c) => c.email.toLowerCase() === email.toLowerCase(),
+        );
         if (exact) {
           setSelectedCustomerId(exact.id);
           setCustomerName(`${exact.firstName} ${exact.lastName}`.trim());
@@ -584,10 +641,18 @@ const CreateEventPurchaseScreen = () => {
       return "Test card numbers are not allowed. Please use a real card.";
     if (!authorizeCredentials?.apiLoginId)
       return "Payment system not initialized. Please reopen this screen and try again.";
+    if (
+      !credentialsMatchChargeLocation(
+        authorizeCredentialsLocationId,
+        cardLocationId,
+      )
+    )
+      return STALE_GATEWAY_LOCATION_MESSAGE;
     return null;
   };
 
-  const dateLabel = dateOptions.find((d) => d.value === purchaseDate)?.label ?? null;
+  const dateLabel =
+    dateOptions.find((d) => d.value === purchaseDate)?.label ?? null;
 
   const locationName =
     selectedLocationId == null
@@ -610,7 +675,10 @@ const CreateEventPurchaseScreen = () => {
 
   const handleSubmit = async () => {
     if (!selected) {
-      Alert.alert("Select an event", "Choose an event to purchase tickets for.");
+      Alert.alert(
+        "Select an event",
+        "Choose an event to purchase tickets for.",
+      );
       return;
     }
     // The purchase belongs to the event's own location (the web uses
@@ -661,7 +729,11 @@ const CreateEventPurchaseScreen = () => {
       .map(([idStr, qty]) => {
         const addOn = selected.addOns.find((a) => a.id === Number(idStr));
         return addOn
-          ? { add_on_id: addOn.id, quantity: qty, price_at_purchase: addOn.price }
+          ? {
+              add_on_id: addOn.id,
+              quantity: qty,
+              price_at_purchase: addOn.price,
+            }
           : null;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
@@ -672,11 +744,8 @@ const CreateEventPurchaseScreen = () => {
     // A cash amount is bounded by the order total, so an over-typed figure can
     // never be recorded as paid.
     const typedPaid = clampAmount(amountPaid, total);
-    const paid = isPayLater || isCardPayment
-      ? 0
-      : typedPaid > 0
-        ? typedPaid
-        : total;
+    const paid =
+      isPayLater || isCardPayment ? 0 : typedPaid > 0 ? typedPaid : total;
 
     const input: CreateEventPurchaseInput = {
       ...giftCardCodeField(giftCard),
@@ -693,7 +762,8 @@ const CreateEventPurchaseScreen = () => {
       amount_paid: paid,
       // Web sends the special-pricing discount here (the manual discount is
       // already folded into total_amount via the base price).
-      discount_amount: specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
+      discount_amount:
+        specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
       payment_method: paymentMethod,
       payment_status:
         isPayLater || isCardPayment
@@ -708,7 +778,8 @@ const CreateEventPurchaseScreen = () => {
       send_email: paymentMethod === "in-store" ? sendEmail : false,
       add_ons: addOnsPayload.length > 0 ? addOnsPayload : undefined,
       applied_fees: appliedFees.length > 0 ? appliedFees : undefined,
-      applied_discounts: appliedDiscounts.length > 0 ? appliedDiscounts : undefined,
+      applied_discounts:
+        appliedDiscounts.length > 0 ? appliedDiscounts : undefined,
     };
 
     submitLockRef.current = true;
@@ -739,7 +810,11 @@ const CreateEventPurchaseScreen = () => {
             })
           : // A failed re-read proves nothing was settled — treat it the same
             // as an unconfirmed record rather than guess at its state.
-            ({ action: "retry", reasonCode: "price-changed", serverDue: 0 } as const);
+            ({
+              action: "retry",
+              reasonCode: "price-changed",
+              serverDue: 0,
+            } as const);
 
         if (outcome.action === "settled") {
           setPaymentError("");
@@ -758,6 +833,24 @@ const CreateEventPurchaseScreen = () => {
               : `This purchase still owes ${money(outcome.serverDue)}. Please enter your card details and try again.`;
           setPaymentError(message);
           Alert.alert("Couldn't complete purchase", message);
+          return;
+        }
+        // A gift card that didn't fully cover the purchase can reach this
+        // branch without ever running cardPreflightError() (it only runs
+        // when cardEntryRequired), so the credential/location check has to
+        // be repeated here before charging.
+        if (
+          !credentialsMatchChargeLocation(
+            authorizeCredentialsLocationId,
+            effectiveLocationId,
+          )
+        ) {
+          await rollbackEventPurchase(token, purchaseId);
+          setPaymentError(STALE_GATEWAY_LOCATION_MESSAGE);
+          Alert.alert(
+            "Couldn't complete purchase",
+            STALE_GATEWAY_LOCATION_MESSAGE,
+          );
           return;
         }
         chargeAmount = outcome.amount;
@@ -824,7 +917,9 @@ const CreateEventPurchaseScreen = () => {
         Alert.alert(
           "Purchase confirmed",
           `${money(chargeAmount)} charged${
-            giftCard ? ` · gift card covered ${money(total - chargeAmount)}` : ""
+            giftCard
+              ? ` · gift card covered ${money(total - chargeAmount)}`
+              : ""
           } · ${selected.name}\n${
             sendEmail ? "Receipt sent to email." : "Email not sent per request."
           }`,
@@ -861,7 +956,9 @@ const CreateEventPurchaseScreen = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">New Purchase</Text>
+          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+            New Purchase
+          </Text>
           <View style={{ width: 36 }} />
         </View>
       </View>
@@ -874,7 +971,10 @@ const CreateEventPurchaseScreen = () => {
           className="flex-1"
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
+          contentContainerStyle={{
+            padding: 20,
+            paddingBottom: insets.bottom + 40,
+          }}
         >
           {/* Location */}
           {isCompanyAdmin && (
@@ -897,11 +997,15 @@ const CreateEventPurchaseScreen = () => {
                     {selected.name}
                   </Text>
                   <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {formatTime(selected.timeStart)} – {formatTime(selected.timeEnd)}
+                    {formatTime(selected.timeStart)} –{" "}
+                    {formatTime(selected.timeEnd)}
                   </Text>
                   <Text className="text-sm font-bold text-[#0644C7] mt-1">
                     {money(selected.price)}
-                    <Text className="text-xs font-normal text-gray-400"> /ticket</Text>
+                    <Text className="text-xs font-normal text-gray-400">
+                      {" "}
+                      /ticket
+                    </Text>
                   </Text>
                 </View>
                 <Pressable onPress={() => setSelected(null)} hitSlop={8}>
@@ -943,7 +1047,9 @@ const CreateEventPurchaseScreen = () => {
                           {formatTime(e.timeStart)} – {formatTime(e.timeEnd)}
                         </Text>
                       </View>
-                      <Text className="text-sm font-bold text-[#0644C7]">{money(e.price)}</Text>
+                      <Text className="text-sm font-bold text-[#0644C7]">
+                        {money(e.price)}
+                      </Text>
                       <Feather name="chevron-right" size={18} color="#9CA3AF" />
                     </Pressable>
                   ))
@@ -962,7 +1068,9 @@ const CreateEventPurchaseScreen = () => {
                   setCustomerEmail(t);
                   setSelectedCustomerId(null);
                 }}
-                onFocus={() => foundCustomers.length > 0 && setShowCustomerList(true)}
+                onFocus={() =>
+                  foundCustomers.length > 0 && setShowCustomerList(true)
+                }
                 placeholder="customer@example.com"
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -994,7 +1102,9 @@ const CreateEventPurchaseScreen = () => {
                     <Text className="text-sm font-medium text-gray-900 dark:text-white">
                       {c.firstName} {c.lastName}
                     </Text>
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">{c.email}</Text>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      {c.email}
+                    </Text>
                   </Pressable>
                 ))}
               </View>
@@ -1128,7 +1238,9 @@ const CreateEventPurchaseScreen = () => {
                         </Text>
                         <Text className="text-xs text-gray-400">
                           {money(addOn.price)} each
-                          {addOn.minQuantity > 1 ? ` · min ${addOn.minQuantity}` : ""}
+                          {addOn.minQuantity > 1
+                            ? ` · min ${addOn.minQuantity}`
+                            : ""}
                         </Text>
                       </View>
                       <Stepper
@@ -1152,225 +1264,250 @@ const CreateEventPurchaseScreen = () => {
                   onRequestCall={() => setCallToBookOpen(true)}
                 />
               ) : (
-              <Section icon="calendar" title="Event Date & Slot">
-                <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-3">
-                  Pick a date and time slot within the events schedule.
-                </Text>
-                <View className="flex-row gap-3">
-                  <View className="flex-1">
-                    <FieldLabel>Date</FieldLabel>
-                    <SelectRow
-                      icon="calendar"
-                      value={loadingDates ? "Loading dates…" : dateLabel}
-                      placeholder="Select date"
-                      onPress={() => setSheet("date")}
-                    />
-                  </View>
-                  <View className="flex-1">
-                    <FieldLabel>Time</FieldLabel>
-                    <SelectRow
-                      icon="clock"
-                      value={
-                        loadingSlots
-                          ? "Loading slots…"
-                          : purchaseTime
-                            ? slotLeft != null
-                              ? `${formatTime(purchaseTime)} — ${slotLeft} left`
-                              : formatTime(purchaseTime)
-                            : null
-                      }
-                      placeholder="Select time"
-                      onPress={() => setSheet("time")}
-                    />
-                  </View>
-                </View>
-                {!loadingSlots && purchaseDate && timeOptions.length === 0 ? (
-                  <Text className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                    No available time slots for this date.
+                <Section icon="calendar" title="Event Date & Slot">
+                  <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-3">
+                    Pick a date and time slot within the events schedule.
                   </Text>
-                ) : null}
-              </Section>
+                  <View className="flex-row gap-3">
+                    <View className="flex-1">
+                      <FieldLabel>Date</FieldLabel>
+                      <SelectRow
+                        icon="calendar"
+                        value={loadingDates ? "Loading dates…" : dateLabel}
+                        placeholder="Select date"
+                        onPress={() => setSheet("date")}
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <FieldLabel>Time</FieldLabel>
+                      <SelectRow
+                        icon="clock"
+                        value={
+                          loadingSlots
+                            ? "Loading slots…"
+                            : purchaseTime
+                              ? slotLeft != null
+                                ? `${formatTime(purchaseTime)} — ${slotLeft} left`
+                                : formatTime(purchaseTime)
+                              : null
+                        }
+                        placeholder="Select time"
+                        onPress={() => setSheet("time")}
+                      />
+                    </View>
+                  </View>
+                  {!loadingSlots && purchaseDate && timeOptions.length === 0 ? (
+                    <Text className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      No available time slots for this date.
+                    </Text>
+                  ) : null}
+                </Section>
               )}
 
               {/* Payment — nothing is taken online for a Call to Book event. */}
               {callToBook ? null : (
-              <Section icon="credit-card" title="Payment">
-                <View className="flex-row gap-2">
-                  {(
-                    [
-                      { key: "authorize.net", label: "Authorize.Net", icon: "credit-card" },
-                      { key: "in-store", label: "In-Store", icon: "dollar-sign" },
-                      { key: "paylater", label: "Pay Later", icon: "clock" },
-                    ] as const
-                  ).map((opt) => {
-                    const active = paymentMethod === opt.key;
-                    return (
-                      <Pressable
-                        key={opt.key}
-                        onPress={() => {
-                          setPaymentMethod(opt.key);
-                          setPaymentError("");
-                          // Clear the override so Amount Paid defaults to the
-                          // live total (which updates as fees/discounts load).
-                          setAmountPaid("");
-                        }}
-                        className={`flex-1 items-center justify-center gap-1 py-3 rounded-2xl border ${
-                          active
-                            ? "bg-[#0644C7] border-[#0644C7]"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                        }`}
-                      >
-                        <Feather name={opt.icon} size={16} color={active ? "#FFFFFF" : "#6B7280"} />
-                        <Text
-                          className={`text-xs font-semibold ${
-                            active ? "text-white" : "text-gray-600 dark:text-gray-300"
+                <Section icon="credit-card" title="Payment">
+                  <View className="flex-row gap-2">
+                    {(
+                      [
+                        {
+                          key: "authorize.net",
+                          label: "Authorize.Net",
+                          icon: "credit-card",
+                        },
+                        {
+                          key: "in-store",
+                          label: "In-Store",
+                          icon: "dollar-sign",
+                        },
+                        { key: "paylater", label: "Pay Later", icon: "clock" },
+                      ] as const
+                    ).map((opt) => {
+                      const active = paymentMethod === opt.key;
+                      return (
+                        <Pressable
+                          key={opt.key}
+                          onPress={() => {
+                            setPaymentMethod(opt.key);
+                            setPaymentError("");
+                            // Clear the override so Amount Paid defaults to the
+                            // live total (which updates as fees/discounts load).
+                            setAmountPaid("");
+                          }}
+                          className={`flex-1 items-center justify-center gap-1 py-3 rounded-2xl border ${
+                            active
+                              ? "bg-[#0644C7] border-[#0644C7]"
+                              : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
                           }`}
                         >
-                          {opt.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                <View className="mt-3">
-                  <FieldLabel>Have a gift card?</FieldLabel>
-                  <GiftCardCheckoutField
-                    locationId={cardLocationId}
-                    items={selected ? [{ type: "event", id: selected.id }] : []}
-                    subtotal={total}
-                    applied={giftCard}
-                    onApplied={setGiftCard}
-                    disabled={submitting || isProcessingPayment}
-                  />
-                  {!cardEntryRequired && giftCard && (
-                    <Text className="mt-1.5 text-xs text-emerald-700 dark:text-emerald-400">
-                      Covers the full amount — no card needed.
-                    </Text>
-                  )}
-                </View>
-
-                {paymentMethod === "paylater" && (
-                  <View className="mt-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-3">
-                    <Text className="text-xs text-amber-800 dark:text-amber-300">
-                      No payment is collected now. The customer will pay later.
-                    </Text>
+                          <Feather
+                            name={opt.icon}
+                            size={16}
+                            color={active ? "#FFFFFF" : "#6B7280"}
+                          />
+                          <Text
+                            className={`text-xs font-semibold ${
+                              active
+                                ? "text-white"
+                                : "text-gray-600 dark:text-gray-300"
+                            }`}
+                          >
+                            {opt.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
-                )}
 
-                {paymentMethod === "authorize.net" && (
-                  <View className="mt-3 rounded-2xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-4">
-                    <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
-                      Card Details
-                    </Text>
-
-                    {/* Web parity: the "Authorize.Net Not Configured" modal. */}
-                    {authorizeUnavailable && (
-                      <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 p-2.5">
-                        <Feather name="alert-triangle" size={13} color="#B45309" />
-                        <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
-                          This location has no active Authorize.Net account, so
-                          cards can&apos;t be charged. Use In-Store or Pay Later,
-                          or ask an administrator to connect the merchant account.
-                        </Text>
-                      </View>
-                    )}
-
-                    <FieldLabel>Card Number</FieldLabel>
-                    <View
-                      className={`h-12 flex-row items-center rounded-xl border px-3 bg-white dark:bg-neutral-900 ${
-                        cardNumber && cardValid
-                          ? "border-green-400"
-                          : cardNumber
-                            ? "border-red-400"
-                            : "border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <TextInput
-                        value={cardNumber}
-                        onChangeText={(v) => {
-                          const formatted = formatCardNumber(v);
-                          if (formatted.replace(/\s/g, "").length <= 16) {
-                            setCardNumber(formatted);
-                            setPaymentError("");
-                          }
-                        }}
-                        placeholder="1234 5678 9012 3456"
-                        placeholderTextColor="#9CA3AF"
-                        keyboardType="number-pad"
-                        maxLength={19}
-                        editable={!isProcessingPayment}
-                        className="flex-1 text-sm text-gray-900 dark:text-white"
-                      />
-                      {!!cardNumber && cardValid && (
-                        <Feather name="check-circle" size={16} color="#16A34A" />
-                      )}
-                    </View>
-                    {!!cardNumber && (
-                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        {getCardType(cardNumber)}
+                  <View className="mt-3">
+                    <FieldLabel>Have a gift card?</FieldLabel>
+                    <GiftCardCheckoutField
+                      locationId={cardLocationId}
+                      items={
+                        selected ? [{ type: "event", id: selected.id }] : []
+                      }
+                      subtotal={total}
+                      applied={giftCard}
+                      onApplied={setGiftCard}
+                      disabled={submitting || isProcessingPayment}
+                    />
+                    {!cardEntryRequired && giftCard && (
+                      <Text className="mt-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                        Covers the full amount — no card needed.
                       </Text>
                     )}
+                  </View>
 
-                    <View className="flex-row gap-2 mt-3">
-                      <View className="flex-1">
-                        <FieldLabel>Month</FieldLabel>
-                        <SelectRow
-                          icon="calendar"
-                          value={cardMonth || null}
-                          placeholder="MM"
-                          onPress={() => setSheet("month")}
-                        />
-                      </View>
-                      <View className="flex-1">
-                        <FieldLabel>Year</FieldLabel>
-                        <SelectRow
-                          icon="calendar"
-                          value={cardYear || null}
-                          placeholder="YYYY"
-                          onPress={() => setSheet("year")}
-                        />
-                      </View>
+                  {paymentMethod === "paylater" && (
+                    <View className="mt-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-3">
+                      <Text className="text-xs text-amber-800 dark:text-amber-300">
+                        No payment is collected now. The customer will pay
+                        later.
+                      </Text>
                     </View>
+                  )}
 
-                    <View className="mt-3">
-                      <FieldLabel>CVV</FieldLabel>
-                      <View className="h-12 justify-center rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3">
+                  {paymentMethod === "authorize.net" && (
+                    <View className="mt-3 rounded-2xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800/50 p-4">
+                      <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+                        Card Details
+                      </Text>
+
+                      {/* Web parity: the "Authorize.Net Not Configured" modal. */}
+                      {authorizeUnavailable && (
+                        <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 p-2.5">
+                          <Feather
+                            name="alert-triangle"
+                            size={13}
+                            color="#B45309"
+                          />
+                          <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                            This location has no active Authorize.Net account,
+                            so cards can&apos;t be charged. Use In-Store or Pay
+                            Later, or ask an administrator to connect the
+                            merchant account.
+                          </Text>
+                        </View>
+                      )}
+
+                      <FieldLabel>Card Number</FieldLabel>
+                      <View
+                        className={`h-12 flex-row items-center rounded-xl border px-3 bg-white dark:bg-neutral-900 ${
+                          cardNumber && cardValid
+                            ? "border-green-400"
+                            : cardNumber
+                              ? "border-red-400"
+                              : "border-gray-200 dark:border-neutral-700"
+                        }`}
+                      >
                         <TextInput
-                          value={cardCVV}
+                          value={cardNumber}
                           onChangeText={(v) => {
-                            const digits = v.replace(/\D/g, "");
-                            if (digits.length <= 4) setCardCVV(digits);
+                            const formatted = formatCardNumber(v);
+                            if (formatted.replace(/\s/g, "").length <= 16) {
+                              setCardNumber(formatted);
+                              setPaymentError("");
+                            }
                           }}
-                          placeholder="123"
+                          placeholder="1234 5678 9012 3456"
                           placeholderTextColor="#9CA3AF"
                           keyboardType="number-pad"
-                          maxLength={4}
+                          maxLength={19}
                           editable={!isProcessingPayment}
-                          className="text-sm text-gray-900 dark:text-white"
+                          className="flex-1 text-sm text-gray-900 dark:text-white"
                         />
+                        {!!cardNumber && cardValid && (
+                          <Feather
+                            name="check-circle"
+                            size={16}
+                            color="#16A34A"
+                          />
+                        )}
                       </View>
-                    </View>
+                      {!!cardNumber && (
+                        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {getCardType(cardNumber)}
+                        </Text>
+                      )}
 
-                    {!!paymentError && (
-                      <View className="mt-3 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-2">
-                        <Text className="text-xs text-red-800 dark:text-red-300">
-                          {paymentError}
+                      <View className="flex-row gap-2 mt-3">
+                        <View className="flex-1">
+                          <FieldLabel>Month</FieldLabel>
+                          <SelectRow
+                            icon="calendar"
+                            value={cardMonth || null}
+                            placeholder="MM"
+                            onPress={() => setSheet("month")}
+                          />
+                        </View>
+                        <View className="flex-1">
+                          <FieldLabel>Year</FieldLabel>
+                          <SelectRow
+                            icon="calendar"
+                            value={cardYear || null}
+                            placeholder="YYYY"
+                            onPress={() => setSheet("year")}
+                          />
+                        </View>
+                      </View>
+
+                      <View className="mt-3">
+                        <FieldLabel>CVV</FieldLabel>
+                        <View className="h-12 justify-center rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3">
+                          <TextInput
+                            value={cardCVV}
+                            onChangeText={(v) => {
+                              const digits = v.replace(/\D/g, "");
+                              if (digits.length <= 4) setCardCVV(digits);
+                            }}
+                            placeholder="123"
+                            placeholderTextColor="#9CA3AF"
+                            keyboardType="number-pad"
+                            maxLength={4}
+                            editable={!isProcessingPayment}
+                            className="text-sm text-gray-900 dark:text-white"
+                          />
+                        </View>
+                      </View>
+
+                      {!!paymentError && (
+                        <View className="mt-3 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-2">
+                          <Text className="text-xs text-red-800 dark:text-red-300">
+                            {paymentError}
+                          </Text>
+                        </View>
+                      )}
+
+                      <View className="flex-row items-center gap-2 mt-3">
+                        <Feather name="lock" size={14} color="#9CA3AF" />
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          Secure payment powered by Authorize.Net
                         </Text>
                       </View>
-                    )}
-
-                    <View className="flex-row items-center gap-2 mt-3">
-                      <Feather name="lock" size={14} color="#9CA3AF" />
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        Secure payment powered by Authorize.Net
-                      </Text>
                     </View>
-                  </View>
-                )}
-              </Section>
+                  )}
+                </Section>
               )}
-
             </>
           )}
 
@@ -1409,7 +1546,9 @@ const CreateEventPurchaseScreen = () => {
                 {discountNum > 0 && (
                   <View className="flex-row justify-between mb-2">
                     <Text className="text-sm text-red-500">Discount</Text>
-                    <Text className="text-sm font-medium text-red-500">-{money(discountNum)}</Text>
+                    <Text className="text-sm font-medium text-red-500">
+                      -{money(discountNum)}
+                    </Text>
                   </View>
                 )}
                 {specialPricingDiscount > 0 && (
@@ -1423,7 +1562,10 @@ const CreateEventPurchaseScreen = () => {
                   </View>
                 )}
                 {feeBreakdown?.fees.map((f) => (
-                  <View key={f.fee_support_id} className="flex-row justify-between mb-2">
+                  <View
+                    key={f.fee_support_id}
+                    className="flex-row justify-between mb-2"
+                  >
                     <Text
                       className="text-sm text-gray-500 dark:text-gray-400 flex-1 mr-2"
                       numberOfLines={1}
@@ -1439,7 +1581,9 @@ const CreateEventPurchaseScreen = () => {
                   </View>
                 ))}
                 <View className="flex-row justify-between pt-3 mt-1 border-t border-gray-200 dark:border-neutral-700">
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">Total</Text>
+                  <Text className="text-base font-bold text-gray-900 dark:text-white">
+                    Total
+                  </Text>
                   <Text className="text-base font-bold text-gray-900 dark:text-white">
                     {money(total)}
                   </Text>
@@ -1466,7 +1610,9 @@ const CreateEventPurchaseScreen = () => {
                 )}
 
                 <View className="flex-row items-center justify-between mt-4">
-                  <Text className="text-sm text-gray-700 dark:text-gray-200">Send email receipt</Text>
+                  <Text className="text-sm text-gray-700 dark:text-gray-200">
+                    Send email receipt
+                  </Text>
                   <Switch
                     value={sendEmail}
                     onValueChange={setSendEmail}
@@ -1501,7 +1647,9 @@ const CreateEventPurchaseScreen = () => {
                 {submitting ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text className="text-base font-semibold text-white">Complete Purchase</Text>
+                  <Text className="text-base font-semibold text-white">
+                    Complete Purchase
+                  </Text>
                 )}
               </Pressable>
             </View>
@@ -1516,7 +1664,10 @@ const CreateEventPurchaseScreen = () => {
         title="Select Location"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: null as number | null, name: "All Locations" }, ...locationOptions].map((loc) => {
+          {[
+            { id: null as number | null, name: "All Locations" },
+            ...locationOptions,
+          ].map((loc) => {
             const isSelected = selectedLocationId === loc.id;
             return (
               <Pressable
@@ -1532,13 +1683,17 @@ const CreateEventPurchaseScreen = () => {
               >
                 <Text
                   className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
                   numberOfLines={1}
                 >
                   {loc.name}
                 </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+                {isSelected && (
+                  <Feather name="check" size={16} color="#3B82F6" />
+                )}
               </Pressable>
             );
           })}
@@ -1546,7 +1701,11 @@ const CreateEventPurchaseScreen = () => {
       </BottomSheet>
 
       {/* Date picker */}
-      <BottomSheet visible={sheet === "date"} onClose={() => setSheet(null)} title="Select Date">
+      <BottomSheet
+        visible={sheet === "date"}
+        onClose={() => setSheet(null)}
+        title="Select Date"
+      >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {dateOptions.map((d) => {
             const isSelected = purchaseDate === d.value;
@@ -1564,12 +1723,16 @@ const CreateEventPurchaseScreen = () => {
               >
                 <Text
                   className={`text-base font-medium ${
-                    isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
+                    isSelected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
                 >
                   {d.label}
                 </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+                {isSelected && (
+                  <Feather name="check" size={16} color="#3B82F6" />
+                )}
               </Pressable>
             );
           })}
@@ -1578,7 +1741,11 @@ const CreateEventPurchaseScreen = () => {
 
       {/* Time picker — each slot carries its live ticket count, like the web's
           "10:00 AM — 8 left" option labels. */}
-      <BottomSheet visible={sheet === "time"} onClose={() => setSheet(null)} title="Select Time">
+      <BottomSheet
+        visible={sheet === "time"}
+        onClose={() => setSheet(null)}
+        title="Select Time"
+      >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {timeOptions.map((t) => {
             const isSelected = purchaseTime === t;
@@ -1628,7 +1795,9 @@ const CreateEventPurchaseScreen = () => {
                     </Text>
                   )}
                 </View>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+                {isSelected && (
+                  <Feather name="check" size={16} color="#3B82F6" />
+                )}
               </Pressable>
             );
           })}
@@ -1666,7 +1835,9 @@ const CreateEventPurchaseScreen = () => {
                 >
                   {m}
                 </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+                {isSelected && (
+                  <Feather name="check" size={16} color="#3B82F6" />
+                )}
               </Pressable>
             );
           })}
@@ -1702,7 +1873,9 @@ const CreateEventPurchaseScreen = () => {
                 >
                   {y}
                 </Text>
-                {isSelected && <Feather name="check" size={16} color="#3B82F6" />}
+                {isSelected && (
+                  <Feather name="check" size={16} color="#3B82F6" />
+                )}
               </Pressable>
             );
           })}

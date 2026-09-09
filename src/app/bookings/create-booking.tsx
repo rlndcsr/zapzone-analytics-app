@@ -73,6 +73,10 @@ import {
   type AuthorizeNetPublicKey,
 } from "../../services/paymentsService";
 import {
+  credentialsMatchChargeLocation,
+  STALE_GATEWAY_LOCATION_MESSAGE,
+} from "../../lib/payments/acceptJsLocation";
+import {
   buildAppliedDiscounts,
   buildAppliedFees,
   fetchFeeBreakdown,
@@ -646,6 +650,12 @@ const CreateBookingScreen = () => {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [authorizeCredentials, setAuthorizeCredentials] =
     useState<AuthorizeNetPublicKey | null>(null);
+  /** The location `authorizeCredentials` was actually fetched for — Accept.js
+   *  binds a token to the api_login_id that minted it, so this must match the
+   *  location about to be charged before we ever tokenize (web parity: "Bind
+   *  Accept.js credentials to the location being charged"). */
+  const [authorizeCredentialsLocationId, setAuthorizeCredentialsLocationId] =
+    useState<number | null>(null);
   /** This location has no active merchant account (web's "Authorize.Net Not
    *  Configured" modal). */
   const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
@@ -909,17 +919,25 @@ const CreateBookingScreen = () => {
   // card method is active, exactly like the web `initializeAuthorizeNet`.
   useEffect(() => {
     if (paymentMethod !== "authorize.net" || effectiveLocationId == null) return;
+    // Clear immediately on location change — a token minted for the OLD
+    // location must never sit around usable while the new location's fetch
+    // is still in flight (web parity: credentials are bound to the location
+    // being charged).
+    setAuthorizeCredentials(null);
+    setAuthorizeCredentialsLocationId(null);
     const token = getToken();
     if (!token) return;
     const controller = new AbortController();
     fetchAuthorizeNetPublicKey(token, effectiveLocationId, controller.signal)
       .then((creds) => {
         setAuthorizeCredentials(creds.apiLoginId ? creds : null);
+        setAuthorizeCredentialsLocationId(creds.apiLoginId ? effectiveLocationId : null);
         setAuthorizeUnavailable(!creds.apiLoginId);
       })
       .catch(() => {
         if (controller.signal.aborted) return;
         setAuthorizeCredentials(null);
+        setAuthorizeCredentialsLocationId(null);
         setAuthorizeUnavailable(true);
       });
     return () => controller.abort();
@@ -1059,6 +1077,8 @@ const CreateBookingScreen = () => {
       return "Test card numbers are not allowed. Please use a real card.";
     if (!authorizeCredentials?.apiLoginId)
       return "Payment system not initialized. Please reopen this screen and try again.";
+    if (!credentialsMatchChargeLocation(authorizeCredentialsLocationId, effectiveLocationId))
+      return STALE_GATEWAY_LOCATION_MESSAGE;
     return null;
   };
 
