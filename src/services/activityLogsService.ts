@@ -62,6 +62,8 @@ export type ActivityLogEntry = {
   action: string;
   category: string;
   description: string;
+  /** Why the employee made this change, when the backend required one. */
+  reason: string | null;
   entityType: string | null;
   entityId: number | null;
   ipAddress: string | null;
@@ -86,6 +88,10 @@ type RawLog = {
   action?: string | null;
   category?: string | null;
   description?: string | null;
+  reason?: string | null;
+  /** Actor name/role as they were when the row was written (see actorFrom). */
+  actor_name?: string | null;
+  actor_role?: string | null;
   entity_type?: string | null;
   entity_id?: number | null;
   ip_address?: string | null;
@@ -112,13 +118,24 @@ type LogsListResponse = {
 
 /* ---------------------------------------------------------------- mappers -- */
 
-function actorFrom(raw: RawUser | null | undefined): ActivityActor {
-  const name = `${raw?.first_name ?? ""} ${raw?.last_name ?? ""}`.trim();
+/**
+ * The employee behind a log row.
+ *
+ * `user_id` is ON DELETE SET NULL, so `actor_name` — the snapshot the backend
+ * takes at write time — is the only thing that keeps a since-deleted employee
+ * attributable, and the name prefers it (web parity). The role prefers the live
+ * user and falls back to the snapshot for the same reason.
+ */
+function actorFrom(log: RawLog): ActivityActor {
+  const raw = log.user;
+  const liveName = `${raw?.first_name ?? ""} ${raw?.last_name ?? ""}`.trim();
+  const snapshot = log.actor_name?.trim() || "";
+  const role = raw?.role ?? log.actor_role ?? null;
   return {
     id: raw?.id ?? null,
-    name: name || "System",
-    role: raw?.role ?? null,
-    roleLabel: raw?.role ? roleLabel(raw.role) : "System",
+    name: snapshot || liveName || raw?.email?.trim() || "System",
+    role,
+    roleLabel: role ? roleLabel(role) : "System",
     email: raw?.email ?? null,
   };
 }
@@ -129,13 +146,14 @@ function mapLog(raw: RawLog): ActivityLogEntry {
     action: raw.action?.trim() || "Activity",
     category: raw.category ?? "other",
     description: raw.description?.trim() || "",
+    reason: raw.reason?.trim() || null,
     entityType: raw.entity_type ?? null,
     entityId: raw.entity_id ?? null,
     ipAddress: raw.ip_address ?? null,
     userAgent: raw.user_agent ?? null,
     metadata: raw.metadata ?? null,
     createdAt: raw.created_at ?? null,
-    actor: actorFrom(raw.user),
+    actor: actorFrom(raw),
     locationId: raw.location?.id ?? null,
     locationName: raw.location?.name?.trim() || null,
   };

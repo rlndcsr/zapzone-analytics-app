@@ -390,6 +390,44 @@ export async function fetchDashboardBookings({
   return items.map((raw) => mapBooking(raw, toDateKey(raw.booking_date) ?? ""));
 }
 
+/**
+ * GET /api/bookings?search=… — the calendar toolbar's "find any booking"
+ * typeahead.
+ *
+ * Searches every date rather than the visible window, so the toolbar can jump
+ * to a booking the current month/week/day does not contain. Mirrors the web
+ * admin's CustomerSearch: newest booking date first, one short page.
+ */
+export async function searchBookings({
+  token,
+  term,
+  locationId,
+  limit = 20,
+  signal,
+}: {
+  token: string;
+  term: string;
+  locationId?: number | null;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<CalendarBooking[]> {
+  const params = new URLSearchParams({
+    search: term,
+    per_page: String(limit),
+    sort_by: "booking_date",
+    sort_order: "desc",
+  });
+  if (locationId != null) params.append("location_id", String(locationId));
+
+  const res = await apiRequest<BookingsListResponse>(
+    `/api/bookings?${params.toString()}`,
+    { token, signal },
+  );
+  return (res?.data?.bookings ?? []).map((raw) =>
+    mapBooking(raw, toDateKey(raw.booking_date) ?? ""),
+  );
+}
+
 function mapAddOns(raw: RawBookingDetail): BookingAddOn[] {
   const list = raw.add_ons ?? raw.addOns ?? [];
   return list.map((a) => ({
@@ -507,6 +545,97 @@ export async function fetchBookingDetail(
     createdAt: b.created_at ?? null,
   };
 }
+
+/** One field's before/after pair inside a change-log entry. `redacted` marks a
+ *  field whose text the backend deliberately keeps out of the permanent log
+ *  (internal notes), leaving only the fact that it changed. */
+export type BookingChangeValue = {
+  from?: unknown;
+  to?: unknown;
+  redacted?: boolean;
+};
+
+/** One entry of a booking's immutable change history (backend activity_logs). */
+export type BookingChangeLogEntry = {
+  id: number;
+  action: string;
+  category: string | null;
+  description: string | null;
+  reason: string | null;
+  employeeName: string;
+  employeeRole: string | null;
+  /** ISO timestamp, or null when the backend has none. */
+  changedAt: string | null;
+  changes: Record<string, BookingChangeValue> | null;
+  changedFields: string[] | null;
+  ipAddress: string | null;
+};
+
+type BookingChangeLogsResponse = {
+  data?: {
+    logs?: {
+      id?: number | string;
+      action?: string | null;
+      category?: string | null;
+      description?: string | null;
+      reason?: string | null;
+      employee_name?: string | null;
+      employee_role?: string | null;
+      changed_at?: string | null;
+      changes?: unknown;
+      changed_fields?: unknown;
+      ip_address?: string | null;
+    }[];
+  } | null;
+};
+
+/** A plain `{ field: { from, to } }` map, or null for anything else the log
+ *  metadata might hold (a list, a string, a missing key). */
+function toChangeMap(value: unknown): Record<string, BookingChangeValue> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, BookingChangeValue> = {};
+  for (const [field, change] of Object.entries(value as Record<string, unknown>)) {
+    out[field] =
+      change && typeof change === "object" && !Array.isArray(change)
+        ? (change as BookingChangeValue)
+        : { from: undefined, to: change };
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * GET /api/bookings/{id}/change-logs — the booking's permanent change history.
+ *
+ * Staff-only on the backend (403 for a customer token, 404 when the booking is
+ * gone), so callers surface the failure rather than treating it as "no changes".
+ */
+export async function fetchBookingChangeLogs(
+  token: string,
+  id: number,
+  { perPage = 50, signal }: { perPage?: number; signal?: AbortSignal } = {},
+): Promise<BookingChangeLogEntry[]> {
+  const res = await apiRequest<BookingChangeLogsResponse>(
+    `/api/bookings/${id}/change-logs?per_page=${perPage}`,
+    { token, signal },
+  );
+
+  return (res?.data?.logs ?? []).map((log, index) => ({
+    id: Number(log.id ?? index),
+    action: log.action?.trim() || "Updated",
+    category: log.category ?? null,
+    description: log.description ?? null,
+    reason: log.reason?.trim() || null,
+    employeeName: log.employee_name?.trim() || "System",
+    employeeRole: log.employee_role ?? null,
+    changedAt: log.changed_at ?? null,
+    changes: toChangeMap(log.changes),
+    changedFields: Array.isArray(log.changed_fields)
+      ? log.changed_fields.map((f) => String(f))
+      : null,
+    ipAddress: log.ip_address ?? null,
+  }));
+}
+
 
 /** PATCH /api/bookings/{id}/status — change the booking status. */
 export async function updateBookingStatus(

@@ -24,6 +24,7 @@ import { bookingDurationMinutes, buildCalendarEventDraft } from "../../lib/calen
 import { addEventToCalendar } from "../../lib/nativeCalendar";
 import { getToken } from "../../lib/session";
 import { deleteBooking, type BookingDetail } from "../../services/bookingsService";
+import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingQRModal } from "./BookingQRModal";
 import { BottomSheet } from "./BottomSheet";
 
@@ -536,6 +537,10 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
               {detail.internalNotes ?? "No internal notes."}
             </Text>
           </View>
+
+          {/* Change history — the backend's permanent booking change log,
+              same block the web ViewBooking shows above "Created". */}
+          <BookingChangeHistory bookingId={detail.id} />
 
           {/* Created */}
           {!!detail.createdAt && (

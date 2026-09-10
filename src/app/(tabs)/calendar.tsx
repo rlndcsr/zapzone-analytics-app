@@ -11,6 +11,7 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { CalendarCustomerSearch } from "../../components/ui/CalendarCustomerSearch";
 import { CalendarCategoryTabs } from "../../components/ui/CalendarCategoryTabs";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import { ScreenTitleCard } from "../../components/ui/ScreenTitleCard";
@@ -740,13 +741,33 @@ const Calendar = () => {
   const categoryFilter = useCategoryFilter(categories);
   const { shows: showsCategory } = categoryFilter;
 
+  /** True when the customer search box is empty or the row matches it. */
+  const matchesSearch = useCallback(
+    (name: string, phone: string | null) => {
+      const term = search.trim().toLowerCase();
+      if (!term) return true;
+      return `${name} ${phone ?? ""}`.toLowerCase().includes(term);
+    },
+    [search],
+  );
+
   const visibleBookings = useMemo(
-    () => bookings.filter((b) => showsCategory(categoryKeyOf(b.packageCategory))),
-    [bookings, showsCategory],
+    () =>
+      bookings.filter(
+        (b) =>
+          showsCategory(categoryKeyOf(b.packageCategory)) &&
+          matchesSearch(b.customerName, b.customerPhone),
+      ),
+    [bookings, showsCategory, matchesSearch],
   );
   const visiblePurchases = useMemo(
-    () => purchasesInWindow.filter((p) => showsCategory(categoryKeyOf(p.category))),
-    [purchasesInWindow, showsCategory],
+    () =>
+      purchasesInWindow.filter(
+        (p) =>
+          showsCategory(categoryKeyOf(p.category)) &&
+          matchesSearch(p.customerName, p.phone),
+      ),
+    [purchasesInWindow, showsCategory, matchesSearch],
   );
 
   // Group the window's bookings + attraction purchases by day.
@@ -825,28 +846,13 @@ const Calendar = () => {
     [spaceById, locationNameById],
   );
 
-  const matchesSearch = useCallback(
-    (name: string, phone: string | null) => {
-      const term = search.trim().toLowerCase();
-      if (!term) return true;
-      return `${name} ${phone ?? ""}`.toLowerCase().includes(term);
-    },
-    [search],
-  );
-
   const dayBookings = useMemo(
-    () =>
-      (byDate[startDate]?.bookings ?? []).filter((b) =>
-        matchesSearch(b.customerName, b.customerPhone),
-      ),
-    [byDate, startDate, matchesSearch],
+    () => byDate[startDate]?.bookings ?? [],
+    [byDate, startDate],
   );
   const dayAttractions = useMemo(
-    () =>
-      (byDate[startDate]?.attractions ?? []).filter((p) =>
-        matchesSearch(p.customerName, p.phone),
-      ),
-    [byDate, startDate, matchesSearch],
+    () => byDate[startDate]?.attractions ?? [],
+    [byDate, startDate],
   );
 
   const dayColumns = useMemo(
@@ -892,7 +898,6 @@ const Calendar = () => {
       const group = byDate[key];
       if (!group) continue;
       for (const booking of group.bookings) {
-        if (!matchesSearch(booking.customerName, booking.customerPhone)) continue;
         out.push({
           kind: "booking",
           key: `b-${booking.id}`,
@@ -902,7 +907,6 @@ const Calendar = () => {
         });
       }
       for (const purchase of group.attractions) {
-        if (!matchesSearch(purchase.customerName, purchase.phone)) continue;
         out.push({
           kind: "attraction",
           key: `a-${purchase.id}`,
@@ -913,7 +917,7 @@ const Calendar = () => {
       }
     }
     return out;
-  }, [weekDays, byDate, matchesSearch]);
+  }, [weekDays, byDate]);
 
   const weekRows = useMemo<WeekRow[]>(
     () =>
@@ -991,6 +995,18 @@ const Calendar = () => {
   }, [viewMode, anchor, weekDays]);
 
   const openBooking = (id: number) => setSelectedBookingId(id);
+
+  /** A typeahead hit can sit outside the visible window, so move the calendar
+   *  to its day (in Day view) before opening it — same as the web. */
+  const openBookingFromSearch = useCallback((booking: CalendarBooking) => {
+    const day = booking.date ? new Date(`${booking.date}T00:00:00`) : null;
+    if (day && !Number.isNaN(day.getTime())) {
+      setAnchor(day);
+      setViewMode("day");
+    }
+    setSelectedDayKey(null);
+    setSelectedBookingId(booking.id);
+  }, []);
   const openAttraction = (id: number) => {
     // Close the day sheet first so navigating away doesn't leave it stacked.
     setSelectedDayKey(null);
@@ -1121,61 +1137,64 @@ const Calendar = () => {
             </Pressable>
           </View>
 
-          {/* Search + space visibility — the day and week grids are filtered by
-              customer, and the day grid can drop the spaces nothing is booked
-              into (58 columns is a lot of scrolling for one booking). */}
-          {viewMode !== "month" && (
-            <View className="flex-row items-center gap-2 mb-4">
-              <View className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-xl px-3 h-11">
-                <Search size={16} color="#9ca3af" />
-                <TextInput
-                  value={search}
-                  onChangeText={setSearch}
-                  placeholder="Search customer name or phone"
-                  placeholderTextColor="#9ca3af"
-                  className="flex-1 text-sm text-gray-900 dark:text-white"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                {search.length > 0 && (
-                  <Pressable
-                    onPress={() => setSearch("")}
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear search"
-                  >
-                    <XCircle size={16} color="#9ca3af" />
-                  </Pressable>
-                )}
-              </View>
-              {viewMode === "day" && (
+          {/* Two searches, as on the web. The typeahead above finds any
+              booking on any date and jumps to it; the filter below narrows
+              whatever the active view already shows — in all three modes, the
+              month grid included (its per-day counts and its day sheet). The
+              day grid can additionally drop the spaces nothing is booked into
+              (58 columns is a lot of scrolling for one booking). */}
+          <CalendarCustomerSearch onSelect={openBookingFromSearch} />
+
+          <View className="flex-row items-center gap-2 mb-4">
+            <View className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-xl px-3 h-11">
+              <Search size={16} color="#9ca3af" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Filter this view by name or phone"
+                placeholderTextColor="#9ca3af"
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {search.length > 0 && (
                 <Pressable
-                  onPress={() => setHideEmptySpaces((v) => !v)}
-                  className={`flex-row items-center gap-1.5 px-3 h-11 rounded-xl border ${
-                    hideEmptySpaces
-                      ? "bg-[#0644C7]/10 dark:bg-[#0644C7]/20 border-[#0644C7]/40"
-                      : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                  }`}
+                  onPress={() => setSearch("")}
                   accessibilityRole="button"
-                  accessibilityState={{ checked: hideEmptySpaces }}
+                  accessibilityLabel="Clear search"
                 >
-                  {hideEmptySpaces ? (
-                    <EyeOff size={16} color="#0644C7" />
-                  ) : (
-                    <Eye size={16} color="#6b7280" />
-                  )}
-                  <Text
-                    className={`text-xs font-semibold ${
-                      hideEmptySpaces
-                        ? "text-[#0644C7]"
-                        : "text-gray-500 dark:text-gray-400"
-                    }`}
-                  >
-                    {hideEmptySpaces ? "Empty hidden" : "All spaces"}
-                  </Text>
+                  <XCircle size={16} color="#9ca3af" />
                 </Pressable>
               )}
             </View>
-          )}
+            {viewMode === "day" && (
+              <Pressable
+                onPress={() => setHideEmptySpaces((v) => !v)}
+                className={`flex-row items-center gap-1.5 px-3 h-11 rounded-xl border ${
+                  hideEmptySpaces
+                    ? "bg-[#0644C7]/10 dark:bg-[#0644C7]/20 border-[#0644C7]/40"
+                    : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+                }`}
+                accessibilityRole="button"
+                accessibilityState={{ checked: hideEmptySpaces }}
+              >
+                {hideEmptySpaces ? (
+                  <EyeOff size={16} color="#0644C7" />
+                ) : (
+                  <Eye size={16} color="#6b7280" />
+                )}
+                <Text
+                  className={`text-xs font-semibold ${
+                    hideEmptySpaces
+                      ? "text-[#0644C7]"
+                      : "text-gray-500 dark:text-gray-400"
+                  }`}
+                >
+                  {hideEmptySpaces ? "Empty hidden" : "All spaces"}
+                </Text>
+              </Pressable>
+            )}
+          </View>
 
           {/* Category tabs — All / <package & attraction categories>, filtering
               bookings and attraction tickets together (web parity). Rendered
@@ -1625,14 +1644,14 @@ const Calendar = () => {
               <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 mt-4 items-center border border-gray-100 dark:border-neutral-800">
                 <CalendarIcon size={32} color="#9ca3af" />
                 <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
-                  {categoryFilter.isAll
-                    ? "No activity"
-                    : "Nothing in the selected categories"}
+                  {emptyGridTitle}
                 </Text>
                 <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                  {categoryFilter.isAll
-                    ? `There are no bookings or attraction purchases in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`
-                    : `Nothing matches the selected categories in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`}
+                  {isSearching
+                    ? `Nothing in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()} matches that customer name or phone.`
+                    : categoryFilter.isAll
+                      ? `There are no bookings or attraction purchases in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`
+                      : `Nothing matches the selected categories in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`}
                 </Text>
               </View>
             )}

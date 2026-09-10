@@ -411,7 +411,7 @@ function formatMetadataForExport(
 
 const CSV_HEADERS = [
   "Timestamp", "Attendant", "User Type", "Action", "Resource Type",
-  "Resource Name", "Details", "Severity", "Guest Name", "Email", "Reference",
+  "Resource Name", "Details", "Reason", "Severity", "Guest Name", "Email", "Reference",
   "Amount", "Participants", "Date", "Time", "Status", "Package", "Location",
   "Room", "Payment Method", "Promo Code", "Discount", "Notes", "Changes",
   "Extra Metadata",
@@ -435,6 +435,7 @@ function buildActivityCsv(logs: ActivityLogEntry[]): string {
       resourceType,
       resourceName,
       log.description,
+      log.reason ?? "",
       determineSeverity(log.action),
       md.guest_name, md.email, md.reference, md.amount, md.participants,
       md.date, md.time, md.status, md.package, md.location, md.room,
@@ -553,6 +554,21 @@ const LogCard = ({
           <Text className="text-sm text-gray-700 dark:text-gray-200 mb-2 leading-relaxed">
             {activityDescription(log)}
           </Text>
+
+          {/* Row 2b: the reason the employee gave, when one was required */}
+          {!!log.reason && (
+            <View className="flex-row items-start gap-1.5 mb-2 rounded-md border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10 px-2.5 py-1.5">
+              <View className="pt-0.5">
+                <Feather name="message-square" size={12} color="#D97706" />
+              </View>
+              <Text className="flex-1 text-sm text-gray-800 dark:text-gray-100">
+                <Text className="font-semibold text-amber-800 dark:text-amber-500">
+                  Reason:{" "}
+                </Text>
+                {log.reason}
+              </Text>
+            </View>
+          )}
 
           {/* Row 3: chips — category · severity · ID · when · View Details */}
           <View className="flex-row items-center gap-2 flex-wrap">

@@ -23,6 +23,7 @@ import {
   fetchBookingDetail,
   type BookingDetail,
 } from "../../services/bookingsService";
+import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
 import { ProcessPaymentSheet } from "./ProcessPaymentSheet";
@@ -471,6 +472,11 @@ export function BookingDetailSheet({
                   {detail.internalNotes ?? "No internal notes."}
                 </Text>
               </Card>
+
+              {/* Change history — the backend's permanent booking change log
+                  (web parity). Skipped while the full view is stacked on top,
+                  so only the visible copy fetches it. */}
+              {!showFull && <BookingChangeHistory bookingId={detail.id} />}
 
               {/* ---- Footer actions ---- */}
               <View className="mt-6 mb-2">

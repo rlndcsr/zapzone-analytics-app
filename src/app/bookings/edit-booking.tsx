@@ -28,6 +28,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BookingChangeHistory } from "../../components/ui/BookingChangeHistory";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { mediaUrl } from "../../lib/api";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
@@ -1307,6 +1308,12 @@ const EditBookingScreen = () => {
                   </Text>
                 </Pressable>
               </View>
+            </View>
+
+            {/* Change history — the permanent change log, same panel the web
+                Edit Booking shows under its form. */}
+            <View className="border-t border-gray-200 dark:border-neutral-800 mt-6 pt-2">
+              <BookingChangeHistory bookingId={bookingId} />
             </View>
           </ScrollView>
 
