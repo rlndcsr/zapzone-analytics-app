@@ -591,10 +591,14 @@ type BookingChangeLogsResponse = {
 
 /** A plain `{ field: { from, to } }` map, or null for anything else the log
  *  metadata might hold (a list, a string, a missing key). */
-function toChangeMap(value: unknown): Record<string, BookingChangeValue> | null {
+function toChangeMap(
+  value: unknown,
+): Record<string, BookingChangeValue> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const out: Record<string, BookingChangeValue> = {};
-  for (const [field, change] of Object.entries(value as Record<string, unknown>)) {
+  for (const [field, change] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
     out[field] =
       change && typeof change === "object" && !Array.isArray(change)
         ? (change as BookingChangeValue)
@@ -635,7 +639,6 @@ export async function fetchBookingChangeLogs(
     ipAddress: log.ip_address ?? null,
   }));
 }
-
 
 /** PATCH /api/bookings/{id}/status — change the booking status. */
 export async function updateBookingStatus(
@@ -938,7 +941,8 @@ export async function fetchRoomOptions(
         id: Number(r.id),
         name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
         bookingInterval:
-          r.booking_interval != null && Number.isFinite(Number(r.booking_interval))
+          r.booking_interval != null &&
+          Number.isFinite(Number(r.booking_interval))
             ? Number(r.booking_interval)
             : null,
       });
@@ -1289,7 +1293,11 @@ type RawScheduleBooking = {
   amount_paid?: number | string | null;
   payment_status?: string | null;
   guest_name?: string | null;
-  package?: { id?: number | null; name?: string | null; category?: string | null } | null;
+  package?: {
+    id?: number | null;
+    name?: string | null;
+    category?: string | null;
+  } | null;
   customer?: { first_name?: string | null; last_name?: string | null } | null;
 };
 
@@ -1376,7 +1384,11 @@ export async function fetchDaySchedule({
 }
 
 /** Statuses that occupy a space, so only these are counted per day. */
-const COUNTED_SCHEDULE_STATUSES = new Set(["confirmed", "checked-in", "pending"]);
+const COUNTED_SCHEDULE_STATUSES = new Set([
+  "confirmed",
+  "checked-in",
+  "pending",
+]);
 
 /**
  * GET /api/bookings?date_from=&date_to= — how many space-occupying bookings
@@ -1427,7 +1439,8 @@ export async function fetchBookingCountsByDate({
     for (const raw of res?.data?.bookings ?? []) {
       // booking_date comes back as a bare date, but tolerate a timestamp.
       const key = String(raw.booking_date ?? "").split("T")[0];
-      if (!key || !COUNTED_SCHEDULE_STATUSES.has(String(raw.status ?? ""))) continue;
+      if (!key || !COUNTED_SCHEDULE_STATUSES.has(String(raw.status ?? "")))
+        continue;
       counts[key] = (counts[key] ?? 0) + 1;
     }
     lastPage = res?.data?.pagination?.last_page ?? page;
@@ -1859,66 +1872,40 @@ export async function recordBookingPayment(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Create Booking (mirrors the web /bookings/create OnsiteBooking flow):
-// rich package catalog + POST /api/bookings.
-// ---------------------------------------------------------------------------
-
 export type PackageAddOn = {
   id: number;
   name: string;
   price: number;
-  /** Resolved thumbnail URL, or null when the add-on has no image. */
   image: string | null;
-  /**
-   * "per_person" multiplies by participants; otherwise a flat per-unit price.
-   * `add_ons` has no such column today, so this is per-unit in practice — it is
-   * mapped because the web reads the same field and the column may yet land.
-   */
   pricingType: string;
-  /** Quantity floor once selected; 0 when the add-on sets none. */
   minQuantity: number | null;
-  /** Quantity ceiling, or null to fall back to the shared default. */
   maxQuantity: number | null;
-  /** `is_force_add_on` — only binding for packages in {@link priceEachPackages}. */
   isForced: boolean;
-  /** Per-package price / minimum-quantity overrides. */
   priceEachPackages:
-    | { package_id: number; price?: number; minimum_quantity?: number }[]
-    | null;
+    { package_id: number; price?: number; minimum_quantity?: number }[] | null;
 };
 export type PackageAttraction = {
   id: number;
   name: string;
   price: number;
-  /** "per_person" multiplies by participants; otherwise a flat per-unit price. */
   pricingType: string;
-  /** Resolved thumbnail URL, or null when the attraction has no image. */
   image: string | null;
-  /** Quantity floor once selected; 0 when the attraction sets none. */
   minQuantity: number | null;
-  /** Quantity ceiling, or null to fall back to the shared default. */
   maxQuantity: number | null;
 };
 
-/** A package with everything the Create Booking form needs. */
 export type BookablePackage = {
   id: number;
   name: string;
   category: string;
   description: string;
-  /** Resolved hero image URL, or null when the package has none. */
   image: string | null;
   price: number;
   pricePerAdditional: number;
+  pricingType: "base" | "per_person";
   minParticipants: number;
   maxParticipants: number;
-  /**
-   * Seats sellable per slot, when the package sets an explicit limit. null means
-   * the cap comes from elsewhere (a per-person package is capped by its own party
-   * size; a room-based one by room availability) — the live per-slot count on the
-   * availability endpoint is what the UI actually shows.
-   */
+
   maxTicketsPerSlot: number | null;
   /** What one seat is called ("player", "guest"…); blank falls back to "participant". */
   participantLabel: string;
@@ -1943,21 +1930,17 @@ export type PackageRoom = {
   name: string;
 };
 
-
 type RawPackage = {
   id: number;
   name?: string | null;
   description?: string | null;
   category?: string | null;
-  /**
-   * The API casts `image` to an array, so this arrives as a list of stored file
-   * paths (`images/packages/<id>.jpg`) — not the single string the field name
-   * suggests. Legacy rows can still hold a base64 data URI.
-   */
+
   image?: string | string[] | null;
   is_active?: boolean | number | null;
   price?: number | string | null;
   price_per_additional?: number | string | null;
+  pricing_type?: string | null;
   min_participants?: number | string | null;
   max_participants?: number | string | null;
   max_tickets_per_slot?: number | string | null;
@@ -1988,8 +1971,7 @@ type RawPackageAddOn = {
   max_quantity?: number | string | null;
   is_force_add_on?: boolean | number | null;
   price_each_packages?:
-    | { package_id: number; price?: number; minimum_quantity?: number }[]
-    | null;
+    { package_id: number; price?: number; minimum_quantity?: number }[] | null;
 };
 
 /** `attractions` rows likewise; `image` is an array cast server-side. */
@@ -2004,7 +1986,9 @@ type RawPackageAttraction = {
 };
 
 /** Numeric column that is absent or empty far more often than it is zero. */
-function optionalCount(value: number | string | null | undefined): number | null {
+function optionalCount(
+  value: number | string | null | undefined,
+): number | null {
   if (value == null || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -2028,6 +2012,7 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
     image: firstMediaUrl(raw.image),
     price: Number(raw.price ?? 0),
     pricePerAdditional: Number(raw.price_per_additional ?? 0),
+    pricingType: raw.pricing_type === "per_person" ? "per_person" : "base",
     minParticipants: Number(raw.min_participants ?? 1) || 1,
     maxParticipants: Number(raw.max_participants ?? 0) || 0,
     maxTicketsPerSlot:

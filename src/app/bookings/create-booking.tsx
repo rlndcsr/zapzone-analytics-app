@@ -47,6 +47,10 @@ import {
   participantMax,
   participantMin,
 } from "../../lib/participants";
+import {
+  packagePriceForParticipants,
+  participantLabelFor,
+} from "../../lib/packages/packagePricing";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
@@ -862,12 +866,16 @@ const CreateBookingScreen = () => {
   const [callToBookOpen, setCallToBookOpen] = useState(false);
 
   // ---- Pricing math (mirrors the web calculateTotal) -----------------------
+  const isPerPlayerPackage = pkg?.pricingType === "per_person";
   const subtotal = useMemo(() => {
     if (!pkg) return 0;
-    let total = 0;
-    const min = pkg.minParticipants || 1;
-    total +=
-      participants <= min ? pkg.price : pkg.price + (participants - min) * pkg.pricePerAdditional;
+    let total = packagePriceForParticipants({
+      pricingType: pkg.pricingType,
+      price: pkg.price,
+      minParticipants: pkg.minParticipants,
+      pricePerAdditional: pkg.pricePerAdditional,
+      participants,
+    });
     for (const a of pkg.attractions) {
       const qty = attractionQty[a.id] ?? 0;
       if (qty > 0) {
@@ -2490,19 +2498,26 @@ const CreateBookingScreen = () => {
                           Package: {pkg.name}
                         </Text>
                         <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                          Includes {pkg.minParticipants || 1}{" "}
-                          {(pkg.minParticipants || 1) > 1
-                            ? "participants"
-                            : "participant"}
+                          {isPerPlayerPackage
+                            ? `${participants} × ${money(pkg.price)} per ${participantLabelFor(pkg.participantLabel)}`
+                            : `Includes ${pkg.minParticipants || 1} ${
+                                (pkg.minParticipants || 1) > 1
+                                  ? "participants"
+                                  : "participant"
+                              }`}
                         </Text>
                       </View>
                       <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {money(pkg.price)}
+                        {money(
+                          isPerPlayerPackage
+                            ? pkg.price * participants
+                            : pkg.price,
+                        )}
                       </Text>
                     </View>
                   </View>
 
-                  {extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
+                  {!isPerPlayerPackage && extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
                     <View className="mt-2 flex-row items-start justify-between">
                       <View className="flex-1 mr-2">
                         <Text className="text-sm text-gray-700 dark:text-gray-200">
@@ -2841,19 +2856,26 @@ const CreateBookingScreen = () => {
                         <Text className="text-xs text-gray-500 dark:text-gray-400">
                           {pkg.name}
                         </Text>
-                        {pkg.minParticipants > 0 && (
+                        {isPerPlayerPackage ? (
                           <Text className="text-xs text-gray-500 dark:text-gray-400">
-                            Covers up to {pkg.minParticipants} participants
+                            {participants} × {money(pkg.price)} per{" "}
+                            {participantLabelFor(pkg.participantLabel)}
                           </Text>
+                        ) : (
+                          pkg.minParticipants > 0 && (
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              Covers up to {pkg.minParticipants} participants
+                            </Text>
+                          )
                         )}
                       </View>
                       <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                        {money(pkg.price)}
+                        {money(isPerPlayerPackage ? pkg.price * participants : pkg.price)}
                       </Text>
                     </View>
                   </View>
 
-                  {extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
+                  {!isPerPlayerPackage && extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
                     <View className="mt-2 flex-row items-start justify-between">
                       <View className="flex-1 mr-2">
                         <Text className="text-sm text-gray-700 dark:text-gray-200">

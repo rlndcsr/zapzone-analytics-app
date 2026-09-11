@@ -44,6 +44,7 @@ import {
   clampParticipants,
   participantLimitsLabel,
 } from "../../lib/participants";
+import { packagePriceForParticipants } from "../../lib/packages/packagePricing";
 import { getToken } from "../../lib/session";
 import {
   fetchAvailableTimeSlots,
@@ -759,12 +760,13 @@ const EditBookingScreen = () => {
       // web does (fees are not editable here, so feesChanged is always false).
       let updatedTotal: number | undefined;
       if (isPackageChanged || isParticipantsChanged || addOnsChanged) {
-        const basePackagePrice = packageDetail ? Number(packageDetail.price) : 0;
-        const minParticipants = packageDetail?.minParticipants || 1;
-        const pricePerAdditional = Number(packageDetail?.pricePerAdditional || 0);
-        const additionalCount = Math.max(0, participantCount - minParticipants);
-        const packagePrice =
-          basePackagePrice + additionalCount * pricePerAdditional;
+        const packagePrice = packagePriceForParticipants({
+          pricingType: packageDetail?.pricingType,
+          price: packageDetail?.price ?? 0,
+          minParticipants: packageDetail?.minParticipants,
+          pricePerAdditional: packageDetail?.pricePerAdditional,
+          participants: participantCount,
+        });
 
         const attractionsTotal = isPackageChanged
           ? 0

@@ -644,6 +644,14 @@ export function PackageActionsSheet({
             </View>
           )}
 
+          {dupLocationId != null && Number(dupLocationId) !== Number(pkg.locationId) && (
+            <Text className="text-xs text-amber-700 dark:text-amber-500 mt-3">
+              Spaces, add-ons and attractions belong to a location, so the copy
+              starts with none of them. Everything else — pricing, schedules,
+              images — is copied. Pick that location&apos;s own spaces on the copy.
+            </Text>
+          )}
+
           <Text className="text-xs text-gray-400 dark:text-gray-500 mt-3">
             The copy is created as inactive, named “{pkg.name} (Copy)”.
           </Text>

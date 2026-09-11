@@ -41,6 +41,10 @@ import {
   participantMax,
   participantMin,
 } from "../../lib/participants";
+import {
+  packagePriceForParticipants,
+  participantLabelFor,
+} from "../../lib/packages/packagePricing";
 import { sortRoomsNumerically } from "../../lib/rooms";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -591,13 +595,16 @@ const ManualBookingScreen = () => {
   }, [pkg, scheduledDate, bookingMode]);
 
   // ---- Pricing math (mirrors the web / mobile create-booking) -------------
+  const isPerPlayerPackage = pkg?.pricingType === "per_person";
   const subtotal = useMemo(() => {
     if (!pkg) return 0;
-    const min = pkg.minParticipants || 1;
-    let total =
-      participants <= min
-        ? pkg.price
-        : pkg.price + (participants - min) * pkg.pricePerAdditional;
+    let total = packagePriceForParticipants({
+      pricingType: pkg.pricingType,
+      price: pkg.price,
+      minParticipants: pkg.minParticipants,
+      pricePerAdditional: pkg.pricePerAdditional,
+      participants,
+    });
     for (const a of pkg.attractions) {
       const qty = attractionQty[a.id] ?? 0;
       if (qty > 0)
@@ -1783,13 +1790,16 @@ const ManualBookingScreen = () => {
                 <View className="gap-1.5">
                   <View className="flex-row items-center justify-between">
                     <Text className="text-xs text-gray-600 dark:text-gray-300">
-                      Package (base price, up to {pkg.minParticipants || 1})
+                      {isPerPlayerPackage
+                        ? `Package (${participants} × ${money(pkg.price)} per ${participantLabelFor(pkg.participantLabel)})`
+                        : `Package (base price, up to ${pkg.minParticipants || 1})`}
                     </Text>
                     <Text className="text-xs font-medium text-gray-900 dark:text-white">
-                      {money(pkg.price)}
+                      {money(isPerPlayerPackage ? pkg.price * participants : pkg.price)}
                     </Text>
                   </View>
-                  {participants > (pkg.minParticipants || 1) &&
+                  {!isPerPlayerPackage &&
+                    participants > (pkg.minParticipants || 1) &&
                     pkg.pricePerAdditional > 0 && (
                       <View className="flex-row items-center justify-between">
                         <Text className="text-xs text-amber-700">

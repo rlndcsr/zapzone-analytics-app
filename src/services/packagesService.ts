@@ -477,16 +477,21 @@ export async function updatePackage(
 
 /** No duplicate endpoint exists — mirror the web: fetch the source, then POST a
  *  copy (name + " (Copy)", inactive, relations as id arrays). Non-admins are
- *  forced to their own location by the backend regardless of `locationId`. */
+ *  forced to their own location by the backend regardless of `locationId`.
+ *  Spaces, add-ons and attractions belong to a location, so they're only
+ *  carried over when the copy lands in the SAME location as the source —
+ *  a cross-location copy would otherwise reference another venue's records. */
 export async function duplicatePackage(
   token: string,
   id: number,
   locationId?: number | null,
 ): Promise<void> {
   const d = await fetchPackageDetail(token, id);
+  const targetLocationId = locationId ?? d.locationId;
+  const sameLocation = Number(targetLocationId) === Number(d.locationId);
   const body: Record<string, unknown> = {
     name: `${d.name} (Copy)`,
-    location_id: locationId ?? d.locationId,
+    location_id: targetLocationId,
     description: d.description,
     category: d.category,
     package_type: d.packageType || "regular",
@@ -499,6 +504,7 @@ export async function duplicatePackage(
     pricing_type: d.pricingType,
     participant_label: d.participantLabel || null,
     display_label: d.displayLabel || null,
+    display_order: d.displayOrder,
     duration: d.duration,
     duration_unit: d.durationUnit,
     price_per_additional_30min: d.pricePerAdditional30min,
@@ -512,9 +518,9 @@ export async function duplicatePackage(
     invitation_download_link: d.invitationDownloadLink || null,
     booking_window_days: d.bookingWindowDays,
     min_booking_notice_hours: d.minBookingNoticeHours,
-    attraction_ids: d.attractions.map((a) => a.id),
-    addon_ids: d.addOns.map((a) => a.id),
-    room_ids: d.rooms.map((r) => r.id),
+    attraction_ids: sameLocation ? d.attractions.map((a) => a.id) : [],
+    addon_ids: sameLocation ? d.addOns.map((a) => a.id) : [],
+    room_ids: sameLocation ? d.rooms.map((r) => r.id) : [],
   };
   await apiRequest("/api/packages", { method: "POST", token, body });
 }
