@@ -42,14 +42,28 @@ import { useMembershipPlans } from "../../lib/hooks/useMembershipPlans";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
 import {
+  AcceptTokenizationError,
+  tokenizeCardWithAccept,
+} from "../../lib/payments/acceptTokenize";
+import {
+  formatCardNumber,
+  getCardType,
+  getPaymentErrorMessage,
+  isTestCardNumber,
+  validateCardNumber,
+} from "../../lib/payments/cardUtils";
+import { isMembershipChargeReady } from "../../lib/payments/membershipChargeGate";
+import {
   cancelMembership,
   createMembership,
   deleteMembership,
+  fetchMembershipGatewayKey,
   freezeMembership,
   unfreezeMembership,
   type MembershipStatus,
   type PaymentType,
 } from "../../services/membershipsService";
+import type { AuthorizeNetPublicKey } from "../../services/paymentsService";
 import {
   searchCustomers,
   type CustomerHit,
@@ -779,6 +793,17 @@ function AddMemberSheet({
   const [paymentType, setPaymentType] = useState<PaymentType>("charge");
   const [submitting, setSubmitting] = useState(false);
 
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardMonth, setCardMonth] = useState("");
+  const [cardYear, setCardYear] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
+  const [gateway, setGateway] = useState<AuthorizeNetPublicKey | null>(null);
+  // The (plan, location) signature the loaded `gateway` was resolved for —
+  // any change to either invalidates it, so a merchant can never be reused
+  // across a different plan/location than it was resolved for.
+  const [gatewayFor, setGatewayFor] = useState("");
+  const [gatewayError, setGatewayError] = useState("");
+
   const reset = useCallback(() => {
     setQuery("");
     setResults([]);
@@ -788,6 +813,13 @@ function AddMemberSheet({
     setLocationId(null);
     setPaymentType("charge");
     setSubmitting(false);
+    setCardNumber("");
+    setCardMonth("");
+    setCardYear("");
+    setCardCvv("");
+    setGateway(null);
+    setGatewayFor("");
+    setGatewayError("");
   }, []);
 
   // Reset the form whenever the sheet closes so it opens fresh next time.
@@ -823,17 +855,68 @@ function AddMemberSheet({
 
   const selectedPlan = plans.find((p) => p.id === planId) ?? null;
   const isFreePlan = selectedPlan ? selectedPlan.price <= 0 : false;
-  // The app can't capture a card (no Accept.js), so charging a paid plan must
-  // happen on the terminal — allow only comp/external here for paid plans.
-  const chargeBlocked =
-    !!selectedPlan && !isFreePlan && paymentType === "charge";
+  const chargeRequested = paymentType === "charge" && !isFreePlan;
+  // What the server resolves the merchant from — the plan (its own billing
+  // account, else its home location's) — so a plan OR location change must
+  // both invalidate an already-loaded gateway.
+  const gatewayRequest =
+    chargeRequested && planId != null
+      ? JSON.stringify({ plan_id: planId, home_location_id: locationId ?? undefined })
+      : "";
+
+  // Ask the server which merchant this plan/location combination charges
+  // through — the exact resolution POST /memberships uses to charge the card
+  // (its own billing account when the plan has one, else the home location's).
+  // Never guessed client-side. Refetched whenever plan or location changes,
+  // and cleared immediately so a stale merchant's credentials can't be reused.
+  useEffect(() => {
+    setGateway(null);
+    setGatewayFor("");
+    setGatewayError("");
+    if (!gatewayRequest || planId == null) return;
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchMembershipGatewayKey(
+      token,
+      { planId, homeLocationId: locationId ?? undefined },
+      controller.signal,
+    )
+      .then((creds) => {
+        if (controller.signal.aborted) return;
+        if (creds.apiLoginId) {
+          setGateway(creds);
+          setGatewayFor(gatewayRequest);
+        } else {
+          setGatewayError("Card payment is not set up for this membership yet.");
+        }
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        const message = err instanceof Error ? err.message : "";
+        setGatewayError(message || "Could not load the payment gateway for this plan.");
+      });
+    return () => controller.abort();
+  }, [gatewayRequest, planId, locationId]);
+
+  const cardValid = validateCardNumber(cardNumber);
+  const chargeReady = isMembershipChargeReady({
+    chargeRequested,
+    hasGateway: !!gateway,
+    gatewayRequestSignature: gatewayFor,
+    currentRequestSignature: gatewayRequest,
+    cardNumberValid: cardValid,
+    cardMonth,
+    cardYear,
+    cardCvv,
+  });
+  const chargeBlocked = chargeRequested && !chargeReady;
   const canSubmit =
     !!customer && planId != null && !chargeBlocked && !submitting;
 
   const paymentNote = (() => {
     if (isFreePlan) return "This plan is free — no card needed.";
-    if (chargeBlocked)
-      return "Card entry happens on the payment terminal. Choose Cash / external or Comp to record this membership here.";
+    if (paymentType === "charge" && gatewayError) return gatewayError;
     if (paymentType === "external")
       return "Records a cash/external payment — no card is charged.";
     if (paymentType === "comp")
@@ -843,14 +926,44 @@ function AddMemberSheet({
 
   const handleCreate = async () => {
     const token = getToken();
-    if (!token || !customer || planId == null) return;
+    if (!token || !customer || planId == null || submitting) return;
     setSubmitting(true);
     try {
+      let opaqueData: { dataDescriptor: string; dataValue: string } | undefined;
+      if (chargeRequested) {
+        if (!chargeReady || !gateway) {
+          Alert.alert("Payment not ready", gatewayError || "Enter the card details and try again.");
+          setSubmitting(false);
+          return;
+        }
+        if (isTestCardNumber(cardNumber)) {
+          Alert.alert("Invalid card", "Test card numbers are not allowed.");
+          setSubmitting(false);
+          return;
+        }
+        try {
+          opaqueData = await tokenizeCardWithAccept(
+            { cardNumber, month: cardMonth, year: cardYear, cardCode: cardCvv },
+            gateway,
+          );
+        } catch (err) {
+          const message =
+            err instanceof AcceptTokenizationError
+              ? err.message
+              : getPaymentErrorMessage(err);
+          Alert.alert("Card could not be processed", message);
+          setSubmitting(false);
+          return;
+        }
+      }
       await createMembership(token, {
         customerId: customer.id,
         membershipPlanId: planId,
         holderName: holderName.trim() || undefined,
         homeLocationId: locationId ?? undefined,
+        ...(chargeRequested && opaqueData && selectedPlan
+          ? { opaqueData, amount: selectedPlan.price }
+          : {}),
         paymentType,
       });
       onCreated();
@@ -1028,6 +1141,69 @@ function AddMemberSheet({
           >
             {paymentNote}
           </Text>
+        )}
+
+        {/* Card entry — only for a charge on a paid plan */}
+        {chargeRequested && (
+          <View className="mt-3">
+            <Text className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+              Card Number
+            </Text>
+            <View
+              className={`h-11 flex-row items-center rounded-lg border px-3 ${
+                cardNumber && cardValid
+                  ? "border-green-400 bg-green-50 dark:bg-green-900/20"
+                  : cardNumber
+                    ? "border-red-400"
+                    : "border-gray-300 dark:border-neutral-700"
+              }`}
+            >
+              <TextInput
+                value={cardNumber}
+                onChangeText={(v) => setCardNumber(formatCardNumber(v))}
+                placeholder="1234 5678 9012 3456"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="number-pad"
+                maxLength={19}
+                className="flex-1 py-0 text-sm text-gray-900 dark:text-white"
+              />
+              {!!cardNumber && cardValid && (
+                <Feather name="check-circle" size={15} color="#16A34A" />
+              )}
+            </View>
+            {!!cardNumber && (
+              <Text className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                {getCardType(cardNumber)}
+              </Text>
+            )}
+            <View className="mt-3 flex-row gap-2">
+              {(
+                [
+                  { label: "Month", value: cardMonth, set: setCardMonth, ph: "MM", max: 2 },
+                  { label: "Year", value: cardYear, set: setCardYear, ph: "YYYY", max: 4 },
+                  { label: "CVV", value: cardCvv, set: setCardCvv, ph: "123", max: 4 },
+                ] as const
+              ).map((f) => (
+                <View key={f.label} className="flex-1">
+                  <Text className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                    {f.label}
+                  </Text>
+                  <View className="h-11 justify-center rounded-lg border border-gray-300 px-3 dark:border-neutral-700">
+                    <TextInput
+                      value={f.value}
+                      onChangeText={(v) =>
+                        f.set(v.replace(/\D/g, "").substring(0, f.max))
+                      }
+                      placeholder={f.ph}
+                      placeholderTextColor="#9CA3AF"
+                      keyboardType="number-pad"
+                      className="py-0 text-sm text-gray-900 dark:text-white"
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
         )}
 
         {/* Submit */}

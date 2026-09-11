@@ -1,4 +1,5 @@
 import { apiRequest, apiUrl, mediaUrl } from "../lib/api";
+import type { AuthorizeNetPublicKey, PaymentOpaqueData } from "./paymentsService";
 
 /** Lifecycle status, mirrored from the backend `status` enum. */
 export type MembershipStatus =
@@ -225,12 +226,49 @@ export type CreateMembershipPayload = {
   holderName?: string;
   homeLocationId?: number;
   paymentType: PaymentType;
+  /** Required when `paymentType` is "charge" — the tokenized card and the
+   *  amount to charge it for, exactly like the web admin's create-member form. */
+  opaqueData?: PaymentOpaqueData;
+  amount?: number;
 };
 
 /**
- * POST /api/memberships — create a membership as staff. Card charges require an
- * Accept.js opaque token, which this app can't capture, so the caller restricts
- * `charge` to free plans; `comp` and `external` settle without a card.
+ * GET /api/memberships/gateway-key — the server-authoritative merchant for a
+ * plan (its own billing account, else its home location's), the exact same
+ * resolution `POST /memberships` uses to actually charge the card. Passing
+ * the same `planId`/`homeLocationId` here as to `createMembership` guarantees
+ * the credentials match the merchant that will be charged.
+ */
+export async function fetchMembershipGatewayKey(
+  token: string,
+  params: { planId: number; homeLocationId?: number },
+  signal?: AbortSignal,
+): Promise<AuthorizeNetPublicKey> {
+  const qs = new URLSearchParams({ plan_id: String(params.planId) });
+  if (params.homeLocationId != null) {
+    qs.append("home_location_id", String(params.homeLocationId));
+  }
+  const res = await apiRequest<{
+    api_login_id?: string;
+    client_key?: string;
+    environment?: string;
+  }>(`/api/memberships/gateway-key?${qs.toString()}`, { token, signal });
+  const environment = res?.environment === "production" ? "production" : "sandbox";
+  return {
+    apiLoginId: res?.api_login_id ?? "",
+    clientKey: res?.client_key ?? "",
+    environment,
+    acceptJsUrl:
+      environment === "production"
+        ? "https://js.authorize.net/v1/Accept.js"
+        : "https://jstest.authorize.net/v1/Accept.js",
+  };
+}
+
+/**
+ * POST /api/memberships — create a membership as staff. A `charge` payment
+ * tokenizes the card via Accept (see `tokenizeCardWithAccept`) before this is
+ * called; `comp` and `external` settle without a card.
  */
 export async function createMembership(
   token: string,
@@ -244,6 +282,14 @@ export async function createMembership(
   };
   if (payload.holderName) body.holder_name = payload.holderName;
   if (payload.homeLocationId != null) body.home_location_id = payload.homeLocationId;
+  if (payload.paymentType === "charge" && payload.opaqueData) {
+    body.opaque_data = payload.opaqueData;
+    body.amount = payload.amount;
+    // Web admin parity: sent unconditionally on the charge path, no separate
+    // consent UI (staff attest for the in-person charge, same as web admin).
+    body.terms_accepted = true;
+    body.recurring_billing_authorized = true;
+  }
   await apiRequest("/api/memberships", { method: "POST", token, body });
 }
 
