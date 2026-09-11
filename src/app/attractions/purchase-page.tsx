@@ -86,6 +86,11 @@ import {
 } from "../../lib/payments/cardUtils";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
+  buildAppliedDiscounts,
+  buildAppliedFees,
+  resolveFreshPricing,
+} from "../../services/pricingService";
+import {
   attractionPurchaseQrValue,
   useQrDataUri,
 } from "../../lib/payments/useQrDataUri";
@@ -534,11 +539,11 @@ const PurchasePageScreen = () => {
   // (Venue Fee) applied to the base price, special pricing subtracted.
   const {
     subtotal,
+    baseTotal,
     feeBreakdown,
+    specialPricing,
     specialPricingDiscount,
     total,
-    appliedFees,
-    appliedDiscounts,
   } = useOnsitePricing({
     entity: detail,
     entityType: "attraction",
@@ -677,6 +682,27 @@ const PurchasePageScreen = () => {
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
 
+    // Resolve pricing fresh, right now — `total` can still reflect the
+    // debounced fee/special-pricing effect from before the latest quantity /
+    // add-on change. `baseTotal` is synchronous, so it's already current.
+    const freshPricing = await resolveFreshPricing({
+      token,
+      entityType: "attraction",
+      entityId: detail.id,
+      basePrice: baseTotal,
+      locationId,
+      date: scheduledDate,
+    });
+    const freshTotal = freshPricing?.total ?? total;
+    const freshAppliedFees = buildAppliedFees(
+      freshPricing?.feeBreakdown ?? feeBreakdown,
+    );
+    const freshSpecialPricingDiscount =
+      freshPricing?.specialPricingDiscount ?? specialPricingDiscount;
+    const freshAppliedDiscounts = buildAppliedDiscounts(
+      freshPricing?.specialPricing ?? specialPricing,
+    );
+
     const isPayLater = paymentMethod === "paylater";
     const input: CreateAttractionPurchaseInput = {
       attraction_id: detail.id,
@@ -694,9 +720,9 @@ const PurchasePageScreen = () => {
       guest_country: country,
       sms_consent: smsConsent,
       quantity,
-      amount: total,
-      total_amount: total,
-      amount_paid: isPayLater ? 0 : total,
+      amount: freshTotal,
+      total_amount: freshTotal,
+      amount_paid: isPayLater ? 0 : freshTotal,
       currency: "USD",
       method: isPayLater ? "paylater" : isCardPayment ? "authorize.net" : "cash",
       payment_method: isCardPayment ? "authorize.net" : paymentMethod,
@@ -708,11 +734,11 @@ const PurchasePageScreen = () => {
       notes: `Attraction Purchase: ${detail.name} (${quantity} ticket${quantity > 1 ? "s" : ""})`,
       send_email: paymentMethod === "in-store" ? sendEmail : false,
       additional_addons: additionalAddons.length > 0 ? additionalAddons : undefined,
-      applied_fees: appliedFees.length > 0 ? appliedFees : undefined,
+      applied_fees: freshAppliedFees.length > 0 ? freshAppliedFees : undefined,
       discount_amount:
-        specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
+        freshSpecialPricingDiscount > 0 ? freshSpecialPricingDiscount : undefined,
       applied_discounts:
-        appliedDiscounts.length > 0 ? appliedDiscounts : undefined,
+        freshAppliedDiscounts.length > 0 ? freshAppliedDiscounts : undefined,
     };
 
     submitLockRef.current = true;
@@ -740,7 +766,7 @@ const PurchasePageScreen = () => {
             authorizeCredentials!,
             {
               location_id: locationId,
-              amount: total,
+              amount: freshTotal,
               order_id: `A${detail.id}-${String(Date.now()).slice(-8)}`,
               description: `Attraction Purchase: ${detail.name}`,
               payable_id: purchaseId,

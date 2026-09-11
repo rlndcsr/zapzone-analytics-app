@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { combineFreshPricing } from "../lib/pricing/combineFreshPricing";
 
 /**
  * Fee-support + special-pricing lookups, mirroring the web's generic
@@ -207,6 +208,83 @@ export async function fetchSpecialPricing({
   if (!res?.data) return null;
   const breakdown = mapSpecialBreakdown(res.data);
   return breakdown.has_special_pricing ? breakdown : null;
+}
+
+// ---- Fresh submit-time pricing ----------------------------------------------
+
+type FreshPricingParams = {
+  token: string;
+  entityType: PricingEntityType;
+  entityId: number;
+  /** The base price computed from CURRENT inputs (quantity, add-ons, manual
+   *  discount, participants, etc.) — never a value read back from debounced
+   *  fee/special-pricing state. Used for the fee lookup, and for the
+   *  special-pricing lookup too unless `specialPricingBasePrice` is given. */
+  basePrice: number;
+  /** Only needed when a screen's special-pricing lookup is keyed off a
+   *  different base price than its fee lookup (e.g. a package's own price
+   *  rather than the full subtotal) — matches that screen's existing
+   *  (debounced) special-pricing effect so this stays a faithful fresh
+   *  re-fetch, not a behavior change. */
+  specialPricingBasePrice?: number;
+  locationId?: number;
+  date?: string;
+  time?: string;
+};
+
+export type FreshPricing = {
+  feeBreakdown: FeeBreakdown | null;
+  specialPricing: SpecialPricingBreakdown | null;
+  specialPricingDiscount: number;
+  /** Fees applied, special pricing subtracted — combined exactly like
+   *  `useOnsitePricing`'s `total`, just resolved on demand instead of from a
+   *  debounced effect. */
+  total: number;
+};
+
+/**
+ * Resolves fee + special-pricing fresh, right now, for the given base price —
+ * the submit-time counterpart to the debounced `useOnsitePricing` hook (and to
+ * each booking screen's own debounced fee/special-pricing effects). Screens
+ * call this immediately before charging/creating a purchase or booking so the
+ * amount reflects the latest inputs, not whatever the last debounce fired with.
+ *
+ * Returns `null` if either lookup fails — callers should fall back to their
+ * existing (debounced) total rather than block the transaction on a transient
+ * network error.
+ */
+export async function resolveFreshPricing({
+  token,
+  entityType,
+  entityId,
+  basePrice,
+  specialPricingBasePrice,
+  locationId,
+  date,
+  time,
+}: FreshPricingParams): Promise<FreshPricing | null> {
+  try {
+    const [feeBreakdown, specialPricing] = await Promise.all([
+      fetchFeeBreakdown({ token, entityType, entityId, basePrice, locationId }),
+      fetchSpecialPricing({
+        token,
+        entityType,
+        entityId,
+        basePrice: specialPricingBasePrice ?? basePrice,
+        date,
+        time,
+        locationId,
+      }),
+    ]);
+    const { specialPricingDiscount, total } = combineFreshPricing(
+      feeBreakdown,
+      specialPricing,
+      basePrice,
+    );
+    return { feeBreakdown, specialPricing, specialPricingDiscount, total };
+  } catch {
+    return null;
+  }
 }
 
 // ---- Payload builders (mirror web utils/fees.ts + utils/discounts.ts) -------

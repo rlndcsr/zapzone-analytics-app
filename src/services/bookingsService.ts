@@ -692,9 +692,21 @@ export async function updateBookingPaymentStatus(
 }
 
 /** DELETE /api/bookings/{id} — soft-delete (moves the booking to trash),
- *  mirroring the web admin's row "Delete" action (bookingService.deleteBooking). */
-export async function deleteBooking(token: string, id: number): Promise<void> {
-  await apiRequest(`/api/bookings/${id}`, { method: "DELETE", token });
+ *  mirroring the web admin's row "Delete" action (bookingService.deleteBooking).
+ *  A caller that already has a reason (e.g. an automatic rollback) can pass it
+ *  up front to skip the interactive change-reason prompt entirely. */
+export async function deleteBooking(
+  token: string,
+  id: number,
+  options?: { changeReason?: string },
+): Promise<void> {
+  await apiRequest(`/api/bookings/${id}`, {
+    method: "DELETE",
+    token,
+    body: options?.changeReason
+      ? { change_reason: options.changeReason }
+      : undefined,
+  });
 }
 
 /**

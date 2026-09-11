@@ -77,6 +77,7 @@ import {
   buildAppliedFees,
   fetchFeeBreakdown,
   fetchSpecialPricing,
+  resolveFreshPricing,
   type FeeBreakdown,
   type SpecialPricingBreakdown,
 } from "../../services/pricingService";
@@ -870,6 +871,40 @@ const ManualBookingScreen = () => {
           price_at_booking: a.price,
         }));
 
+      // Resolve pricing fresh, right now — `finalTotal`/`discount` can still
+      // reflect the 300ms-debounced fee/special-pricing effect from before the
+      // latest participants/add-on/attraction change. `subtotal` itself is
+      // synchronous, so it already reflects current inputs. An explicit staff
+      // override still wins outright, exactly as before.
+      const freshPricing = await resolveFreshPricing({
+        token,
+        entityType: "package",
+        entityId: pkg.id,
+        basePrice: subtotal,
+        locationId: effectiveLocationId,
+        date: scheduledDate,
+        time: scheduledTime || undefined,
+      });
+      const freshFeeBreakdown = freshPricing?.feeBreakdown ?? feeBreakdown;
+      const freshFeeTotal = freshFeeBreakdown ? freshFeeBreakdown.total : subtotal;
+      const freshSpecial = freshPricing?.specialPricing ?? special;
+      const freshDiscount = freshSpecial?.has_special_pricing
+        ? freshSpecial.total_discount
+        : 0;
+      const freshFinalTotal = totalAmountOverride
+        ? Math.max(0, Number(totalAmountOverride) || 0)
+        : freshFeeTotal;
+      const freshFinalAmountPaid =
+        paymentMethod === "paylater"
+          ? 0
+          : amountPaidOverride
+            ? Math.max(0, Number(amountPaidOverride) || 0)
+            : freshFinalTotal;
+      const freshPaymentStatus = derivePaymentStatus(
+        freshFinalAmountPaid,
+        freshFinalTotal,
+      );
+
       const { id, referenceNumber, customerId } = await createBooking(token, {
         guest_name: customerName.trim(),
         guest_email: email.trim() || undefined,
@@ -888,11 +923,11 @@ const ManualBookingScreen = () => {
         participants,
         duration: pkg.duration,
         duration_unit: pkg.durationUnit,
-        total_amount: finalTotal,
-        amount_paid: finalAmountPaid,
+        total_amount: freshFinalTotal,
+        amount_paid: freshFinalAmountPaid,
         payment_method: paymentMethod,
         status,
-        payment_status: paymentMethod === "paylater" ? "pending" : paymentStatus,
+        payment_status: paymentMethod === "paylater" ? "pending" : freshPaymentStatus,
         is_manual_entry: true,
         skip_date_validation: bookingMode === "flexible",
         notes: notes.trim() || undefined,
@@ -908,22 +943,22 @@ const ManualBookingScreen = () => {
         guest_of_honor_gender:
           pkg.hasGuestOfHonor && gohGender ? gohGender : undefined,
         sent_email_to_staff: sendEmailToStaff,
-        applied_fees: buildAppliedFees(feeBreakdown).length
-          ? buildAppliedFees(feeBreakdown)
+        applied_fees: buildAppliedFees(freshFeeBreakdown).length
+          ? buildAppliedFees(freshFeeBreakdown)
           : null,
-        discount_amount: discount > 0 ? discount : undefined,
-        applied_discounts: buildAppliedDiscounts(special).length
-          ? buildAppliedDiscounts(special)
+        discount_amount: freshDiscount > 0 ? freshDiscount : undefined,
+        applied_discounts: buildAppliedDiscounts(freshSpecial).length
+          ? buildAppliedDiscounts(freshSpecial)
           : null,
         send_email: sendEmail,
       });
 
       // Record the collected amount as an in-store payment (matches the web).
-      if (finalAmountPaid > 0 && paymentMethod === "in-store") {
+      if (freshFinalAmountPaid > 0 && paymentMethod === "in-store") {
         try {
           await recordBookingPayment(token, {
             bookingId: id,
-            amount: finalAmountPaid,
+            amount: freshFinalAmountPaid,
             locationId: effectiveLocationId,
             customerId: customerId ?? null,
           });
@@ -950,7 +985,7 @@ const ManualBookingScreen = () => {
             authorizeCredentials!,
             {
               location_id: effectiveLocationId,
-              amount: finalAmountPaid,
+              amount: freshFinalAmountPaid,
               order_id: `P${pkg.id}-${String(Date.now()).slice(-8)}`,
               description: `Manual Booking: ${pkg.name}`,
               customer_id: customerId ?? undefined,

@@ -12,8 +12,12 @@
  */
 
 import { forceDeleteAttractionPurchase } from "../../services/attractionPurchasesService";
-import { forceDeleteBooking } from "../../services/bookingsService";
+import { deleteBooking, forceDeleteBooking } from "../../services/bookingsService";
 import { forceDeleteEventPurchase } from "../../services/eventPurchasesService";
+import {
+  forceDeleteThenSoftDelete,
+  ROLLBACK_REASON,
+} from "./forceDeleteThenSoftDelete";
 
 async function quietly(what: string, remove: () => Promise<void>): Promise<void> {
   try {
@@ -29,5 +33,23 @@ export const rollbackAttractionPurchase = (token: string, id: number) =>
 export const rollbackEventPurchase = (token: string, id: number) =>
   quietly("event purchase", () => forceDeleteEventPurchase(token, id));
 
-export const rollbackBooking = (token: string, id: number) =>
-  quietly("booking", () => forceDeleteBooking(token, id));
+/**
+ * Booking rollback for a failed card payment. Tries the permanent force-delete
+ * first (a soft delete alone would leave the slot's room looking reserved); if
+ * that fails, falls back to an ordinary soft delete with a fixed reason —
+ * matching the web's `bookingService.rollbackBooking` — so a force-delete
+ * failure (e.g. the booking already has a payment on it) doesn't silently
+ * leave an unpaid booking with no trace at all. The reason also skips the
+ * interactive change-reason prompt, since nobody is present to answer it here.
+ */
+export async function rollbackBooking(token: string, id: number): Promise<void> {
+  const outcome = await forceDeleteThenSoftDelete(
+    () => forceDeleteBooking(token, id),
+    () => deleteBooking(token, id, { changeReason: ROLLBACK_REASON }),
+  );
+  if (outcome === "failed" && __DEV__) {
+    console.warn(
+      "[payments] booking rollback failed — both force-delete and soft-delete failed",
+    );
+  }
+}

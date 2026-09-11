@@ -85,6 +85,7 @@ import {
   buildAppliedFees,
   fetchFeeBreakdown,
   fetchSpecialPricing,
+  resolveFreshPricing,
   type FeeBreakdown,
   type SpecialPricingBreakdown,
 } from "../../services/pricingService";
@@ -1202,10 +1203,47 @@ const CreateBookingScreen = () => {
 
       const { duration, unit } = durationForPayload();
 
+      // Resolve pricing fresh, right now — `submitTotal`/`discount` can still
+      // reflect the 300ms-debounced fee/special-pricing effect from before the
+      // latest participants/add-on/attraction change. `subtotal` itself is
+      // synchronous, so it already reflects current inputs. This fresh total
+      // also feeds the actual Authorize.Net charge below, not just the record.
+      const freshPricing = await resolveFreshPricing({
+        token,
+        entityType: "package",
+        entityId: pkg.id,
+        basePrice: subtotal,
+        // The existing (debounced) special-pricing effect for this screen is
+        // keyed off the package's own price, not the full subtotal — matched
+        // here so this stays a faithful fresh re-fetch, not a behavior change.
+        specialPricingBasePrice: pkg.price,
+        locationId: effectiveLocationId,
+        date: scheduledDate,
+        time: slot.startTime,
+      });
+      const freshFeeBreakdown = freshPricing?.feeBreakdown ?? feeBreakdown;
+      const freshSubmitTotal = freshFeeBreakdown ? freshFeeBreakdown.total : subtotal;
+      const freshSpecial = freshPricing?.specialPricing ?? special;
+      const freshDiscount =
+        (freshSpecial?.has_special_pricing ? freshSpecial.total_discount : 0) +
+        codeDiscount;
+      // Same branching as the `dueNow` memo, just fed the fresh total.
+      const freshDueNow =
+        paymentMethod === "paylater"
+          ? 0
+          : paymentMethod === "in-store" && inStoreTyped > 0
+            ? Math.min(inStoreTyped, freshSubmitTotal)
+            : paymentType === "custom"
+              ? Math.min(Math.max(0, Number(customAmount) || 0), freshSubmitTotal)
+              : paymentType === "partial" && partialDeposit > 0
+                ? Math.min(partialDeposit, freshSubmitTotal)
+                : freshSubmitTotal;
+      const freshAmountPaid = freshDueNow;
+
       const paymentStatus: "paid" | "partial" | "pending" =
-        amountPaid >= submitTotal
+        freshAmountPaid >= freshSubmitTotal
           ? "paid"
-          : amountPaid > 0
+          : freshAmountPaid > 0
             ? "partial"
             : "pending";
 
@@ -1227,8 +1265,8 @@ const CreateBookingScreen = () => {
         participants,
         duration,
         duration_unit: unit,
-        total_amount: submitTotal,
-        amount_paid: amountPaid,
+        total_amount: freshSubmitTotal,
+        amount_paid: freshAmountPaid,
         payment_method: paymentMethod,
         // Web parity: in-store confirms immediately, pay-later is pending, and
         // the card leg sends neither — the charge endpoint sets both once the
@@ -1249,22 +1287,22 @@ const CreateBookingScreen = () => {
         guest_of_honor_gender:
           pkg.hasGuestOfHonor && gohGender ? gohGender : undefined,
         sent_email_to_staff: sendStaffEmail,
-        applied_fees: buildAppliedFees(feeBreakdown).length
-          ? buildAppliedFees(feeBreakdown)
+        applied_fees: buildAppliedFees(freshFeeBreakdown).length
+          ? buildAppliedFees(freshFeeBreakdown)
           : null,
-        discount_amount: discount > 0 ? discount : undefined,
-        applied_discounts: buildAppliedDiscounts(special).length
-          ? buildAppliedDiscounts(special)
+        discount_amount: freshDiscount > 0 ? freshDiscount : undefined,
+        applied_discounts: buildAppliedDiscounts(freshSpecial).length
+          ? buildAppliedDiscounts(freshSpecial)
           : null,
         send_email: sendEmail,
       });
 
       // Mirror the web: record the collected amount as a payment (in-store).
-      if (amountPaid > 0 && paymentMethod === "in-store") {
+      if (freshAmountPaid > 0 && paymentMethod === "in-store") {
         try {
           await recordBookingPayment(token, {
             bookingId: id,
-            amount: amountPaid,
+            amount: freshAmountPaid,
             locationId: effectiveLocationId,
             customerId: customerId ?? null,
           });
@@ -1291,7 +1329,7 @@ const CreateBookingScreen = () => {
             authorizeCredentials!,
             {
               location_id: effectiveLocationId,
-              amount: amountPaid,
+              amount: freshAmountPaid,
               order_id: `P${pkg.id}-${String(Date.now()).slice(-8)}`,
               description: `On-Site Booking: ${pkg.name}`,
               customer_id: customerId ?? undefined,

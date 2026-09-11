@@ -79,6 +79,11 @@ import {
 } from "../../lib/payments/cardUtils";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
+  buildAppliedDiscounts,
+  buildAppliedFees,
+  resolveFreshPricing,
+} from "../../services/pricingService";
+import {
   attractionPurchaseQrValue,
   ticketOrderQrValue,
   useQrDataUri,
@@ -875,14 +880,13 @@ const CreatePurchaseScreen = () => {
   // one — never negative, never more than the order is worth.
   const {
     subtotal,
+    baseTotal,
     discountCeiling,
     discountNum,
     feeBreakdown,
     specialPricing,
     specialPricingDiscount,
     total,
-    appliedFees,
-    appliedDiscounts,
   } = useOnsitePricing({
     entity: selected,
     entityType: "attraction",
@@ -1600,12 +1604,35 @@ const CreatePurchaseScreen = () => {
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
 
+    // Resolve pricing fresh, right now, instead of trusting `total` — which
+    // can still reflect the debounced fee/special-pricing effect from BEFORE
+    // the user's latest quantity/add-on/discount change. `baseTotal` itself is
+    // synchronous (not debounced), so it already reflects current inputs.
+    const freshPricing = await resolveFreshPricing({
+      token,
+      entityType: "attraction",
+      entityId: selected.id,
+      basePrice: baseTotal,
+      locationId: effectiveLocationId,
+      date: scheduledDate,
+      time: scheduledTime,
+    });
+    const freshTotal = freshPricing?.total ?? total;
+    const freshAppliedFees = buildAppliedFees(
+      freshPricing?.feeBreakdown ?? feeBreakdown,
+    );
+    const freshSpecialPricingDiscount =
+      freshPricing?.specialPricingDiscount ?? specialPricingDiscount;
+    const freshAppliedDiscounts = buildAppliedDiscounts(
+      freshPricing?.specialPricing ?? specialPricing,
+    );
+
     const isPayLater = paymentMethod === "paylater";
     // Web parity: a card always pays the full total; cash honours the typed
     // amount and falls back to the total; pay-later collects nothing now.
     // A cash amount is bounded by the order total, so an over-typed figure can
     // never be recorded as paid.
-    const typedPaid = clampAmount(amountPaid, total);
+    const typedPaid = clampAmount(amountPaid, freshTotal);
     // Web parity: a card payment with a gift card applied posts amount_paid
     // as 0 rather than the pre-discount total — the server redeems the
     // gift_card_code and is the one to say what actually got paid.
@@ -1614,10 +1641,10 @@ const CreatePurchaseScreen = () => {
       : isCardPayment
         ? giftCard
           ? 0
-          : total
+          : freshTotal
         : typedPaid > 0
           ? typedPaid
-          : total;
+          : freshTotal;
 
     const input: CreateAttractionPurchaseInput = {
       ...giftCardCodeField(giftCard),
@@ -1627,8 +1654,8 @@ const CreatePurchaseScreen = () => {
       guest_email: customerEmail.trim() || undefined,
       guest_phone: customerPhone.trim() || undefined,
       quantity,
-      amount: total,
-      total_amount: total,
+      amount: freshTotal,
+      total_amount: freshTotal,
       amount_paid: paid,
       currency: "USD",
       method: isPayLater
@@ -1648,11 +1675,11 @@ const CreatePurchaseScreen = () => {
       send_email: paymentMethod === "in-store" ? sendEmail : false,
       additional_addons:
         additionalAddons.length > 0 ? additionalAddons : undefined,
-      applied_fees: appliedFees.length > 0 ? appliedFees : undefined,
+      applied_fees: freshAppliedFees.length > 0 ? freshAppliedFees : undefined,
       discount_amount:
-        specialPricingDiscount > 0 ? specialPricingDiscount : undefined,
+        freshSpecialPricingDiscount > 0 ? freshSpecialPricingDiscount : undefined,
       applied_discounts:
-        appliedDiscounts.length > 0 ? appliedDiscounts : undefined,
+        freshAppliedDiscounts.length > 0 ? freshAppliedDiscounts : undefined,
     };
 
     submitLockRef.current = true;
@@ -1669,7 +1696,7 @@ const CreatePurchaseScreen = () => {
       // pre-computed total, then decide whether a card charge is even needed
       // (web parity: PurchaseAttraction.tsx runs the same re-read +
       // settle/retry/charge dance after creating the purchase).
-      let chargeAmount = total;
+      let chargeAmount = freshTotal;
       if (giftCard && isCardPayment) {
         const record = await fetchAttractionPurchase({
           token,
@@ -1797,7 +1824,7 @@ const CreatePurchaseScreen = () => {
           "Purchase confirmed",
           `${money(chargeAmount)} charged${
             giftCard
-              ? ` · gift card covered ${money(total - chargeAmount)}`
+              ? ` · gift card covered ${money(freshTotal - chargeAmount)}`
               : ""
           } · ${selected.name}\n${
             sendEmail ? "Receipt sent to email." : "Email not sent per request."
@@ -1807,7 +1834,7 @@ const CreatePurchaseScreen = () => {
         return;
       }
 
-      Alert.alert("Purchase created", `${money(total)} · ${selected.name}`, [
+      Alert.alert("Purchase created", `${money(freshTotal)} · ${selected.name}`, [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (err) {
