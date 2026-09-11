@@ -18,9 +18,8 @@ import {
   type EntityWaivers,
 } from "../../services/waiversService";
 import { parseBookingQr } from "../checkin/parseTicketQr";
-// Reuse the phase/tone vocabulary from the attraction scanner so both flows
-// speak the same language (no runtime coupling — types only).
-import type { CheckInPhase, ResultTone } from "./useAttractionCheckIn";
+// The phase/tone vocabulary every check-in flow shares.
+import type { CheckInPhase, ResultTone } from "../checkin/checkInPhase";
 
 export type { CheckInPhase, ResultTone };
 

@@ -1,8 +1,8 @@
 import {
-  Activity,
   Building,
   Calendar,
   Plus,
+  ScanLine,
   type LucideIcon,
 } from "lucide-react-native";
 
@@ -39,11 +39,14 @@ export const QUICK_ACTION_ITEMS: QuickActionItem[] = [
     icon: Calendar,
     route: "/bookings/calendar",
   },
+  // The web's single check-in hub: one desk that reads bookings, attraction
+  // tickets, bulk orders, event tickets, memberships and waiver codes, and
+  // finds a guest by name when they have no code at all.
   {
     key: "check-in",
-    label: "Check-in",
-    icon: Activity,
-    route: "/bookings/check-in",
+    label: "Check-In / Waivers",
+    icon: ScanLine,
+    route: "/check-in",
   },
   // The web's "Locations" tile opens the location activity log (/admin/activity),
   // so this points at the same report rather than the Locations tab.

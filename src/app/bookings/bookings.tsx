@@ -395,10 +395,10 @@ const NAV_CARDS: {
 }[] = [
   {
     icon: "camera",
-    title: "Check-in",
-    desc: "Checking in customers",
-    cta: "Scan QR Code",
-    route: "/bookings/check-in",
+    title: "Check-In / Waivers",
+    desc: "Scan any code, or find a guest",
+    cta: "Open Check-In",
+    route: "/check-in",
   },
   {
     icon: "grid",

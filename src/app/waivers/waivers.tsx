@@ -87,6 +87,15 @@ type NavItem = {
 /** Sub-page shortcuts, rendered as a 2-column grid of square cards (the same
  *  design the Packages / Attractions / Events / Bookings modules use). */
 const NAV_ITEMS: NavItem[] = [
+  // First, as on the web sidebar: the desk is what this module is used for all
+  // day, and it reads every other code kind besides waivers.
+  {
+    label: "Check-In / Waivers",
+    desc: "Scan any code, or find a guest",
+    cta: "Open Check-In",
+    icon: "maximize",
+    route: "/check-in",
+  },
   {
     label: "Templates",
     desc: "Waiver templates",

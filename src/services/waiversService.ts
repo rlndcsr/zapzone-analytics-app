@@ -77,6 +77,12 @@ export type WaiverMinor = {
 /** A waiver row as rendered in the Records list. */
 export type Waiver = {
   id: number;
+  /**
+   * The waiver's own scannable code (`WV…`). Null on deployments whose waivers
+   * table predates the column, which is why the check-in desk has to check it
+   * before offering to open a record by scan.
+   */
+  referenceNumber: string | null;
   status: WaiverStatus;
   selectedDate: string | null;
   adultFirstName: string | null;
@@ -205,6 +211,7 @@ type RawMinor = {
 
 type RawWaiver = {
   id: number;
+  reference_number?: string | null;
   status?: WaiverStatus;
   selected_date?: string | null;
   adult_first_name?: string | null;
@@ -333,6 +340,7 @@ function mapMinor(raw: RawMinor): WaiverMinor {
 function mapWaiver(raw: RawWaiver): Waiver {
   return {
     id: raw.id,
+    referenceNumber: raw.reference_number?.trim() || null,
     status: raw.status ?? "pending",
     selectedDate: raw.selected_date ?? null,
     adultFirstName: raw.adult_first_name ?? null,
@@ -473,6 +481,11 @@ export type WaiverSearchFilters = {
   endDate?: string;
   /** A single venue day. The server's fallback when no timeframe is sent. */
   date?: string;
+  /**
+   * Free-text term, matched server-side across the adult's name, email, phone
+   * and reference number — the `search` filter the web guest lookup sends.
+   */
+  search?: string;
   adultName?: string;
   email?: string;
   phone?: string;
@@ -501,6 +514,7 @@ function buildWaiverParams(
   });
   appendVisitPeriod(params, filters);
   if (filters.status) params.append("status", filters.status);
+  if (filters.search?.trim()) params.append("search", filters.search.trim());
   if (filters.adultName?.trim())
     params.append("adult_name", filters.adultName.trim());
   if (filters.email?.trim()) params.append("email", filters.email.trim());
@@ -1716,10 +1730,104 @@ export async function createKioskSession(
   };
 }
 
+/* ------------------------------------------------------- Waiver code scan -- */
+
+/** What `POST /api/waivers/scan` returns for a scanned `WV…` code. */
+export type ScannedWaiver = {
+  id: number;
+  referenceNumber: string | null;
+  status: WaiverStatus;
+  /** The record is signed (status `completed`) — the server's own judgement. */
+  isSigned: boolean;
+  checkedInAt: string | null;
+  adultName: string;
+  /** Masked by the server (`j••@example.com`); never the raw address. */
+  adultEmail: string | null;
+  adultPhone: string | null;
+  selectedDate: string | null;
+  templateTitle: string | null;
+  locationId: number | null;
+  locationName: string | null;
+  minorsCount: number;
+  minors: { id: number; name: string }[];
+  /** The record this waiver is attached to, when it is attached to one. */
+  linkedTo: { type: string; id: number } | null;
+};
+
+type RawScannedWaiver = {
+  id?: number;
+  reference_number?: string | null;
+  status?: string | null;
+  is_signed?: boolean | null;
+  checked_in_at?: string | null;
+  adult_name?: string | null;
+  adult_email?: string | null;
+  adult_phone?: string | null;
+  selected_date?: string | null;
+  template_title?: string | null;
+  location_id?: number | null;
+  location_name?: string | null;
+  minors_count?: number | null;
+  minors?: { id?: number; name?: string | null }[] | null;
+  linked_to?: { type?: string | null; id?: number | null } | null;
+};
+
 /**
- * POST /api/waivers/{id}/check-in — mark a connected waiver's participant as
- * checked in. NOTE: route is a best-guess mirror of the web action; adjust if
- * your backend uses a different path.
+ * POST /api/waivers/scan — resolve a scanned waiver reference to its record.
+ *
+ * The same endpoint the web check-in desk calls. Returns `null` when the code
+ * matches nothing in scope (the server answers 404), so the caller can say so
+ * rather than treating a miss as a failure.
+ */
+export async function scanWaiver(
+  token: string,
+  code: string,
+  signal?: AbortSignal,
+): Promise<ScannedWaiver | null> {
+  let res: { success?: boolean; data?: RawScannedWaiver } | undefined;
+  try {
+    res = await apiRequest<{ success?: boolean; data?: RawScannedWaiver }>(
+      "/api/waivers/scan",
+      { method: "POST", token, body: { code: code.trim() }, signal },
+    );
+  } catch (err) {
+    // "No waiver found for that code" is an answer, not an outage.
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+
+  const d = res?.data;
+  if (!d?.id) return null;
+
+  return {
+    id: d.id,
+    referenceNumber: d.reference_number?.trim() || null,
+    status: (d.status ?? "pending") as WaiverStatus,
+    isSigned: d.is_signed === true || d.status === "completed",
+    checkedInAt: d.checked_in_at ?? null,
+    adultName: d.adult_name?.trim() || "Unnamed",
+    adultEmail: d.adult_email?.trim() || null,
+    adultPhone: d.adult_phone?.trim() || null,
+    selectedDate: d.selected_date ?? null,
+    templateTitle: d.template_title?.trim() || null,
+    locationId: d.location_id ?? null,
+    locationName: d.location_name?.trim() || null,
+    minorsCount: Number(d.minors_count ?? d.minors?.length ?? 0),
+    minors: (d.minors ?? []).flatMap((m) =>
+      typeof m?.id === "number"
+        ? [{ id: m.id, name: m.name?.trim() || "Minor" }]
+        : [],
+    ),
+    linkedTo:
+      d.linked_to?.type && d.linked_to.id != null
+        ? { type: d.linked_to.type, id: d.linked_to.id }
+        : null,
+  };
+}
+
+/**
+ * POST /api/waivers/{id}/check-in — mark a waiver's participant as checked in.
+ * The same route the web desk posts to (`waiverService.checkIn`).
  */
 export async function checkInWaiver(token: string, id: number): Promise<void> {
   await apiRequest(`/api/waivers/${id}/check-in`, {

@@ -144,6 +144,11 @@ export type TicketOrderListParams = {
   locationId?: number | null;
   page?: number;
   perPage?: number;
+  /**
+   * Free-text term matched server-side across the order's reference and its
+   * customer (the `search` filter the check-in desk's guest lookup sends).
+   */
+  search?: string;
 };
 
 /** What a check-in attempt actually did, per line (web `checkIn`). */
@@ -375,7 +380,7 @@ export async function checkoutTicketOrder(
  */
 export async function listTicketOrders(
   token: string,
-  { locationId, page = 1, perPage = 1000 }: TicketOrderListParams = {},
+  { locationId, page = 1, perPage = 1000, search }: TicketOrderListParams = {},
   signal?: AbortSignal,
 ): Promise<TicketOrderDetail[]> {
   const params = new URLSearchParams({
@@ -383,6 +388,7 @@ export async function listTicketOrders(
     per_page: String(perPage),
   });
   if (locationId != null) params.set("location_id", String(locationId));
+  if (search?.trim()) params.set("search", search.trim());
 
   const res = await apiRequest<Envelope>(
     `/api/ticket-orders?${params.toString()}`,

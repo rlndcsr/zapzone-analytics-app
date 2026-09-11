@@ -9,6 +9,8 @@ const orderQr = (id: number | string) =>
 const ticketQr = (id: number | string) =>
   JSON.stringify({ type: "attraction_purchase", id });
 
+const NO_BOOKING = { referenceNumber: null, bookingId: null };
+
 describe("scanning a ticket-order QR", () => {
   it("reads the order out of the payload the app generates", () => {
     assert.deepEqual(parseScannedTicketQr(orderQr(45)), {
@@ -17,26 +19,18 @@ describe("scanning a ticket-order QR", () => {
     });
   });
 
-  it("accepts a string id and the order_id / orderId spellings", () => {
-    assert.deepEqual(parseScannedTicketQr(orderQr("45")), {
-      kind: "order",
-      orderId: 45,
-    });
-    assert.deepEqual(
-      parseScannedTicketQr(JSON.stringify({ type: "ticket_order", order_id: 7 })),
-      { kind: "order", orderId: 7 },
-    );
-    assert.deepEqual(
-      parseScannedTicketQr(JSON.stringify({ type: "ticket_order", orderId: 8 })),
-      { kind: "order", orderId: 8 },
-    );
-  });
-
   it("tolerates whitespace around the payload", () => {
     assert.deepEqual(parseScannedTicketQr(`  ${orderQr(3)}\n`), {
       kind: "order",
       orderId: 3,
     });
+  });
+
+  it("returns null for a bare ORD reference, which carries no id to look up", () => {
+    // The order endpoints are keyed by id, so a reference-only code has nothing
+    // to resolve against here. The desk reports it rather than guessing — the
+    // same branch the web's scanner takes for it.
+    assert.equal(parseScannedTicketQr("ORD20260910EDQALA"), null);
   });
 
   for (const [label, raw] of [
@@ -62,7 +56,7 @@ describe("scanning a ticket-order QR", () => {
   });
 });
 
-describe("scanning a single attraction ticket (unchanged behaviour)", () => {
+describe("scanning a single attraction ticket", () => {
   it("reads the app's own ticket payload", () => {
     assert.deepEqual(parseScannedTicketQr(ticketQr(123)), {
       kind: "purchase",
@@ -70,97 +64,86 @@ describe("scanning a single attraction ticket (unchanged behaviour)", () => {
     });
   });
 
-  for (const [label, raw] of [
-    ["purchaseId", JSON.stringify({ purchaseId: 9 })],
-    ["purchase_id", JSON.stringify({ purchase_id: 9 })],
-    ["a bare id", JSON.stringify({ id: 9 })],
-    ["a string id", JSON.stringify({ id: "9" })],
-  ] as const) {
-    it(`accepts ${label}`, () => {
-      assert.deepEqual(parseScannedTicketQr(raw), {
-        kind: "purchase",
-        purchaseId: 9,
-      });
-    });
-  }
-
-  it("falls back to the first run of digits in a plain string", () => {
-    assert.deepEqual(parseScannedTicketQr("TICKET-77-ZAPZONE"), {
+  it("accepts a string id", () => {
+    assert.deepEqual(parseScannedTicketQr(ticketQr("9")), {
       kind: "purchase",
-      purchaseId: 77,
+      purchaseId: 9,
     });
-    assert.deepEqual(parseScannedTicketQr("77"), {
-      kind: "purchase",
-      purchaseId: 77,
-    });
-  });
-
-  it("prefers purchaseId over a competing id", () => {
-    assert.deepEqual(
-      parseScannedTicketQr(JSON.stringify({ purchaseId: 5, id: 99 })),
-      { kind: "purchase", purchaseId: 5 },
-    );
-  });
-
-  it("ignores an unrecognized type and still reads the id", () => {
-    // Forward compatibility: only `ticket_order` changes the branch taken.
-    assert.deepEqual(
-      parseScannedTicketQr(JSON.stringify({ type: "event_purchase", id: 12 })),
-      { kind: "purchase", purchaseId: 12 },
-    );
   });
 });
 
-describe("invalid codes (unchanged behaviour)", () => {
+describe("codes the scanner must refuse", () => {
   for (const [label, raw] of [
     ["an empty string", ""],
     ["whitespace only", "   "],
     ["a code with no digits", "NOT-A-TICKET"],
     ["JSON with no id-like field", JSON.stringify({ foo: "bar" })],
-    ["a zero id", JSON.stringify({ id: 0 })],
+    ["an undeclared purchaseId", JSON.stringify({ purchaseId: 9 })],
+    ["an undeclared purchase_id", JSON.stringify({ purchase_id: 9 })],
+    ["a bare untyped id", JSON.stringify({ id: 9 })],
+    ["a ticket payload with a zero id", ticketQr(0)],
   ] as const) {
     it(`returns null for ${label}`, () => {
       assert.equal(parseScannedTicketQr(raw), null);
     });
   }
 
-  it("still digit-scans a ticket payload whose id is unusable", () => {
-    // Pre-existing behaviour, asserted so it stays deliberate: an unusable JSON
-    // id drops to the plain-string branch, which finds the digits anywhere in
-    // the payload. Only the `ticket_order` branch is strict — it must never fall
-    // through, because there its `id` belongs to a different table.
-    assert.deepEqual(parseScannedTicketQr(JSON.stringify({ id: -3 })), {
-      kind: "purchase",
-      purchaseId: 3,
-    });
+  it("REGRESSION: never digit-scans a plain string into a ticket id", () => {
+    // The bug: `/\d+/` ran over any payload, so a membership token, a photo
+    // link or a loyalty card resolved to whichever attraction purchase shared
+    // those digits — a stranger's ticket, silently admitted.
+    assert.equal(parseScannedTicketQr("TICKET-77-ZAPZONE"), null);
+    assert.equal(parseScannedTicketQr("77"), null);
+    assert.equal(parseScannedTicketQr(`mbr_${"a".repeat(40)}`), null);
     assert.equal(
-      parseScannedTicketQr(JSON.stringify({ type: "ticket_order", id: -3 })),
+      parseScannedTicketQr("https://zapzone.test/photos/qr/abcdef0123456789"),
       null,
     );
   });
+
+  it("refuses another module's code rather than reading its id", () => {
+    // An event ticket and a booking each have their own handler at the desk;
+    // neither may be resolved against the attraction-purchase table.
+    assert.equal(parseScannedTicketQr("EVT-AB12CD34"), null);
+    assert.equal(parseScannedTicketQr("BK20260910EDQALA"), null);
+    assert.equal(parseScannedTicketQr("WV20260910EDQALA"), null);
+  });
 });
 
-describe("booking QR parsing (untouched)", () => {
+describe("booking QR parsing", () => {
   it("reads a JSON booking payload", () => {
     assert.deepEqual(
-      parseBookingQr(JSON.stringify({ booking_id: 4, reference_number: "BK-1" })),
-      { referenceNumber: "BK-1", bookingId: 4 },
+      parseBookingQr(
+        JSON.stringify({
+          type: "booking",
+          id: 4,
+          reference_number: "BK20260910EDQALA",
+        }),
+      ),
+      { referenceNumber: "BK20260910EDQALA", bookingId: 4 },
     );
   });
 
-  it("treats a plain string as the reference number", () => {
-    assert.deepEqual(parseBookingQr("BK20260101ABC"), {
-      referenceNumber: "BK20260101ABC",
+  it("reads a bare booking reference", () => {
+    assert.deepEqual(parseBookingQr("BK20260101ABCDEF"), {
+      referenceNumber: "BK20260101ABCDEF",
       bookingId: null,
     });
   });
 
-  it("is unaffected by the order payload shape", () => {
-    // Bookings are scanned on their own screen; an order code simply yields no
-    // booking reference rather than a bogus one.
-    assert.deepEqual(parseBookingQr(orderQr(45)), {
-      referenceNumber: null,
-      bookingId: 45,
-    });
+  it("REGRESSION: an attraction ticket is never read as a booking", () => {
+    // The bug: any JSON `id` became a booking id, so scanning attraction
+    // ticket #45 loaded booking #45 — a different guest — and offered to
+    // check them in.
+    assert.deepEqual(parseBookingQr(ticketQr(45)), NO_BOOKING);
+    assert.deepEqual(parseBookingQr(orderQr(45)), NO_BOOKING);
+  });
+
+  it("REGRESSION: an arbitrary string is not a booking reference", () => {
+    // The bug: every non-JSON payload was treated as a reference number, so a
+    // membership token was looked up as a booking.
+    assert.deepEqual(parseBookingQr("hello"), NO_BOOKING);
+    assert.deepEqual(parseBookingQr(`mbr_${"a".repeat(40)}`), NO_BOOKING);
+    assert.deepEqual(parseBookingQr("EVT-AB12CD34"), NO_BOOKING);
   });
 });

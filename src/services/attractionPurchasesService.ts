@@ -184,6 +184,34 @@ export async function fetchAttractionPurchases({
   return all.map(mapPurchase);
 }
 
+/**
+ * GET /api/attraction-purchases?search= — tickets matching a free-text term,
+ * for the check-in desk's "find the guest by name" lookup. Deliberately one
+ * page: the desk wants the person in front of it, so paging the whole index
+ * (as `fetchAttractionPurchases` must for its KPIs) would be wasted requests.
+ */
+export async function searchAttractionPurchases({
+  token,
+  term,
+  limit = 25,
+  signal,
+}: {
+  token: string;
+  term: string;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<PurchaseRow[]> {
+  const params = new URLSearchParams({
+    search: term,
+    per_page: String(limit),
+  });
+  const res = await apiRequest<PurchasesListResponse>(
+    `/api/attraction-purchases?${params.toString()}`,
+    { token, signal },
+  );
+  return (res?.data?.purchases ?? []).map(mapPurchase);
+}
+
 /** One add-on line on a new purchase. */
 export type PurchaseAddonInput = {
   addon_id: number;

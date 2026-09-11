@@ -414,8 +414,8 @@ const Memberships = () => {
           {/* Actions: Scan · Plans · Reports pill, then Add Member */}
           <FilterPill>
             <PillSegment
-              label="Scan Member"
-              onPress={() => router.push("/memberships/membership-check-in")}
+              label="Check-In"
+              onPress={() => router.push("/check-in")}
               renderIcon={(c) => <Feather name="maximize" size={15} color={c} />}
             />
             <PillSegment

@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/api";
+import { ApiError, apiRequest } from "../lib/api";
 import type { AppliedDiscount, AppliedFee } from "./pricingService";
 
 /** Booking lifecycle status, mirroring the backend `status` enum. */
@@ -148,6 +148,130 @@ export async function fetchEventPurchases({
     { token, signal },
   );
   return extractPurchases(res).map(mapPurchase);
+}
+
+/**
+ * GET /api/event-purchases?search= — event tickets matching a free-text term,
+ * for the check-in desk's "find the guest by name" lookup. One page only: the
+ * desk is looking for a person, not aggregating, so paging every page (as
+ * `fetchEventPurchases` must) would cost requests for rows nobody reads.
+ */
+export async function searchEventPurchases({
+  token,
+  term,
+  limit = 25,
+  signal,
+}: {
+  token: string;
+  term: string;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<EventPurchaseRow[]> {
+  const params = new URLSearchParams({
+    search: term,
+    per_page: String(limit),
+  });
+  const res = await apiRequest<unknown>(
+    `/api/event-purchases?${params.toString()}`,
+    { token, signal },
+  );
+  return extractPurchases(res).map(mapPurchase);
+}
+
+/** What `GET /api/event-purchases/verify/{reference}` resolves a code to. */
+export type ScannedEventTicket = {
+  id: number;
+  referenceNumber: string;
+  status: string;
+  checkedInAt: string | null;
+  guestName: string | null;
+  guestEmail: string | null;
+  guestPhone: string | null;
+  quantity: number;
+  purchaseDate: string | null;
+  purchaseTime: string | null;
+  totalAmount: number;
+  amountPaid: number;
+  paymentMethod: string | null;
+  paymentStatus: string | null;
+  notes: string | null;
+  eventName: string | null;
+  locationId: number | null;
+  locationName: string | null;
+  /**
+   * Set when the ticket was bought as part of a bulk order. Such a ticket is
+   * admitted through its order, never on its own — the web refuses it here too.
+   */
+  ticketOrderId: number | null;
+};
+
+type RawScannedEventTicket = {
+  id?: number;
+  reference_number?: string | null;
+  status?: string | null;
+  checked_in_at?: string | null;
+  guest_name?: string | null;
+  guest_email?: string | null;
+  guest_phone?: string | null;
+  quantity?: number | null;
+  purchase_date?: string | null;
+  purchase_time?: string | null;
+  total_amount?: number | string | null;
+  amount_paid?: number | string | null;
+  payment_method?: string | null;
+  payment_status?: string | null;
+  notes?: string | null;
+  event_name?: string | null;
+  location_id?: number | null;
+  location_name?: string | null;
+  ticket_order_id?: number | null;
+};
+
+/**
+ * GET /api/event-purchases/verify/{reference} — resolve a scanned `EVT-…` code
+ * to its ticket. Returns `null` when nothing in scope matches (the server
+ * answers 404), so a miss reads as "no ticket for that code", not an error.
+ */
+export async function verifyEventPurchaseByReference(
+  token: string,
+  reference: string,
+  signal?: AbortSignal,
+): Promise<ScannedEventTicket | null> {
+  let res: { success?: boolean; data?: RawScannedEventTicket } | undefined;
+  try {
+    res = await apiRequest<{ success?: boolean; data?: RawScannedEventTicket }>(
+      `/api/event-purchases/verify/${encodeURIComponent(reference.trim())}`,
+      { token, signal },
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+
+  const d = res?.data;
+  if (!d?.id) return null;
+
+  return {
+    id: d.id,
+    referenceNumber: d.reference_number?.trim() || "",
+    status: d.status ?? "pending",
+    checkedInAt: d.checked_in_at ?? null,
+    guestName: d.guest_name?.trim() || null,
+    guestEmail: d.guest_email?.trim() || null,
+    guestPhone: d.guest_phone?.trim() || null,
+    quantity: Number(d.quantity ?? 0),
+    purchaseDate: d.purchase_date ?? null,
+    purchaseTime: d.purchase_time ?? null,
+    totalAmount: Number(d.total_amount ?? 0),
+    amountPaid: Number(d.amount_paid ?? 0),
+    paymentMethod: d.payment_method ?? null,
+    paymentStatus: d.payment_status ?? null,
+    notes: d.notes?.trim() || null,
+    eventName: d.event_name?.trim() || null,
+    locationId: d.location_id ?? null,
+    locationName: d.location_name?.trim() || null,
+    ticketOrderId: d.ticket_order_id ?? null,
+  };
 }
 
 /**

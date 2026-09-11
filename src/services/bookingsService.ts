@@ -30,6 +30,20 @@ export type CalendarBooking = {
   customerName: string;
   customerEmail: string | null;
   customerPhone: string | null;
+  /**
+   * The booking's own guest fields and package name, with no display
+   * substitution applied.
+   *
+   * The web is not consistent about which name a booking shows: its Bookings
+   * list prefers the linked customer record (what `customerName` above mirrors),
+   * while its Check In page shows `guest_name` and nothing else. These carry the
+   * raw values so the check-in desk can match that page exactly instead of
+   * showing a different name for the same booking.
+   */
+  guestName: string | null;
+  guestEmail: string | null;
+  guestPhone: string | null;
+  packageNameRaw: string | null;
   roomName: string;
   /** Room the booking occupies when one is assigned — the day grid keys its
    *  space columns off this, falling back to `packageId` when it is null. */
@@ -294,6 +308,10 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
       raw.customer?.email?.trim() || raw.guest_email?.trim() || null,
     customerPhone:
       raw.customer?.phone?.trim() || raw.guest_phone?.trim() || null,
+    guestName: raw.guest_name?.trim() || null,
+    guestEmail: raw.guest_email?.trim() || null,
+    guestPhone: raw.guest_phone?.trim() || null,
+    packageNameRaw: raw.package?.name?.trim() || null,
     roomName: raw.room?.name?.trim() || "",
     roomId: raw.room_id ?? raw.room?.id ?? null,
     packageId: raw.package_id ?? raw.package?.id ?? null,
@@ -453,9 +471,14 @@ function mapBookingAttractions(raw: RawBookingDetail): BookingAttraction[] {
  * Bookings for one venue day, for the check-in desk's manual lookup.
  *
  * Mirrors the web Check In page: one page of up to 100 rows scoped by
- * `booking_date`, filtered down to the two statuses that can be checked in —
- * `confirmed` (still to arrive) and `checked-in` (already here). Anything
- * pending, completed or cancelled is not something the desk acts on.
+ * `booking_date`, in the server's default order, filtered down to the two
+ * statuses that can be checked in — `confirmed` (still to arrive) and
+ * `checked-in` (already here). Anything pending, completed or cancelled is not
+ * something the desk acts on.
+ *
+ * Request parameters are kept identical to the web's on purpose: the two desks
+ * are read side by side, so the same day must produce the same rows in the same
+ * order on both.
  */
 export async function fetchBookingsForCheckIn({
   token,
@@ -471,11 +494,13 @@ export async function fetchBookingsForCheckIn({
   userId?: number;
   signal?: AbortSignal;
 }): Promise<CalendarBooking[]> {
+  // Deliberately no sort_by / sort_order: the web desk sends none either, so
+  // the server's default (booking_date desc) orders both. Asking for
+  // booking_time asc here — however sensible on its own — put the two desks in
+  // different orders, so the same guest sat on a different row in each.
   const params = new URLSearchParams({
     booking_date: date,
     per_page: "100",
-    sort_by: "booking_time",
-    sort_order: "asc",
   });
   if (locationId != null) params.append("location_id", String(locationId));
   if (userId != null) params.append("user_id", String(userId));

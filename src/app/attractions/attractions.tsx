@@ -704,10 +704,10 @@ const Attractions = () => {
           >
             <ShortcutCard
               icon="camera"
-              title="Check-in"
-              subtitle="Checking in customers"
-              action="Scan QR Code"
-              route="/attractions/check-in"
+              title="Check-In / Waivers"
+              subtitle="Scan any code, or find a guest"
+              action="Open Check-In"
+              route="/check-in"
             />
             <ShortcutCard
               icon="shopping-bag"

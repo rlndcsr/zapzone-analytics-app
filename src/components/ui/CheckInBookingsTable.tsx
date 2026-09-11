@@ -88,19 +88,19 @@ export function CheckInBookingsTable({
               numberOfLines={1}
               className="text-sm font-semibold text-gray-900 dark:text-white"
             >
-              {b.customerName || "Guest"}
+              {b.guestName || "Guest"}
             </Text>
             <Text
               numberOfLines={1}
               className="text-[11px] text-gray-500 dark:text-gray-400"
             >
-              Email: {b.customerEmail || "N/A"}
+              Email: {b.guestEmail || "N/A"}
             </Text>
             <Text
               numberOfLines={1}
               className="text-[11px] text-gray-500 dark:text-gray-400"
             >
-              Phone: {b.customerPhone || "N/A"}
+              Phone: {b.guestPhone || "N/A"}
             </Text>
           </View>
         ),
@@ -115,7 +115,7 @@ export function CheckInBookingsTable({
               numberOfLines={2}
               className="text-sm text-gray-900 dark:text-white"
             >
-              {b.packageName || "N/A"}
+              {b.packageNameRaw || "N/A"}
             </Text>
             <Text className="text-[11px] text-gray-500 dark:text-gray-400">
               {money(b.totalAmount)}
