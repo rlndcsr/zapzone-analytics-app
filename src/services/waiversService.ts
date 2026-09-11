@@ -1408,6 +1408,9 @@ export type KioskSubmitResult = {
   id: number | null;
   status: string | null;
   ad: KioskAd | null;
+  /** The waiver's own scannable code (`WV…`) — lets the guest be checked in
+   *  later by scan instead of only by staff name-lookup. */
+  referenceNumber: string | null;
 };
 
 /** The template + prefill behind the kiosk form. */
@@ -1554,7 +1557,7 @@ export async function submitTemplateKioskWaiver(
   if (opts.selectedDate) body.selected_date = opts.selectedDate;
   const res = await apiRequest<{
     success?: boolean;
-    data?: { id?: number; status?: string; ad?: unknown };
+    data?: { id?: number; status?: string; ad?: unknown; reference_number?: string };
   }>(`/api/waivers/kiosk/${templateId}/submit`, {
     method: "POST",
     body,
@@ -1564,6 +1567,7 @@ export async function submitTemplateKioskWaiver(
     id: res?.data?.id ?? null,
     status: res?.data?.status ?? null,
     ad: mapKioskAd(res?.data?.ad),
+    referenceNumber: res?.data?.reference_number?.trim() || null,
   };
 }
 
@@ -1580,7 +1584,7 @@ export async function submitKioskWaiver(
 ): Promise<KioskSubmitResult> {
   const res = await apiRequest<{
     success?: boolean;
-    data?: { id?: number; status?: string; ad?: unknown };
+    data?: { id?: number; status?: string; ad?: unknown; reference_number?: string };
   }>(`/api/waivers/access/${encodeURIComponent(accessToken)}/submit`, {
     method: "POST",
     body: opts.kiosk ? { ...payload, kiosk: true } : payload,
@@ -1590,6 +1594,7 @@ export async function submitKioskWaiver(
     id: res?.data?.id ?? null,
     status: res?.data?.status ?? null,
     ad: mapKioskAd(res?.data?.ad),
+    referenceNumber: res?.data?.reference_number?.trim() || null,
   };
 }
 

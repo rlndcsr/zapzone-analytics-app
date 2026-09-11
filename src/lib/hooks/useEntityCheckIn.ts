@@ -217,16 +217,20 @@ export function useEntityCheckIn(): UseEntityCheckIn {
 
       setLoading(true);
       setNotice(null);
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      const { signal } = abortRef.current;
+
       try {
         await withToken(async (token) => {
-          const scan = await scanMembership(token, qrToken, locationId);
-          if (!mountedRef.current) return;
+          const scan = await scanMembership(token, qrToken, locationId, signal);
+          if (signal.aborted || !mountedRef.current) return;
           setSurface({ kind: "membership", scan });
         });
       } catch (err) {
-        fail(reason(err, "Membership not found."));
+        if (!signal.aborted) fail(reason(err, "Membership not found."));
       } finally {
-        if (mountedRef.current) setLoading(false);
+        if (mountedRef.current && !signal.aborted) setLoading(false);
       }
     },
     [fail, withToken],

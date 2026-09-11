@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from "react-native";
+import QRCode from "react-native-qrcode-svg";
 
 import { mediaUrl } from "../../lib/api";
 import {
@@ -27,6 +28,7 @@ export function KioskAdModal({
   ad,
   waiverId,
   signerFirstName,
+  waiverReference,
   onClose,
   closeLabel = "Start Next Waiver",
   closingText = "Returning to the start screen",
@@ -35,6 +37,9 @@ export function KioskAdModal({
   ad: KioskAd | null;
   waiverId: number | null;
   signerFirstName?: string | null;
+  /** The waiver's own `WV…` code, shown alongside the ad — same take-home QR
+   *  as the plain (no-ad) success confirmation. */
+  waiverReference?: string | null;
   onClose: () => void;
   closeLabel?: string;
   closingText?: string;
@@ -121,6 +126,25 @@ export function KioskAdModal({
               resizeMode="contain"
               accessibilityLabel={ad.name || "Announcement"}
             />
+          )}
+
+          {!!waiverReference && (
+            <View className="items-center border-b border-gray-100 px-5 py-4 dark:border-neutral-800">
+              <View className="rounded-lg bg-white p-2">
+                <QRCode
+                  value={waiverReference}
+                  size={88}
+                  backgroundColor="#FFFFFF"
+                  color="#111827"
+                />
+              </View>
+              <Text className="mt-2 text-center text-xs font-medium text-gray-700 dark:text-gray-300">
+                Show this at the front desk
+              </Text>
+              <Text className="text-center text-[11px] text-gray-400 dark:text-gray-500">
+                Staff can scan it to check you in.
+              </Text>
+            </View>
           )}
 
           <View className="px-5 py-4">

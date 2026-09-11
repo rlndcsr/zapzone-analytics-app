@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { InputField } from "../../components/ui/InputField";
 import { KioskAdModal } from "../../components/ui/KioskAdModal";
+import { WaiverSuccessModal } from "../../components/ui/WaiverSuccessModal";
 import {
   KioskReturningPanel,
   KioskSavedSignerFields,
@@ -317,6 +318,9 @@ const WaiverKiosk = () => {
   /** The ad the submission came back with, held until the guest dismisses it. */
   const [ad, setAd] = useState<KioskAd | null>(null);
   const [adWaiverId, setAdWaiverId] = useState<number | null>(null);
+  /** The just-signed waiver's own code, shown as a take-home QR either way. */
+  const [successReference, setSuccessReference] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   // Sign & agree
   const [typedName, setTypedName] = useState("");
@@ -521,10 +525,17 @@ const WaiverKiosk = () => {
       markWaiversStale();
 
       // An ad takes over the confirmation; without one the kiosk keeps its
-      // original success modal exactly as before.
+      // original success modal exactly as before. Either way, a take-home
+      // check-in QR rides along when the server returned a reference.
       if (result.ad) {
         setAd(result.ad);
         setAdWaiverId(result.id);
+        setSuccessReference(result.referenceNumber);
+        return;
+      }
+      if (result.referenceNumber) {
+        setSuccessReference(result.referenceNumber);
+        setShowSuccess(true);
         return;
       }
       status.show({
@@ -1095,11 +1106,23 @@ const WaiverKiosk = () => {
         ad={ad}
         waiverId={adWaiverId}
         signerFirstName={firstName.trim() || null}
+        waiverReference={successReference}
         closeLabel="Done"
         closingText="Closing"
         onClose={() => {
           setAd(null);
           setAdWaiverId(null);
+          setSuccessReference(null);
+          router.back();
+        }}
+      />
+
+      <WaiverSuccessModal
+        visible={showSuccess}
+        waiverReference={successReference}
+        onClose={() => {
+          setShowSuccess(false);
+          setSuccessReference(null);
           router.back();
         }}
       />

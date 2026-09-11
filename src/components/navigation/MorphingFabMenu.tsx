@@ -30,6 +30,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { runOnJS } from "react-native-worklets";
 
+import { useHiddenQuickActions } from "../../lib/hooks/useHiddenQuickActions";
 import { useCurrentUserRole } from "../../lib/session";
 import {
   CARD_REVEAL,
@@ -354,6 +355,20 @@ export function MorphingFabMenu({
   const role = useCurrentUserRole();
   const items = useMemo(() => getNavMenuItems(role), [role]);
 
+  // Web parity: a company_admin always sees every Quick Action (same as
+  // `useQuickActions.ts`'s own admin branch); everyone else gets the
+  // company's configured hide list applied.
+  const hiddenQuickActions = useHiddenQuickActions();
+  const visibleQuickActions = useMemo(
+    () =>
+      role === "company_admin"
+        ? QUICK_ACTION_ITEMS
+        : QUICK_ACTION_ITEMS.filter(
+            (item) => !hiddenQuickActions.includes(item.label),
+          ),
+    [role, hiddenQuickActions],
+  );
+
   const progress = useSharedValue(0);
   const itemsProgress = useSharedValue(0);
   const bloom = useSharedValue(0);
@@ -588,7 +603,7 @@ export function MorphingFabMenu({
   );
 
   const actionGrid = gridWrapper(
-    QUICK_ACTION_ITEMS.map((item, i) => (
+    visibleQuickActions.map((item, i) => (
       <MenuCell
         key={item.key}
         label={item.label}
@@ -609,7 +624,7 @@ export function MorphingFabMenu({
         icon={
           <Feather name={item.icon} size={CHIP_ICON_SIZE} color={FAB_COLOR} />
         }
-        index={QUICK_ACTION_ITEMS.length + i}
+        index={visibleQuickActions.length + i}
         onPress={() => handleSelect(item)}
         itemsProgress={itemsProgress}
       />

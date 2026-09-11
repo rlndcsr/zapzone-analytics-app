@@ -836,11 +836,13 @@ export async function scanMembership(
   token: string,
   qrToken: string,
   locationId?: number,
+  signal?: AbortSignal,
 ): Promise<ScanResult> {
   const res = await apiRequest<RawScan>("/api/memberships/scan", {
     method: "POST",
     token,
     body: { qr_token: qrToken.trim(), location_id: locationId },
+    signal,
   });
   const d = res.data ?? {};
   const m = d.membership;
