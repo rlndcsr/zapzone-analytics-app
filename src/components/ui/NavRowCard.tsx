@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { type ComponentProps } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 const PRIMARY = "#0644C7";
 
@@ -30,9 +32,10 @@ export function NavRowCard({
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <PressableScale
+      pressScale="surface"
       onPress={onPress}
-      className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
+      className="flex-row items-center gap-3 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800"
       style={NAV_ROW_SHADOW}
       accessibilityRole="button"
       accessibilityLabel={title}
@@ -52,6 +55,6 @@ export function NavRowCard({
         </Text>
       </View>
       <Feather name="chevron-right" size={18} color={PRIMARY} />
-    </Pressable>
+    </PressableScale>
   );
 }

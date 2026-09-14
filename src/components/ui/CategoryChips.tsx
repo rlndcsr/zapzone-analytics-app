@@ -1,4 +1,6 @@
-import { Pressable, ScrollView, Text } from "react-native";
+import { ScrollView, Text } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import {
   categoryKeyOf,
@@ -50,12 +52,12 @@ function Chip({
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: on }}
       accessibilityLabel={`${label}, ${count} ${count === 1 ? "record" : "records"}`}
-      className={`flex-row items-center gap-1.5 rounded-full border px-3.5 py-1.5 active:opacity-70 ${
+      className={`flex-row items-center gap-1.5 rounded-full border px-3.5 py-1.5 ${
         on
           ? "bg-gray-900 border-gray-900 dark:bg-white dark:border-white"
           : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
@@ -77,7 +79,7 @@ function Chip({
       >
         {count}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 

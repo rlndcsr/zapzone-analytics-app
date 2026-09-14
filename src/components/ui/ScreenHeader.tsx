@@ -2,7 +2,9 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type ScreenHeaderProps = {
@@ -31,14 +33,15 @@ export function ScreenHeader({
       style={{ paddingTop: insets.top + 10 }}
     >
       <View className="flex-row items-center">
-        <Pressable
+        <PressableScale
+          pressScale="icon"
           onPress={onBack ?? (() => router.back())}
           accessibilityRole="button"
           accessibilityLabel="Go back"
-          className="h-9 w-9 items-center justify-center rounded-full bg-black/5 dark:bg-neutral-800 active:opacity-80"
+          className="h-9 w-9 items-center justify-center rounded-full bg-black/5 dark:bg-neutral-800"
         >
           <Feather name="chevron-left" size={22} color={headerIcon} />
-        </Pressable>
+        </PressableScale>
         <Text
           className="flex-1 text-center text-[22px] font-bold text-gray-900 dark:text-white"
           numberOfLines={1}

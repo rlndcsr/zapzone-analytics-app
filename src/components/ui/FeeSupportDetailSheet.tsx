@@ -223,6 +223,7 @@ export function FeeSupportDetailSheet({
 
   // The detail payload is authoritative for the count; the row is the fallback.
   const entityCount = detail?.entityIds.length ?? row.entityCount;
+  const appliesToAll = detail?.appliesToAll ?? row.appliesToAll;
 
   const location = feeSupportLocationLabel(row);
 
@@ -311,7 +312,11 @@ export function FeeSupportDetailSheet({
           <DetailTile
             icon="check-square"
             label="Items"
-            value={`${entityCount} ${entityCount === 1 ? "item" : "items"}`}
+            value={
+              appliesToAll
+                ? "All items of this type"
+                : `${entityCount} ${entityCount === 1 ? "item" : "items"}`
+            }
           />
         </View>
 
@@ -335,6 +340,16 @@ export function FeeSupportDetailSheet({
                 </Text>
               </View>
             ))}
+          </View>
+        ) : appliesToAll ? (
+          // An applies-to-all rule names nothing on purpose, so the empty list
+          // below would otherwise read as "not applied to anything" — the exact
+          // opposite of what this rule does.
+          <View className="flex-row items-center gap-2.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-neutral-700 dark:bg-neutral-800">
+            <Feather name={entity.icon} size={14} color={PRIMARY} />
+            <Text className="flex-1 text-sm font-medium text-gray-900 dark:text-white">
+              Every {entity.plural.replace(/s$/, "")}, including new ones
+            </Text>
           </View>
         ) : entityNames && entityNames.length === 0 ? (
           <Text className="text-sm text-gray-500 dark:text-gray-400">

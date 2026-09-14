@@ -22,11 +22,13 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { bookingDurationMinutes, buildCalendarEventDraft } from "../../lib/calendarEvent";
 import { addEventToCalendar } from "../../lib/nativeCalendar";
+import { resolvePaymentState } from "../../lib/payments/paymentState";
 import { getToken } from "../../lib/session";
 import { deleteBooking, type BookingDetail } from "../../services/bookingsService";
 import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingQRModal } from "./BookingQRModal";
 import { BottomSheet } from "./BottomSheet";
+import { PaymentStatusBadge } from "./PaymentStatusBadge";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -47,11 +49,10 @@ const STATUS_BADGE: Record<string, string> = {
   "checked-in": "bg-indigo-100 text-indigo-700",
   completed: "bg-blue-100 text-blue-700",
 };
-const PAYMENT_BADGE: Record<string, string> = {
-  paid: "bg-green-100 text-green-700",
-  partial: "bg-amber-100 text-amber-700",
-  pending: "bg-gray-200 text-gray-700",
-};
+// Kept only as the neutral fallback for the *booking* status badge below; the
+// payment colours it used to hold (amber for partial, grey for unpaid) now come
+// from lib/payments/paymentState.ts, which paints anything owing red.
+const NEUTRAL_BADGE = "bg-gray-200 text-gray-700";
 
 const formatMoney = (value: number) =>
   `$${value.toLocaleString("en-US", {
@@ -218,7 +219,15 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
 
   const typeLabel =
     detail.type === "package" ? "Package Booking" : capitalize(detail.type);
-  const remaining = Math.max(0, detail.totalAmount - detail.amountPaid);
+  // The one payment verdict for this booking: label, colour and balance.
+  const payment = resolvePaymentState({
+    payment_status: detail.paymentStatus,
+    total_amount: detail.totalAmount,
+    amount_paid: detail.amountPaid,
+  });
+  // Clamped for display — an overpayment is called out by `balanceLabel`
+  // ("Credit Due") rather than by showing a negative figure here.
+  const remaining = Math.max(0, payment.balance);
 
   // Null when the booking has no valid scheduled date/time — the action is
   // hidden rather than falling back to midnight or any other placeholder.
@@ -384,7 +393,7 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
               <View className="flex-row">
                 <Badge
                   text={capitalize(detail.status)}
-                  className={STATUS_BADGE[detail.status] ?? PAYMENT_BADGE.pending}
+                  className={STATUS_BADGE[detail.status] ?? NEUTRAL_BADGE}
                 />
               </View>
             </InfoTile>
@@ -442,19 +451,15 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
             </InfoTile>
             <InfoTile
               icon={DollarSign}
-              label="Remaining Balance"
-              accent={remaining > 0 ? "#dc2626" : "#16a34a"}
+              label={payment.balanceLabel}
+              accent={payment.isSettled ? "#16a34a" : "#dc2626"}
               tintClass={
-                remaining > 0
-                  ? "bg-red-100 dark:bg-red-900/20"
-                  : "bg-green-100 dark:bg-green-900/20"
+                payment.isSettled
+                  ? "bg-green-100 dark:bg-green-900/20"
+                  : "bg-red-100 dark:bg-red-900/20"
               }
             >
-              <Text
-                className={`text-base font-bold ${
-                  remaining > 0 ? "text-red-600" : "text-green-600"
-                }`}
-              >
+              <Text className={`text-base font-bold ${payment.amountClass}`}>
                 {formatMoney(remaining)}
               </Text>
             </InfoTile>
@@ -466,14 +471,13 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
               />
             )}
             <InfoTile icon={Wallet} label="Payment Status">
-              <View className="flex-row">
-                <Badge
-                  text={capitalize(detail.paymentStatus)}
-                  className={
-                    PAYMENT_BADGE[detail.paymentStatus] ?? PAYMENT_BADGE.pending
-                  }
-                />
-              </View>
+              <PaymentStatusBadge
+                payment={{
+                  payment_status: detail.paymentStatus,
+                  total_amount: detail.totalAmount,
+                  amount_paid: detail.amountPaid,
+                }}
+              />
             </InfoTile>
 
             {detail.appliedFees.length > 0 && (

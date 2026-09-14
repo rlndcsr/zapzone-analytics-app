@@ -1,5 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { BottomSheet } from "./BottomSheet";
 
@@ -32,7 +34,8 @@ export function FilterOptionSheet({
         {options.map((option) => {
           const isSelected = option.value === value;
           return (
-            <Pressable
+            <PressableScale
+              pressScale="flat"
               key={String(option.value)}
               onPress={() => {
                 onSelect(option.value);
@@ -59,7 +62,7 @@ export function FilterOptionSheet({
                   <Feather name="check" size={14} color="#FFFFFF" />
                 </View>
               )}
-            </Pressable>
+            </PressableScale>
           );
         })}
       </ScrollView>

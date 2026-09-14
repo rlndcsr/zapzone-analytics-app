@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useState, type ComponentProps } from "react";
-import { Pressable, Text } from "react-native";
+import { Text } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { FilterOptionSheet } from "./FilterOptionSheet";
 
@@ -36,7 +38,8 @@ export function SheetSelect({
 
   return (
     <>
-      <Pressable
+      <PressableScale
+        pressScale="flat"
         onPress={() => setOpen(true)}
         className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
       >
@@ -48,7 +51,7 @@ export function SheetSelect({
           {selected ? selected.label : placeholder}
         </Text>
         <Feather name="chevron-down" size={14} color="#9CA3AF" />
-      </Pressable>
+      </PressableScale>
 
       <FilterOptionSheet
         visible={open}

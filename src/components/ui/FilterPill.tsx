@@ -1,5 +1,7 @@
 import React, { type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 const PRIMARY = "#0644C7";
 
@@ -52,7 +54,7 @@ export function PillSegment({
 }) {
   const color = active ? "#FFFFFF" : "#6B7280";
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       className={`flex-1 flex-row items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl ${
         active ? "bg-[#0644C7]" : "bg-transparent"
@@ -68,6 +70,6 @@ export function PillSegment({
       >
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }

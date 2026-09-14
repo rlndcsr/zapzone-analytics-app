@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import React, { type ComponentProps } from "react";
-import { Alert, Pressable, Text, View } from "react-native";
+import { Alert, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 const CARD_SHADOW = {
   shadowColor: "#000",
@@ -57,9 +59,9 @@ export function StatTile({
             {label}
           </Text>
           {info ? (
-            <Pressable onPress={() => Alert.alert(label, info)} hitSlop={8}>
+            <PressableScale pressScale="surface" onPress={() => Alert.alert(label, info)} hitSlop={8}>
               <Feather name="info" size={12} color="#9CA3AF" />
-            </Pressable>
+            </PressableScale>
           ) : null}
         </View>
       </View>

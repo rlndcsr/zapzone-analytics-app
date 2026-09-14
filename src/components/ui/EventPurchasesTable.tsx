@@ -4,10 +4,10 @@ import { Pressable, Text, View } from "react-native";
 
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import type {
-  EventPaymentStatus,
   EventPurchaseRow,
   EventPurchaseStatus,
 } from "../../services/eventPurchasesService";
+import { PaymentStatusBadge } from "./PaymentStatusBadge";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
 
 const PRIMARY = "#0644C7";
@@ -71,28 +71,8 @@ const STATUS_STYLE: Record<EventPurchaseStatus, string> = {
   cancelled: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
 };
 
-const PAYMENT_STYLE: Record<EventPaymentStatus, string> = {
-  paid: "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
-  partial: "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
-  pending: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
-  refunded:
-    "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400",
-  voided: "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400",
-};
-
 const prettyStatus = (s: string) =>
   s === "checked-in" ? "Checked In" : s.charAt(0).toUpperCase() + s.slice(1);
-
-const Pill = ({ style, label }: { style: string; label: string }) => {
-  const [bg1, bg2, fg1, fg2] = style.split(" ");
-  return (
-    <View className="flex-row">
-      <View className={`px-2.5 py-1 rounded-full ${bg1} ${bg2}`}>
-        <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>{label}</Text>
-      </View>
-    </View>
-  );
-};
 
 /**
  * Status cell as a tap-to-change pill — the same pattern as the Manage Accounts
@@ -270,9 +250,13 @@ function buildColumns(h: Handlers): TableColumn<EventPurchaseRow>[] {
     label: "Payment Status",
     width: 130,
     render: (p) => (
-      <Pill
-        style={PAYMENT_STYLE[p.paymentStatus] ?? PAYMENT_STYLE.pending}
-        label={prettyStatus(p.paymentStatus)}
+      <PaymentStatusBadge
+        payment={{
+          payment_status: p.paymentStatus,
+          total_amount: p.totalAmount,
+          amount_paid: p.amountPaid,
+        }}
+        size="sm"
       />
     ),
   },

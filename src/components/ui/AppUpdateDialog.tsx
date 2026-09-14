@@ -1,5 +1,7 @@
 import { Download, ShieldAlert } from "lucide-react-native";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 import Animated, { FadeIn } from "react-native-reanimated";
 
 import type { ApkInstall } from "../../lib/hooks/useApkInstall";
@@ -115,7 +117,7 @@ export function AppUpdateDialog({
             </Text>
 
             <View className="flex-row items-center gap-4">
-              <Pressable
+              <PressableScale
                 onPress={paused ? install.resume : install.pause}
                 accessibilityRole="button"
                 hitSlop={8}
@@ -126,8 +128,8 @@ export function AppUpdateDialog({
                 >
                   {paused ? "Resume" : "Pause"}
                 </Text>
-              </Pressable>
-              <Pressable
+              </PressableScale>
+              <PressableScale
                 onPress={install.cancel}
                 accessibilityRole="button"
                 hitSlop={8}
@@ -135,7 +137,7 @@ export function AppUpdateDialog({
                 <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500">
                   Cancel
                 </Text>
-              </Pressable>
+              </PressableScale>
             </View>
           </View>
         </View>
@@ -177,24 +179,24 @@ export function AppUpdateDialog({
             {/* Only an install failure has a settings remedy. There is
                 deliberately no browser fallback anywhere in this flow. */}
             {kind === "install_failed" && (
-              <Pressable
+              <PressableScale
                 onPress={install.openSettings}
                 accessibilityRole="button"
-                className="flex-1 items-center rounded-xl border border-gray-200 py-3 active:opacity-70 dark:border-neutral-700"
+                className="flex-1 items-center rounded-xl border border-gray-200 py-3 dark:border-neutral-700"
               >
                 <Text className="text-sm font-semibold text-gray-600 dark:text-gray-300">
                   Open Settings
                 </Text>
-              </Pressable>
+              </PressableScale>
             )}
-            <Pressable
+            <PressableScale
               onPress={install.retry}
               accessibilityRole="button"
-              className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] py-3 active:opacity-80"
+              className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] py-3"
             >
               <Download size={16} color="#fff" />
               <Text className="text-sm font-semibold text-white">Retry</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       );
@@ -204,17 +206,17 @@ export function AppUpdateDialog({
     if (blocking) {
       return (
         <View>
-          <Pressable
+          <PressableScale
             onPress={onUpdate}
             disabled={!canDownload}
             accessibilityRole="button"
-            className={`flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] py-3 active:opacity-80 ${
+            className={`flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] py-3 ${
               canDownload ? "" : "opacity-50"
             }`}
           >
             <Download size={16} color="#fff" />
             <Text className="text-sm font-semibold text-white">Update Now</Text>
-          </Pressable>
+          </PressableScale>
           {!canDownload && (
             // Blocking with nothing to download is a backend
             // misconfiguration; say so instead of leaving a dead button.
@@ -229,23 +231,23 @@ export function AppUpdateDialog({
 
     return (
       <View className="flex-row gap-3">
-        <Pressable
+        <PressableScale
           onPress={onLater}
           accessibilityRole="button"
-          className="flex-1 items-center rounded-xl border border-gray-200 py-3 active:opacity-70 dark:border-neutral-700"
+          className="flex-1 items-center rounded-xl border border-gray-200 py-3 dark:border-neutral-700"
         >
           <Text className="text-sm font-semibold text-gray-600 dark:text-gray-300">
             Later
           </Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={onUpdate}
           accessibilityRole="button"
-          className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] py-3 active:opacity-80"
+          className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] py-3"
         >
           <Download size={16} color="#fff" />
           <Text className="text-sm font-semibold text-white">Update</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     );
   };

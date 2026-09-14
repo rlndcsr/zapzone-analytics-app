@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { BottomSheet } from "./BottomSheet";
 import { formatShortDate } from "./DateRangeSheet";
@@ -143,7 +145,7 @@ export function CustomerFiltersSheet({
           {/* Created Date — opens the shared range calendar */}
           <View>
             <FieldLabel>Created Date</FieldLabel>
-            <Pressable
+            <PressableScale
               onPress={onOpenCreatedDate}
               className="h-14 flex-row items-center gap-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5"
             >
@@ -157,34 +159,34 @@ export function CustomerFiltersSheet({
                 {createdLabel ?? "Select dates"}
               </Text>
               {hasCreated ? (
-                <Pressable
+                <PressableScale
                   onPress={() => set({ createdStart: "", createdEnd: "" })}
                   hitSlop={10}
                 >
                   <Feather name="x" size={18} color="#9CA3AF" />
-                </Pressable>
+                </PressableScale>
               ) : (
                 <Feather name="chevron-right" size={18} color="#9CA3AF" />
               )}
-            </Pressable>
+            </PressableScale>
           </View>
 
           {/* Footer: Clear Filters (secondary) + Done (primary) */}
           <View className="flex-row gap-3 mt-2">
-            <Pressable
+            <PressableScale
               onPress={onClear}
-              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
             >
               <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                 Clear Filters
               </Text>
-            </Pressable>
-            <Pressable
+            </PressableScale>
+            <PressableScale
               onPress={onClose}
-              className="flex-1 h-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+              className="flex-1 h-14 items-center justify-center rounded-full bg-[#0644C7]"
             >
               <Text className="text-base font-semibold text-white">Done</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       </ScrollView>

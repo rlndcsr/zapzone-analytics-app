@@ -31,7 +31,9 @@ import { DatePickerSheet } from "../components/ui/DatePickerSheet";
 import { Pagination } from "../components/ui/Pagination";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../components/ui/ViewToggle";
+import { useAppUpdateNoticeInset } from "../lib/hooks/useAppUpdateNotice";
 import { resolveScannedCode } from "../lib/checkin/resolveScannedCode";
+import { resolvePaymentState } from "../lib/payments/paymentState";
 import {
   useBookingCheckIn,
   type ResultTone,
@@ -185,10 +187,17 @@ function BookingSummary({
 
 /** Outstanding-balance breakdown for a Pending booking (Total − Paid). */
 function PaymentBreakdown({ booking }: { booking: ScanBooking }) {
-  const outstanding = Math.max(0, booking.totalAmount - booking.amountPaid);
+  // Red, not amber: this panel only ever shows when the desk cannot check the
+  // guest in until money changes hands, which is a blocker, not a caution.
+  const payment = resolvePaymentState({
+    payment_status: booking.paymentStatus,
+    total_amount: booking.totalAmount,
+    amount_paid: booking.amountPaid,
+  });
+  const outstanding = Math.max(0, payment.balance);
   return (
-    <View className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-900/20">
-      <Text className="mb-1 text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+    <View className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-900/20">
+      <Text className="mb-1 text-xs font-bold uppercase tracking-wide text-red-700 dark:text-red-400">
         Payment Details
       </Text>
       <View className="flex-row items-center justify-between py-2">
@@ -203,15 +212,15 @@ function PaymentBreakdown({ booking }: { booking: ScanBooking }) {
           {money(booking.amountPaid)}
         </Text>
       </View>
-      <View className="mt-1 flex-row items-center justify-between border-t border-amber-200 pt-3 dark:border-amber-900/40">
-        <Text className="text-sm font-bold text-amber-800 dark:text-amber-300">
-          Outstanding Balance
+      <View className="mt-1 flex-row items-center justify-between border-t border-red-200 pt-3 dark:border-red-900/40">
+        <Text className="text-sm font-bold text-red-800 dark:text-red-300">
+          {payment.balanceLabel}
         </Text>
-        <Text className="text-base font-bold text-amber-800 dark:text-amber-300">
+        <Text className="text-base font-bold text-red-800 dark:text-red-300">
           {money(outstanding)}
         </Text>
       </View>
-      <Text className="mt-3 text-xs font-medium text-amber-700 dark:text-amber-400">
+      <Text className="mt-3 text-xs font-medium text-red-700 dark:text-red-400">
         This booking can’t be checked in until payment is completed.
       </Text>
     </View>
@@ -249,6 +258,9 @@ const SURFACE_TITLE: Record<string, string> = {
 
 export default function CheckInWaiversScreen() {
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
@@ -1167,7 +1179,17 @@ export default function CheckInWaiversScreen() {
                       </View>
 
                       <View className="mt-2.5 flex-row items-center gap-2">
-                        <StatusBadge status={b.status} />
+                        {/* Same pill as the table view above it — the card
+                            layout is this screen's narrow rendering of the
+                            same row, so a view-mode toggle must not repaint
+                            the status. */}
+                        <StatusBadge
+                          status={b.status}
+                          palette="checkin"
+                          label={
+                            b.status === "checked-in" ? "Checked In" : b.status
+                          }
+                        />
                         <View className="flex-1" />
                         {b.status === "confirmed" && !!b.referenceNumber && (
                           <Pressable
@@ -1246,7 +1268,7 @@ export default function CheckInWaiversScreen() {
       {booking.phase === "review" && booking.reviewDetail && (
         <View
           className="flex-row gap-2.5 border-t border-gray-100 bg-white px-5 pt-3 dark:border-neutral-800 dark:bg-neutral-900"
-          style={{ paddingBottom: insets.bottom + 12 }}
+          style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
         >
           {detailsOnly ? (
             <>
@@ -1382,7 +1404,7 @@ export default function CheckInWaiversScreen() {
       {!!surface && (
         <View
           className="flex-row gap-2.5 border-t border-gray-100 bg-white px-5 pt-3 dark:border-neutral-800 dark:bg-neutral-900"
-          style={{ paddingBottom: insets.bottom + 12 }}
+          style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
         >
           <Pressable
             onPress={closeEntity}

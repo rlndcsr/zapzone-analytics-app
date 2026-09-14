@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { SOURCE_LABELS } from "../../services/waiversService";
 import { BottomSheet } from "./BottomSheet";
@@ -90,7 +92,7 @@ const DateRangeRow = ({
     ? `${formatShortDate(start) || "…"} – ${formatShortDate(end) || "…"}`
     : null;
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       className="h-14 flex-row items-center gap-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5"
     >
@@ -104,13 +106,13 @@ const DateRangeRow = ({
         {label ?? "Select dates"}
       </Text>
       {picked ? (
-        <Pressable onPress={onClear} hitSlop={10}>
+        <PressableScale onPress={onClear} hitSlop={10}>
           <Feather name="x" size={18} color="#9CA3AF" />
-        </Pressable>
+        </PressableScale>
       ) : (
         <Feather name="chevron-right" size={18} color="#9CA3AF" />
       )}
-    </Pressable>
+    </PressableScale>
   );
 };
 
@@ -225,20 +227,20 @@ export function WaiverFiltersSheet({
 
           {/* Footer: Clear Filters (secondary) + Done (primary) */}
           <View className="flex-row gap-3 mt-2">
-            <Pressable
+            <PressableScale
               onPress={onClear}
-              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
             >
               <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                 Clear Filters
               </Text>
-            </Pressable>
-            <Pressable
+            </PressableScale>
+            <PressableScale
               onPress={onClose}
-              className="flex-1 h-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+              className="flex-1 h-14 items-center justify-center rounded-full bg-[#0644C7]"
             >
               <Text className="text-base font-semibold text-white">Done</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       </ScrollView>

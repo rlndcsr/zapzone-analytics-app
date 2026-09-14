@@ -209,7 +209,11 @@ const COLUMNS: Column[] = [
     toggle: "entities",
     render: (row) => (
       <Text numberOfLines={1} className={CELL_TEXT}>
-        {row.entityCount} item{row.entityCount === 1 ? "" : "s"}
+        {/* A count would read "0 items" for a rule that actually covers
+            everything — the two are opposite meanings, not a rounding. */}
+        {row.appliesToAll
+          ? "All"
+          : `${row.entityCount} item${row.entityCount === 1 ? "" : "s"}`}
       </Text>
     ),
   },

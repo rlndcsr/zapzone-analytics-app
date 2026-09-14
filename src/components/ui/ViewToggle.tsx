@@ -1,5 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 const PRIMARY = "#0644C7";
 
@@ -32,7 +34,8 @@ export function ViewToggle({
       {(["table", "cards"] as const).map((m) => {
         const active = mode === m;
         return (
-          <Pressable
+          <PressableScale
+            pressScale="icon"
             key={m}
             onPress={() => onChange(m)}
             accessibilityRole="button"
@@ -48,7 +51,7 @@ export function ViewToggle({
               size={16}
               color={active ? PRIMARY : "#9CA3AF"}
             />
-          </Pressable>
+          </PressableScale>
         );
       })}
     </View>

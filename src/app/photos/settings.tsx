@@ -24,6 +24,7 @@ import {
   SkeletonBlock,
   usePulse,
 } from "../../components/ui/skeleton/SkeletonBlock";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -380,6 +381,9 @@ function SettingsSkeleton() {
 
 export default function PhotoSettingsScreen() {
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
 
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
@@ -1242,7 +1246,7 @@ export default function PhotoSettingsScreen() {
         {!!data && !!form && (
           <View
             className="border-t border-gray-100 bg-white px-5 pt-3 dark:border-neutral-800 dark:bg-neutral-900"
-            style={{ paddingBottom: insets.bottom + 12 }}
+            style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
           >
             <Pressable
               onPress={() => void save()}

@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import {
   MONTHS,
@@ -103,23 +105,23 @@ export function DateRangeSheet({
 
         {/* Month navigation */}
         <View className="flex-row items-center justify-between mb-3">
-          <Pressable
+          <PressableScale
             onPress={goPrevMonth}
             hitSlop={8}
-            className="w-9 h-9 rounded-full items-center justify-center bg-gray-100 dark:bg-neutral-800 active:opacity-70"
+            className="w-9 h-9 rounded-full items-center justify-center bg-gray-100 dark:bg-neutral-800"
           >
             <Feather name="chevron-left" size={20} color="#0644C7" />
-          </Pressable>
+          </PressableScale>
           <Text className="text-base font-bold text-gray-900 dark:text-white">
             {MONTHS[viewMonth.getMonth()]} {viewMonth.getFullYear()}
           </Text>
-          <Pressable
+          <PressableScale
             onPress={goNextMonth}
             hitSlop={8}
-            className="w-9 h-9 rounded-full items-center justify-center bg-gray-100 dark:bg-neutral-800 active:opacity-70"
+            className="w-9 h-9 rounded-full items-center justify-center bg-gray-100 dark:bg-neutral-800"
           >
             <Feather name="chevron-right" size={20} color="#0644C7" />
-          </Pressable>
+          </PressableScale>
         </View>
 
         {/* Weekday header — flex-1 columns, matching the grid below. */}
@@ -153,12 +155,12 @@ export function DateRangeSheet({
                       : ""
                   }`}
                 >
-                  <Pressable
+                  <PressableScale
                     onPress={() => onTapDay(key)}
+                    // The unselected day's pressed background is gone; the
+                    // animated press from PressableScale is the feedback now.
                     className={`w-9 h-9 rounded-full items-center justify-center ${
-                      isEndpoint
-                        ? "bg-[#0644C7]"
-                        : "active:bg-gray-100 dark:active:bg-neutral-800"
+                      isEndpoint ? "bg-[#0644C7]" : ""
                     }`}
                     accessibilityRole="button"
                     accessibilityLabel={key}
@@ -172,7 +174,7 @@ export function DateRangeSheet({
                     >
                       {Number(key.substring(8, 10))}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 </View>
               );
             })}

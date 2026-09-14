@@ -1,6 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import { type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { Appear } from "./motion/Appear";
+import { PressableScale } from "./motion/PressableScale";
 
 const CARD_SHADOW = {
   shadowColor: "#000",
@@ -40,13 +43,13 @@ const CheckboxCell = ({
     className="items-center justify-center"
     style={{ width: CHECKBOX_WIDTH }}
   >
-    <Pressable
+    <PressableScale
       onPress={onPress}
       hitSlop={10}
+      pressScale="icon"
       accessibilityRole="checkbox"
       accessibilityState={{ checked: state === "on" }}
       accessibilityLabel={label}
-      className="active:opacity-60"
     >
       <Feather
         name={
@@ -59,7 +62,7 @@ const CheckboxCell = ({
         size={19}
         color={state === "off" ? "#9CA3AF" : "#0644C7"}
       />
-    </Pressable>
+    </PressableScale>
   </View>
 );
 
@@ -171,45 +174,53 @@ function SelectableTableInner<T>({
             const id = rowId(row);
             const selected = !!selectedIds?.has(id);
             return (
-              <Pressable
-                key={id}
-                onPress={onRowPress ? () => onRowPress(row) : undefined}
-                disabled={!onRowPress}
-                accessibilityRole={onRowPress ? "button" : undefined}
-                accessibilityLabel={
-                  onRowPress && rowLabel ? `View ${rowLabel(row)}` : undefined
-                }
-                className={`flex-row items-center ${
-                  selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                } ${
-                  i < rows.length - 1
-                    ? "border-b border-gray-100 dark:border-neutral-800"
-                    : ""
-                }`}
-                style={({ pressed }) => ({
-                  minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed && onRowPress ? 0.6 : 1,
-                })}
-              >
-                {selectable && (
-                  <CheckboxCell
-                    state={selected ? "on" : "off"}
-                    onPress={() => onToggleRow?.(id)}
-                    label={`${selected ? "Deselect" : "Select"} ${
-                      rowLabel ? rowLabel(row) : "row"
-                    }`}
-                  />
-                )}
-                {columns.map((col) => (
-                  <View
-                    key={col.key}
-                    className="justify-center px-4 py-4"
-                    style={{ width: col.width }}
-                  >
-                    {col.render(row)}
-                  </View>
-                ))}
-              </Pressable>
+              // Rows cascade in rather than appearing all at once. Keyed by row
+              // id, so the stagger plays when a page's rows actually mount —
+              // paging, filtering, a first load — and not on an unrelated
+              // re-render of the same rows.
+              <Appear key={id} index={i}>
+                {/* `flat`: a table row shares dividers with its neighbours, so
+                    shrinking it would open a gap and flash the card behind. It
+                    gets the animated dim instead of the instant opacity swap
+                    the function style used to do. */}
+                <PressableScale
+                  onPress={onRowPress ? () => onRowPress(row) : undefined}
+                  disabled={!onRowPress}
+                  pressScale="flat"
+                  dim={!!onRowPress}
+                  accessibilityRole={onRowPress ? "button" : undefined}
+                  accessibilityLabel={
+                    onRowPress && rowLabel ? `View ${rowLabel(row)}` : undefined
+                  }
+                  className={`flex-row items-center ${
+                    selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  } ${
+                    i < rows.length - 1
+                      ? "border-b border-gray-100 dark:border-neutral-800"
+                      : ""
+                  }`}
+                  style={{ minHeight: ROW_MIN_HEIGHT }}
+                >
+                  {selectable && (
+                    <CheckboxCell
+                      state={selected ? "on" : "off"}
+                      onPress={() => onToggleRow?.(id)}
+                      label={`${selected ? "Deselect" : "Select"} ${
+                        rowLabel ? rowLabel(row) : "row"
+                      }`}
+                    />
+                  )}
+                  {columns.map((col) => (
+                    <View
+                      key={col.key}
+                      className="justify-center px-4 py-4"
+                      style={{ width: col.width }}
+                    >
+                      {col.render(row)}
+                    </View>
+                  ))}
+                </PressableScale>
+              </Appear>
             );
           })}
         </View>

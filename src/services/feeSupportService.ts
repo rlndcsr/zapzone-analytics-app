@@ -23,6 +23,8 @@ export type FeeSupportRow = {
   entityType: FeeSupportEntityType;
   /** How many entities this fee is applied to (entity_ids length). */
   entityCount: number;
+  /** Covers every item of its type — `entityCount` is meaningless when true. */
+  appliesToAll: boolean;
   status: FeeSupportStatus;
   locationId: number | null;
   locationName: string;
@@ -40,6 +42,7 @@ type RawFeeSupport = {
   /** `json` column cast to `array` by the model, so normally a real array — but
    *  see {@link parseEntityIds} for the string form we tolerate. */
   entity_ids?: number[] | string | null;
+  applies_to_all?: boolean | number | null;
   entity_type?: string | null;
   is_active?: boolean | null;
   created_at?: string | null;
@@ -138,6 +141,7 @@ function mapFeeSupport(raw: RawFeeSupport): FeeSupportRow {
     amountLabel: amountLabel(feeAmount, calculationType),
     entityType: normalizeEntityType(raw.entity_type),
     entityCount: parseEntityIds(raw.entity_ids).length,
+    appliesToAll: !!raw.applies_to_all,
     status: raw.is_active ? "active" : "inactive",
     locationId: raw.location?.id ?? raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
@@ -221,6 +225,14 @@ export type FeeSupportInput = {
   fee_application_type: FeeApplicationType;
   entity_type: FeeSupportEntityType;
   entity_ids: number[];
+  /**
+   * Cover every item of this type, present and future, instead of naming them.
+   * A company-wide fee written as a list of ids silently stops covering
+   * anything added afterwards — the new package simply isn't in the list — so
+   * "all" has to be a rule the server can re-evaluate, not a snapshot.
+   * `entity_ids` is ignored by the backend when this is set.
+   */
+  applies_to_all: boolean;
   is_active: boolean;
 };
 
@@ -245,6 +257,8 @@ export type FeeSupportDetail = {
   applicationType: FeeApplicationType;
   entityType: FeeSupportEntityType;
   entityIds: number[];
+  /** See {@link FeeSupportInput.applies_to_all}. */
+  appliesToAll: boolean;
   isActive: boolean;
 };
 
@@ -279,6 +293,7 @@ export async function fetchFeeSupport(
       return "package";
     })(),
     entityIds: parseEntityIds(r.entity_ids as number[] | string | null),
+    appliesToAll: !!r.applies_to_all,
     isActive: r.is_active == null ? true : !!r.is_active,
   };
 }

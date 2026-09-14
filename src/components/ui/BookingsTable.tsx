@@ -1,10 +1,14 @@
 import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
+import { PressableScale } from "./motion/PressableScale";
+
+import { resolvePaymentState } from "../../lib/payments/paymentState";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { ColumnMeta } from "./ColumnsSheet";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
+import { PaymentStatusBadge } from "./PaymentStatusBadge";
 import { StatusBadge } from "./StatusBadge";
 
 const PRIMARY = "#0644C7";
@@ -40,17 +44,17 @@ const IconAction = ({
   filled?: boolean;
   onPress: () => void;
 }) => (
-  <Pressable
+  <PressableScale
     onPress={onPress}
     hitSlop={4}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className={`w-7 h-7 items-center justify-center rounded-md active:opacity-60 ${
+    className={`w-7 h-7 items-center justify-center rounded-md ${
       filled ? "bg-red-500" : ""
     }`}
   >
     <Feather name={icon} size={14} color={filled ? "#FFFFFF" : tint} />
-  </Pressable>
+  </PressableScale>
 );
 
 const money = (n: number) =>
@@ -94,17 +98,9 @@ function paymentMethodLabel(pm: string | null): string {
   return (pm ?? "N/A").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/** Payment status derived from amounts — identical to the web `derivePaymentStatus`. */
-function derivePaymentStatus(
-  amountPaid: number,
-  totalAmount: number,
-): "paid" | "partial" | "pending" {
-  if (amountPaid <= 0) return "pending";
-  if (amountPaid >= totalAmount) return "paid";
-  return "partial";
-}
-
-// Web paymentColors (method) and paymentStatusColors, mapped to NativeWind pills.
+// Web paymentColors (method), mapped to NativeWind pills. The payment *status*
+// colours used to live here too, as a second, subtly different derivation; both
+// now come from lib/payments/paymentState.ts via <PaymentStatusBadge />.
 const PAYMENT_METHOD_STYLE: Record<string, string> = {
   card: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300",
   "authorize.net":
@@ -112,15 +108,6 @@ const PAYMENT_METHOD_STYLE: Record<string, string> = {
   "in-store": "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400",
   paylater:
     "bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400",
-};
-const PAYMENT_STATUS_STYLE: Record<string, string> = {
-  paid: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400",
-  partial:
-    "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400",
-  pending: "bg-gray-100 dark:bg-neutral-800 text-gray-600 dark:text-gray-300",
-  refunded:
-    "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400",
-  voided: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400",
 };
 const PILL_FALLBACK =
   "bg-gray-100 dark:bg-neutral-800 text-gray-600 dark:text-gray-300";
@@ -352,15 +339,15 @@ function buildColumns(
       width: 140,
       render: (b) => (
         <View className="flex-row">
-          <Pressable
+          <PressableScale
             onPress={() => h.onStatusPress(b)}
             accessibilityRole="button"
             accessibilityLabel={`Change status for ${b.customerName}, currently ${b.status}`}
-            className="flex-row items-center gap-1 active:opacity-70"
+            className="flex-row items-center gap-1"
           >
             <StatusBadge status={b.status} />
             <Feather name="chevron-down" size={13} color="#6B7280" />
-          </Pressable>
+          </PressableScale>
         </View>
       ),
     });
@@ -385,12 +372,16 @@ function buildColumns(
       key: "paymentStatus",
       label: "Pay Status",
       width: 120,
-      render: (b) => {
-        const ps = derivePaymentStatus(b.amountPaid, b.totalAmount);
-        return (
-          <Pill style={PAYMENT_STATUS_STYLE[ps] ?? PILL_FALLBACK} label={ps} />
-        );
-      },
+      render: (b) => (
+        <PaymentStatusBadge
+          payment={{
+            payment_status: b.paymentStatus,
+            amount_paid: b.amountPaid,
+            total_amount: b.totalAmount,
+          }}
+          size="sm"
+        />
+      ),
     });
   }
 
@@ -498,8 +489,14 @@ function buildColumns(
     label: "Actions",
     width: 164,
     render: (b) => {
-      const unpaid =
-        derivePaymentStatus(b.amountPaid, b.totalAmount) !== "paid";
+      // Nothing left to collect on a settled booking — and a refunded or
+      // voided one is settled too, so `isSettled` is the right test rather
+      // than a comparison against "paid".
+      const unpaid = !resolvePaymentState({
+        payment_status: b.paymentStatus,
+        amount_paid: b.amountPaid,
+        total_amount: b.totalAmount,
+      }).isSettled;
       return (
         <View className="flex-row items-center gap-0.5">
           {unpaid && (

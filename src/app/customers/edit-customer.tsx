@@ -21,6 +21,7 @@ import {
 } from "../../components/ui/FormControls";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { PRIMARY, Section } from "../../components/ui/attractionFormKit";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { markContactsStale } from "../../lib/contactsStale";
 import { getToken } from "../../lib/session";
 import {
@@ -58,6 +59,9 @@ const ReadOnly = ({ label, value }: { label: string; value: string }) => (
 const EditCustomer = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
   const params = useLocalSearchParams<{ id?: string }>();
   const contactId = Number(params.id);
 
@@ -396,7 +400,7 @@ const EditCustomer = () => {
           {/* Sticky footer: Cancel + Save (matches the other edit screens). */}
           <View
             className="flex-row gap-3 px-5 pt-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-            style={{ paddingBottom: insets.bottom + 12 }}
+            style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
           >
             <Pressable
               onPress={() => router.back()}

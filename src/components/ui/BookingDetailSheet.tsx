@@ -26,6 +26,7 @@ import {
 import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
+import { PaymentStatusBadge } from "./PaymentStatusBadge";
 import { ProcessPaymentSheet } from "./ProcessPaymentSheet";
 
 const MONTH_NAMES = [
@@ -60,11 +61,9 @@ const STATUS_BADGE: Record<string, string> = {
   completed: "bg-blue-100 text-blue-700",
 };
 
-const PAYMENT_BADGE: Record<string, string> = {
-  paid: "bg-green-100 text-green-700",
-  partial: "bg-amber-100 text-amber-700",
-  pending: "bg-gray-200 text-gray-700",
-};
+// Kept only as the neutral fallback for the *booking* status badge; the payment
+// colours it used to hold now come from lib/payments/paymentState.ts.
+const NEUTRAL_BADGE = "bg-gray-200 text-gray-700";
 
 const formatMoney = (value: number) =>
   `$${value.toLocaleString("en-US", {
@@ -287,7 +286,7 @@ export function BookingDetailSheet({
                   <Badge
                     text={capitalize(detail.status)}
                     className={
-                      STATUS_BADGE[detail.status] ?? PAYMENT_BADGE.pending
+                      STATUS_BADGE[detail.status] ?? NEUTRAL_BADGE
                     }
                   />
                 </View>
@@ -424,12 +423,12 @@ export function BookingDetailSheet({
                   <Text className="text-sm text-gray-500 dark:text-gray-400">
                     Payment Status
                   </Text>
-                  <Badge
-                    text={capitalize(detail.paymentStatus)}
-                    className={
-                      PAYMENT_BADGE[detail.paymentStatus] ??
-                      PAYMENT_BADGE.pending
-                    }
+                  <PaymentStatusBadge
+                    payment={{
+                      payment_status: detail.paymentStatus,
+                      total_amount: detail.totalAmount,
+                      amount_paid: detail.amountPaid,
+                    }}
                   />
                 </View>
                 {!!detail.paymentMethod && (

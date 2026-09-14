@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { formatDuration } from "../../lib/time";
 import type { CalendarBooking } from "../../services/bookingsService";
@@ -42,19 +44,19 @@ const ActionButton = ({
   disabled?: boolean;
   onPress: () => void;
 }) => (
-  <Pressable
+  <PressableScale
     onPress={onPress}
     disabled={disabled}
     hitSlop={4}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className={`flex-row items-center gap-1.5 rounded-lg px-2.5 py-1.5 active:opacity-80 ${
+    className={`flex-row items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${
       tone === "success" ? "bg-emerald-600" : "bg-[#0644C7]"
     } ${disabled ? "opacity-50" : ""}`}
   >
     <Feather name={icon} size={13} color="#FFFFFF" />
     <Text className="text-[11px] font-semibold text-white">{label}</Text>
-  </Pressable>
+  </PressableScale>
 );
 
 /**
@@ -154,7 +156,15 @@ export function CheckInBookingsTable({
         width: 110,
         render: (b) => (
           <View className="flex-row">
-            <StatusBadge status={b.status} />
+            {/* The Check-In page prints the status verbatim rather than
+                title-casing it, and spells out the one status a hyphen would
+                mangle — so "confirmed" stays lowercase and "checked-in" reads
+                as "Checked In", the same two strings the web shows. */}
+            <StatusBadge
+              status={b.status}
+              palette="checkin"
+              label={b.status === "checked-in" ? "Checked In" : b.status}
+            />
           </View>
         ),
       },

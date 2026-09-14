@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Pressable, Text, View } from "react-native";
 
+import { resolvePaymentState } from "../../lib/payments/paymentState";
 import { convertTo12Hour } from "../../lib/time";
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
 import type { CalendarBooking } from "../../services/bookingsService";
@@ -167,17 +168,22 @@ const DayBookingCard = ({
           {booking.paymentMethod || "N/A"}
         </Text>
       </View>
+      {/* Green when nothing is owed, red when something is — the stored status
+          alone can't answer that (it misses a refund, and an unpaid booking
+          read as merely "not paid" in yellow), so the shared rule decides. */}
       <View className="items-end">
         <Text
           className={`text-sm font-semibold ${
-            booking.paymentStatus === "paid"
-              ? "text-green-600 dark:text-green-400"
-              : "text-yellow-600 dark:text-yellow-400"
+            resolvePaymentState({
+              payment_status: booking.paymentStatus,
+              total_amount: booking.totalAmount,
+              amount_paid: booking.amountPaid,
+            }).amountClass
           }`}
         >
           {money(booking.totalAmount)}
         </Text>
-        {booking.paymentStatus === "partial" && (
+        {booking.amountPaid > 0 && booking.amountPaid < booking.totalAmount && (
           <Text className="text-[10px] text-gray-500 dark:text-gray-400">
             (Paid: {money(booking.amountPaid)})
           </Text>

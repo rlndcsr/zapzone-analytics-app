@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { BottomSheet } from "./BottomSheet";
 import { formatShortDate } from "./DateRangeSheet";
@@ -185,7 +187,7 @@ export function PaymentFiltersSheet({
               a native Modal and cannot stack another one on top. */}
           <View>
             <FieldLabel>Payment Date</FieldLabel>
-            <Pressable
+            <PressableScale
               onPress={onOpenDateRange}
               accessibilityRole="button"
               accessibilityLabel="Select payment dates"
@@ -201,18 +203,18 @@ export function PaymentFiltersSheet({
                 {dateText ?? "Select dates"}
               </Text>
               {hasDates ? (
-                <Pressable
+                <PressableScale
                   onPress={() => set({ createdFrom: "", createdTo: "" })}
                   hitSlop={10}
                   accessibilityRole="button"
                   accessibilityLabel="Clear payment dates"
                 >
                   <Feather name="x" size={18} color="#9CA3AF" />
-                </Pressable>
+                </PressableScale>
               ) : (
                 <Feather name="chevron-right" size={18} color="#9CA3AF" />
               )}
-            </Pressable>
+            </PressableScale>
           </View>
 
           {/* Amount range */}
@@ -252,26 +254,26 @@ export function PaymentFiltersSheet({
               utilities by CSS order, so `rounded-full` would win over a class
               override here (see CONTROL_RADIUS). */}
           <View className="flex-row gap-3 mt-2">
-            <Pressable
+            <PressableScale
               onPress={onClear}
               accessibilityRole="button"
               accessibilityLabel="Clear filters"
-              className="flex-1 h-14 items-center justify-center border border-gray-300 dark:border-neutral-700 active:opacity-70"
+              className="flex-1 h-14 items-center justify-center border border-gray-300 dark:border-neutral-700"
               style={{ borderRadius: CONTROL_RADIUS }}
             >
               <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                 Clear Filters
               </Text>
-            </Pressable>
-            <Pressable
+            </PressableScale>
+            <PressableScale
               onPress={onClose}
               accessibilityRole="button"
               accessibilityLabel="Done"
-              className="flex-1 h-14 items-center justify-center bg-[#0644C7] active:opacity-90"
+              className="flex-1 h-14 items-center justify-center bg-[#0644C7]"
               style={{ borderRadius: CONTROL_RADIUS }}
             >
               <Text className="text-base font-semibold text-white">Done</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       </ScrollView>

@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { type ComponentProps, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 const PRIMARY = "#0644C7";
 
@@ -40,11 +42,11 @@ export function NavTileCard({
   badge?: string;
 }) {
   return (
-    <Pressable
+    <PressableScale pressScale="surface"
       onPress={onPress}
       disabled={disabled}
       className={`aspect-square rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900 ${
-        disabled ? "opacity-60" : "active:opacity-70"
+        disabled ? "opacity-60" : ""
       }`}
       style={CARD_SHADOW}
       accessibilityRole="button"
@@ -90,6 +92,6 @@ export function NavTileCard({
           </>
         )}
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }

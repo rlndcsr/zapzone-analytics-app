@@ -1,10 +1,11 @@
 import {
   ActivityIndicator,
-  Pressable,
   type StyleProp,
   Text,
   type ViewStyle,
 } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 /**
  * The soft — not pill — corner radius for buttons and fields on screens that
@@ -37,13 +38,18 @@ export function PrimaryButton({
   const isDisabled = disabled || loading;
 
   return (
-    <Pressable
+    // `surface`, not the default: this is a full-width control, where the
+    // smaller chip scale would be too subtle to register. The old
+    // `active:opacity-90` is gone — PressableScale owns the press feedback now,
+    // and leaving both would dim it twice.
+    <PressableScale
       onPress={onPress}
       disabled={isDisabled}
+      pressScale="surface"
       accessibilityRole="button"
       accessibilityState={{ disabled: isDisabled }}
       android_ripple={{ color: "#1E3A8A" }}
-      className={`h-14 flex-row items-center justify-center rounded-full bg-[#0A2472] active:opacity-90 ${
+      className={`h-14 flex-row items-center justify-center rounded-full bg-[#0A2472] ${
         isDisabled ? "opacity-60" : ""
       } ${className ?? ""}`}
       style={style}
@@ -53,6 +59,6 @@ export function PrimaryButton({
       ) : (
         <Text className="text-base font-semibold text-white">{label}</Text>
       )}
-    </Pressable>
+    </PressableScale>
   );
 }

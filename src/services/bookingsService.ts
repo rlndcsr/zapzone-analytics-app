@@ -1,4 +1,5 @@
 import { apiRequest, apiUrl, firstMediaUrl } from "../lib/api";
+import { compareCheckInRows } from "../lib/checkin/checkInOrder";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
   AppliedFee as PricingAppliedFee,
@@ -494,10 +495,13 @@ export async function fetchBookingsForCheckIn({
   userId?: number;
   signal?: AbortSignal;
 }): Promise<CalendarBooking[]> {
-  // Deliberately no sort_by / sort_order: the web desk sends none either, so
-  // the server's default (booking_date desc) orders both. Asking for
-  // booking_time asc here — however sensible on its own — put the two desks in
-  // different orders, so the same guest sat on a different row in each.
+  // Still no sort_by / sort_order, because sending them would not help: the
+  // server's default is `ORDER BY booking_date DESC` with no secondary key
+  // (BookingController@index), and this list is one single day — so every row
+  // ties and the database returns them in whatever order it likes. The web
+  // desk sends no sort params either, which is why the two desks disagreed:
+  // they were not sharing an order, they were each getting an arbitrary one.
+  // The order is imposed below instead, where it is actually guaranteed.
   const params = new URLSearchParams({
     booking_date: date,
     per_page: "100",
@@ -515,7 +519,11 @@ export async function fetchBookingsForCheckIn({
     if (raw.status !== "confirmed" && raw.status !== "checked-in") continue;
     out.push(mapBooking(raw, toDateKey(raw.booking_date) ?? date));
   }
-  return out;
+
+  // Latest slot first, matching the order the web check-in desk shows. The
+  // rule itself lives in lib/checkin/checkInOrder.ts, where it can be tested
+  // without a network.
+  return out.sort(compareCheckInRows);
 }
 
 /** Full detail for one booking (GET /api/bookings/{id}). */
@@ -1663,8 +1671,32 @@ export type BookingUpdateInput = {
     quantity: number;
     price_at_booking: number;
   }[];
-  /** Recomputed total; sent with `amountPaid` only when a recalc was needed. */
+  /**
+   * Sent as `[]` when the package changes: the attractions on a booking belong
+   * to the package that was chosen with them, so carrying them onto a different
+   * package would bill the guest for extras that package never included.
+   */
+  additionalAttractions?: {
+    attraction_id: number;
+    quantity: number;
+    price_at_booking?: number;
+  }[];
+  /**
+   * The server's total, straight from a reprice quote — never computed here.
+   * Sent together with {@link discountAmount} and {@link appliedFees}, which
+   * are the other two halves of the same quote: writing the total without the
+   * discount and fees that produced it would store a figure the booking's own
+   * line items contradict.
+   */
   totalAmount?: number;
+  discountAmount?: number;
+  appliedFees?: BookingQuoteFee[] | null;
+  /**
+   * Deliberately absent from the edit screens. `amount_paid` is what the guest
+   * has handed over; an edit to the booking's contents never changes it, and
+   * sending a page-load snapshot back just reinstates a stale figure over
+   * whatever was collected in the meantime. Only the payment flows send it.
+   */
   amountPaid?: number;
   /** "paid" | "partial" — written by the Process Payment flow, like the web. */
   paymentStatus?: string;
@@ -1704,12 +1736,178 @@ export async function updateBooking(
   if (input.sendEmail != null) body.send_notification = input.sendEmail;
   if (input.additionalAddons !== undefined)
     body.additional_addons = input.additionalAddons;
+  if (input.additionalAttractions !== undefined)
+    body.additional_attractions = input.additionalAttractions;
   if (input.totalAmount !== undefined) body.total_amount = input.totalAmount;
+  if (input.discountAmount !== undefined)
+    body.discount_amount = input.discountAmount;
+  if (input.appliedFees !== undefined) {
+    body.applied_fees =
+      input.appliedFees && input.appliedFees.length > 0
+        ? input.appliedFees.map((fee) => ({
+            fee_name: fee.feeName,
+            fee_amount: fee.feeAmount,
+            fee_application_type: fee.feeApplicationType,
+            ...(fee.feeLabel != null ? { fee_label: fee.feeLabel } : {}),
+            ...(fee.feeCalculationType != null
+              ? { fee_calculation_type: fee.feeCalculationType }
+              : {}),
+          }))
+        : null;
+  }
   if (input.amountPaid !== undefined) body.amount_paid = input.amountPaid;
   if (input.paymentStatus !== undefined)
     body.payment_status = input.paymentStatus;
 
   await apiRequest(`/api/bookings/${id}`, { method: "PUT", token, body });
+}
+
+// ---------------------------------------------------------------------------
+// Repricing
+// ---------------------------------------------------------------------------
+
+/** One fee line on a quote, as the server would persist it. */
+export type BookingQuoteFee = {
+  feeName: string;
+  feeLabel: string | null;
+  feeAmount: number;
+  feeCalculationType: "fixed" | "percentage" | null;
+  feeApplicationType: "additive" | "inclusive";
+};
+
+/** One priced line (the package itself, an add-on, or an attraction). */
+export type BookingQuoteLine = {
+  type: "package" | "addon" | "attraction";
+  id: number;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+};
+
+/**
+ * The server's price for a proposed edit — every figure below is the server's,
+ * none are recomputed here.
+ */
+export type BookingQuote = {
+  subtotal: number;
+  lines: BookingQuoteLine[];
+  /** Fees to display, already resolved against the proposed change. */
+  fees: BookingQuoteFee[];
+  /**
+   * The same fees in the shape the server wants written back on save. Kept
+   * apart from `fees` because the two are not always the same set, and it is
+   * the persist set — never the display set — that goes into `updateBooking`.
+   */
+  persistFees: BookingQuoteFee[];
+  additiveFees: number;
+  specialPricingDiscount: number;
+  membershipDiscount: number;
+  redeemedCredit: number;
+  discountAmount: number;
+  totalAmount: number;
+  amountPaid: number;
+  remainingBalance: number;
+  paymentStatus: string;
+  /** Change against what is currently stored; negative means cheaper. */
+  delta: number | null;
+  /** False when the stored total disagrees with what the rules now produce. */
+  pricingConsistent: boolean | null;
+};
+
+/**
+ * What the caller is proposing. Only the fields that actually changed need to
+ * be sent — anything omitted is taken from the stored booking, which is why
+ * this is an *intent* rather than a payload: the client says what the user
+ * did, and the server decides what that costs.
+ */
+export type BookingRepriceIntent = {
+  participants?: number;
+  packageId?: number | null;
+  date?: string;
+  locationId?: number;
+  additionalAddons?: { addon_id: number; quantity: number }[];
+  additionalAttractions?: { attraction_id: number; quantity: number }[];
+};
+
+function toQuoteFee(raw: Record<string, unknown>): BookingQuoteFee {
+  return {
+    feeName: String(raw.fee_name ?? ""),
+    feeLabel: (raw.fee_label as string | null) ?? null,
+    feeAmount: Number(raw.fee_amount ?? 0),
+    feeCalculationType:
+      (raw.fee_calculation_type as "fixed" | "percentage" | null) ?? null,
+    feeApplicationType:
+      raw.fee_application_type === "inclusive" ? "inclusive" : "additive",
+  };
+}
+
+/**
+ * POST /api/bookings/{id}/reprice — ask the server what an edit would cost.
+ *
+ * This replaces the client-side arithmetic the edit screens used to do. That
+ * arithmetic was wrong in two ways that no amount of care would have fixed:
+ * it had no discount term at all (so any special pricing, membership benefit
+ * or redeemed credit silently vanished from the total on save), and it summed
+ * the *stored* fees, which are themselves derived from the price it was busy
+ * changing. Only the server knows the pricing rules, so only the server prices.
+ *
+ * Purely a quote: nothing is written. Rejects on a network or validation
+ * failure so the caller can block saving rather than fall back to a guess.
+ */
+export async function repriceBooking(
+  token: string,
+  id: number,
+  intent: BookingRepriceIntent,
+  signal?: AbortSignal,
+): Promise<BookingQuote> {
+  const body: Record<string, unknown> = {};
+  if (intent.participants != null) body.participants = intent.participants;
+  if (intent.packageId !== undefined) body.package_id = intent.packageId;
+  if (intent.date != null) body.booking_date = intent.date;
+  if (intent.locationId != null) body.location_id = intent.locationId;
+  if (intent.additionalAddons !== undefined)
+    body.additional_addons = intent.additionalAddons;
+  if (intent.additionalAttractions !== undefined)
+    body.additional_attractions = intent.additionalAttractions;
+
+  const res = await apiRequest<{ data?: Record<string, unknown> }>(
+    `/api/bookings/${id}/reprice`,
+    { method: "POST", token, body, signal },
+  );
+
+  const q = res?.data;
+  if (!q) throw new Error("The server returned no price for this change.");
+
+  return {
+    subtotal: Number(q.subtotal ?? 0),
+    lines: Array.isArray(q.lines)
+      ? (q.lines as Record<string, unknown>[]).map((l) => ({
+          type: l.type as BookingQuoteLine["type"],
+          id: Number(l.id ?? 0),
+          unitPrice: Number(l.unit_price ?? 0),
+          quantity: Number(l.quantity ?? 0),
+          lineTotal: Number(l.line_total ?? 0),
+        }))
+      : [],
+    fees: Array.isArray(q.fees)
+      ? (q.fees as Record<string, unknown>[]).map(toQuoteFee)
+      : [],
+    persistFees: Array.isArray(q.persist_fees)
+      ? (q.persist_fees as Record<string, unknown>[]).map(toQuoteFee)
+      : [],
+    additiveFees: Number(q.additive_fees ?? 0),
+    specialPricingDiscount: Number(q.special_pricing_discount ?? 0),
+    membershipDiscount: Number(q.membership_discount ?? 0),
+    redeemedCredit: Number(q.redeemed_credit ?? 0),
+    discountAmount: Number(q.discount_amount ?? 0),
+    totalAmount: Number(q.total_amount ?? 0),
+    amountPaid: Number(q.amount_paid ?? 0),
+    remainingBalance: Number(q.remaining_balance ?? 0),
+    paymentStatus: String(q.payment_status ?? "pending"),
+    delta: q.delta == null ? null : Number(q.delta),
+    pricingConsistent:
+      q.pricing_consistent == null ? null : Boolean(q.pricing_consistent),
+  };
 }
 
 // ---------------------------------------------------------------------------

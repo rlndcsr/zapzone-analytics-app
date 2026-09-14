@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Dimensions, Modal, Pressable, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 import {
   Gesture,
   GestureDetector,
@@ -162,9 +164,13 @@ export function BottomSheet({
                       </Text>
                     )}
                   </View>
-                  <Pressable onPress={onClose} className="p-1 shrink-0">
+                  <PressableScale
+                    onPress={onClose}
+                    pressScale="icon"
+                    className="p-1 shrink-0"
+                  >
                     <Text className="text-xl text-gray-500 dark:text-gray-400">✕</Text>
-                  </Pressable>
+                  </PressableScale>
                 </View>
               </View>
             </GestureDetector>

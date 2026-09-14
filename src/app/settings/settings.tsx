@@ -13,6 +13,7 @@ import { GoogleCalendarCard } from "../../components/settings/GoogleCalendarCard
 import { PaymentIntegrationCard } from "../../components/settings/PaymentIntegrationCard";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { SettingsAccountSkeleton } from "../../components/ui/skeleton/SettingsAccountSkeleton";
+import { reopenUpdatePrompt } from "../../lib/appUpdatePrompt";
 import { useAppUpdateStatus } from "../../lib/hooks/useAppUpdateCheck";
 import { useProfile } from "../../lib/hooks/useProfile";
 import { saveTheme } from "../../lib/theme";
@@ -193,6 +194,40 @@ const Settings = () => {
                 </View>
               }
             />
+
+            {/* Only rendered while an update is actually pending and
+                downloadable — the same condition AppUpdateGate uses before it
+                offers anything. This is the one permanent way back to the
+                prompt: the launch dialog can be waved off with "Later" and the
+                reminder notice behind it can be closed, but this row stays for
+                as long as the installed build is behind. It starts nothing
+                itself; reopening the gate's dialog keeps a single download
+                flow in one place (lib/appUpdatePrompt.ts). */}
+            {updateStatus?.hasUpdate && updateStatus.apkUrl ? (
+              <>
+                <Divider />
+                <SettingRow
+                  icon="download"
+                  label="App Update"
+                  value={
+                    updateStatus.latestVersion
+                      ? `Version ${updateStatus.latestVersion} is ready to install`
+                      : "A newer version is ready to install"
+                  }
+                  onPress={reopenUpdatePrompt}
+                  right={
+                    <View
+                      className="rounded-xl bg-[#0644C7] px-3.5 py-2"
+                      pointerEvents="none"
+                    >
+                      <Text className="text-xs font-semibold text-white">
+                        Update
+                      </Text>
+                    </View>
+                  }
+                />
+              </>
+            ) : null}
           </View>
 
           {/* Version Info — the installed build, read from the binary itself so

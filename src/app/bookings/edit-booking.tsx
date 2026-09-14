@@ -29,7 +29,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingChangeHistory } from "../../components/ui/BookingChangeHistory";
+import { BookingPricePanel } from "../../components/ui/BookingPricePanel";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { mediaUrl } from "../../lib/api";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -44,7 +46,7 @@ import {
   clampParticipants,
   participantLimitsLabel,
 } from "../../lib/participants";
-import { packagePriceForParticipants } from "../../lib/packages/packagePricing";
+import { useBookingQuote } from "../../lib/hooks/useBookingQuote";
 import { getToken } from "../../lib/session";
 import {
   fetchAvailableTimeSlots,
@@ -312,6 +314,9 @@ const SelectField = ({
  *  screen's Edit button. */
 const EditBookingScreen = () => {
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
   const params = useLocalSearchParams<{ id?: string }>();
   const bookingId = Number(params.id);
 
@@ -682,22 +687,6 @@ const EditBookingScreen = () => {
     [availableAddOns, packageId],
   );
 
-  const computeAddonsTotal = useCallback(
-    (addons: { [id: number]: number }, participantCount: number) =>
-      Object.entries(addons).reduce((sum, [id, quantity]) => {
-        const addonId = parseInt(id);
-        const addOn = availableAddOns.find((a) => a.id === addonId);
-        if (!addOn) return sum;
-        const price = getAddOnUnitPrice(addonId, addOn);
-        const lineTotal =
-          addOn.pricingType === "per_person"
-            ? price * quantity * participantCount
-            : price * quantity;
-        return sum + lineTotal;
-      }, 0),
-    [availableAddOns, getAddOnUnitPrice],
-  );
-
   const buildAdditionalAddons = useCallback(
     () =>
       Object.entries(selectedAddOns)
@@ -724,6 +713,58 @@ const EditBookingScreen = () => {
     [selectedAddOns, availableAddOns, getAddOnUnitPrice],
   );
 
+  /**
+   * What the user is proposing, in the server's terms. Note what is NOT here:
+   * a total. The client no longer prices anything — it describes the edit and
+   * the server answers with what it costs.
+   */
+  const repriceIntent = useMemo(
+    () => ({
+      participants: clampParticipants(participants, packageDetail),
+      packageId: packageId ?? undefined,
+      date: date || undefined,
+      locationId: locationId ?? undefined,
+      additionalAddons: buildAdditionalAddons().map(
+        ({ addon_id, quantity }) => ({ addon_id, quantity }),
+      ),
+      // Swapping the package drops the attractions that belonged to the old
+      // one, so the quote must be asked for a booking with none rather than
+      // for one still carrying the previous package's extras.
+      ...(packageId !== detail?.packageId
+        ? { additionalAttractions: [] }
+        : {}),
+    }),
+    [participants, packageDetail, packageId, date, locationId, buildAdditionalAddons, detail?.packageId],
+  );
+
+  /**
+   * One string that changes exactly when a priced field does. The intent object
+   * is rebuilt every render, so this — not the object — is what drives the
+   * re-quote; without it every keystroke in the guest's name would fire one.
+   */
+  const repriceKey = useMemo(
+    () =>
+      [
+        repriceIntent.participants,
+        repriceIntent.packageId ?? "",
+        repriceIntent.date ?? "",
+        repriceIntent.locationId ?? "",
+        repriceIntent.additionalAddons
+          .map((a) => `${a.addon_id}:${a.quantity}`)
+          .sort()
+          .join(","),
+      ].join("|"),
+    [repriceIntent],
+  );
+
+  const priceQuote = useBookingQuote({
+    bookingId: detail?.id ?? null,
+    intent: repriceIntent,
+    intentKey: repriceKey,
+    // Nothing to price without a package — the endpoint 422s on such a booking.
+    enabled: !!detail?.id && !!packageId,
+  });
+
   const addOnsChanged = useMemo(() => {
     const originalMap: { [id: number]: number } = {};
     (detail?.addOns ?? []).forEach((a) => {
@@ -740,6 +781,16 @@ const EditBookingScreen = () => {
 
   const handleSave = async () => {
     if (!detail || saving) return;
+    // The price on screen is stale or unknown — saving now would write a total
+    // nobody computed. The button is already disabled; this is the backstop.
+    if (priceQuote.blocked) {
+      Alert.alert(
+        "Pricing not ready",
+        priceQuote.error ??
+          "Still working out the new price. Try again in a moment.",
+      );
+      return;
+    }
     const token = getToken();
     if (!token) {
       Alert.alert("Not authenticated", "Please sign in again.");
@@ -754,36 +805,6 @@ const EditBookingScreen = () => {
         setParticipants(String(participantCount));
       }
       const isPackageChanged = packageId !== detail.packageId;
-      const isParticipantsChanged = participantCount !== detail.participants;
-
-      // Recompute the total only when something priced changed, exactly as the
-      // web does (fees are not editable here, so feesChanged is always false).
-      let updatedTotal: number | undefined;
-      if (isPackageChanged || isParticipantsChanged || addOnsChanged) {
-        const packagePrice = packagePriceForParticipants({
-          pricingType: packageDetail?.pricingType,
-          price: packageDetail?.price ?? 0,
-          minParticipants: packageDetail?.minParticipants,
-          pricePerAdditional: packageDetail?.pricePerAdditional,
-          participants: participantCount,
-        });
-
-        const attractionsTotal = isPackageChanged
-          ? 0
-          : detail.attractions.reduce(
-              (sum, attr) => sum + attr.priceAtBooking * attr.quantity,
-              0,
-            );
-
-        const addonsTotal = computeAddonsTotal(selectedAddOns, participantCount);
-
-        const additiveFeeTotal = detail.appliedFees
-          .filter((f) => f.applicationType === "additive")
-          .reduce((sum, f) => sum + f.amount, 0);
-
-        updatedTotal =
-          packagePrice + attractionsTotal + addonsTotal + additiveFeeTotal;
-      }
 
       await updateBooking(token, detail.id, {
         locationId,
@@ -803,9 +824,19 @@ const EditBookingScreen = () => {
         internalNotes: internalNotes.trim() || null,
         sendEmail,
         ...(addOnsChanged && { additionalAddons: buildAdditionalAddons() }),
-        ...(updatedTotal !== undefined && {
-          totalAmount: updatedTotal,
-          amountPaid: detail.amountPaid,
+        // A new package does not inherit the old one's attractions.
+        ...(isPackageChanged && { additionalAttractions: [] }),
+        // The money comes from the server's quote or not at all. `amount_paid`
+        // is deliberately absent: it is what the guest has handed over, which
+        // an edit to the booking's contents never changes, and sending the
+        // page-load snapshot back would overwrite anything collected since.
+        ...(priceQuote.quote && {
+          totalAmount: priceQuote.quote.totalAmount,
+          discountAmount: priceQuote.quote.discountAmount,
+          appliedFees:
+            priceQuote.quote.persistFees.length > 0
+              ? priceQuote.quote.persistFees
+              : null,
         }),
       });
       markBookingsStale();
@@ -1312,6 +1343,18 @@ const EditBookingScreen = () => {
               </View>
             </View>
 
+            {/* The server's price for the edit in progress. Every figure here
+                comes off the reprice quote — the screen shows what the change
+                costs, it does not work it out. While a quote is in flight the
+                last good total stays put under an "updating" note rather than
+                blanking, so the panel doesn't flicker on every keystroke. */}
+            <BookingPricePanel
+              quote={priceQuote}
+              storedTotal={detail?.totalAmount ?? 0}
+              storedAmountPaid={detail?.amountPaid ?? 0}
+              storedPaymentStatus={detail?.paymentStatus ?? null}
+            />
+
             {/* Change history — the permanent change log, same panel the web
                 Edit Booking shows under its form. */}
             <View className="border-t border-gray-200 dark:border-neutral-800 mt-6 pt-2">
@@ -1322,7 +1365,7 @@ const EditBookingScreen = () => {
           {/* Footer */}
           <View
             className="flex-row gap-3 px-5 pt-3 bg-white dark:bg-neutral-900 border-t border-gray-100 dark:border-neutral-800"
-            style={{ paddingBottom: insets.bottom + 12 }}
+            style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
           >
             <Pressable
               onPress={() => router.back()}
@@ -1333,13 +1376,22 @@ const EditBookingScreen = () => {
                 Cancel
               </Text>
             </Pressable>
+            {/* Disabled while the price is in flight or failed: the client no
+                longer knows the total, so there is nothing safe to save. */}
             <Pressable
               onPress={handleSave}
-              disabled={saving}
-              className="flex-1 py-3 rounded-xl bg-[#0644C7] items-center flex-row justify-center gap-2 active:opacity-80"
+              disabled={saving || priceQuote.blocked}
+              className={`flex-1 py-3 rounded-xl bg-[#0644C7] items-center flex-row justify-center gap-2 active:opacity-80 ${
+                priceQuote.blocked && !saving ? "opacity-50" : ""
+              }`}
             >
-              {saving ? (
-                <ActivityIndicator color="#fff" size="small" />
+              {saving || priceQuote.status === "loading" ? (
+                <>
+                  <ActivityIndicator color="#fff" size="small" />
+                  <Text className="text-sm font-semibold text-white">
+                    {saving ? "Saving…" : "Pricing…"}
+                  </Text>
+                </>
               ) : (
                 <>
                   <Save size={16} color="#fff" />
@@ -1349,6 +1401,7 @@ const EditBookingScreen = () => {
                 </>
               )}
             </Pressable>
+
           </View>
         </>
       )}

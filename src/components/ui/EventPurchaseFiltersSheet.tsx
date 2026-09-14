@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { BottomSheet } from "./BottomSheet";
 import { formatShortDate } from "./DateRangeSheet";
@@ -121,7 +123,7 @@ const DateRangeRow = ({
   return (
     <View>
       <FieldLabel>{label}</FieldLabel>
-      <Pressable
+      <PressableScale
         onPress={onOpen}
         className="h-14 flex-row items-center gap-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-5"
       >
@@ -135,13 +137,13 @@ const DateRangeRow = ({
           {text ?? "Any date"}
         </Text>
         {has ? (
-          <Pressable onPress={onClear} hitSlop={10}>
+          <PressableScale onPress={onClear} hitSlop={10}>
             <Feather name="x" size={18} color="#9CA3AF" />
-          </Pressable>
+          </PressableScale>
         ) : (
           <Feather name="chevron-right" size={18} color="#9CA3AF" />
         )}
-      </Pressable>
+      </PressableScale>
     </View>
   );
 };
@@ -283,35 +285,35 @@ export function EventPurchaseFiltersSheet({
           {/* Footer: Clear All + Cancel (secondary), Apply (primary) */}
           <View className="gap-3 mt-2">
             <View className="flex-row gap-3">
-              <Pressable
+              <PressableScale
                 onPress={onClear}
                 accessibilityRole="button"
                 accessibilityLabel="Clear all filters"
-                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
               >
                 <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                   Clear All
                 </Text>
-              </Pressable>
-              <Pressable
+              </PressableScale>
+              <PressableScale
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel"
-                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 active:opacity-70"
+                className="flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700"
               >
                 <Text className="text-base font-semibold text-gray-700 dark:text-gray-200">
                   Cancel
                 </Text>
-              </Pressable>
+              </PressableScale>
             </View>
-            <Pressable
+            <PressableScale
               onPress={onApply}
               accessibilityRole="button"
               accessibilityLabel="Apply filters"
-              className="h-14 items-center justify-center rounded-full bg-[#0644C7] active:opacity-90"
+              className="h-14 items-center justify-center rounded-full bg-[#0644C7]"
             >
               <Text className="text-base font-semibold text-white">Apply</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       </ScrollView>

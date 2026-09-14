@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import { BottomSheet } from "./BottomSheet";
 
@@ -60,7 +62,7 @@ export function ColumnsSheet({
             {groupColumns.map((column) => {
               const checked = column.lockVisible || visibleKeys.has(column.key);
               return (
-                <Pressable
+                <PressableScale
                   key={column.key}
                   onPress={() => !column.lockVisible && onToggle(column.key)}
                   disabled={column.lockVisible}
@@ -70,8 +72,12 @@ export function ColumnsSheet({
                     disabled: column.lockVisible,
                   }}
                   accessibilityLabel={column.label}
+                  // No `active:bg-*` here any more: the pressed background was
+                  // NativeWind's own press state, and PressableScale already
+                  // gives this row an animated dim on touch. Keeping both would
+                  // mean two different press treatments fighting on one row.
                   className={`flex-row items-center gap-2.5 rounded-lg px-1 py-2.5 ${
-                    column.lockVisible ? "opacity-50" : "active:bg-gray-50 dark:active:bg-neutral-800"
+                    column.lockVisible ? "opacity-50" : ""
                   }`}
                 >
                   <Feather
@@ -82,23 +88,23 @@ export function ColumnsSheet({
                   <Text className="text-sm text-gray-700 dark:text-gray-200">
                     {column.label}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </View>
         ))}
 
         <View className="mt-1 mb-6 flex-row gap-4 border-t border-gray-100 pt-3 dark:border-neutral-800">
-          <Pressable onPress={onShowAll} hitSlop={8}>
+          <PressableScale onPress={onShowAll} hitSlop={8}>
             <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-400">
               Show All
             </Text>
-          </Pressable>
-          <Pressable onPress={onReset} hitSlop={8}>
+          </PressableScale>
+          <PressableScale onPress={onReset} hitSlop={8}>
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400">
               Reset
             </Text>
-          </Pressable>
+          </PressableScale>
         </View>
       </ScrollView>
     </BottomSheet>

@@ -19,6 +19,7 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { PrimaryButton } from "../../components/ui/PrimaryButton";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { markWaiversStale } from "../../lib/hooks/useWaivers";
 import { getToken } from "../../lib/session";
 import {
@@ -91,6 +92,9 @@ const Section = ({
 
 const CreateWaiver = () => {
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
@@ -549,7 +553,7 @@ const CreateWaiver = () => {
         {/* Sticky footer */}
         <View
           className="bg-white dark:bg-neutral-900 border-t border-gray-100 dark:border-neutral-800 px-5 pt-4"
-          style={{ paddingBottom: insets.bottom + 12 }}
+          style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
         >
           <Text className="text-xs text-gray-400 dark:text-gray-500 text-center mb-3">
             A waiver link will be sent by email and/or SMS.

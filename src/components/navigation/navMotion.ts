@@ -335,3 +335,93 @@ export const PROGRESS_INDETERMINATE_DURATION = 1100;
 
 /** Width of the travelling indeterminate segment, as a share of the track. */
 export const PROGRESS_INDETERMINATE_RATIO = 0.4;
+
+/* ------------------------------------------------------------------ *
+ * Touch feedback — components/ui/motion/PressableScale.tsx
+ * ------------------------------------------------------------------ */
+
+/**
+ * How a pressable reacts under the finger — expressed as utility classes, not
+ * as a Reanimated style, and that distinction is load-bearing.
+ *
+ * The app was built on NativeWind's `active:opacity-*`, which is a state swap
+ * rather than a motion: the element is one opacity on this frame and another on
+ * the next, which flickers on a fast tap and gives nothing back on a slow one.
+ * The obvious upgrade — a `useAnimatedStyle` on an
+ * `Animated.createAnimatedComponent(Pressable)` — does not work here, and fails
+ * loudly: react-native-css-interop recognises Reanimated's own `Animated.*`
+ * components but not a custom one, so it walks the animated style's properties
+ * itself and trips Reanimated's "animated style on a non-animated component"
+ * guard.
+ *
+ * The supported path is to let css-interop do the animating. When a className
+ * carries a transition it upgrades the component to an animated one and builds
+ * the `useAnimatedStyle` internally (see its render-component.js), so the
+ * transition below runs on the UI thread with no custom animated component and
+ * nothing for the two libraries to disagree about.
+ *
+ * The trade against the hand-rolled version is that a CSS transition is
+ * symmetric — there is no way to press in on a curve and release on a spring.
+ * A single short ease-out is the cost of an approach that actually works.
+ */
+export const PRESS_TRANSITION = "transition duration-150 ease-out";
+
+/**
+ * Press scale, by how big the target is.
+ *
+ * One value cannot serve both: 3% off a full-width button is a clear, soft
+ * push, while 3% off a 32px icon button is a twitch you can barely see — and
+ * 10% off the button would look like it was collapsing. So the scale is chosen
+ * per target size instead of shared.
+ *
+ * `scale-97` is not a stock Tailwind step; it is added in tailwind.config.js,
+ * because arbitrary decimal scales (`scale-[0.97]`) generate no CSS at all.
+ */
+export const PRESS_SCALE_CLASS = {
+  /** Full-width buttons, cards — large surfaces. */
+  surface: "active:scale-97",
+  /** Chips, pills, segmented controls. */
+  control: "active:scale-95",
+  /** Icon buttons and other small square targets. */
+  icon: "active:scale-90",
+  /**
+   * No geometric change — the dim alone.
+   *
+   * For a row inside a bordered container (a table row, a sheet option),
+   * shrinking it pulls it away from the dividers it shares with its neighbours
+   * and flashes the container through the gap, which reads as a glitch rather
+   * than a press. Those rows still get a smooth dim in place of an instant
+   * `pressed ? 0.6 : 1` style swap.
+   */
+  flat: "",
+} as const;
+
+export type PressScale = keyof typeof PRESS_SCALE_CLASS;
+
+/** Companion dip in opacity. Small — the scale is doing the work. */
+export const PRESS_DIM_CLASS = "active:opacity-90";
+
+/* ------------------------------------------------------------------ *
+ * Content entrance — components/ui/motion/Appear.tsx
+ * ------------------------------------------------------------------ */
+
+/**
+ * How a piece of content arrives: a short rise with a fade.
+ *
+ * Unlike the screen-level rule at the top of this file, a fade and an offset
+ * are both fine here — these wrap cards, rows and panels, which always have an
+ * opaque screen behind them, so there is nothing to show through.
+ */
+export const APPEAR_DURATION = 260;
+export const APPEAR_DISTANCE = 10;
+
+/**
+ * Gap between consecutive items in a staggered list.
+ *
+ * Short on purpose, and capped by {@link APPEAR_MAX_STAGGER_STEPS}: a stagger
+ * that runs the length of a 50-row table turns a list into a slow reveal the
+ * user has to wait out. After the cap every remaining row shares the last
+ * delay, so the top of the list feels sequenced and the rest simply arrives.
+ */
+export const APPEAR_STAGGER_MS = 35;
+export const APPEAR_MAX_STAGGER_STEPS = 8;

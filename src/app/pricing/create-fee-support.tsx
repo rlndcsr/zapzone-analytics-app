@@ -45,6 +45,15 @@ const ENTITY: { label: string; value: FeeSupportEntityType }[] = [
   { label: "Membership Plans", value: "membership" },
 ];
 
+/** Lower-case nouns for the "apply to all" copy, e.g. "all membership plans". */
+const ENTITY_NOUN: Record<FeeSupportEntityType, { one: string; many: string }> =
+  {
+    package: { one: "package", many: "packages" },
+    attraction: { one: "attraction", many: "attractions" },
+    event: { one: "event", many: "events" },
+    membership: { one: "membership plan", many: "membership plans" },
+  };
+
 function Field({
   label,
   value,
@@ -138,6 +147,7 @@ const CreateFeeSupport = () => {
     useState<FeeApplicationType>("additive");
   const [entityType, setEntityType] = useState<FeeSupportEntityType>("package");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [appliesToAll, setAppliesToAll] = useState(false);
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
   // In edit mode, gate the first entity-list load until the record is fetched
@@ -171,6 +181,7 @@ const CreateFeeSupport = () => {
         setApplicationType(d.applicationType);
         pendingIdsRef.current = d.entityIds;
         setEntityType(d.entityType);
+        setAppliesToAll(d.appliesToAll);
         setActive(d.isActive);
       })
       .catch((err) => {
@@ -253,10 +264,12 @@ const CreateFeeSupport = () => {
       Alert.alert("Name required", "Please enter a fee name.");
       return;
     }
-    if (selectedIds.length === 0) {
+    // "Apply to all" is the alternative to naming items, not an extra on top
+    // of it — the same rule the backend enforces.
+    if (!appliesToAll && selectedIds.length === 0) {
       Alert.alert(
         "Select entities",
-        "Choose at least one item this fee applies to.",
+        "Choose at least one item this fee applies to, or apply it to all of them.",
       );
       return;
     }
@@ -267,7 +280,10 @@ const CreateFeeSupport = () => {
       fee_amount: Number(amount) || 0,
       fee_application_type: applicationType,
       entity_type: entityType,
-      entity_ids: selectedIds,
+      // The server ignores these when the rule covers everything; sent empty
+      // so a stale hand-picked list can't linger on the record.
+      entity_ids: appliesToAll ? [] : selectedIds,
+      applies_to_all: appliesToAll,
       is_active: active,
     };
     setSaving(true);
@@ -476,19 +492,56 @@ const CreateFeeSupport = () => {
             })}
           </View>
 
+          {/* The company-wide option. A fee meant to cover everything used to
+              have to be saved as a list of every current item, which stopped
+              covering anything added later — this is a rule the server keeps
+              re-evaluating instead of a snapshot of today's catalogue. */}
+          <Pressable
+            onPress={() => setAppliesToAll((v) => !v)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: appliesToAll }}
+            accessibilityLabel={`Apply to all ${ENTITY_NOUN[entityType].many}`}
+            className="mb-3 flex-row items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 active:opacity-80 dark:border-neutral-700 dark:bg-neutral-800"
+          >
+            <Feather
+              name={appliesToAll ? "check-square" : "square"}
+              size={18}
+              color={appliesToAll ? PRIMARY : "#9CA3AF"}
+            />
+            <View className="flex-1">
+              <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                Apply to all {ENTITY_NOUN[entityType].many}
+              </Text>
+              <Text className="mt-0.5 text-xs leading-4 text-gray-500 dark:text-gray-400">
+                Covers every current and future{" "}
+                {ENTITY_NOUN[entityType].one} automatically, so new ones are
+                never missed.
+              </Text>
+            </View>
+          </Pressable>
+
           <View className="flex-row items-center justify-between mb-1.5">
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-              Select Items *
+              Select Items{appliesToAll ? "" : " *"}
             </Text>
             {entities.length > 0 && (
-              <Pressable onPress={toggleAll}>
-                <Text className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+              <Pressable onPress={toggleAll} disabled={appliesToAll}>
+                <Text
+                  className={`text-xs font-semibold text-blue-600 dark:text-blue-400 ${
+                    appliesToAll ? "opacity-40" : ""
+                  }`}
+                >
                   {allSelected ? "Clear All" : "Select All"}
                 </Text>
               </Pressable>
             )}
           </View>
-          <View className="bg-gray-50 dark:bg-neutral-800 rounded-xl border border-gray-200 dark:border-neutral-700 max-h-64 mb-4">
+          <View
+            pointerEvents={appliesToAll ? "none" : "auto"}
+            className={`bg-gray-50 dark:bg-neutral-800 rounded-xl border border-gray-200 dark:border-neutral-700 max-h-64 mb-4 ${
+              appliesToAll ? "opacity-40" : ""
+            }`}
+          >
             {entitiesLoading ? (
               <View className="py-8 items-center">
                 <ActivityIndicator color={PRIMARY} />

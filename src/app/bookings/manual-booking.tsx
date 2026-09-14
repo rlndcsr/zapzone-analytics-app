@@ -34,6 +34,7 @@ import {
   isForceAddOn,
   seedForcedAddOns,
 } from "../../lib/addOnQuantity";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { packageIsCallToBook } from "../../lib/callToBook";
 import {
   clampParticipants,
@@ -60,6 +61,7 @@ import {
 } from "../../lib/payments/cardUtils";
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
+import { derivePaymentStatus } from "../../lib/payments/paymentState";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
@@ -148,16 +150,6 @@ function to12h(hhmm: string): string {
   const meridian = hour >= 12 ? "PM" : "AM";
   hour = hour % 12 || 12;
   return `${hour}:${mStr ?? "00"} ${meridian}`;
-}
-
-/** Mirrors the web derivePaymentStatus — paid / partial / pending from the money. */
-function derivePaymentStatus(
-  amountPaid: number,
-  total: number,
-): "paid" | "partial" | "pending" {
-  if (total > 0 && amountPaid >= total) return "paid";
-  if (amountPaid > 0) return "partial";
-  return "pending";
 }
 
 const durationLabel = (pkg: BookablePackage): string => {
@@ -343,6 +335,9 @@ const ExtraCard = ({
 
 const ManualBookingScreen = () => {
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const user = getCurrentUser();
@@ -2240,7 +2235,7 @@ const ManualBookingScreen = () => {
         {pkg && (
           <View
             className="flex-row gap-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 pt-3"
-            style={{ paddingBottom: insets.bottom + 12 }}
+            style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
           >
             <Pressable
               onPress={() => router.back()}

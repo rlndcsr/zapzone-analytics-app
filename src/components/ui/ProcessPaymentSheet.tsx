@@ -104,10 +104,17 @@ export function ProcessPaymentSheet({
         referenceNumber,
       });
 
+      // Send what was collected and let the server decide what that makes the
+      // booking. The old `newAmountPaid >= totalAmount ? "paid" : "partial"`
+      // was wrong twice over: no epsilon, so a fully settled booking that
+      // landed a hundredth of a cent short stuck on "partial" forever; and it
+      // overwrote a refunded or voided booking with an ordinary status. The
+      // backend derives it with the epsilon and refuses to leave a terminal
+      // state (BookingRepricer::derive), which is the only place that decision
+      // can be made correctly.
       const newAmountPaid = amountPaid + value;
       await updateBooking(token, bookingId, {
         amountPaid: newAmountPaid,
-        paymentStatus: newAmountPaid >= totalAmount ? "paid" : "partial",
         status: "confirmed",
       });
 

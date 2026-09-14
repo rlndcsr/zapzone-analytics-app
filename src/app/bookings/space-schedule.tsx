@@ -50,6 +50,7 @@ import {
   fetchDayOffsByLocation,
   type DayOff,
 } from "../../services/dayOffsService";
+import { resolvePaymentState } from "../../lib/payments/paymentState";
 import type { ScheduleBooking, SpaceBreak } from "../../services/bookingsService";
 
 const PRIMARY = "#0644C7";
@@ -83,14 +84,28 @@ const STATUS_COLOR: Record<string, string> = {
 };
 const statusColor = (status: string) => STATUS_COLOR[status] ?? "#F59E0B";
 
-const PAYMENT_TONE: Record<string, { bg: string; text: string }> = {
-  paid: { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-400" },
-  partial: { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400" },
+/**
+ * The tile's payment chip, from the shared rule. The map this replaces keyed on
+ * the stored status word alone, so a part payment that had since settled still
+ * showed amber, and a refunded booking fell through to the "anything else" red.
+ */
+const paymentTone = (booking: {
+  paymentStatus: string;
+  totalAmount: number;
+  amountPaid: number;
+}) => {
+  const state = resolvePaymentState({
+    payment_status: booking.paymentStatus,
+    total_amount: booking.totalAmount,
+    amount_paid: booking.amountPaid,
+  });
+  const [bg1, bg2, fg1, fg2] = state.pillClass.split(" ");
+  return {
+    bg: `${bg1} ${bg2}`,
+    text: `${fg1} ${fg2}`,
+    label: state.label,
+  };
 };
-const paymentTone = (s: string) =>
-  PAYMENT_TONE[s] ?? { bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400" };
-
-const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const dateKey = (d: Date) =>
@@ -171,7 +186,7 @@ const BookingCard = ({
 }) => {
   const pkg = packageColor(booking.packageName);
   const start = timeToMinutes(booking.time);
-  const pay = paymentTone(booking.paymentStatus);
+  const pay = paymentTone(booking);
   return (
     <Pressable
       onPress={onPress}
@@ -218,7 +233,7 @@ const BookingCard = ({
         </View>
         <View className={`px-1.5 py-0.5 rounded ${pay.bg}`}>
           <Text className={`text-[10px] font-medium ${pay.text}`}>
-            {capitalize(booking.paymentStatus)}
+            {pay.label}
           </Text>
         </View>
       </View>
@@ -321,7 +336,7 @@ const GridBookingBlock = ({
 }) => {
   const b = item.booking;
   const pkg = packageColor(b.packageName);
-  const pay = paymentTone(b.paymentStatus);
+  const pay = paymentTone(b);
   const compact = item.height < 56;
   const laneWidth = 100 / item.laneCount;
   const needsCheckIn = inProgress && b.status !== "checked-in";
@@ -409,7 +424,7 @@ const GridBookingBlock = ({
                     {formatMoney(b.totalAmount)}
                   </Text>
                   <View className={`px-1 py-0.5 rounded ${pay.bg}`}>
-                    <Text className={`text-[9px] font-medium ${pay.text}`}>{b.paymentStatus}</Text>
+                    <Text className={`text-[9px] font-medium ${pay.text}`}>{pay.label}</Text>
                   </View>
                 </View>
               </>

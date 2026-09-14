@@ -63,6 +63,8 @@ import {
 } from "../../lib/payments/cardUtils";
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
+import { derivePaymentStatus } from "../../lib/payments/paymentState";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
 import { formatDuration } from "../../lib/time";
@@ -536,6 +538,9 @@ const StepIndicator = ({ step }: { step: number }) => (
 
 const CreateBookingScreen = () => {
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const user = getCurrentUser();
@@ -1240,12 +1245,13 @@ const CreateBookingScreen = () => {
                 : freshSubmitTotal;
       const freshAmountPaid = freshDueNow;
 
-      const paymentStatus: "paid" | "partial" | "pending" =
-        freshAmountPaid >= freshSubmitTotal
-          ? "paid"
-          : freshAmountPaid > 0
-            ? "partial"
-            : "pending";
+      // The shared rule, not a bare `>=`: a fully paid booking whose total
+      // arrives a hundredth of a cent off would otherwise be created as
+      // "partial" and need chasing for a balance of nothing.
+      const paymentStatus = derivePaymentStatus(
+        freshAmountPaid,
+        freshSubmitTotal,
+      );
 
       const { id, referenceNumber, customerId } = await createBooking(token, {
         guest_name: customerName.trim(),
@@ -3059,7 +3065,7 @@ const CreateBookingScreen = () => {
         {/* Sticky footer: Back / Next / Create */}
         <View
           className="flex-row gap-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 pt-3"
-          style={{ paddingBottom: insets.bottom + 12 }}
+          style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
         >
           {step > 1 && (
             <Pressable

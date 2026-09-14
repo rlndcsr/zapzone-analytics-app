@@ -3,6 +3,7 @@ import * as Clipboard from "expo-clipboard";
 import React from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
+import { resolvePaymentState } from "../../lib/payments/paymentState";
 import { formatDuration } from "../../lib/time";
 import { launchKioskSession } from "../../lib/waivers/kiosk";
 import type { BookingDetail } from "../../services/bookingsService";
@@ -38,7 +39,10 @@ function fmtTime(raw: string | null | undefined): string | null {
 const titleCase = (s: string) =>
   s.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-/** Color the payment / booking status value like the web verify modal. */
+/**
+ * Colour a *booking* status value like the web verify modal. Payment status no
+ * longer comes through here — lib/payments/paymentState.ts decides that one.
+ */
 function statusColor(status: string): string {
   switch (status.toLowerCase()) {
     case "paid":
@@ -175,6 +179,11 @@ export function VerifyBookingDetails({
     : "—";
   const durationLabel = formatDuration(detail.duration, detail.durationUnit);
   const banner = DETAILS_BANNER[(detail.status ?? "").toLowerCase()] ?? null;
+  const payment = resolvePaymentState({
+    payment_status: detail.paymentStatus,
+    total_amount: detail.totalAmount,
+    amount_paid: detail.amountPaid,
+  });
 
   const [launchingKiosk, setLaunchingKiosk] = React.useState(false);
 
@@ -480,8 +489,12 @@ export function VerifyBookingDetails({
           <InfoTile
             icon="dollar-sign"
             label="Payment Status"
-            value={titleCase(detail.paymentStatus)}
-            valueClass={statusColor(detail.paymentStatus)}
+            // Not `titleCase(paymentStatus)`: the stored word alone can't say
+            // whether anything is owed (it misses a part payment that has since
+            // settled, and a refund), and amber said "nearly" where the desk
+            // needs "yes" or "no".
+            value={payment.label}
+            valueClass={payment.amountClass}
           />
           <InfoTile
             icon="check-circle"

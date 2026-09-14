@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 type Props = {
   page: number;
@@ -37,7 +39,7 @@ export function PaginationControls({
           {perPageOptions.map((option) => {
             const isActive = perPage === option;
             return (
-              <Pressable
+              <PressableScale
                 key={option}
                 onPress={() => onPerPageChange(option)}
                 accessibilityRole="button"
@@ -55,14 +57,14 @@ export function PaginationControls({
                 >
                   {option}
                 </Text>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </View>
 
         {/* Previous / page indicator / Next */}
         <View className="flex-row items-center gap-1">
-          <Pressable
+          <PressableScale
             onPress={() => onPageChange(page - 1)}
             disabled={atFirst}
             hitSlop={6}
@@ -79,11 +81,11 @@ export function PaginationControls({
               size={16}
               color={atFirst ? disabledIcon : enabledIcon}
             />
-          </Pressable>
+          </PressableScale>
           <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 px-0.5">
             {page}/{lastPage}
           </Text>
-          <Pressable
+          <PressableScale
             onPress={() => onPageChange(page + 1)}
             disabled={atLast}
             hitSlop={6}
@@ -100,7 +102,7 @@ export function PaginationControls({
               size={16}
               color={atLast ? disabledIcon : enabledIcon}
             />
-          </Pressable>
+          </PressableScale>
         </View>
       </View>
     );
@@ -117,7 +119,7 @@ export function PaginationControls({
             {perPageOptions.map((option) => {
               const isActive = perPage === option;
               return (
-                <Pressable
+                <PressableScale
                   key={option}
                   onPress={() => onPerPageChange(option)}
                   className={`px-3 py-1.5 rounded-lg border ${
@@ -135,14 +137,14 @@ export function PaginationControls({
                   >
                     {option}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </View>
         </View>
 
         <View className="flex-row items-center justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
-          <Pressable
+          <PressableScale
             onPress={() => onPageChange(page - 1)}
             disabled={atFirst}
             className={`px-4 py-2 rounded-lg border ${
@@ -160,13 +162,13 @@ export function PaginationControls({
             >
               Previous
             </Text>
-          </Pressable>
+          </PressableScale>
 
           <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
             Page {page} of {lastPage}
           </Text>
 
-          <Pressable
+          <PressableScale
             onPress={() => onPageChange(page + 1)}
             disabled={atLast}
             className={`px-4 py-2 rounded-lg border ${
@@ -184,7 +186,7 @@ export function PaginationControls({
             >
               Next
             </Text>
-          </Pressable>
+          </PressableScale>
         </View>
       </View>
     </View>

@@ -18,6 +18,7 @@ import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { markGroupInvitesStale } from "../../lib/hooks/useGroupInvites";
 import { getToken } from "../../lib/session";
 import {
@@ -64,6 +65,9 @@ const FieldLabel = ({
 
 const CreateGroupInvite = () => {
   const insets = useSafeAreaInsets();
+  // The update reminder floats above every screen until the app is
+  // updated; without this it would sit on top of the buttons below.
+  const updateNoticeInset = useAppUpdateNoticeInset();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
@@ -327,7 +331,7 @@ const CreateGroupInvite = () => {
 
         <View
           className="bg-white dark:bg-neutral-900 border-t border-gray-100 dark:border-neutral-800 px-5 pt-4"
-          style={{ paddingBottom: insets.bottom + 12 }}
+          style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}
         >
           {/* Cancel + Create & Notify, as in the web modal's footer. The radius
               is an inline style, not a class: NativeWind resolves conflicting

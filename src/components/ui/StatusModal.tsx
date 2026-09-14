@@ -1,5 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
+
+import { PressableScale } from "./motion/PressableScale";
 
 import {
   statusStyle,
@@ -71,17 +73,17 @@ export function StatusModal({
         }}
       >
         {/* The backdrop dismisses too, but an explicit close is clearer. */}
-        <Pressable
+        <PressableScale
           onPress={onCancel}
           disabled={loading}
           hitSlop={10}
           accessibilityRole="button"
           accessibilityLabel="Close"
-          className="absolute right-4 top-4 z-10 active:opacity-60"
+          className="absolute right-4 top-4 z-10"
           style={{ opacity: loading ? 0.4 : 1 }}
         >
           <Feather name="x" size={18} color="#9CA3AF" />
-        </Pressable>
+        </PressableScale>
 
         <View className="items-center">
           <View
@@ -112,26 +114,26 @@ export function StatusModal({
 
         <View className="mt-5 flex-row gap-3">
           {cancelLabel ? (
-            <Pressable
+            <PressableScale
               onPress={onCancel}
               disabled={loading}
               accessibilityRole="button"
               accessibilityState={{ disabled: loading }}
-              className="flex-1 items-center rounded-xl border border-gray-200 py-3 active:opacity-70 dark:border-neutral-700"
+              className="flex-1 items-center rounded-xl border border-gray-200 py-3 dark:border-neutral-700"
               style={{ opacity: loading ? 0.5 : 1 }}
             >
               <Text className="text-sm font-semibold text-gray-600 dark:text-gray-300">
                 {cancelLabel}
               </Text>
-            </Pressable>
+            </PressableScale>
           ) : null}
 
-          <Pressable
+          <PressableScale
             onPress={onConfirm}
             disabled={loading}
             accessibilityRole="button"
             accessibilityState={{ disabled: loading, busy: loading }}
-            className="flex-1 flex-row items-center justify-center gap-2 rounded-xl py-3 active:opacity-80"
+            className="flex-1 flex-row items-center justify-center gap-2 rounded-xl py-3"
             style={{ backgroundColor: accent, opacity: loading ? 0.7 : 1 }}
           >
             {loading ? (
@@ -141,7 +143,7 @@ export function StatusModal({
                 {confirmLabel}
               </Text>
             )}
-          </Pressable>
+          </PressableScale>
         </View>
       </View>
     </CenterModal>
