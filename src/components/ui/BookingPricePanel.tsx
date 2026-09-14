@@ -42,19 +42,6 @@ const Row = ({
   </View>
 );
 
-/**
- * What the edit in progress costs, according to the server.
- *
- * Nothing here is computed locally. The panel renders a reprice quote, and
- * falls back to the booking's stored figures only when there is no quote yet —
- * which is the honest thing to show, since that is what the booking currently
- * says. While a new quote is in flight the previous figures stay on screen
- * under an "updating" note instead of blanking, so typing in the participants
- * field doesn't make the totals strobe.
- *
- * The payment line is {@link resolvePaymentState}'s, like every other payment
- * label in the app — green settled, red owing, grey for a refund or void.
- */
 export function BookingPricePanel({
   quote: state,
   storedTotal,
@@ -138,10 +125,6 @@ export function BookingPricePanel({
         <Row label="Subtotal" value={money(quote.subtotal)} />
       )}
 
-      {/* Read-only, deliberately. Fees are derived from the location's fee
-          settings and the participant count, so there is nothing here for the
-          desk to type — a hand-edited fee would only be overwritten by the
-          next quote. The note below says so rather than leaving it a mystery. */}
       {quote?.fees.map((fee, i) => (
         <Row
           key={`${fee.feeName}-${i}`}
@@ -190,8 +173,8 @@ export function BookingPricePanel({
       </View>
 
       <Text className="mt-3 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
-        Fees come from this location&apos;s fee settings and recalculate with the
-        participant count.
+        Fees come from this location&apos;s fee settings and recalculate with
+        the participant count.
       </Text>
     </View>
   );

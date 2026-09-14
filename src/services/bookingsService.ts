@@ -20,50 +20,27 @@ export type CalendarBooking = {
   totalAmount: number;
   amountPaid: number;
   packageName: string;
-  /**
-   * How the package is labelled ("Birthday", "Escape Room", …); "" when
-   * uncategorised. Prefers the package's `display_label` over its `category`,
-   * because escape rooms keep their venue label there and use `category` for
-   * the difficulty — grouping on `category` alone splits one Escape Room into
-   * Advanced / Beginner / Intermediate.
-   */
   packageCategory: string;
   customerName: string;
   customerEmail: string | null;
   customerPhone: string | null;
-  /**
-   * The booking's own guest fields and package name, with no display
-   * substitution applied.
-   *
-   * The web is not consistent about which name a booking shows: its Bookings
-   * list prefers the linked customer record (what `customerName` above mirrors),
-   * while its Check In page shows `guest_name` and nothing else. These carry the
-   * raw values so the check-in desk can match that page exactly instead of
-   * showing a different name for the same booking.
-   */
   guestName: string | null;
   guestEmail: string | null;
   guestPhone: string | null;
   packageNameRaw: string | null;
   roomName: string;
-  /** Room the booking occupies when one is assigned — the day grid keys its
-   *  space columns off this, falling back to `packageId` when it is null. */
   roomId: number | null;
   packageId: number | null;
   duration: number | null;
   durationUnit: string;
-  /** `duration` normalised to whole minutes, for placing it on a time grid. */
   durationMinutes: number;
   paymentMethod: string | null;
-  /** Settlement state ("paid" / "partial" / …), drives the amount colour. */
   paymentStatus: string | null;
   locationName: string;
   createdAt: string | null;
   updatedAt: string | null;
-  /** Counts behind the day card's "N attractions / N add-ons" chips. */
   attractionCount: number;
   addOnCount: number;
-  /** Fields behind the table's optional columns (hidden by default). */
   address: string | null;
   guestOfHonorName: string | null;
   customerNotes: string | null;
@@ -409,14 +386,6 @@ export async function fetchDashboardBookings({
   return items.map((raw) => mapBooking(raw, toDateKey(raw.booking_date) ?? ""));
 }
 
-/**
- * GET /api/bookings?search=… — the calendar toolbar's "find any booking"
- * typeahead.
- *
- * Searches every date rather than the visible window, so the toolbar can jump
- * to a booking the current month/week/day does not contain. Mirrors the web
- * admin's CustomerSearch: newest booking date first, one short page.
- */
 export async function searchBookings({
   token,
   term,
@@ -468,19 +437,6 @@ function mapBookingAttractions(raw: RawBookingDetail): BookingAttraction[] {
   }));
 }
 
-/**
- * Bookings for one venue day, for the check-in desk's manual lookup.
- *
- * Mirrors the web Check In page: one page of up to 100 rows scoped by
- * `booking_date`, in the server's default order, filtered down to the two
- * statuses that can be checked in — `confirmed` (still to arrive) and
- * `checked-in` (already here). Anything pending, completed or cancelled is not
- * something the desk acts on.
- *
- * Request parameters are kept identical to the web's on purpose: the two desks
- * are read side by side, so the same day must produce the same rows in the same
- * order on both.
- */
 export async function fetchBookingsForCheckIn({
   token,
   date,
@@ -495,13 +451,6 @@ export async function fetchBookingsForCheckIn({
   userId?: number;
   signal?: AbortSignal;
 }): Promise<CalendarBooking[]> {
-  // Still no sort_by / sort_order, because sending them would not help: the
-  // server's default is `ORDER BY booking_date DESC` with no secondary key
-  // (BookingController@index), and this list is one single day — so every row
-  // ties and the database returns them in whatever order it likes. The web
-  // desk sends no sort params either, which is why the two desks disagreed:
-  // they were not sharing an order, they were each getting an arbitrary one.
-  // The order is imposed below instead, where it is actually guaranteed.
   const params = new URLSearchParams({
     booking_date: date,
     per_page: "100",
@@ -520,9 +469,6 @@ export async function fetchBookingsForCheckIn({
     out.push(mapBooking(raw, toDateKey(raw.booking_date) ?? date));
   }
 
-  // Latest slot first, matching the order the web check-in desk shows. The
-  // rule itself lives in lib/checkin/checkInOrder.ts, where it can be tested
-  // without a network.
   return out.sort(compareCheckInRows);
 }
 
@@ -579,9 +525,6 @@ export async function fetchBookingDetail(
   };
 }
 
-/** One field's before/after pair inside a change-log entry. `redacted` marks a
- *  field whose text the backend deliberately keeps out of the permanent log
- *  (internal notes), leaving only the fact that it changed. */
 export type BookingChangeValue = {
   from?: unknown;
   to?: unknown;
@@ -640,12 +583,6 @@ function toChangeMap(
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/**
- * GET /api/bookings/{id}/change-logs — the booking's permanent change history.
- *
- * Staff-only on the backend (403 for a customer token, 404 when the booking is
- * gone), so callers surface the failure rather than treating it as "no changes".
- */
 export async function fetchBookingChangeLogs(
   token: string,
   id: number,
@@ -699,10 +636,6 @@ export async function updateBookingPaymentStatus(
   });
 }
 
-/** DELETE /api/bookings/{id} — soft-delete (moves the booking to trash),
- *  mirroring the web admin's row "Delete" action (bookingService.deleteBooking).
- *  A caller that already has a reason (e.g. an automatic rollback) can pass it
- *  up front to skip the interactive change-reason prompt entirely. */
 export async function deleteBooking(
   token: string,
   id: number,
@@ -717,13 +650,6 @@ export async function deleteBooking(
   });
 }
 
-/**
- * DELETE /api/bookings/{id}/force-delete — permanent removal.
- *
- * Used only to roll back a booking whose card payment failed, matching the
- * web's `forceDeleteBooking` cleanup: a soft delete would keep the slot's room
- * reserved and leave a recoverable-looking booking nobody ever paid for.
- */
 export async function forceDeleteBooking(
   token: string,
   id: number,
@@ -734,12 +660,6 @@ export async function forceDeleteBooking(
   });
 }
 
-/**
- * POST /api/bookings/check-in — mark a confirmed booking as checked-in, matching
- * the web admin's row "Check In" action. The backend records checked_in_at /
- * checked_in_by (from `user_id` when provided, else the authenticated user) and
- * only accepts confirmed bookings.
- */
 export async function checkInBooking(
   token: string,
   referenceNumber: string,
@@ -755,13 +675,6 @@ export async function checkInBooking(
   });
 }
 
-/**
- * Bulk status change for the selected bookings. There is no bulk-status endpoint,
- * so — exactly like the web admin's bulk bar — this fans out per-id requests:
- * a "checked-in" change routes through the dedicated check-in endpoint (records
- * checked_in_at/by, confirmed-only), every other status uses the generic status
- * PATCH. Rejects if any single update fails.
- */
 export async function bulkSetBookingStatus(
   token: string,
   bookings: { id: number; referenceNumber: string | null }[],
@@ -777,11 +690,6 @@ export async function bulkSetBookingStatus(
   );
 }
 
-/**
- * POST /api/bookings/bulk-delete — the backend's dedicated bulk soft-delete
- * endpoint (one round-trip), the same route the web BookingService exposes as
- * `bulkDelete({ ids })`.
- */
 export async function bulkDeleteBookings(
   token: string,
   ids: number[],
@@ -842,11 +750,6 @@ function mapScanBooking(raw: RawScanBooking): ScanBooking {
   };
 }
 
-/**
- * GET /api/bookings?reference_number= — look up a scanned booking by its
- * reference number (the same request the web scanner makes,
- * `getBookings({ reference_number })`). Returns the first match, or null.
- */
 export async function fetchBookingByReference({
   token,
   referenceNumber,
@@ -906,10 +809,6 @@ export type PackageOption = { id: number; name: string; price: number | null };
 export type RoomOption = {
   id: number;
   name: string;
-  /**
-   * How often this space opens a new booking, in minutes. Null when it sets
-   * none — the server then leaves the start times to the schedule interval.
-   */
   bookingInterval: number | null;
 };
 
@@ -921,11 +820,8 @@ function extractList<T>(res: any, key: string): T[] {
   return [];
 }
 
-/** Runaway-paging backstop when following `last_page`. */
 const MAX_LOOKUP_PAGES = 20;
 
-/** GET /api/mobile/packages — selectable packages (id/name/price) for the Edit form
- *  dropdown, via the lightweight mobile list; the full package loads from the detail endpoint. */
 export async function fetchPackages(
   token: string,
   locationId?: number | null,
@@ -944,24 +840,11 @@ export async function fetchPackages(
   }));
 }
 
-/** Spaces plus the venue-wide booking rules the package form previews against. */
 export type RoomOptions = {
   rooms: RoomOption[];
-  /**
-   * The gap the server leaves between two bookings in the same space, from
-   * `booking_rules.room_cleanup_minutes`. Null when the API does not report it,
-   * so the caller falls back to its own default rather than assuming zero.
-   */
   slotCleanupMinutes: number | null;
 };
 
-/**
- * GET /api/rooms?location_id= — selectable spaces/rooms plus the cleanup gap.
- * Also paginated (default 15/page, max 500); page through so every space shows.
- *
- * The endpoint returns only available spaces unless `is_available` is passed,
- * which is the same set the server staggers start times across.
- */
 export async function fetchRoomOptions(
   token: string,
   locationId?: number | null,
@@ -1006,26 +889,16 @@ export async function fetchRooms(
   return (await fetchRoomOptions(token, locationId)).rooms;
 }
 
-// ---------------------------------------------------------------------------
-// Space Schedule (mirrors the web /bookings/space-schedule): the day's bookings
-// laid out per room/space, with each room's break times. Both are scoped by
-// user_id (backend limits to the user's location), exactly like the web.
-// ---------------------------------------------------------------------------
-
-/** A recurring break window on a space, for a set of weekdays. */
 export type SpaceBreak = {
-  /** Lowercased weekday names, e.g. ["saturday","sunday"]. */
   days: string[];
-  startTime: string; // HH:MM
-  endTime: string; // HH:MM
+  startTime: string;
+  endTime: string;
 };
 
-/** A space/room with the fields the Space Schedule needs. */
 export type Space = {
   id: number;
   name: string;
   capacity: number | null;
-  /** Null for a company-wide space with no single location. */
   locationId: number | null;
   breaks: SpaceBreak[];
 };
@@ -1050,10 +923,6 @@ type RawRoom = {
     | null;
 };
 
-/**
- * GET /api/rooms — spaces with capacity + break times. Scoped by user_id like
- * the web Space Schedule (`roomService.getRooms({ user_id, per_page: 100 })`).
- */
 export async function fetchSpaces({
   token,
   userId,
@@ -1172,10 +1041,6 @@ export function breaksToPayload(breaks: SpaceBreak[]): RoomInput["break_time"] {
   }));
 }
 
-/**
- * GET /api/rooms — the full spaces list for the management screen (name,
- * capacity, area group, booking interval). Scoped by user_id like the web.
- */
 export async function fetchSpaceList({
   token,
   userId,
@@ -1222,15 +1087,6 @@ export async function createRoom(
   });
 }
 
-/**
- * Create a space and attach it to a package, as the web's Manual Booking does
- * when a name is typed into Space Selection: POST /api/rooms, then
- * POST /api/packages/room/create to link it. Returns the new space so the
- * caller can select it straight away.
- *
- * The link step is best-effort — the web logs and moves on if it fails, since
- * the space itself already exists and the booking can still reference it.
- */
 export async function createPackageSpace(
   token: string,
   input: { name: string; locationId: number; packageId: number },
@@ -1281,11 +1137,6 @@ export async function deleteRoom(token: string, id: number): Promise<void> {
   await apiRequest(`/api/rooms/${id}`, { method: "DELETE", token });
 }
 
-/**
- * Apply one booking interval to every room in an area group. Uses the confirmed
- * per-room update route (PUT /api/rooms/{id}) so it doesn't depend on a bulk
- * endpoint; each room keeps its other fields (name/capacity/breaks/location).
- */
 export async function updateAreaGroupInterval(
   token: string,
   rooms: SpaceRow[],
@@ -1308,14 +1159,11 @@ export async function updateAreaGroupInterval(
 export type ScheduleBooking = {
   id: number;
   roomId: number | null;
-  /** For a roomless booking, groups it into a virtual (no-room) timeline column. */
   packageId: number | null;
-  /** Raw package category — web parity: SpaceSchedule groups by this, not the
-   *  display-label-preferring `packageCategory` the general Booking type uses. */
   packageCategory: string;
   referenceNumber: string | null;
   status: string;
-  time: string | null; // HH:MM start
+  time: string | null;
   durationMinutes: number;
   participants: number;
   totalAmount: number;
@@ -1382,11 +1230,6 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
   };
 }
 
-/**
- * GET /api/bookings?booking_date=YYYY-MM-DD — the single day's bookings for the
- * Space Schedule (same request the web makes: `getBookings({ booking_date,
- * user_id })`). Paged for safety, though a single day rarely exceeds one page.
- */
 export async function fetchDaySchedule({
   token,
   date,
@@ -1397,8 +1240,6 @@ export async function fetchDaySchedule({
   token: string;
   date: string;
   userId?: number;
-  /** Web parity: `bookingService.getBookings({ location_id })` — filters
-   *  server-side to the active workspace location (company_admin only). */
   locationId?: number;
   signal?: AbortSignal;
 }): Promise<ScheduleBooking[]> {
@@ -1435,17 +1276,6 @@ const COUNTED_SCHEDULE_STATUSES = new Set([
   "pending",
 ]);
 
-/**
- * GET /api/bookings?date_from=&date_to= — how many space-occupying bookings
- * (confirmed / checked-in / pending) fall on each date of an inclusive range,
- * keyed by "YYYY-MM-DD". Backs the Space Schedule's week-strip badges.
- *
- * The web counts the same statuses out of its local booking cache; mobile has
- * no such cache, so it asks the range endpoint once for the whole week rather
- * than fetching seven separate days. `locationId` scopes to the active
- * workspace location exactly like `fetchDaySchedule` — managers/attendants are
- * scoped server-side either way.
- */
 export async function fetchBookingCountsByDate({
   token,
   from,
@@ -1455,9 +1285,7 @@ export async function fetchBookingCountsByDate({
   signal,
 }: {
   token: string;
-  /** Inclusive range start, "YYYY-MM-DD". */
   from: string;
-  /** Inclusive range end, "YYYY-MM-DD". */
   to: string;
   userId?: number;
   locationId?: number;
@@ -1494,12 +1322,6 @@ export async function fetchBookingCountsByDate({
   return counts;
 }
 
-/**
- * GET /api/bookings/location-date?location_id=&date= — bookings at a location on
- * a date, matching the web admin's `getBookingsByLocationAndDate` (used by
- * EditBooking to show "Existing bookings at this location"). Reuses the same
- * dedicated Laravel endpoint the web uses, location-scoped server-side.
- */
 export async function fetchBookingsByLocationAndDate(
   token: string,
   locationId: number,
@@ -1517,25 +1339,17 @@ export async function fetchBookingsByLocationAndDate(
   return (Array.isArray(res?.data) ? res.data : []).map(mapScheduleBooking);
 }
 
-/**
- * A package's availability rule. Together these decide which calendar days a
- * booking can be rescheduled onto — e.g. a package with a single weekly
- * `["friday"]` rule is bookable on Fridays only.
- */
 export type PackageAvailabilitySchedule = {
   availabilityType: "daily" | "weekly" | "monthly" | string;
   dayConfiguration: string[] | null;
   isActive: boolean;
-  /** Daily window, "HH:MM". Null when the row never had one — which is what
-   *  makes a schedule unusable, and the package Call to Book. */
   timeSlotStart: string | null;
   timeSlotEnd: string | null;
 };
 
-/** A concrete open slot from the mobile availability endpoint. */
 export type AvailableSlot = {
-  startTime: string; // HH:MM
-  endTime: string; // HH:MM
+  startTime: string;
+  endTime: string;
   roomId: number | null;
   roomName: string | null;
   remainingTickets: number | null;
@@ -1560,8 +1374,6 @@ function isLastWeekdayOccurrence(date: Date): boolean {
   return next.getMonth() !== date.getMonth();
 }
 
-/** Mirrors the backend PackageAvailabilitySchedule::matchesDate(). Monthly configs
- *  use the backend `occurrence-dayName` form (e.g. "first-friday", "last-friday"). */
 export function scheduleMatchesDate(
   schedule: PackageAvailabilitySchedule,
   date: Date,
@@ -1621,10 +1433,6 @@ export async function fetchPackageAvailabilitySchedules(
   }));
 }
 
-/**
- * GET /api/mobile/packages/{id}/availability?date= — the real open slots for a
- * package on a date (respects rooms, existing bookings, day-offs). Public endpoint.
- */
 export async function fetchAvailableTimeSlots(
   token: string | undefined,
   packageId: number,
@@ -1655,8 +1463,8 @@ export type BookingUpdateInput = {
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
-  date?: string; // YYYY-MM-DD
-  time?: string; // HH:mm
+  date?: string;
+  time?: string;
   participants?: number;
   status?: string;
   guestOfHonorName?: string | null;
@@ -1665,49 +1473,25 @@ export type BookingUpdateInput = {
   customerNotes?: string | null;
   internalNotes?: string | null;
   sendEmail?: boolean;
-  /** Sent only when the add-on selection changed, like the web's `additional_addons`. */
   additionalAddons?: {
     addon_id: number;
     quantity: number;
     price_at_booking: number;
   }[];
-  /**
-   * Sent as `[]` when the package changes: the attractions on a booking belong
-   * to the package that was chosen with them, so carrying them onto a different
-   * package would bill the guest for extras that package never included.
-   */
+
   additionalAttractions?: {
     attraction_id: number;
     quantity: number;
     price_at_booking?: number;
   }[];
-  /**
-   * The server's total, straight from a reprice quote — never computed here.
-   * Sent together with {@link discountAmount} and {@link appliedFees}, which
-   * are the other two halves of the same quote: writing the total without the
-   * discount and fees that produced it would store a figure the booking's own
-   * line items contradict.
-   */
+
   totalAmount?: number;
   discountAmount?: number;
   appliedFees?: BookingQuoteFee[] | null;
-  /**
-   * Deliberately absent from the edit screens. `amount_paid` is what the guest
-   * has handed over; an edit to the booking's contents never changes it, and
-   * sending a page-load snapshot back just reinstates a stale figure over
-   * whatever was collected in the meantime. Only the payment flows send it.
-   */
   amountPaid?: number;
-  /** "paid" | "partial" — written by the Process Payment flow, like the web. */
   paymentStatus?: string;
 };
 
-/**
- * PUT /api/bookings/{id} — full booking update from the Edit form. Method and
- * body keys mirror the web admin exactly (bookingService.updateBooking /
- * EditBooking.tsx): PUT, `guest_name`, `notes` (customer notes), and
- * `send_notification` for the update-notification toggle.
- */
 export async function updateBooking(
   token: string,
   id: number,
@@ -1762,11 +1546,6 @@ export async function updateBooking(
   await apiRequest(`/api/bookings/${id}`, { method: "PUT", token, body });
 }
 
-// ---------------------------------------------------------------------------
-// Repricing
-// ---------------------------------------------------------------------------
-
-/** One fee line on a quote, as the server would persist it. */
 export type BookingQuoteFee = {
   feeName: string;
   feeLabel: string | null;
@@ -1784,20 +1563,10 @@ export type BookingQuoteLine = {
   lineTotal: number;
 };
 
-/**
- * The server's price for a proposed edit — every figure below is the server's,
- * none are recomputed here.
- */
 export type BookingQuote = {
   subtotal: number;
   lines: BookingQuoteLine[];
-  /** Fees to display, already resolved against the proposed change. */
   fees: BookingQuoteFee[];
-  /**
-   * The same fees in the shape the server wants written back on save. Kept
-   * apart from `fees` because the two are not always the same set, and it is
-   * the persist set — never the display set — that goes into `updateBooking`.
-   */
   persistFees: BookingQuoteFee[];
   additiveFees: number;
   specialPricingDiscount: number;
@@ -1808,18 +1577,10 @@ export type BookingQuote = {
   amountPaid: number;
   remainingBalance: number;
   paymentStatus: string;
-  /** Change against what is currently stored; negative means cheaper. */
   delta: number | null;
-  /** False when the stored total disagrees with what the rules now produce. */
   pricingConsistent: boolean | null;
 };
 
-/**
- * What the caller is proposing. Only the fields that actually changed need to
- * be sent — anything omitted is taken from the stored booking, which is why
- * this is an *intent* rather than a payload: the client says what the user
- * did, and the server decides what that costs.
- */
 export type BookingRepriceIntent = {
   participants?: number;
   packageId?: number | null;
@@ -1841,19 +1602,6 @@ function toQuoteFee(raw: Record<string, unknown>): BookingQuoteFee {
   };
 }
 
-/**
- * POST /api/bookings/{id}/reprice — ask the server what an edit would cost.
- *
- * This replaces the client-side arithmetic the edit screens used to do. That
- * arithmetic was wrong in two ways that no amount of care would have fixed:
- * it had no discount term at all (so any special pricing, membership benefit
- * or redeemed credit silently vanished from the total on save), and it summed
- * the *stored* fees, which are themselves derived from the price it was busy
- * changing. Only the server knows the pricing rules, so only the server prices.
- *
- * Purely a quote: nothing is written. Rejects on a network or validation
- * failure so the caller can block saving rather than fall back to a guess.
- */
 export async function repriceBooking(
   token: string,
   id: number,
@@ -1910,16 +1658,6 @@ export async function repriceBooking(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Page-level "More" actions (mirrors the web Manage Bookings header menu):
-// Export Bookings, Generate Report, Bulk Import, View Deleted.
-// ---------------------------------------------------------------------------
-
-/**
- * GET /api/bookings/export — the raw booking records the web admin turns into a
- * CSV (bookingService.exportBookings). Returned as-is so the caller can build
- * the same CSV columns client-side.
- */
 export async function exportBookings(
   token: string,
   locationId?: number | null,
@@ -1935,13 +1673,8 @@ export async function exportBookings(
   return res?.data?.bookings ?? [];
 }
 
-/** A soft-deleted booking row (adds the deletion timestamp to the list shape). */
 export type TrashedBooking = CalendarBooking & { deletedAt: string | null };
 
-/**
- * GET /api/bookings/trashed — soft-deleted bookings (the web "View Deleted"
- * list), paged newest-first and scoped to the location when provided.
- */
 export async function fetchTrashedBookings({
   token,
   locationId,
@@ -1986,11 +1719,6 @@ export type BulkImportResult = {
   total_rows: number;
 };
 
-/**
- * POST /api/bookings/bulk-import-csv — multipart upload of a CSV file, matching
- * the web admin's Bulk Import. Sent via a direct fetch (not apiRequest) so
- * React Native sets the multipart boundary itself.
- */
 export async function bulkImportBookingsCsv(params: {
   token: string;
   fileUri: string;
@@ -2025,15 +1753,8 @@ export async function bulkImportBookingsCsv(params: {
   return data?.data as BulkImportResult;
 }
 
-/** Report period selector (subset of the web's period types that map cleanly to
- *  mobile controls). */
 export type ReportPeriod = "today" | "monthly" | "custom";
 
-/**
- * Absolute URL for GET /api/bookings/details-report (a PDF stream). Built here
- * so the screen can hand it to expo-file-system's downloader with the same
- * query params the web sends.
- */
 export function buildBookingsReportUrl(params: {
   period: ReportPeriod;
   viewMode: "individual" | "list";
@@ -2066,11 +1787,6 @@ export function buildBookingsReportUrl(params: {
 /** Payment methods the Process Payment form offers (mirrors the web modal). */
 export type BookingPaymentMethod = "in-store" | "authorize.net";
 
-/**
- * POST /api/payments — record a payment against a booking. `method` defaults to
- * in-store; "authorize.net" marks the payment as taken on the terminal (no card
- * tokenization happens here, same as the web modal's manual path).
- */
 export async function recordBookingPayment(
   token: string,
   params: {
@@ -2080,12 +1796,10 @@ export async function recordBookingPayment(
     customerId: number | null;
     method?: BookingPaymentMethod;
     notes?: string | null;
-    /** Enables the web's default note text ("In-store payment for booking X"). */
     referenceNumber?: string | null;
   },
 ): Promise<void> {
   const method = params.method ?? "in-store";
-  // Same fallback note the web modal writes when the field is left blank.
   const defaultNote = params.referenceNumber
     ? `${method === "in-store" ? "In-store" : "Authorize.net"} payment for booking ${params.referenceNumber}`
     : "Recorded from analytics app";
@@ -2142,7 +1856,6 @@ export type BookablePackage = {
   maxParticipants: number;
 
   maxTicketsPerSlot: number | null;
-  /** What one seat is called ("player", "guest"…); blank falls back to "participant". */
   participantLabel: string;
   duration: number;
   durationUnit: "hours" | "minutes" | "hours and minutes";
@@ -2151,11 +1864,9 @@ export type BookablePackage = {
   partialPaymentPercentage: number | null;
   partialPaymentFixed: number | null;
   locationId: number | null;
-  /** Whether the package is active; the web filters these client-side. */
   isActive: boolean;
   addOns: PackageAddOn[];
   attractions: PackageAttraction[];
-  /** Spaces this package can be booked into; Flexible mode picks one by hand. */
   rooms: PackageRoom[];
 };
 
@@ -2187,19 +1898,16 @@ type RawPackage = {
   partial_payment_percentage?: number | string | null;
   partial_payment_fixed?: number | string | null;
   location_id?: number | null;
-  /** Eager-loaded by GET /api/mobile/packages (`location:id,name`). */
   location?: { id?: number | null; name?: string | null } | null;
   add_ons?: RawPackageAddOn[] | null;
   attractions?: RawPackageAttraction[] | null;
   rooms?: { id: number; name?: string | null }[] | null;
 };
 
-/** `add_ons` rows come straight off the model, so every column is present. */
 type RawPackageAddOn = {
   id: number;
   name?: string | null;
   price?: number | string | null;
-  /** String column that sometimes holds a JSON-encoded array of paths. */
   image?: string | string[] | null;
   pricing_type?: string | null;
   min_quantity?: number | string | null;
@@ -2209,7 +1917,6 @@ type RawPackageAddOn = {
     { package_id: number; price?: number; minimum_quantity?: number }[] | null;
 };
 
-/** `attractions` rows likewise; `image` is an array cast server-side. */
 type RawPackageAttraction = {
   id: number;
   name?: string | null;
@@ -2220,7 +1927,6 @@ type RawPackageAttraction = {
   max_quantity?: number | string | null;
 };
 
-/** Numeric column that is absent or empty far more often than it is zero. */
 function optionalCount(
   value: number | string | null | undefined,
 ): number | null {
@@ -2242,8 +1948,6 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
     name: raw.name?.trim() || `Package #${raw.id}`,
     category: raw.category?.trim() || "",
     description: raw.description?.trim() || "",
-    // firstMediaUrl, not mediaUrl: the field is an array, and stringifying a
-    // multi-image one yields "a.jpg,b.jpg" — a URL that resolves to nothing.
     image: firstMediaUrl(raw.image),
     price: Number(raw.price ?? 0),
     pricePerAdditional: Number(raw.price_per_additional ?? 0),
@@ -2266,9 +1970,6 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
         ? Number(raw.partial_payment_fixed)
         : null,
     locationId: raw.location_id ?? null,
-    // Active unless the backend explicitly says otherwise (matches the web's
-    // `is_active === true` filter without hiding packages when the field is
-    // simply absent from the payload).
     isActive: raw.is_active !== false && raw.is_active !== 0,
     addOns: (raw.add_ons ?? []).map((a) => ({
       id: Number(a.id),
@@ -2299,13 +2000,6 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
   };
 }
 
-/**
- * Lightweight package row for the Step-1 list — scalars only, NO relations.
- * The `/packages` index eager-loads 7 relations per package (rooms, promos,
- * gift cards, attractions, add-ons, availability schedules), which is far too
- * heavy to retain for a mobile list; we map only what's needed to list + pick,
- * and hydrate the full package on selection ({@link fetchBookablePackageDetail}).
- */
 export type PackageListItem = {
   id: number;
   name: string;
@@ -2317,7 +2011,6 @@ export type PackageListItem = {
   minParticipants: number;
   maxParticipants: number;
   isActive: boolean;
-  /** The package's own location, so a card can name it (company admins see many). */
   locationId: number | null;
   locationName: string;
 };
@@ -2347,8 +2040,6 @@ export type PackageListPage = {
   lastPage: number;
 };
 
-/** GET /api/mobile/packages — bookable packages as lightweight list items (role-scoped, `search`
- *  server-side). Not paginated: whole list is one page (`lastPage: 1`), keeping "load more" a no-op. */
 export async function fetchPackageList(
   token: string,
   opts: {
@@ -2377,11 +2068,6 @@ export async function fetchPackageList(
   return { items, page: 1, lastPage: 1 };
 }
 
-/**
- * GET /api/packages/{id} — the full package (add-ons, attractions, deposit
- * rules, etc.), fetched only AFTER a package is picked so the heavy relations
- * are hydrated for exactly one package instead of the whole list.
- */
 export async function fetchBookablePackageDetail(
   token: string,
   id: number,
@@ -2407,11 +2093,6 @@ export type BookingAttractionInput = {
   price_at_booking: number;
 };
 
-/**
- * Payload for POST /api/bookings — mirrors the web on-site booking request.
- * Card bookings post this first (unpaid), then charge via
- * `POST /api/payments/charge`, exactly as the web `OnsiteBooking` does.
- */
 export type CreateBookingInput = {
   guest_name: string;
   guest_email?: string;
@@ -2420,8 +2101,8 @@ export type CreateBookingInput = {
   package_id: number;
   room_id?: number;
   type: "package";
-  booking_date: string; // YYYY-MM-DD
-  booking_time: string; // HH:MM
+  booking_date: string;
+  booking_time: string;
   participants: number;
   duration: number;
   duration_unit: string;
@@ -2430,9 +2111,6 @@ export type CreateBookingInput = {
   payment_method: "authorize.net" | "in-store" | "paylater";
   status?: BookingStatus;
   payment_status?: "paid" | "partial" | "pending";
-  /** Manual-booking flags (mirrors the web ManualBooking payload). The backend
-   *  ignores unknown keys, but sending them keeps the mobile request identical
-   *  to the web admin's and forward-compatible if the API starts honoring them. */
   is_manual_entry?: boolean;
   skip_date_validation?: boolean;
   notes?: string;
@@ -2465,7 +2143,6 @@ type CreateBookingResponse = {
   message?: string;
 };
 
-/** POST /api/bookings — create an on-site package booking. */
 export async function createBooking(
   token: string,
   input: CreateBookingInput,
@@ -2486,14 +2163,11 @@ export async function createBooking(
   };
 }
 
-/** Preset reasons for the change-reason prompt, plus whether the backend
- *  currently requires one at all (a company/location-level policy). */
 export type ChangeReasonOptions = {
   presets: string[];
   policy: "off" | "guest_visible" | "all";
 };
 
-/** GET /api/bookings/change-reason-options — feeds the change-reason prompt's preset chips. */
 export async function fetchChangeReasonOptions(
   token: string,
   signal?: AbortSignal,
