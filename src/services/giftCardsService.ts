@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages } from "../lib/fetchAllPages";
 
 /** A selectable gift card for the package form. No image → payload-safe. */
 export type GiftCardOption = {
@@ -87,19 +88,19 @@ export async function fetchGiftCardList(
   token: string,
   signal?: AbortSignal,
 ): Promise<GiftCardRow[]> {
-  const out: GiftCardRow[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const res = await apiRequest<GiftCardsResponse>(
-      `/api/gift-cards?per_page=${PER_PAGE}&page=${page}`,
-      { token, signal },
-    );
-    for (const g of res?.data?.gift_cards ?? []) out.push(mapGiftCardRow(g));
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page += 1;
-  } while (page <= lastPage && page <= MAX_PAGES);
-  return out;
+  return fetchAllPages<GiftCardRow>(
+    async (page) => {
+      const res = await apiRequest<GiftCardsResponse>(
+        `/api/gift-cards?per_page=${PER_PAGE}&page=${page}`,
+        { token, signal },
+      );
+      return {
+        items: (res?.data?.gift_cards ?? []).map(mapGiftCardRow),
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: MAX_PAGES },
+  );
 }
 
 /** POST /api/gift-cards — create a gift card. */
@@ -177,19 +178,20 @@ export async function fetchGiftCards(
   token: string,
   signal?: AbortSignal,
 ): Promise<GiftCardOption[]> {
-  const out: GiftCardOption[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const res = await apiRequest<GiftCardsResponse>(
-      `/api/gift-cards?per_page=${PER_PAGE}&page=${page}`,
-      { token, signal },
-    );
-    for (const g of res?.data?.gift_cards ?? []) {
-      out.push({ id: g.id, code: g.code?.trim() || `#${g.id}` });
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page += 1;
-  } while (page <= lastPage && page <= MAX_PAGES);
-  return out;
+  return fetchAllPages<GiftCardOption>(
+    async (page) => {
+      const res = await apiRequest<GiftCardsResponse>(
+        `/api/gift-cards?per_page=${PER_PAGE}&page=${page}`,
+        { token, signal },
+      );
+      return {
+        items: (res?.data?.gift_cards ?? []).map((g) => ({
+          id: g.id,
+          code: g.code?.trim() || `#${g.id}`,
+        })),
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: MAX_PAGES },
+  );
 }

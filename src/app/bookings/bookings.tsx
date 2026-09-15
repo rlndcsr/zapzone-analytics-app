@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
 } from "react";
@@ -36,6 +37,12 @@ import {
   defaultBookingColumnKeys,
   type BookingRowHandlers,
 } from "../../components/ui/BookingsTable";
+import { ChangeLocationSheet } from "../../components/ui/ChangeLocationSheet";
+import { EditDurationSheet } from "../../components/ui/EditDurationSheet";
+import {
+  fetchLocations,
+  type LocationOption,
+} from "../../services/locationsService";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import {
   ALL_CATEGORIES,
@@ -62,6 +69,7 @@ import { getCurrentUser, getToken } from "../../lib/session";
 import {
   bulkDeleteBookings,
   bulkSetBookingStatus,
+  checkInBooking,
   deleteBooking,
   exportBookings,
   fetchBookingDetail,
@@ -579,6 +587,29 @@ const Bookings = () => {
     null,
   );
   const [statusSaving, setStatusSaving] = useState(false);
+  // Rows whose inline Location / Duration editors are open (the web opens the
+  // same two modals from those cells).
+  const [locationBooking, setLocationBooking] =
+    useState<CalendarBooking | null>(null);
+  // Venues for the Change Location picker. Fetched the first time that sheet
+  // opens rather than on mount — every other row action works without it, and
+  // this screen already pays for a full bookings walk on load.
+  const [venues, setVenues] = useState<LocationOption[]>([]);
+  const venuesLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!locationBooking || venuesLoadedRef.current) return;
+    const token = getToken();
+    if (!token) return;
+    venuesLoadedRef.current = true;
+    fetchLocations(token)
+      .then(setVenues)
+      .catch(() => {
+        // Let the next open retry rather than stranding the picker empty.
+        venuesLoadedRef.current = false;
+      });
+  }, [locationBooking]);
+  const [durationBooking, setDurationBooking] =
+    useState<CalendarBooking | null>(null);
   const [notesBooking, setNotesBooking] = useState<CalendarBooking | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
   const [notesLoading, setNotesLoading] = useState(false);
@@ -948,6 +979,46 @@ const Bookings = () => {
           .finally(() => setNotesLoading(false));
       },
       onStatusPress: (booking) => setStatusBooking(booking),
+      onLocationPress: (booking) => setLocationBooking(booking),
+      onDurationPress: (booking) => setDurationBooking(booking),
+      onCheckIn: (booking) => {
+        if (!booking.referenceNumber) {
+          Alert.alert(
+            "Can't check in",
+            "This booking has no reference number to check in against.",
+          );
+          return;
+        }
+        Alert.alert(
+          "Check in this booking?",
+          "This marks the party as arrived.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Confirm",
+              onPress: async () => {
+                const token = getToken();
+                if (!token) return;
+                try {
+                  await checkInBooking(
+                    token,
+                    booking.referenceNumber!,
+                    currentUser?.id,
+                  );
+                  refetch();
+                } catch (err) {
+                  Alert.alert(
+                    "Check-in failed",
+                    err instanceof Error
+                      ? err.message
+                      : "Could not check in this booking.",
+                  );
+                }
+              },
+            },
+          ],
+        );
+      },
       onView: (booking) => {
         setDetailMode("details");
         setSelectedBookingId(booking.id);
@@ -984,7 +1055,7 @@ const Bookings = () => {
         );
       },
     }),
-    [refetch],
+    [refetch, currentUser?.id],
   );
 
   return (
@@ -1487,6 +1558,21 @@ const Bookings = () => {
         loading={payLoading}
         onClose={() => setPayBooking(null)}
         onProcessed={refetch}
+      />
+
+      {/* Change Location / Edit Duration — opened from those table cells. */}
+      <ChangeLocationSheet
+        visible={locationBooking !== null}
+        booking={locationBooking}
+        locations={venues}
+        onClose={() => setLocationBooking(null)}
+        onSaved={refetch}
+      />
+      <EditDurationSheet
+        visible={durationBooking !== null}
+        booking={durationBooking}
+        onClose={() => setDurationBooking(null)}
+        onSaved={refetch}
       />
 
       {/* Internal Notes — staff-only, saved to the booking. */}

@@ -1,4 +1,5 @@
 import { ApiError, apiRequest } from "../lib/api";
+import { fetchAllPages } from "../lib/fetchAllPages";
 
 /**
  * Customer Concerns — guests who asked for schedule help, wanted to book by
@@ -177,24 +178,24 @@ export async function fetchAllCheckoutConcerns({
   locationId,
   signal,
 }: Omit<FetchParams, "page" | "perPage">): Promise<AllConcerns> {
-  const rows: ConcernRow[] = [];
-  let page = 1;
-  let lastPage = 1;
   let total = 0;
 
-  do {
-    const res = await fetchCheckoutConcerns({
-      token,
-      locationId,
-      page,
-      perPage: 100,
-      signal,
-    });
-    rows.push(...res.rows);
-    lastPage = res.lastPage;
-    total = res.total;
-    page += 1;
-  } while (page <= lastPage && page <= ALL_MAX_PAGES);
+  const rows = await fetchAllPages<ConcernRow>(
+    async (page) => {
+      const res = await fetchCheckoutConcerns({
+        token,
+        locationId,
+        page,
+        perPage: 100,
+        signal,
+      });
+      // Page 1's count is the authoritative one; later pages report the same
+      // total but can now land out of order.
+      if (page === 1) total = res.total;
+      return { items: res.rows, lastPage: res.lastPage };
+    },
+    { maxPages: ALL_MAX_PAGES },
+  );
 
   return { rows, total };
 }

@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages } from "../lib/fetchAllPages";
 
 /*
  * Staff (users) API client — mirrors the web admin's user-management services
@@ -309,16 +310,20 @@ export async function fetchAllStaffUsers(
         { ...filters, status: "inactive" },
       ];
 
-  const users: StaffUser[] = [];
-  for (const pass of passes) {
-    const first = await fetchStaffUsers(token, pass, 1, perPage, signal);
-    users.push(...first.users);
-    const pages = Math.min(first.lastPage, maxPages);
-    for (let page = 2; page <= pages; page += 1) {
-      const next = await fetchStaffUsers(token, pass, page, perPage, signal);
-      users.push(...next.users);
-    }
-  }
+  // Both status passes walk their own pages, and the two passes run together —
+  // an unfiltered load is two independent index walks, not one after the other.
+  const perPass = await Promise.all(
+    passes.map((pass) =>
+      fetchAllPages<StaffUser>(
+        async (page) => {
+          const res = await fetchStaffUsers(token, pass, page, perPage, signal);
+          return { items: res.users, lastPage: res.lastPage };
+        },
+        { maxPages },
+      ),
+    ),
+  );
+  const users = perPass.flat();
 
   return passes.length > 1 && filters.sortBy
     ? sortStaff(users, filters.sortBy, filters.sortOrder ?? "asc")

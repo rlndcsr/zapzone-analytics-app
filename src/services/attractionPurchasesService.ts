@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages } from "../lib/fetchAllPages";
 import type {
   AppliedDiscount as PayloadAppliedDiscount,
   AppliedFee as PayloadAppliedFee,
@@ -90,6 +91,10 @@ type PurchasesListResponse = {
 // per_page server-side (the minimum necessary requests) — the same page-all
 // approach already used for bookings.
 const PER_PAGE = 500;
+// Runaway guard for that page-all walk: 500 * 40 = 20k purchases, far past any
+// real venue's history. The walk used to be uncapped, so a paginator that kept
+// reporting "one more page" could spin indefinitely.
+const ALL_MAX_PAGES = 40;
 // Deleted ("trashed") view keeps its own page size — it has no KPI cards and
 // stays a client-paginated list, so its data loading is intentionally
 // unaffected by the KPI fix.
@@ -149,37 +154,42 @@ export async function fetchAttractionPurchases({
   scheduledTo,
   signal,
 }: FetchParams): Promise<PurchaseRow[]> {
-  const all: RawPurchase[] = [];
-  // The index sorts by non-unique `purchase_date`, so LIMIT/OFFSET paging can
-  // repeat a row across pages and double-count tickets — key by id.
-  const seen = new Set<number>();
-  let page = 1;
-  let lastPage = 1;
-
   // Page through every page so the KPI aggregation sees the complete dataset,
   // regardless of any server-side per_page cap (see PER_PAGE note above).
-  do {
-    const params = new URLSearchParams({
-      per_page: String(PER_PAGE),
-      page: String(page),
-      user_id: String(userId),
-    });
-    if (locationId != null) params.append("location_id", String(locationId));
-    if (scheduledFrom) params.append("scheduled_from", scheduledFrom);
-    if (scheduledTo) params.append("scheduled_to", scheduledTo);
+  const raws = await fetchAllPages<RawPurchase>(
+    async (page) => {
+      const params = new URLSearchParams({
+        per_page: String(PER_PAGE),
+        page: String(page),
+        user_id: String(userId),
+      });
+      if (locationId != null) params.append("location_id", String(locationId));
+      if (scheduledFrom) params.append("scheduled_from", scheduledFrom);
+      if (scheduledTo) params.append("scheduled_to", scheduledTo);
 
-    const res = await apiRequest<PurchasesListResponse>(
-      `/api/attraction-purchases?${params.toString()}`,
-      { token, signal },
-    );
-    for (const raw of res?.data?.purchases ?? []) {
-      if (seen.has(raw.id)) continue;
-      seen.add(raw.id);
-      all.push(raw);
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page += 1;
-  } while (page <= lastPage);
+      const res = await apiRequest<PurchasesListResponse>(
+        `/api/attraction-purchases?${params.toString()}`,
+        { token, signal },
+      );
+      return {
+        items: res?.data?.purchases ?? [],
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: ALL_MAX_PAGES },
+  );
+
+  // The index sorts by non-unique `purchase_date`, so LIMIT/OFFSET paging can
+  // repeat a row across pages and double-count tickets — key by id. Dedupe on
+  // the assembled list, which `fetchAllPages` returns in page order, so the
+  // row that survives is the same one the serial walk kept.
+  const seen = new Set<number>();
+  const all: RawPurchase[] = [];
+  for (const raw of raws) {
+    if (seen.has(raw.id)) continue;
+    seen.add(raw.id);
+    all.push(raw);
+  }
 
   return all.map(mapPurchase);
 }

@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { PressableScale } from "./motion/PressableScale";
 
 import { resolvePaymentState } from "../../lib/payments/paymentState";
+import { formatDuration } from "../../lib/time";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { ColumnMeta } from "./ColumnsSheet";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
@@ -27,6 +28,12 @@ export type BookingRowHandlers = {
   onDelete: (booking: CalendarBooking) => void;
   /** Status pill — open the parent-hosted "Set Status" picker. */
   onStatusPress: (booking: CalendarBooking) => void;
+  /** Location cell — open "Change Location" (the web's clickable cell). */
+  onLocationPress: (booking: CalendarBooking) => void;
+  /** Duration cell — open "Edit Duration" (the web's clickable cell). */
+  onDurationPress: (booking: CalendarBooking) => void;
+  /** Circled check — mark the party arrived (paid-in-full bookings only). */
+  onCheckIn: (booking: CalendarBooking) => void;
 };
 
 /** One icon button in the Actions cell. Nested Pressable — owns its own touch. */
@@ -123,6 +130,9 @@ const Pill = ({ style, label }: { style: string; label: string }) => (
 );
 
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+/** A cell that opens an editor — coloured so it reads as tappable, like the
+ *  web's clickable Location / Duration cells. */
+const LINK_TEXT = "text-sm font-medium text-[#0644C7]";
 
 /**
  * The table's columns. Grouped cells mirror the web exactly: Date/Time stacks
@@ -287,13 +297,20 @@ function buildColumns(
       key: "location",
       label: "Location",
       width: 170,
+      // Tappable, like the web's clickable Location cell: opens Change Location.
       render: (b) => (
-        <View className="flex-row items-center gap-1">
-          <Feather name="map-pin" size={11} color="#9CA3AF" />
-          <Text numberOfLines={1} className={`flex-1 ${CELL_TEXT}`}>
+        <PressableScale
+          onPress={() => h.onLocationPress(b)}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`Change location for ${b.customerName}`}
+          className="flex-row items-center gap-1"
+        >
+          <Feather name="map-pin" size={11} color={PRIMARY} />
+          <Text numberOfLines={1} className={`flex-1 ${LINK_TEXT}`}>
             {b.locationName || "—"}
           </Text>
-        </View>
+        </PressableScale>
       ),
     });
   }
@@ -303,13 +320,21 @@ function buildColumns(
       key: "duration",
       label: "Duration",
       width: 120,
+      // Tappable, like the web's clickable Duration cell: opens Edit Duration.
+      // The text is the web's wording, not raw `duration + unit`.
       render: (b) => (
-        <View className="flex-row items-center gap-1">
-          <Feather name="clock" size={11} color="#9CA3AF" />
-          <Text numberOfLines={1} className={CELL_TEXT}>
-            {b.duration ? `${b.duration} ${b.durationUnit}` : "—"}
+        <PressableScale
+          onPress={() => h.onDurationPress(b)}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit duration for ${b.customerName}`}
+          className="flex-row items-center gap-1"
+        >
+          <Feather name="clock" size={11} color={PRIMARY} />
+          <Text numberOfLines={1} className={LINK_TEXT}>
+            {formatDuration(b.duration, b.durationUnit)}
           </Text>
-        </View>
+        </PressableScale>
       ),
     });
   }
@@ -484,19 +509,26 @@ function buildColumns(
 
   columns.push({
     // Inline row actions, in the web's order: Process Payment (unpaid only),
-    // Internal Notes, View Details, Edit, Delete.
+    // Check In (paid in full and not yet checked in), Internal Notes, View
+    // Details, Edit, Delete.
     key: "actions",
     label: "Actions",
-    width: 164,
+    width: 190,
     render: (b) => {
-      // Nothing left to collect on a settled booking — and a refunded or
-      // voided one is settled too, so `isSettled` is the right test rather
-      // than a comparison against "paid".
-      const unpaid = !resolvePaymentState({
+      const payment = resolvePaymentState({
         payment_status: b.paymentStatus,
         amount_paid: b.amountPaid,
         total_amount: b.totalAmount,
-      }).isSettled;
+      });
+      // Nothing left to collect on a settled booking — and a refunded or
+      // voided one is settled too, so `isSettled` is the right test rather
+      // than a comparison against "paid".
+      const unpaid = !payment.isSettled;
+      // Check-in is the paid-in-full case only. Deliberately `state === "paid"`
+      // rather than `isSettled`: a refunded or voided booking owes nothing but
+      // must not be checked in, and the web gates on `paymentStatus === 'paid'`
+      // for the same reason.
+      const canCheckIn = payment.state === "paid" && b.status !== "checked-in";
       return (
         <View className="flex-row items-center gap-0.5">
           {unpaid && (
@@ -505,6 +537,14 @@ function buildColumns(
               tint={PRIMARY}
               label={`Process payment for ${b.customerName}`}
               onPress={() => h.onPayment(b)}
+            />
+          )}
+          {canCheckIn && (
+            <IconAction
+              icon="check-circle"
+              tint="#6B7280"
+              label={`Check in ${b.customerName}`}
+              onPress={() => h.onCheckIn(b)}
             />
           )}
           <IconAction
