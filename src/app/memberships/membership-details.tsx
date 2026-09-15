@@ -683,7 +683,7 @@ const MembershipDetailsScreen = () => {
         {/* Payment Method */}
         <SectionCard icon="credit-card" title="Payment Method">
           <Text className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-            Current: {detail.paymentMethodLabel || "— none on file"}
+            Current: {detail.cardLabel ?? detail.paymentMethodLabel ?? "— none on file"}
           </Text>
           <View className="flex-row items-center gap-2">
             <View className="flex-1 rounded-xl px-3.5 py-2.5 border border-gray-200 dark:border-neutral-800">

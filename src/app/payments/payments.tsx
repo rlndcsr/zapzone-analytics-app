@@ -194,6 +194,11 @@ function PaymentCard({ p, deleted }: { p: PaymentRow; deleted?: boolean }) {
           <Feather name="credit-card" size={13} color="#9CA3AF" />
           <Text className="text-xs text-gray-500 dark:text-gray-400">{p.methodLabel}</Text>
         </View>
+        {!!p.cardLabel && (
+          <Text className="text-[11px] text-gray-400 dark:text-gray-500 ml-[19px]">
+            {p.cardLabel}
+          </Text>
+        )}
         {!!p.locationName && (
           <View className="flex-row items-center gap-1.5">
             <Feather name="map-pin" size={13} color="#9CA3AF" />
@@ -617,6 +622,7 @@ const Payments = () => {
         "Email",
         "Amount",
         "Method",
+        "Card",
         "Status",
         "Location",
         "Date",
@@ -638,6 +644,7 @@ const Payments = () => {
           row.customerEmail,
           row.amount.toFixed(2),
           row.methodLabel,
+          row.cardLabel ?? "",
           row.statusLabel,
           row.locationName,
           when(row.createdAt),
@@ -1497,6 +1504,9 @@ function PaymentDetailSheet({
 
             <DetailRow icon="hash" label="Transaction" value={payment.reference} />
             <DetailRow icon="credit-card" label="Method" value={payment.methodLabel} />
+            {!!payment.cardLabel && (
+              <DetailRow icon="credit-card" label="Card" value={payment.cardLabel} />
+            )}
             <DetailRow
               icon="tag"
               label="Type"

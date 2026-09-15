@@ -359,10 +359,17 @@ function buildColumns(
       label: "Payment",
       width: 130,
       render: (b) => (
-        <Pill
-          style={PAYMENT_METHOD_STYLE[b.paymentMethod ?? ""] ?? PILL_FALLBACK}
-          label={paymentMethodLabel(b.paymentMethod)}
-        />
+        <View>
+          <Pill
+            style={PAYMENT_METHOD_STYLE[b.paymentMethod ?? ""] ?? PILL_FALLBACK}
+            label={paymentMethodLabel(b.paymentMethod)}
+          />
+          {!!b.cardLabel && (
+            <Text className="mt-0.5 text-[10px] text-gray-400 dark:text-gray-500">
+              {b.cardLabel}
+            </Text>
+          )}
+        </View>
       ),
     });
   }

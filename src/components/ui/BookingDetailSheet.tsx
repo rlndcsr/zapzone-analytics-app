@@ -434,6 +434,13 @@ export function BookingDetailSheet({
                 {!!detail.paymentMethod && (
                   <Row label="Payment Method" value={detail.paymentMethod} />
                 )}
+                {!!detail.cardLabel && (
+                  <Row
+                    label="Card"
+                    value={detail.cardLabel}
+                    valueClass="text-xs text-gray-500 dark:text-gray-400"
+                  />
+                )}
                 <Row
                   label="Amount Paid"
                   value={formatMoney(detail.amountPaid)}

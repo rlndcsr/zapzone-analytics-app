@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
 import type {
   AppliedDiscount as PayloadAppliedDiscount,
   AppliedFee as PayloadAppliedFee,
@@ -26,6 +27,8 @@ export type PurchaseRow = {
   totalAmount: number;
   amountPaid: number;
   paymentMethod: string;
+  /** "Visa ending in 1234" — the most relevant paid card, or null. */
+  cardLabel: string | null;
   createdAt: string;
   /** Transaction date (YYYY-MM-DD), distinct from the scheduled visit. */
   purchaseDate: string | null;
@@ -66,6 +69,7 @@ type RawPurchase = {
     email?: string | null;
     phone?: string | null;
   } | null;
+  payments?: CardBearingPayment[] | null;
 };
 
 type PurchasesListResponse = {
@@ -114,6 +118,7 @@ function mapPurchase(raw: RawPurchase): PurchaseRow {
     totalAmount: Number(raw.total_amount ?? 0),
     amountPaid: Number(raw.amount_paid ?? 0),
     paymentMethod: raw.payment_method ?? "",
+    cardLabel: cardLabelFromPayments(raw.payments),
     createdAt: raw.created_at ?? "",
     purchaseDate: raw.purchase_date ?? null,
     notes: raw.notes?.trim() || null,
@@ -313,6 +318,8 @@ export type AttractionPurchaseDetail = {
   totalAmount: number;
   amountPaid: number;
   paymentMethod: string;
+  /** "Visa ending in 1234" — the most relevant paid card, or null. */
+  cardLabel: string | null;
   transactionId: string | null;
   paymentId: string | null;
   createdAt: string;
@@ -381,6 +388,7 @@ function mapDetail(raw: RawPurchaseDetail): AttractionPurchaseDetail {
     totalAmount: base.totalAmount,
     amountPaid: base.amountPaid,
     paymentMethod: base.paymentMethod,
+    cardLabel: base.cardLabel,
     transactionId: raw.transaction_id ?? null,
     paymentId: raw.payment_id ?? null,
     createdAt: base.createdAt,

@@ -922,6 +922,7 @@ export default function CheckInWaiversScreen() {
               {surface.kind === "order" && (
                 <VerifyOrderDetails
                   order={surface.order}
+                  payments={surface.payments}
                   busy={entity.orderBusy}
                   notice={null}
                   onCheckInLine={(lineId) => confirmEntity([lineId])}

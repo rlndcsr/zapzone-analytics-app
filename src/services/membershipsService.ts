@@ -1,4 +1,5 @@
 import { apiRequest, apiUrl, mediaUrl } from "../lib/api";
+import { formatCardLabel } from "../lib/payments/cardLabel";
 import type { AuthorizeNetPublicKey, PaymentOpaqueData } from "./paymentsService";
 
 /** Lifecycle status, mirrored from the backend `status` enum. */
@@ -411,6 +412,8 @@ export type MembershipDetail = {
   homeLocationName: string | null;
   qrToken: string | null;
   paymentMethodLabel: string | null;
+  /** "Visa ending in 1234" from the card on file, preferred over the free-text label. */
+  cardLabel: string | null;
   isComped: boolean;
   visits: MembershipVisit[];
   payments: MembershipPayment[];
@@ -435,6 +438,9 @@ type RawMembershipDetail = RawMembership & {
   visits_used_this_term?: number | null;
   visits_remaining?: number | null;
   payment_method_label?: string | null;
+  card_type?: string | null;
+  card_last_four?: string | null;
+  card_label?: string | null;
   plan?: {
     id?: number;
     name?: string | null;
@@ -511,6 +517,7 @@ function mapDetail(raw: RawMembershipDetail): MembershipDetail {
     homeLocationName: base.homeLocationName,
     qrToken: base.qrToken,
     paymentMethodLabel: raw.payment_method_label?.trim() || null,
+    cardLabel: formatCardLabel(raw.card_type, raw.card_last_four, raw.card_label),
     isComped: base.isComped,
     visits: (raw.visits ?? []).map((v) => ({
       id: v.id,

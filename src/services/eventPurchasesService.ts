@@ -1,4 +1,5 @@
 import { ApiError, apiRequest } from "../lib/api";
+import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
 import type { AppliedDiscount, AppliedFee } from "./pricingService";
 
 /** Booking lifecycle status, mirroring the backend `status` enum. */
@@ -25,6 +26,8 @@ export type EventPurchaseRow = {
   totalAmount: number;
   amountPaid: number;
   paymentMethod: string;
+  /** "Visa ending in 1234" — the most relevant paid card, or null. */
+  cardLabel: string | null;
   createdAt: string;
   purchaseDate: string | null;
   purchaseTime: string | null;
@@ -61,6 +64,7 @@ type RawEventPurchase = {
     email?: string | null;
     phone?: string | null;
   } | null;
+  payments?: CardBearingPayment[] | null;
 };
 
 // Web loads a single large page and filters/sorts client-side; mirror that.
@@ -84,6 +88,7 @@ function mapPurchase(raw: RawEventPurchase): EventPurchaseRow {
     totalAmount: Number(raw.total_amount ?? 0),
     amountPaid: Number(raw.amount_paid ?? 0),
     paymentMethod: raw.payment_method ?? "",
+    cardLabel: cardLabelFromPayments(raw.payments),
     createdAt: raw.created_at ?? "",
     purchaseDate: raw.purchase_date ?? null,
     purchaseTime: raw.purchase_time ?? null,
@@ -393,6 +398,8 @@ export type EventPurchaseDetail = {
   amountPaid: number;
   discountAmount: number;
   paymentMethod: string;
+  /** "Visa ending in 1234" — the most relevant paid card, or null. */
+  cardLabel: string | null;
   transactionId: string | null;
   notes: string;
   specialRequests: string;
@@ -462,6 +469,7 @@ function mapDetail(raw: RawEventPurchaseDetail): EventPurchaseDetail {
     amountPaid: base.amountPaid,
     discountAmount: Number(raw.discount_amount ?? 0),
     paymentMethod: base.paymentMethod,
+    cardLabel: base.cardLabel,
     transactionId: raw.transaction_id ?? null,
     notes: raw.notes?.trim() || "",
     specialRequests: raw.special_requests?.trim() || "",

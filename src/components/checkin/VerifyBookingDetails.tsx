@@ -484,6 +484,7 @@ export function VerifyBookingDetails({
               icon="credit-card"
               label="Payment Method"
               value={titleCase(detail.paymentMethod)}
+              subValue={detail.cardLabel}
             />
           )}
           <InfoTile

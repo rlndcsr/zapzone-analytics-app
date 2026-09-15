@@ -1,5 +1,6 @@
 import { apiRequest, apiUrl, firstMediaUrl } from "../lib/api";
 import { compareCheckInRows } from "../lib/checkin/checkInOrder";
+import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
   AppliedFee as PricingAppliedFee,
@@ -35,6 +36,8 @@ export type CalendarBooking = {
   durationUnit: string;
   durationMinutes: number;
   paymentMethod: string | null;
+  /** "Visa ending in 1234" — the most relevant paid card, or null. */
+  cardLabel: string | null;
   paymentStatus: string | null;
   locationName: string;
   createdAt: string | null;
@@ -101,6 +104,8 @@ export type BookingDetail = {
   totalAmount: number;
   paymentStatus: string;
   paymentMethod: string | null;
+  /** "Visa ending in 1234" — the most relevant paid card, or null. */
+  cardLabel: string | null;
   amountPaid: number;
   appliedFees: AppliedFee[];
   customerNotes: string | null;
@@ -153,6 +158,8 @@ type RawBooking = {
   // Eager-loaded by the index as `attractions:id,name` / `addOns:id,name`.
   attractions?: RawBookingAttraction[] | null;
   add_ons?: RawAddOn[] | null;
+  // Column-limited eager load, present on both the index and the show response.
+  payments?: CardBearingPayment[] | null;
 };
 
 type RawBookingAttraction = {
@@ -301,6 +308,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
       raw.duration_unit,
     ),
     paymentMethod: raw.payment_method ?? null,
+    cardLabel: cardLabelFromPayments(raw.payments),
     paymentStatus: raw.payment_status ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
@@ -513,6 +521,7 @@ export async function fetchBookingDetail(
     totalAmount: Number(b.total_amount ?? 0),
     paymentStatus: b.payment_status ?? "partial",
     paymentMethod: b.payment_method ?? null,
+    cardLabel: cardLabelFromPayments(b.payments),
     amountPaid: Number(b.amount_paid ?? 0),
     appliedFees: (b.applied_fees ?? []).map((f) => ({
       name: f.fee_name ?? "Fee",

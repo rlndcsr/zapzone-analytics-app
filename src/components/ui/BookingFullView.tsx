@@ -464,11 +464,16 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
               </Text>
             </InfoTile>
             {!!detail.paymentMethod && (
-              <InfoTile
-                icon={CreditCard}
-                label="Payment Method"
-                value={detail.paymentMethod}
-              />
+              <InfoTile icon={CreditCard} label="Payment Method">
+                <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {detail.paymentMethod}
+                </Text>
+                {!!detail.cardLabel && (
+                  <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                    {detail.cardLabel}
+                  </Text>
+                )}
+              </InfoTile>
             )}
             <InfoTile icon={Wallet} label="Payment Status">
               <PaymentStatusBadge

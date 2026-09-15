@@ -1,4 +1,5 @@
 import { ApiError, apiRequest, apiUrl } from "../lib/api";
+import { formatCardLabel } from "../lib/payments/cardLabel";
 import { tokenizeCardWithAccept } from "../lib/payments/acceptTokenize";
 
 /** Payment lifecycle status (backend `status` column). */
@@ -27,6 +28,8 @@ export type PaymentRow = {
   /** Raw backend `method` ("authorize.net" / "cash" / …) — drives eligibility. */
   method: string;
   methodLabel: string;
+  /** "Visa ending in 1234" — null for cash/in-store or a record with no card. */
+  cardLabel: string | null;
   status: PaymentStatus;
   statusLabel: string;
   locationId: number | null;
@@ -74,6 +77,9 @@ type RawPayment = {
   notes?: string | null;
   signature_image?: string | null;
   terms_accepted?: boolean | null;
+  card_type?: string | null;
+  card_last_four?: string | null;
+  card_label?: string | null;
   paid_at?: string | null;
   refunded_at?: string | null;
   created_at?: string | null;
@@ -264,6 +270,7 @@ function mapPayment(raw: RawPayment): PaymentRow {
     amount: Number(raw.amount ?? 0),
     method: (raw.method ?? "").toLowerCase(),
     methodLabel: methodLabel(raw.method),
+    cardLabel: formatCardLabel(raw.card_type, raw.card_last_four, raw.card_label),
     status: raw.status ?? "pending",
     statusLabel: humanize(raw.status) || "Pending",
     locationId: raw.location?.id ?? raw.location_id ?? null,

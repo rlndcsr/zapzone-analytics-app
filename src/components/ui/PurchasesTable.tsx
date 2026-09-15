@@ -256,9 +256,16 @@ function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
     label: "Payment",
     width: 120,
     render: (p) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {paymentLabel(p.paymentMethod)}
-      </Text>
+      <View>
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {paymentLabel(p.paymentMethod)}
+        </Text>
+        {!!p.cardLabel && (
+          <Text numberOfLines={1} className="text-xs text-gray-400 dark:text-gray-500">
+            {p.cardLabel}
+          </Text>
+        )}
+      </View>
     ),
   },
   {

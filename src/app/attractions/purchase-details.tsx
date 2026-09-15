@@ -551,6 +551,7 @@ const PurchaseDetailsScreen = () => {
               icon="credit-card"
               label="Payment Method"
               value={prettyMethod(detail.paymentMethod)}
+              extra={[detail.cardLabel]}
             />
             {!!detail.transactionId && (
               <InfoTile

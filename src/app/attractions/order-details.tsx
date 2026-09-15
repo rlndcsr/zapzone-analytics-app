@@ -17,6 +17,7 @@ import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { OrderQRSheet } from "../../components/ui/OrderQRSheet";
 import { getToken } from "../../lib/session";
+import { cardLabelFromPayments } from "../../lib/payments/cardLabel";
 import {
   PAYMENT_TYPE,
   fetchPaymentsForPayable,
@@ -507,6 +508,17 @@ export default function OrderDetailsScreen() {
 
   const allIn = order.lines.length > 0 && order.lines.every((l) => l.checkedInAt);
   const ended = ENDED.includes(order.status);
+  // `payments` comes from a separate fetch (the show endpoint doesn't eager-load
+  // it) — pick the same card the per-payment rows below would show.
+  const orderCardLabel = cardLabelFromPayments(
+    payments.map((p) => ({
+      status: p.status,
+      card_label: p.cardLabel,
+      paid_at: p.paidAt,
+      created_at: p.createdAt,
+      id: p.id,
+    })),
+  );
   const canRecordPayment = order.remainingBalance > 0 && !ended;
   const canCancel =
     order.amountPaid === 0 &&
@@ -657,6 +669,11 @@ export default function OrderDetailsScreen() {
                 <Text className="text-sm font-medium text-gray-800 dark:text-white">
                   {methodLabel(order.paymentMethod)}
                 </Text>
+                {!!orderCardLabel && (
+                  <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+                    {orderCardLabel}
+                  </Text>
+                )}
               </InfoTile>
               <InfoTile icon="tag" label="Items">
                 <Text className="text-sm font-medium text-gray-800 dark:text-white">
@@ -767,33 +784,40 @@ export default function OrderDetailsScreen() {
                 {payments.map((p) => (
                   <View
                     key={p.id}
-                    className="flex-row items-center gap-2 rounded-xl bg-gray-50 p-3 dark:bg-neutral-800/40"
+                    className="rounded-xl bg-gray-50 p-3 dark:bg-neutral-800/40"
                   >
-                    <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                      {money(p.amount)}
-                    </Text>
-                    <Text className="text-xs capitalize text-gray-600 dark:text-gray-300">
-                      {p.method}
-                    </Text>
-                    <View
-                      className={`rounded-full px-2 py-0.5 ${
-                        p.status === "completed"
-                          ? "bg-green-100 dark:bg-green-900/30"
-                          : p.status === "refunded" || p.status === "voided"
-                            ? "bg-purple-100 dark:bg-purple-900/30"
-                            : "bg-yellow-100 dark:bg-yellow-900/30"
-                      }`}
-                    >
-                      <Text className="text-[10px] font-medium capitalize text-gray-800 dark:text-gray-200">
-                        {p.status}
+                    <View className="flex-row items-center gap-2">
+                      <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                        {money(p.amount)}
+                      </Text>
+                      <Text className="text-xs capitalize text-gray-600 dark:text-gray-300">
+                        {p.method}
+                      </Text>
+                      <View
+                        className={`rounded-full px-2 py-0.5 ${
+                          p.status === "completed"
+                            ? "bg-green-100 dark:bg-green-900/30"
+                            : p.status === "refunded" || p.status === "voided"
+                              ? "bg-purple-100 dark:bg-purple-900/30"
+                              : "bg-yellow-100 dark:bg-yellow-900/30"
+                        }`}
+                      >
+                        <Text className="text-[10px] font-medium capitalize text-gray-800 dark:text-gray-200">
+                          {p.status}
+                        </Text>
+                      </View>
+                      <Text
+                        className="flex-1 text-right text-[10px] text-gray-500 dark:text-gray-400"
+                        numberOfLines={1}
+                      >
+                        {p.createdAt ? formatDateTimeET(p.createdAt) : ""}
                       </Text>
                     </View>
-                    <Text
-                      className="flex-1 text-right text-[10px] text-gray-500 dark:text-gray-400"
-                      numberOfLines={1}
-                    >
-                      {p.createdAt ? formatDateTimeET(p.createdAt) : ""}
-                    </Text>
+                    {!!p.cardLabel && (
+                      <Text className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        {p.cardLabel}
+                      </Text>
+                    )}
                   </View>
                 ))}
               </View>

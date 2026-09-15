@@ -2,6 +2,8 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
+import { cardLabelFromPayments } from "../../lib/payments/cardLabel";
+import type { PaymentRow } from "../../services/paymentsService";
 import type {
   TicketOrderDetail,
   TicketOrderLine,
@@ -66,11 +68,13 @@ function InfoTile({
   icon,
   label,
   value,
+  subValue,
   full,
 }: {
   icon: IconName;
   label: string;
   value: string;
+  subValue?: string | null;
   full?: boolean;
 }) {
   return (
@@ -86,6 +90,11 @@ function InfoTile({
           <Text className="text-sm font-medium text-gray-800 dark:text-white">
             {value}
           </Text>
+          {!!subValue && (
+            <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+              {subValue}
+            </Text>
+          )}
         </View>
       </View>
     </View>
@@ -181,16 +190,28 @@ function LineRow({
  */
 export function VerifyOrderDetails({
   order,
+  payments = [],
   busy,
   notice,
   onCheckInLine,
 }: {
   order: TicketOrderDetail;
+  /** Fetched separately — the order itself carries no payments here. */
+  payments?: PaymentRow[];
   busy: number | "all" | null;
   /** Outcome of the last attempt, including any lines the server skipped. */
   notice: { tone: "success" | "warning" | "error"; message: string } | null;
   onCheckInLine: (lineId: number) => void;
 }) {
+  const cardLabel = cardLabelFromPayments(
+    payments.map((p) => ({
+      status: p.status,
+      card_label: p.cardLabel,
+      paid_at: p.paidAt,
+      created_at: p.createdAt,
+      id: p.id,
+    })),
+  );
   const cancelled = order.status === "cancelled";
   const refunded = order.status === "refunded";
   const owes = order.remainingBalance > 0;
@@ -299,6 +320,7 @@ export function VerifyOrderDetails({
             icon="credit-card"
             label="Payment"
             value={order.paymentMethod?.replace(/_/g, " ") ?? "—"}
+            subValue={cardLabel}
           />
         </View>
       </View>

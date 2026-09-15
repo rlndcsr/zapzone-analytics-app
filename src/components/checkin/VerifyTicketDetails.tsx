@@ -133,11 +133,19 @@ const STATUS_STYLE: Record<
   },
 };
 
+/** Title-case a payment method ("in_store" -> "In Store"), like the tickets list. */
+function paymentLabel(method: string): string {
+  if (!method) return "—";
+  const spaced = method.replace(/_/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /** One icon-led detail tile (icon square + label + value). */
 function InfoTile({
   icon,
   label,
   value,
+  subValue,
   full,
   valueClass = "text-gray-800 dark:text-white",
   tileClass = "bg-[#0644C7]/10",
@@ -147,6 +155,7 @@ function InfoTile({
   icon: IconName;
   label: string;
   value: string;
+  subValue?: string | null;
   full?: boolean;
   valueClass?: string;
   tileClass?: string;
@@ -162,6 +171,9 @@ function InfoTile({
         <View className="flex-1">
           <Text className="text-[11px] text-gray-500 dark:text-gray-400">{label}</Text>
           <Text className={`text-sm font-medium ${valueClass}`}>{value}</Text>
+          {!!subValue && (
+            <Text className="text-[11px] text-gray-400 dark:text-gray-500">{subValue}</Text>
+          )}
         </View>
       </View>
     </View>
@@ -280,6 +292,14 @@ export function VerifyTicketDetails({
             label="Total Amount"
             value={money(purchase.totalAmount)}
           />
+          {!!purchase.paymentMethod && (
+            <InfoTile
+              icon="credit-card"
+              label="Payment Method"
+              value={paymentLabel(purchase.paymentMethod)}
+              subValue={purchase.cardLabel}
+            />
+          )}
           <InfoTile
             icon="check-circle"
             label="Status"

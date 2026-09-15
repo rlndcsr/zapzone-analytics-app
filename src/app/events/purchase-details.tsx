@@ -546,6 +546,13 @@ const EventPurchaseDetailsScreen = () => {
             valueClass={balance > 0 ? "text-amber-600" : "text-green-600"}
           />
           <InfoRow label="Payment Method" value={prettyMethod(detail.paymentMethod)} />
+          {!!detail.cardLabel && (
+            <InfoRow
+              label="Card"
+              value={detail.cardLabel}
+              valueClass="text-xs text-gray-500 dark:text-gray-400"
+            />
+          )}
           <View className="flex-row items-center justify-between py-1.5">
             <Text className="text-sm text-gray-500 dark:text-gray-400">
               Payment Status

@@ -19,6 +19,11 @@ import {
   type ScanResult as MembershipScan,
 } from "../../services/membershipsService";
 import {
+  PAYMENT_TYPE,
+  fetchPaymentsForPayable,
+  type PaymentRow,
+} from "../../services/paymentsService";
+import {
   checkInTicketOrder,
   fetchTicketOrder,
   type TicketOrderDetail,
@@ -43,7 +48,12 @@ import { KIND_LABELS } from "../checkin/resolveScannedCode";
  */
 export type EntitySurface =
   | { kind: "ticket"; purchase: PurchaseRow; waivers: EntityWaivers | null }
-  | { kind: "order"; order: TicketOrderDetail }
+  /**
+   * `order.cardLabel` is null here — the show endpoint doesn't eager-load
+   * payments — so `payments` is fetched separately, the same way
+   * order-details.tsx already does.
+   */
+  | { kind: "order"; order: TicketOrderDetail; payments: PaymentRow[] }
   | { kind: "membership"; scan: MembershipScan }
   | { kind: "event"; ticket: ScannedEventTicket }
   | { kind: "waiver"; waiver: ScannedWaiver };
@@ -196,7 +206,22 @@ export function useEntityCheckIn(): UseEntityCheckIn {
         await withToken(async (token) => {
           const order = await fetchTicketOrder(token, orderId, signal);
           if (signal.aborted || !mountedRef.current) return;
-          setSurface({ kind: "order", order });
+
+          // Same "extra context, never a reason to refuse" rule as the ticket
+          // lookup's waivers: a failed fetch just leaves the card unshown.
+          let payments: PaymentRow[] = [];
+          try {
+            payments = await fetchPaymentsForPayable(
+              token,
+              PAYMENT_TYPE.TICKET_ORDER,
+              order.id,
+              signal,
+            );
+          } catch {
+            payments = [];
+          }
+          if (signal.aborted || !mountedRef.current) return;
+          setSurface({ kind: "order", order, payments });
         });
       } catch (err) {
         if (!signal.aborted) fail(reason(err, "Order not found."));

@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
 
 /*
  * Ticket-order (multi-item order) API client — mirrors the web admin's
@@ -134,6 +135,14 @@ export type TicketOrderDetail = {
   /** What is still owed. Gates check-in, exactly as on the web. */
   remainingBalance: number;
   paymentMethod: string | null;
+  /**
+   * "Visa ending in 1234" from the order's payment history — only ever
+   * populated where the response actually carries `payments` (the list
+   * endpoint eager-loads it; the single-order show endpoint currently does
+   * not, so this is null there. See `order-details.tsx`, which fetches the
+   * order's payments separately for that case).
+   */
+  cardLabel: string | null;
   transactionId: string | null;
   notes: string | null;
   createdAt: string | null;
@@ -301,6 +310,9 @@ const mapOrderDetail = (raw: RawOrder): TicketOrderDetail => {
         ? Math.max(0, totalAmount - amountPaid)
         : num(raw.remaining_balance),
     paymentMethod: str(raw.payment_method),
+    cardLabel: cardLabelFromPayments(
+      Array.isArray(raw.payments) ? (raw.payments as CardBearingPayment[]) : null,
+    ),
     transactionId: str(raw.transaction_id),
     notes: str(raw.notes),
     createdAt: str(raw.created_at),

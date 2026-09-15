@@ -218,9 +218,16 @@ const COLUMNS: Column[] = [
     label: "Method",
     width: 140,
     render: (o, ctx) => (
-      <Text numberOfLines={1} className={`capitalize ${CELL_TEXT}`}>
-        {ctx.methodLabel(o.paymentMethod)}
-      </Text>
+      <View>
+        <Text numberOfLines={1} className={`capitalize ${CELL_TEXT}`}>
+          {ctx.methodLabel(o.paymentMethod)}
+        </Text>
+        {!!o.cardLabel && (
+          <Text numberOfLines={1} className="text-xs text-gray-400 dark:text-gray-500">
+            {o.cardLabel}
+          </Text>
+        )}
+      </View>
     ),
   },
   {
