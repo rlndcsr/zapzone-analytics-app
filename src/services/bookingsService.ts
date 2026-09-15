@@ -910,6 +910,10 @@ export type Space = {
   capacity: number | null;
   locationId: number | null;
   breaks: SpaceBreak[];
+  /** False for an out-of-service space — only present when fetched with
+   *  `includeUnavailable` (the Space Schedule's own display fetch); the
+   *  shared bookable-only fetch never returns one of these in the first place. */
+  isAvailable: boolean;
 };
 
 type RawRoom = {
@@ -919,6 +923,7 @@ type RawRoom = {
   area_group?: string | { name?: string | null } | null;
   booking_interval?: number | string | null;
   is_active?: boolean | number | null;
+  is_available?: boolean | number | null;
   status?: string | null;
   location_id?: number | string | null;
   location?: { id?: number | null; name?: string | null } | null;
@@ -935,10 +940,15 @@ type RawRoom = {
 export async function fetchSpaces({
   token,
   userId,
+  includeUnavailable,
   signal,
 }: {
   token: string;
   userId?: number;
+  /** The Space Schedule needs out-of-service rooms too, so it can show them as
+   *  unavailable — every other caller (the room picker, the Calendar tab) wants
+   *  the default bookable-only list, so this stays opt-in. */
+  includeUnavailable?: boolean;
   signal?: AbortSignal;
 }): Promise<Space[]> {
   const out: Space[] = [];
@@ -947,6 +957,7 @@ export async function fetchSpaces({
   do {
     const params = new URLSearchParams({ per_page: "100", page: String(page) });
     if (userId != null) params.append("user_id", String(userId));
+    if (includeUnavailable) params.append("include_unavailable", "true");
     const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
       token,
       signal,
@@ -969,6 +980,7 @@ export async function fetchSpaces({
           startTime: toTime(b.start_time) ?? String(b.start_time ?? ""),
           endTime: toTime(b.end_time) ?? String(b.end_time ?? ""),
         })),
+        isAvailable: r.is_available !== false,
       });
     }
     lastPage = res?.data?.pagination?.last_page ?? page;

@@ -58,6 +58,7 @@ import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkele
 import { categoryKeyOf } from "../../lib/calendar/categoryFilter";
 import { consumeBookingsStale, useBookings } from "../../lib/hooks/useBookings";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { cardLabelFromPayments, type CardBearingPayment } from "../../lib/payments/cardLabel";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   bulkDeleteBookings,
@@ -139,6 +140,7 @@ type ExportRow = {
   status?: string | null;
   payment_method?: string | null;
   payment_status?: string | null;
+  payments?: CardBearingPayment[] | null;
   total_amount?: number | string | null;
   amount_paid?: number | string | null;
   attractions?:
@@ -167,6 +169,7 @@ function buildBookingsCsv(rows: ExportRow[]): string {
     "Duration",
     "Status",
     "Payment Method",
+    "Card",
     "Payment Status",
     "Total Amount",
     "Amount Paid",
@@ -197,6 +200,7 @@ function buildBookingsCsv(rows: ExportRow[]): string {
       b.duration && b.duration_unit ? `${b.duration} ${b.duration_unit}` : "",
       b.status ?? "",
       b.payment_method ?? "",
+      cardLabelFromPayments(b.payments) ?? "",
       b.payment_status ?? "",
       b.total_amount ?? 0,
       b.amount_paid ?? 0,

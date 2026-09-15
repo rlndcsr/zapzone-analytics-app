@@ -21,12 +21,14 @@ import { CalendarDaySkeleton } from "../../components/ui/skeleton/CalendarSkelet
 import { packageColor } from "../../lib/calendar/packageColors";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useSpaceSchedule } from "../../lib/hooks/useSpaceSchedule";
+import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
 import { useWeekBookingCounts } from "../../lib/hooks/useWeekBookingCounts";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
   buildColumns,
   closureBoundaryMinutes,
   closureLabel,
+  columnKeyFor,
   computeCategoryOptions,
   computeDaySummary,
   computeSpaceClosures,
@@ -44,6 +46,17 @@ import {
   type SpaceClosure,
   type TimeWindow,
 } from "../../lib/bookings/spaceScheduleGrid";
+import {
+  bandGeometry,
+  freeState,
+  minuteAtOffset,
+  nextFreeMinute,
+  snapToInterval,
+  type FreeState,
+  type TimeRange,
+} from "../../lib/bookings/freeTime";
+import { buildBookingParams, CREATE_BOOKING_PATH } from "../../lib/bookings/bookingPrefill";
+import { packagesValidForSlot } from "../../lib/bookings/packageCandidates";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
@@ -451,14 +464,52 @@ const GridColumnBackground = ({
   closure,
   timeWindow,
   pxPerMinute,
+  meta,
+  isPastDate,
+  onPressBand,
 }: {
   column: ScheduleColumn;
   breaks: { start: number; end: number }[];
   closure: SpaceClosure | undefined;
   timeWindow: TimeWindow;
   pxPerMinute: number;
-}) => (
+  meta: { open: number | null; close: number | null; bookable: boolean; windowKnown: boolean; reason: string | null };
+  isPastDate: boolean;
+  onPressBand: (bandOrigin: number, locationY: number) => void;
+}) => {
+  const band = bandGeometry(meta.open, meta.close, timeWindow, pxPerMinute);
+  const bandOrigin = Math.max(meta.open ?? timeWindow.start, timeWindow.start);
+  const clickable = !!band && meta.bookable && !isPastDate;
+
+  return (
   <>
+    {/* Free time — the whole open/close window, shaded and (when bookable)
+        tappable to start a booking there. Drawn first so closures/breaks and
+        booking blocks layer on top of it, never the other way around. */}
+    {band && (
+      <Pressable
+        disabled={!clickable}
+        onPress={(e) => onPressBand(bandOrigin, e.nativeEvent.locationY)}
+        accessibilityRole={clickable ? "button" : undefined}
+        accessibilityLabel={clickable ? `Start a booking in ${column.name}` : undefined}
+        style={{ position: "absolute", left: 0, right: 0, top: band.top, height: band.height }}
+        className={clickable ? "bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60" : "bg-gray-50 dark:bg-neutral-900/40"}
+      />
+    )}
+    {!band && !closure?.fullDay && meta.reason && (
+      <View className="absolute inset-0 z-[1] items-center pt-8">
+        <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
+          {meta.reason}
+        </Text>
+      </View>
+    )}
+    {!band && !closure?.fullDay && !meta.windowKnown && !meta.reason && (
+      <View className="absolute inset-0 z-[1] items-center pt-8">
+        <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
+          Schedule unavailable
+        </Text>
+      </View>
+    )}
     {closure?.fullDay && (
       <View className="absolute inset-0 bg-red-50/80 dark:bg-red-950/40 items-center pt-8 z-10">
         <Text className="text-[10px] font-semibold text-red-500 bg-white/80 dark:bg-black/40 border border-red-200 dark:border-red-900/40 rounded-full px-2 py-0.5">
@@ -511,7 +562,8 @@ const GridColumnBackground = ({
     ))}
     {column.virtual && <View className="absolute inset-0 bg-amber-50/20 dark:bg-amber-900/5" />}
   </>
-);
+  );
+};
 
 const ScheduleGrid = ({
   columns,
@@ -528,6 +580,10 @@ const ScheduleGrid = ({
   refreshControl,
   bottomInset,
   scrollRef,
+  metaByColumn,
+  freeStateByColumn,
+  isPastDate,
+  onOpenSlot,
 }: {
   columns: ScheduleColumn[];
   positionedByColumn: Map<string, PositionedBooking[]>;
@@ -543,6 +599,10 @@ const ScheduleGrid = ({
   refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
   bottomInset: number;
   scrollRef: React.RefObject<ScrollView | null>;
+  metaByColumn: Map<string, { open: number | null; close: number | null; bookable: boolean; windowKnown: boolean; reason: string | null }>;
+  freeStateByColumn: Map<string, FreeState>;
+  isPastDate: boolean;
+  onOpenSlot: (column: ScheduleColumn, bandOrigin: number, locationY: number) => void;
 }) => {
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyHeight = timeWindow.total * pxPerMinute;
@@ -601,6 +661,57 @@ const ScheduleGrid = ({
                     </Text>
                   </View>
                 )}
+                {(() => {
+                  const state = freeStateByColumn.get(column.key);
+                  const meta = metaByColumn.get(column.key);
+                  if (!state || !meta) return null;
+                  // Already covered by the red "Closed all day" badge above.
+                  if (state.kind === "closed" && column.roomId != null && closuresBySpace.has(column.roomId)) {
+                    return null;
+                  }
+                  if (state.kind === "closed") {
+                    return (
+                      <View className="mt-0.5 px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700">
+                        <Text className="text-[9px] font-semibold text-gray-500 dark:text-gray-400" numberOfLines={1}>
+                          {meta.windowKnown ? (meta.reason ?? "Not bookable") : "Schedule unavailable"}
+                        </Text>
+                      </View>
+                    );
+                  }
+                  if (state.kind === "booked") {
+                    return (
+                      <Text className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400">
+                        Booked until close
+                      </Text>
+                    );
+                  }
+                  if (state.kind === "blocked") {
+                    return (
+                      <Text className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400" numberOfLines={1}>
+                        {state.reason}
+                      </Text>
+                    );
+                  }
+                  if (state.kind === "day-over") {
+                    return (
+                      <Text className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400">
+                        Closed for the day
+                      </Text>
+                    );
+                  }
+                  if (isVenueToday && state.atMinute <= nowMinutes) {
+                    return (
+                      <Text className="mt-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        Free now
+                      </Text>
+                    );
+                  }
+                  return (
+                    <Text className="mt-0.5 text-[9px] font-medium text-gray-600 dark:text-gray-300" numberOfLines={1}>
+                      Free {minutesToLabel(state.atMinute)}
+                    </Text>
+                  );
+                })()}
               </View>
             ))}
           </View>
@@ -675,6 +786,12 @@ const ScheduleGrid = ({
                       closure={column.roomId != null ? closuresBySpace.get(column.roomId) : undefined}
                       timeWindow={timeWindow}
                       pxPerMinute={pxPerMinute}
+                      meta={
+                        metaByColumn.get(column.key) ??
+                        { open: null, close: null, bookable: false, windowKnown: false, reason: null }
+                      }
+                      isPastDate={isPastDate}
+                      onPressBand={(bandOrigin, locationY) => onOpenSlot(column, bandOrigin, locationY)}
                     />
                     {(positionedByColumn.get(column.key) ?? []).map((item) => (
                       <GridBookingBlock
@@ -773,7 +890,10 @@ const SpaceScheduleScreen = () => {
   const [categoryFilter, setCategoryFilter] = useState(savedFilters.categoryFilter ?? "all");
   const [statusFilter, setStatusFilter] = useState(savedFilters.statusFilter ?? "all");
   const [searchInput, setSearchInput] = useState(savedFilters.searchInput ?? "");
-  const [hideEmptySpaces, setHideEmptySpaces] = useState(savedFilters.hideEmptySpaces ?? true);
+  // Free time now makes an empty room worth seeing (it's not just a blank
+  // column anymore), so this defaults to showing every space, matching the
+  // web's post-parity default.
+  const [hideEmptySpaces, setHideEmptySpaces] = useState(savedFilters.hideEmptySpaces ?? false);
   const [zoomIndex, setZoomIndex] = useState(
     typeof savedFilters.zoomIndex === "number" &&
       savedFilters.zoomIndex >= 0 &&
@@ -819,10 +939,16 @@ const SpaceScheduleScreen = () => {
   // own assigned location — so managers/attendants still see their closures.
   const dayOffLocationId = effectiveLocationId ?? user?.location_id ?? undefined;
 
-  const { spaces, bookings, loading, error, refetch } = useSpaceSchedule(
+  const { allSpaces, bookings, loading, error, refetch } = useSpaceSchedule(
     selectedKey,
     effectiveLocationId,
   );
+
+  // The day's operating window, from the same server truth the web admin
+  // uses. `dayWindow` stays null on failure — never a guessed fallback — so a
+  // failed request can only ever make the timeline unclickable, never wrong.
+  const { dayWindow, windowLoading } = useScheduleDayWindow(selectedKey, effectiveLocationId);
+  const isPastDate = selectedKey < dateKey(venueToday());
 
   // The week strip runs from today forward (web parity: SpaceSchedule's
   // `weekDays`), so it re-anchors when the venue day rolls over rather than
@@ -867,12 +993,16 @@ const SpaceScheduleScreen = () => {
     return () => controller.abort();
   }, [dayOffLocationId]);
 
+  // Every space for the location, out-of-service ones included — the timeline
+  // shows them as unavailable rather than dropping them. This is a display-only
+  // list; it never feeds the booking-picker cache (`useSpaces`/`spacesCache`),
+  // which stays bookable-only.
   const displaySpaces = useMemo(
     () =>
       effectiveLocationId != null
-        ? spaces.filter((s) => s.locationId === effectiveLocationId)
-        : spaces,
-    [spaces, effectiveLocationId],
+        ? allSpaces.filter((s) => s.locationId === effectiveLocationId)
+        : allSpaces,
+    [allSpaces, effectiveLocationId],
   );
 
   const sortedSpaces = useMemo(
@@ -943,6 +1073,26 @@ const SpaceScheduleScreen = () => {
     return map;
   }, [sortedSpaces, currentDayName]);
 
+  // Per-room open/close/bookable, from the authoritative day window — absent
+  // entirely (not defaulted) when the window failed to load, or when this
+  // particular room has no window (its own signal that it's not bookable).
+  const roomWindows = useMemo(() => {
+    const map = new Map<
+      number,
+      { open: number | null; close: number | null; closedAllDay: boolean; bookable: boolean; reason: string | null }
+    >();
+    for (const entry of dayWindow?.rooms ?? []) {
+      map.set(entry.room_id, {
+        open: entry.open_minutes,
+        close: entry.close_minutes,
+        closedAllDay: entry.closed_all_day,
+        bookable: entry.bookable !== false,
+        reason: entry.reason,
+      });
+    }
+    return map;
+  }, [dayWindow]);
+
   const columns = useMemo(
     () =>
       buildColumns({
@@ -1000,6 +1150,179 @@ const SpaceScheduleScreen = () => {
         knownRoomIds,
       }),
     [columns, filteredBookings, timeWindow, pxPerMinute, knownRoomIds],
+  );
+
+  // Per-column open/close/bookable, resolved once so the header label, the
+  // free band, and the click handler all agree on the same numbers. A room
+  // absent from `dayWindow.rooms` (the fetch failed, or hasn't landed yet)
+  // stays `windowKnown: false` — drawn if there's a window to draw, but never
+  // bookable, so a slow/failed request can't be clicked as if it were real.
+  const scheduleMetaByColumn = useMemo(() => {
+    const map = new Map<
+      string,
+      { open: number | null; close: number | null; bookable: boolean; windowKnown: boolean; reason: string | null }
+    >();
+    for (const column of columns) {
+      if (column.roomId != null) {
+        const rw = roomWindows.get(column.roomId);
+        const windowKnown = dayWindow != null && rw !== undefined;
+        map.set(column.key, {
+          open: rw && !rw.closedAllDay ? rw.open : null,
+          close: rw && !rw.closedAllDay ? rw.close : null,
+          bookable: windowKnown && !rw!.closedAllDay && rw!.bookable,
+          windowKnown,
+          reason: rw?.reason ?? null,
+        });
+      } else {
+        const packageId = Number(column.key.replace("pkg-", ""));
+        const pw = dayWindow?.packages.find((p) => p.package_id === packageId);
+        map.set(column.key, {
+          open: pw?.open_minutes ?? null,
+          close: pw?.close_minutes ?? null,
+          bookable: dayWindow != null && !dayWindow.location_closed,
+          windowKnown: dayWindow != null,
+          reason: null,
+        });
+      }
+    }
+    return map;
+  }, [columns, roomWindows, dayWindow]);
+
+  // Raw, unclipped booking ranges per column — used for the free-time math,
+  // never the filtered/searched list, so a booking hidden by a UI filter can't
+  // make its own room look free.
+  const occupancyByColumn = useMemo(() => {
+    const map = new Map<string, TimeRange[]>();
+    for (const b of activeBookings) {
+      const key = columnKeyFor(b, knownRoomIds);
+      const start = timeToMinutes(b.time);
+      const range: TimeRange = { startMinutes: start, endMinutes: start + Math.max(15, b.durationMinutes) };
+      const list = map.get(key);
+      if (list) list.push(range);
+      else map.set(key, [range]);
+    }
+    return map;
+  }, [activeBookings, knownRoomIds]);
+
+  const blockedRangesFor = useCallback(
+    (column: ScheduleColumn, meta: { open: number | null; close: number | null }): TimeRange[] => {
+      const closure = column.roomId != null ? spaceClosures.get(column.roomId) : undefined;
+      return [
+        ...(occupancyByColumn.get(column.key) ?? []),
+        ...(column.roomId != null
+          ? (roomBreaks.get(column.roomId) ?? []).map((b) => ({
+              startMinutes: b.start,
+              endMinutes: b.end,
+              reason: "On break",
+            }))
+          : []),
+        ...(closure && !closure.fullDay
+          ? closure.ranges.map((r) => ({
+              startMinutes: r.timeStart ? timeToMinutes(r.timeStart) : (meta.open ?? timeWindow.start),
+              endMinutes: r.timeEnd ? timeToMinutes(r.timeEnd) : (meta.close ?? timeWindow.end),
+              reason: "Closed",
+            }))
+          : []),
+      ];
+    },
+    [occupancyByColumn, roomBreaks, spaceClosures, timeWindow],
+  );
+
+  const freeFromByColumn = useMemo(() => {
+    const map = new Map<string, FreeState>();
+    for (const column of columns) {
+      const meta = scheduleMetaByColumn.get(column.key);
+      if (!meta) continue;
+      const from = isVenueToday ? nowMinutes : (meta.open ?? timeWindow.start);
+      map.set(column.key, freeState(meta.open, meta.close, blockedRangesFor(column, meta), from, meta.bookable));
+    }
+    return map;
+  }, [columns, scheduleMetaByColumn, blockedRangesFor, isVenueToday, nowMinutes, timeWindow]);
+
+  const roomLocationById = useMemo(() => {
+    const map = new Map<number, number | null>();
+    for (const s of allSpaces) map.set(s.id, s.locationId);
+    return map;
+  }, [allSpaces]);
+
+  /** Every package valid for this room at this minute — auto-selectable when
+   *  there's exactly one, narrowed-list material when there's more. */
+  const packagesForColumnSlot = useCallback(
+    (column: ScheduleColumn, minute: number): number[] => {
+      if (column.virtual) {
+        const id = Number(column.key.replace("pkg-", ""));
+        return Number.isInteger(id) && id > 0 ? [id] : [];
+      }
+      if (column.roomId == null) return [];
+      const candidates = (dayWindow?.packages ?? []).map((entry) => ({
+        packageId: entry.package_id,
+        roomIds: entry.room_ids,
+        openMinutes: entry.open_minutes,
+        closeMinutes: entry.close_minutes,
+        closedRanges: (entry.closed_ranges ?? []).map((r) => ({
+          startMinutes: r.start_minutes,
+          endMinutes: r.end_minutes,
+        })),
+      }));
+      return packagesValidForSlot(candidates, column.roomId, minute);
+    },
+    [dayWindow],
+  );
+
+  /**
+   * A tap on the free band: `locationY` is React Native's `nativeEvent.locationY`
+   * — inherently relative to the Pressable it fired on, which IS the band, so
+   * this can't repeat the web's "measured inside the band, added to the whole
+   * timeline" bug by construction. `bandOrigin` is the band's own visible top
+   * (open time clipped to the visible window), matching what's actually drawn.
+   */
+  const openBookingForSlot = useCallback(
+    (column: ScheduleColumn, bandOrigin: number, locationY: number) => {
+      const meta = scheduleMetaByColumn.get(column.key);
+      if (!meta || meta.open == null || meta.close == null) return;
+      const interval = dayWindow?.interval_minutes ?? 15;
+      const raw = snapToInterval(
+        minuteAtOffset(bandOrigin, locationY, pxPerMinute),
+        interval,
+        isVenueToday ? nowMinutes : undefined,
+      );
+      const free = nextFreeMinute(meta.open, meta.close, blockedRangesFor(column, meta), raw);
+      const minute =
+        free === null || free === raw
+          ? raw
+          : snapToInterval(free, interval, isVenueToday ? Math.max(free, nowMinutes) : undefined);
+
+      const candidates = packagesForColumnSlot(column, minute);
+      const locationId =
+        (column.roomId != null ? roomLocationById.get(column.roomId) : null) ??
+        effectiveLocationId ??
+        dayWindow?.location_id ??
+        null;
+
+      router.push({
+        pathname: CREATE_BOOKING_PATH,
+        params: buildBookingParams({
+          locationId,
+          date: selectedKey,
+          minute,
+          roomId: column.roomId ?? null,
+          packageId: candidates.length === 1 ? candidates[0] : null,
+          packageIds: candidates,
+        }),
+      });
+    },
+    [
+      dayWindow,
+      pxPerMinute,
+      isVenueToday,
+      nowMinutes,
+      blockedRangesFor,
+      packagesForColumnSlot,
+      roomLocationById,
+      effectiveLocationId,
+      selectedKey,
+      scheduleMetaByColumn,
+    ],
   );
 
   const nowTop = useMemo(
@@ -1105,61 +1428,25 @@ const SpaceScheduleScreen = () => {
     />
   );
 
+  // A room with nothing booked still has a full free-time band to show, so
+  // only "no spaces at all" takes over the whole screen now — a quiet day or a
+  // filtered-out one just gets a small banner above the still-visible grid.
   const noSchedule = !loading && !error && activeBookings.length === 0;
   const noMatches = !loading && !error && activeBookings.length > 0 && filteredBookings.length === 0;
 
-  const closedSpaces = sortedSpaces.filter((s) => spaceClosures.has(s.id));
-
-  const renderEmpty = () => (
+  const renderNoSpaces = () => (
     <View className="px-5 pt-6">
-      {noSchedule ? (
-        <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-          <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
-            <Feather name="calendar" size={28} color={PRIMARY} />
-          </View>
-          <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-            No Bookings Found
-          </Text>
-          <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-            There are no bookings scheduled for{" "}
-            {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()},{" "}
-            {selectedDate.getFullYear()}.
-          </Text>
-          {closedSpaces.length > 0 && (
-            <View className="flex-row flex-wrap justify-center gap-2 mt-4">
-              {closedSpaces.map((s) => (
-                <View
-                  key={s.id}
-                  className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-full px-2.5 py-1"
-                >
-                  <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
-                    {s.name}: {closureLabel(spaceClosures.get(s.id))}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
+      <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
+        <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
+          <Feather name="calendar" size={28} color={PRIMARY} />
         </View>
-      ) : (
-        <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center border border-gray-100 dark:border-neutral-800">
-          <Feather name="search" size={28} color="#9ca3af" />
-          <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
-            No Matching Bookings
-          </Text>
-          <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs mb-4">
-            {activeBookings.length} {activeBookings.length === 1 ? "booking is" : "bookings are"}{" "}
-            scheduled this day, but none match the current filters.
-          </Text>
-          <Pressable
-            onPress={clearFilters}
-            className="px-5 py-2.5 rounded-xl border border-gray-300 dark:border-neutral-600"
-          >
-            <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Clear filters
-            </Text>
-          </Pressable>
-        </View>
-      )}
+        <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
+          No Spaces To Show
+        </Text>
+        <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+          No spaces are configured for this location, so there is no schedule to display.
+        </Text>
+      </View>
     </View>
   );
 
@@ -1241,7 +1528,7 @@ const SpaceScheduleScreen = () => {
                 Today
               </Text>
             </Pressable>
-            {nowTop !== null && filteredBookings.length > 0 && (
+            {nowTop !== null && (
               <Pressable
                 onPress={scrollToNow}
                 className="flex-row items-center gap-1 px-2.5 py-2 rounded-full bg-red-50 dark:bg-red-900/20"
@@ -1464,48 +1751,82 @@ const SpaceScheduleScreen = () => {
       )}
 
       {/* Body */}
-      {loading ? (
+      {loading || windowLoading ? (
         <View className="px-5 pt-6">
           <CalendarDaySkeleton />
         </View>
-      ) : error ? null : noSchedule || noMatches ? (
-        <ScrollView refreshControl={refreshControl}>{renderEmpty()}</ScrollView>
-      ) : viewMode === "grid" ? (
-        <ScheduleGrid
-          columns={columns}
-          positionedByColumn={positionedByColumn}
-          breaksByRoom={roomBreaks}
-          closuresBySpace={spaceClosures}
-          timeWindow={timeWindow}
-          pxPerMinute={pxPerMinute}
-          nowTop={nowTop}
-          nowLabel={minutesToLabel(nowMinutes)}
-          isVenueToday={isVenueToday}
-          nowMinutes={nowMinutes}
-          onBookingPress={setSelectedBookingId}
-          refreshControl={refreshControl}
-          bottomInset={insets.bottom + 24}
-          scrollRef={scrollRef}
-        />
+      ) : error ? null : columns.length === 0 ? (
+        <ScrollView refreshControl={refreshControl}>{renderNoSpaces()}</ScrollView>
       ) : (
-        <ScrollView
-          className="flex-1"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-          refreshControl={refreshControl}
-        >
-          <View className="px-5 pt-6">
-            {listSections.map(({ column, items }) => (
-              <ColumnSection
-                key={column.key}
-                column={column}
-                items={items}
-                closure={column.roomId != null ? spaceClosures.get(column.roomId) : undefined}
-                onBookingPress={setSelectedBookingId}
-              />
-            ))}
-          </View>
-        </ScrollView>
+        <>
+          {noSchedule && (
+            <View className="flex-row items-center gap-2 border-b border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 py-2.5">
+              <Feather name="calendar" size={14} color="#9ca3af" />
+              <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+                No bookings for {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()},{" "}
+                {selectedDate.getFullYear()} — every space below is open for its scheduled hours.
+              </Text>
+            </View>
+          )}
+          {noMatches && (
+            <View className="flex-row flex-wrap items-center gap-2 border-b border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 py-2.5">
+              <Feather name="search" size={14} color="#9ca3af" />
+              <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+                {activeBookings.length} {activeBookings.length === 1 ? "booking is" : "bookings are"}{" "}
+                scheduled this day, but none match the current filters.
+              </Text>
+              <Pressable
+                onPress={clearFilters}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-neutral-600"
+              >
+                <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  Clear filters
+                </Text>
+              </Pressable>
+            </View>
+          )}
+          {viewMode === "grid" ? (
+            <ScheduleGrid
+              columns={columns}
+              positionedByColumn={positionedByColumn}
+              breaksByRoom={roomBreaks}
+              closuresBySpace={spaceClosures}
+              timeWindow={timeWindow}
+              pxPerMinute={pxPerMinute}
+              nowTop={nowTop}
+              nowLabel={minutesToLabel(nowMinutes)}
+              isVenueToday={isVenueToday}
+              nowMinutes={nowMinutes}
+              onBookingPress={setSelectedBookingId}
+              refreshControl={refreshControl}
+              bottomInset={insets.bottom + 24}
+              scrollRef={scrollRef}
+              metaByColumn={scheduleMetaByColumn}
+              freeStateByColumn={freeFromByColumn}
+              isPastDate={isPastDate}
+              onOpenSlot={openBookingForSlot}
+            />
+          ) : (
+            <ScrollView
+              className="flex-1"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+              refreshControl={refreshControl}
+            >
+              <View className="px-5 pt-6">
+                {listSections.map(({ column, items }) => (
+                  <ColumnSection
+                    key={column.key}
+                    column={column}
+                    items={items}
+                    closure={column.roomId != null ? spaceClosures.get(column.roomId) : undefined}
+                    onBookingPress={setSelectedBookingId}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+          )}
+        </>
       )}
 
       {/* Month date picker */}

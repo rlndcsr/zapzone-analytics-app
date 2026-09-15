@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  buildBookingParams,
+  clockToMinutes,
+  minutesToClock,
+  readBookingPrefill,
+} from "./bookingPrefill.ts";
+
+describe("minutesToClock / clockToMinutes", () => {
+  it("round-trips a minute through the HH:MM clock format", () => {
+    assert.equal(minutesToClock(630), "10:30");
+    assert.equal(minutesToClock(0), "00:00");
+    assert.equal(clockToMinutes("10:30"), 630);
+    assert.equal(clockToMinutes("00:00"), 0);
+  });
+
+  it("wraps a minute past midnight into the next day's clock", () => {
+    assert.equal(minutesToClock(1440 + 30), "00:30");
+  });
+
+  it("rejects malformed or out-of-range clocks", () => {
+    assert.equal(clockToMinutes(null), null);
+    assert.equal(clockToMinutes(""), null);
+    assert.equal(clockToMinutes("not-a-time"), null);
+  });
+});
+
+describe("buildBookingParams / readBookingPrefill round trip", () => {
+  it("carries location, date, time, and room through unchanged", () => {
+    const params = buildBookingParams({
+      locationId: 4,
+      date: "2026-09-20",
+      minute: 18 * 60 + 30,
+      roomId: 12,
+    });
+    const prefill = readBookingPrefill(params);
+    assert.equal(prefill.locationId, 4);
+    assert.equal(prefill.date, "2026-09-20");
+    assert.equal(prefill.time, "18:30");
+    assert.equal(prefill.roomId, 12);
+    assert.equal(prefill.packageId, null);
+    assert.deepEqual(prefill.packageIds, []);
+    assert.equal(prefill.hasAny, true);
+  });
+
+  it("auto-selects a single valid package via packageId", () => {
+    const params = buildBookingParams({ date: "2026-09-20", minute: 600, packageId: 9 });
+    const prefill = readBookingPrefill(params);
+    assert.equal(prefill.packageId, 9);
+    assert.deepEqual(prefill.packageIds, []);
+  });
+
+  it("narrows to multiple candidates via packageIds, omitting packageId", () => {
+    const params = buildBookingParams({
+      date: "2026-09-20",
+      minute: 600,
+      packageId: null,
+      packageIds: [3, 7, 11],
+    });
+    assert.equal(params.package_id, undefined);
+    const prefill = readBookingPrefill(params);
+    assert.equal(prefill.packageId, null);
+    assert.deepEqual(prefill.packageIds, [3, 7, 11]);
+  });
+
+  it("omits package_ids entirely for zero or one candidate (nothing to narrow)", () => {
+    assert.equal(buildBookingParams({ date: "2026-09-20", minute: 600, packageIds: [] }).package_ids, undefined);
+    assert.equal(
+      buildBookingParams({ date: "2026-09-20", minute: 600, packageIds: [5] }).package_ids,
+      undefined,
+    );
+  });
+
+  it("reports hasAny=false when nothing was carried over", () => {
+    const prefill = readBookingPrefill({});
+    assert.equal(prefill.hasAny, false);
+    assert.equal(prefill.date, null);
+  });
+
+  it("takes the first value of a repeated param (expo-router array form)", () => {
+    const prefill = readBookingPrefill({ room_id: ["12", "99"] });
+    assert.equal(prefill.roomId, 12);
+  });
+
+  it("rejects a non-date-shaped date param rather than passing it through", () => {
+    const prefill = readBookingPrefill({ date: "not-a-date" });
+    assert.equal(prefill.date, null);
+  });
+});

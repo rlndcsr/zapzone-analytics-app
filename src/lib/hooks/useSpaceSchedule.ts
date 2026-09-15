@@ -15,6 +15,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 type SpacesCache = { key: string; fetchedAt: number; data: Space[] };
 let spacesCache: SpacesCache | null = null;
 
+// Separate from `spacesCache` on purpose: this one includes out-of-service
+// rooms so the Space Schedule can show them as unavailable, and it must never
+// feed the picker-facing cache above (that would offer an out-of-service room
+// for a new booking).
+let allSpacesCache: SpacesCache | null = null;
+
 type DayCache = { key: string; fetchedAt: number; data: ScheduleBooking[] };
 const dayCache = new Map<string, DayCache>();
 
@@ -43,6 +49,31 @@ async function loadSpaces(
   try {
     const data = await fetchSpaces({ token, userId });
     spacesCache = { key: uKey, fetchedAt: Date.now(), data };
+    return data;
+  } catch (err) {
+    console.error("Spaces load error:", err);
+    return null;
+  }
+}
+
+/** Same as `loadSpaces`, but including out-of-service rooms — for the Space
+ *  Schedule's own display only. Never merged into `spacesCache`. */
+async function loadAllSpaces(
+  uKey: string,
+  userId: number | undefined,
+  force: boolean,
+): Promise<Space[] | null> {
+  const fresh =
+    !!allSpacesCache &&
+    allSpacesCache.key === uKey &&
+    Date.now() - allSpacesCache.fetchedAt < CACHE_TTL_MS;
+  if (fresh && !force) return allSpacesCache!.data;
+
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const data = await fetchSpaces({ token, userId, includeUnavailable: true });
+    allSpacesCache = { key: uKey, fetchedAt: Date.now(), data };
     return data;
   } catch (err) {
     console.error("Spaces load error:", err);
@@ -104,6 +135,11 @@ export function useSpaceSchedule(date: string, locationId?: number) {
   const [spaces, setSpaces] = useState<Space[]>(
     spacesCache && spacesCache.key === uKey ? spacesCache.data : [],
   );
+  // Out-of-service rooms included — for the timeline's own display, never for
+  // anything that hands a room back to a booking form (that stays on `spaces`).
+  const [allSpaces, setAllSpaces] = useState<Space[]>(
+    allSpacesCache && allSpacesCache.key === uKey ? allSpacesCache.data : [],
+  );
   const [bookings, setBookings] = useState<ScheduleBooking[]>(
     daySeed ? daySeed.data : [],
   );
@@ -118,6 +154,14 @@ export function useSpaceSchedule(date: string, locationId?: number) {
     async (force: boolean) => {
       const data = await loadSpaces(uKey, userId, force);
       if (data) setSpaces(data);
+    },
+    [uKey, userId],
+  );
+
+  const syncAllSpaces = useCallback(
+    async (force: boolean) => {
+      const data = await loadAllSpaces(uKey, userId, force);
+      if (data) setAllSpaces(data);
     },
     [uKey, userId],
   );
@@ -176,15 +220,16 @@ export function useSpaceSchedule(date: string, locationId?: number) {
 
   useEffect(() => {
     syncSpaces(false);
+    syncAllSpaces(false);
     syncDay(false);
     return () => {
       requestIdRef.current++;
     };
-  }, [syncSpaces, syncDay]);
+  }, [syncSpaces, syncAllSpaces, syncDay]);
 
   const refetch = useCallback(async () => {
-    await Promise.all([syncSpaces(true), syncDay(true)]);
-  }, [syncSpaces, syncDay]);
+    await Promise.all([syncSpaces(true), syncAllSpaces(true), syncDay(true)]);
+  }, [syncSpaces, syncAllSpaces, syncDay]);
 
-  return { spaces, bookings, loading, error, refetch };
+  return { spaces, allSpaces, bookings, loading, error, refetch };
 }

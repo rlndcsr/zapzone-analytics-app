@@ -1,0 +1,135 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  bandGeometry,
+  freeState,
+  minuteAtOffset,
+  nextFreeMinute,
+  snapToInterval,
+  type TimeRange,
+} from "./freeTime.ts";
+
+describe("snapToInterval", () => {
+  it("floors to the nearest interval", () => {
+    assert.equal(snapToInterval(615, 30), 600);
+    assert.equal(snapToInterval(629, 30), 600);
+    assert.equal(snapToInterval(630, 30), 630);
+  });
+
+  it("clamps up to floorMinute — the today walk-in guard", () => {
+    assert.equal(snapToInterval(600, 30, 643), 660);
+    assert.equal(snapToInterval(700, 30, 643), 690);
+  });
+
+  it("never goes negative", () => {
+    assert.equal(snapToInterval(-10, 15), 0);
+  });
+});
+
+describe("minuteAtOffset", () => {
+  it("adds the pixel offset scaled by px-per-minute to the band's own origin", () => {
+    assert.equal(minuteAtOffset(600, 60, 2), 630); // 60px at 2px/min = 30 min past 10:00
+  });
+
+  it("never crosses the whole-timeline anchor bug — origin is the band's top, not 0", () => {
+    // A click 10px into a band opening at 6pm must land near 6pm, not near midnight.
+    const result = minuteAtOffset(18 * 60, 10, 2);
+    assert.ok(Math.abs(result - 18 * 60) < 10);
+  });
+
+  it("falls back to the origin when scale is non-positive", () => {
+    assert.equal(minuteAtOffset(600, 100, 0), 600);
+  });
+});
+
+describe("bandGeometry", () => {
+  const window = { start: 600, end: 1320, total: 720 };
+
+  it("returns null when open/close is unknown", () => {
+    assert.equal(bandGeometry(null, 1000, window, 1), null);
+    assert.equal(bandGeometry(900, null, window, 1), null);
+  });
+
+  it("clips to the visible time window", () => {
+    const band = bandGeometry(500, 1400, window, 1);
+    assert.deepEqual(band, { top: 0, height: 720 });
+  });
+
+  it("returns null when the room's window doesn't intersect what's visible", () => {
+    assert.equal(bandGeometry(1400, 1450, window, 1), null);
+  });
+});
+
+describe("nextFreeMinute", () => {
+  it("returns the cursor unchanged when nothing is busy", () => {
+    assert.equal(nextFreeMinute(600, 1320, [], 650), 650);
+  });
+
+  it("walks past back-to-back bookings instead of stopping at the first", () => {
+    const busy: TimeRange[] = [
+      { startMinutes: 360, endMinutes: 420 }, // 6:00-7:00
+      { startMinutes: 420, endMinutes: 480 }, // 7:00-8:00
+    ];
+    // A click landing inside the first booking must resolve past BOTH, at 8:00.
+    assert.equal(nextFreeMinute(0, 1440, busy, 380), 480);
+  });
+
+  it("uses a booking's real end minute even past the visible grid, never snapping backward", () => {
+    // Booking runs to 23:30, well past a grid that only draws to 22:00.
+    const busy: TimeRange[] = [{ startMinutes: 1300, endMinutes: 1410 }];
+    assert.equal(nextFreeMinute(0, 1440, busy, 1305), 1410);
+  });
+
+  it("returns null once the close time is reached", () => {
+    const busy: TimeRange[] = [{ startMinutes: 600, endMinutes: 1320 }];
+    assert.equal(nextFreeMinute(600, 1320, busy, 600), null);
+  });
+});
+
+describe("freeState", () => {
+  it("reports closed for an unknown/failed window regardless of bookable", () => {
+    assert.deepEqual(freeState(null, null, [], 600, true), { kind: "closed" });
+  });
+
+  it("reports closed when bookable is false — an out-of-service room", () => {
+    assert.deepEqual(freeState(600, 1320, [], 700, false), { kind: "closed" });
+  });
+
+  it("reports free with the current moment when nothing is booked yet", () => {
+    assert.deepEqual(freeState(600, 1320, [], 650), {
+      kind: "free",
+      atMinute: 650,
+    });
+  });
+
+  it("reports free at the moment a booking ends", () => {
+    const busy: TimeRange[] = [{ startMinutes: 600, endMinutes: 660 }];
+    assert.deepEqual(freeState(600, 1320, busy, 600), {
+      kind: "free",
+      atMinute: 660,
+    });
+  });
+
+  it("reports booked when back-to-back bookings run to close", () => {
+    const busy: TimeRange[] = [
+      { startMinutes: 600, endMinutes: 900 },
+      { startMinutes: 900, endMinutes: 1320 },
+    ];
+    assert.deepEqual(freeState(600, 1320, busy, 600), { kind: "booked" });
+  });
+
+  it("reports blocked with the closure's reason when a break/closure runs to close", () => {
+    const busy: TimeRange[] = [
+      { startMinutes: 600, endMinutes: 1320, reason: "On break" },
+    ];
+    assert.deepEqual(freeState(600, 1320, busy, 600), {
+      kind: "blocked",
+      reason: "On break",
+    });
+  });
+
+  it("reports day-over once past close for today", () => {
+    assert.deepEqual(freeState(600, 1320, [], 1350), { kind: "day-over" });
+  });
+});

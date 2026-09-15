@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import {
   useEffect,
   useMemo,
@@ -109,6 +109,7 @@ import {
   validatePromoCode,
   type DiscountCodeResult,
 } from "../../services/discountCodesService";
+import { readBookingPrefill } from "../../lib/bookings/bookingPrefill";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -546,14 +547,30 @@ const CreateBookingScreen = () => {
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
 
+  // A tap on a Space Schedule free slot arrives here as route params — location,
+  // date, start time, room, and the package(s) valid for that room/time.
+  // Re-parsed only when the params object itself changes (expo-router gives a
+  // stable reference across re-renders that don't touch the URL).
+  const searchParams = useLocalSearchParams();
+  const slotPrefill = useMemo(() => readBookingPrefill(searchParams), [searchParams]);
+  // Guards so the prefill lands exactly once — re-picking a package afterward
+  // must never re-apply the original click's date/room (web parity).
+  const prefillAppliedRef = useRef(false);
+  const prefillLandedRef = useRef(false);
+  const prefillTimeCheckedRef = useRef(false);
+  const [showAllPackages, setShowAllPackages] = useState(false);
+
   // Wizard step (1..5).
   const [step, setStep] = useState(1);
 
   // Location filter (company admins only). Left null by default — the backend
   // auth-scopes packages by role, so a location manager is limited to their own
   // location automatically and an admin sees all company packages until they
-  // pick a location to narrow by.
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
+  // pick a location to narrow by. A prefilled location narrows the search the
+  // same way a manual pick would.
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
+    isCompanyAdmin ? (slotPrefill.locationId ?? null) : null,
+  );
   const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
   const locationOptions = useMemo(() => {
     if (!metrics?.locationStats) return [];
@@ -793,12 +810,14 @@ const CreateBookingScreen = () => {
   };
 
   // Hydrate the full package on selection (relations needed for Steps 3 & 5).
-  const pickPackage = async (item: PackageListItem) => {
+  // Returns the fetched package so a caller (the prefill effect below) can
+  // chain its own date/time/room application onto the same fetch.
+  const pickPackageById = async (id: number): Promise<BookablePackage | null> => {
     const token = getToken();
-    if (!token) return;
-    setPickingId(item.id);
+    if (!token) return null;
+    setPickingId(id);
     try {
-      const full = await fetchBookablePackageDetail(token, item.id);
+      const full = await fetchBookablePackageDetail(token, id);
       setPkg(full);
       setParticipants(full.minParticipants || 1);
       // Required add-ons start at their minimum, as they do on the web.
@@ -810,12 +829,99 @@ const CreateBookingScreen = () => {
       setGohName("");
       setGohAge("");
       setGohGender("");
+      return full;
     } catch {
       Alert.alert("Couldn't load package", "Please try selecting it again.");
+      return null;
     } finally {
       setPickingId(null);
     }
   };
+
+  /** The Step 1 list's own tap handler — a deliberate package choice, so it
+   *  always jumps to Step 2. Never re-applies a landed prefill's date/room
+   *  (`prefillAppliedRef` is already true by the time a user can tap here for
+   *  a second package, so `pickPackageById`'s own reset is all that runs). */
+  const pickPackage = async (item: PackageListItem) => {
+    await pickPackageById(item.id);
+    setStep(2);
+  };
+
+  // Prefilled candidate packages (multiple valid for the clicked room/time) —
+  // fetched directly by id rather than trusting the paginated/searched Step 1
+  // list to contain them all.
+  const [slotPackages, setSlotPackages] = useState<PackageListItem[]>([]);
+  const [loadingSlotPackages, setLoadingSlotPackages] = useState(false);
+  const showNarrowedPackages = slotPrefill.packageIds.length > 1 && !showAllPackages;
+
+  useEffect(() => {
+    if (slotPrefill.packageIds.length < 2) return;
+    const token = getToken();
+    if (!token) return;
+    let active = true;
+    setLoadingSlotPackages(true);
+    Promise.all(slotPrefill.packageIds.map((id) => fetchBookablePackageDetail(token, id).catch(() => null)))
+      .then((results) => {
+        if (!active) return;
+        setSlotPackages(
+          results.filter((p): p is BookablePackage => p != null).map((p) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            category: p.category,
+            price: p.price,
+            duration: p.duration,
+            durationUnit: p.durationUnit,
+            minParticipants: p.minParticipants,
+            maxParticipants: p.maxParticipants,
+            isActive: p.isActive,
+            locationId: p.locationId,
+            locationName: "",
+          })),
+        );
+      })
+      .finally(() => {
+        if (active) setLoadingSlotPackages(false);
+      });
+    return () => {
+      active = false;
+    };
+    // Only the initial prefill's candidate set matters — it never changes
+    // after landing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Lands the clicked slot exactly once. A single valid package auto-selects
+   * and jumps to Step 2 (mirrors a manual pick); multiple or zero valid
+   * packages leave Step 1 showing the narrowed list (or the full list, when
+   * there's nothing to narrow to) with the date/time/room already applied and
+   * a note that a package is still needed.
+   */
+  useEffect(() => {
+    if (prefillAppliedRef.current || !slotPrefill.hasAny) return;
+    prefillAppliedRef.current = true;
+
+    const applyDate = () => {
+      setScheduledDate((prev) => slotPrefill.date ?? prev);
+      prefillLandedRef.current = true;
+    };
+
+    if (slotPrefill.packageId) {
+      // Exactly one package was valid for the clicked room/time — auto-select
+      // it and go straight to Step 2, the same place a manual pick lands.
+      void pickPackageById(slotPrefill.packageId).then((full) => {
+        applyDate();
+        if (full) setStep(2);
+      });
+    } else {
+      // Zero or multiple valid packages — apply date/room now and leave the
+      // user on Step 1 (narrowed, when there's a candidate list) to choose.
+      applyDate();
+    }
+    // Runs once, off the prefill read at mount — never re-applied afterward.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- Availability (Step 2: package + date → time slots with room) --------
   useEffect(() => {
@@ -843,6 +949,38 @@ const CreateBookingScreen = () => {
       active = false;
     };
   }, [pkg, scheduledDate]);
+
+  /**
+   * Re-selects the carried-over room/time once real slots have come back —
+   * never before. Checking against an empty `slots` array (because the fetch
+   * hadn't returned yet) is exactly the race the web version had: it always
+   * decided the time was no longer offered, because there was nothing to find
+   * it in yet. Runs once per landed prefill (`prefillTimeCheckedRef`).
+   */
+  useEffect(() => {
+    if (!prefillLandedRef.current || prefillTimeCheckedRef.current) return;
+    if (loadingSlots) return;
+    if (scheduledDate !== slotPrefill.date) return;
+
+    prefillTimeCheckedRef.current = true;
+    if (!slotPrefill.time && slotPrefill.roomId == null) return;
+
+    const matched =
+      slots.find(
+        (s) =>
+          (slotPrefill.time == null || s.startTime === slotPrefill.time) &&
+          (slotPrefill.roomId == null || s.roomId === slotPrefill.roomId),
+      ) ?? null;
+
+    if (matched) {
+      setSlot(matched);
+    } else if (slotPrefill.time) {
+      Alert.alert(
+        "Time no longer available",
+        "That start time is no longer offered for this package — pick another below.",
+      );
+    }
+  }, [slots, loadingSlots, scheduledDate, slotPrefill]);
 
   /**
    * Call to Book: whether the selected package has any usable schedule at all.
@@ -1444,6 +1582,73 @@ const CreateBookingScreen = () => {
           {/* ============================ STEP 1 — PACKAGE ==================== */}
           {step === 1 && (
             <>
+              {slotPrefill.hasAny && !slotPrefill.packageId && (
+                <View className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-900/10">
+                  <Text className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                    Date and time carried over from the schedule — choose a package to continue.
+                  </Text>
+                </View>
+              )}
+
+              {showNarrowedPackages ? (
+                <Section icon="package" title="Suggested Packages">
+                  <Text className="mb-3 text-xs text-gray-400 dark:text-gray-500">
+                    Showing the {slotPackages.length || slotPrefill.packageIds.length} package
+                    {(slotPackages.length || slotPrefill.packageIds.length) === 1 ? "" : "s"} that run in
+                    this space at the time you picked.
+                  </Text>
+                  {loadingSlotPackages ? (
+                    <View className="py-8 items-center">
+                      <ActivityIndicator color={PRIMARY} />
+                    </View>
+                  ) : (
+                    slotPackages.map((p) => {
+                      const active = pkg?.id === p.id;
+                      const picking = pickingId === p.id;
+                      return (
+                        <Pressable
+                          key={p.id}
+                          onPress={() => pickPackage(p)}
+                          disabled={pickingId != null}
+                          className={`rounded-lg border p-4 mb-3 ${
+                            active
+                              ? "border-[#0644C7] bg-[#0644C7]/5"
+                              : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                          }`}
+                        >
+                          <View className="flex-row items-start justify-between gap-3">
+                            <Text className="flex-1 text-base font-bold text-gray-900 dark:text-white" numberOfLines={2}>
+                              {p.name}
+                            </Text>
+                            <Text className="text-lg font-bold text-[#0644C7] dark:text-blue-400">
+                              {money(p.price)}
+                            </Text>
+                          </View>
+                          <View className="mt-2 flex-row flex-wrap items-center gap-2">
+                            {p.duration > 0 && (
+                              <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
+                                <Feather name="clock" size={10} color="#9333EA" />
+                                <Text className="text-[11px] text-purple-700 dark:text-purple-300">
+                                  {formatDuration(p.duration, p.durationUnit)}
+                                </Text>
+                              </View>
+                            )}
+                            {picking && <ActivityIndicator size="small" color={PRIMARY} />}
+                            {active && !picking && <Feather name="check-circle" size={16} color={PRIMARY} />}
+                          </View>
+                        </Pressable>
+                      );
+                    })
+                  )}
+                  <Pressable
+                    onPress={() => setShowAllPackages(true)}
+                    className="mt-1 py-3 items-center rounded-xl border border-gray-200 dark:border-neutral-700"
+                  >
+                    <Text className="text-sm font-semibold text-[#0644C7]">Show all packages</Text>
+                  </Pressable>
+                </Section>
+              ) : (
+                <>
               {/* Location filter (company admin) — inline chips, optional. */}
               {isCompanyAdmin && locationOptions.length > 0 && (
                 <Section icon="map-pin" title="Location">
@@ -1616,6 +1821,8 @@ const CreateBookingScreen = () => {
                   </>
                 )}
               </Section>
+                </>
+              )}
             </>
           )}
 
