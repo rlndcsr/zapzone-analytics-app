@@ -4,7 +4,9 @@ import { useColorScheme } from "nativewind";
 import { type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 
+import { useBrandLogo } from "../../lib/hooks/useBrandLogo";
 import { getCurrentUser } from "../../lib/session";
+import { BrandLogo } from "./BrandLogo";
 import { InitialsAvatar } from "./InitialsAvatar";
 
 /** Friendly labels for the backend staff roles. */
@@ -42,6 +44,7 @@ export function DashboardHeader({
 }: DashboardHeaderProps) {
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
+  const brandLogoSrc = useBrandLogo();
 
   const user = getCurrentUser();
   const roleLabel = user?.role
@@ -77,6 +80,9 @@ export function DashboardHeader({
             </Text>
           </View>
         </View>
+
+        {/* Center: the location/company brand logo — web parity. */}
+        <BrandLogo src={brandLogoSrc} size="sm" className="mx-2" />
 
         {/* Right: notifications + settings, or a custom action (e.g. Logout) */}
         <View className="flex-row items-center gap-4">

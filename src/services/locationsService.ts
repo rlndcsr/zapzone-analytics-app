@@ -17,6 +17,8 @@ export type LocationOption = {
   phone: string | null;
   email: string | null;
   timezone: string | null;
+  /** Raw storage path — resolve with `mediaUrl()` before rendering. */
+  logoPath: string | null;
 };
 
 type RawLocation = {
@@ -30,6 +32,7 @@ type RawLocation = {
   phone?: string | null;
   email?: string | null;
   timezone?: string | null;
+  logo_path?: string | null;
 };
 
 function locationAddress(l: RawLocation): string {
@@ -50,6 +53,7 @@ function mapLocation(l: RawLocation): LocationOption {
     phone: l.phone?.trim() || null,
     email: l.email?.trim() || null,
     timezone: l.timezone?.trim() || null,
+    logoPath: l.logo_path?.trim() || null,
   };
 }
 

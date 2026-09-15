@@ -1259,6 +1259,7 @@ const ManageAttendants = () => {
         phone: phone || null,
         email: email || null,
         timezone: prev?.timezone ?? null,
+        logoPath: prev?.logoPath ?? null,
       }));
       setSheet(null);
       Alert.alert("Location updated", "Location updated successfully.");

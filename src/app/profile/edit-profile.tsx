@@ -19,6 +19,7 @@ import { InputField } from "../../components/ui/InputField";
 import { StatusModal } from "../../components/ui/StatusModal";
 import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton";
 import { mediaUrl } from "../../lib/api";
+import { setCachedCompanyLogo } from "../../lib/hooks/useBrandLogo";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { EditProfileSkeleton } from "../../components/ui/skeleton/EditProfileSkeleton";
 import { useProfile } from "../../lib/hooks/useProfile";
@@ -178,7 +179,8 @@ const EditProfile = () => {
           country: country.trim() || null,
           zip_code: zipCode.trim() || null,
         };
-        await updateCompany(companyId, token, companyPayload);
+        const updated = await updateCompany(companyId, token, companyPayload);
+        setCachedCompanyLogo(updated.logo_path ?? null);
       }
 
       await refresh();
