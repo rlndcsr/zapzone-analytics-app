@@ -811,7 +811,10 @@ const ScheduleGrid = ({
                   }
                   if (state.kind === "booked") {
                     return (
-                      <Text className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400">
+                      <Text
+                        className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400"
+                        numberOfLines={1}
+                      >
                         Booked until close
                       </Text>
                     );
@@ -828,14 +831,20 @@ const ScheduleGrid = ({
                   }
                   if (state.kind === "day-over") {
                     return (
-                      <Text className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400">
+                      <Text
+                        className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400"
+                        numberOfLines={1}
+                      >
                         Closed for the day
                       </Text>
                     );
                   }
                   if (isVenueToday && state.atMinute <= nowMinutes) {
                     return (
-                      <Text className="mt-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      <Text
+                        className="mt-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400"
+                        numberOfLines={1}
+                      >
                         Free now
                       </Text>
                     );
