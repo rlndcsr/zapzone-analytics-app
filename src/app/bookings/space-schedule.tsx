@@ -18,12 +18,20 @@ import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { CalendarDaySkeleton } from "../../components/ui/skeleton/CalendarSkeleton";
-import { packageColor } from "../../lib/calendar/packageColors";
-import { venueNow, venueToday } from "../../lib/date/venueTime";
-import { useSpaceSchedule } from "../../lib/hooks/useSpaceSchedule";
-import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
-import { useWeekBookingCounts } from "../../lib/hooks/useWeekBookingCounts";
-import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import {
+  buildBookingParams,
+  CREATE_BOOKING_PATH,
+} from "../../lib/bookings/bookingPrefill";
+import {
+  bandGeometry,
+  freeState,
+  minuteAtOffset,
+  nextFreeMinute,
+  snapToInterval,
+  type FreeState,
+  type TimeRange,
+} from "../../lib/bookings/freeTime";
+import { packagesValidForSlot } from "../../lib/bookings/packageCandidates";
 import {
   buildColumns,
   closureBoundaryMinutes,
@@ -46,37 +54,57 @@ import {
   type SpaceClosure,
   type TimeWindow,
 } from "../../lib/bookings/spaceScheduleGrid";
-import {
-  bandGeometry,
-  freeState,
-  minuteAtOffset,
-  nextFreeMinute,
-  snapToInterval,
-  type FreeState,
-  type TimeRange,
-} from "../../lib/bookings/freeTime";
-import { buildBookingParams, CREATE_BOOKING_PATH } from "../../lib/bookings/bookingPrefill";
-import { packagesValidForSlot } from "../../lib/bookings/packageCandidates";
+import { packageColor } from "../../lib/calendar/packageColors";
+import { venueNow, venueToday } from "../../lib/date/venueTime";
+import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
+import { useSpaceSchedule } from "../../lib/hooks/useSpaceSchedule";
+import { useWeekBookingCounts } from "../../lib/hooks/useWeekBookingCounts";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { resolvePaymentState } from "../../lib/payments/paymentState";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
+import type {
+  ScheduleBooking,
+  SpaceBreak,
+} from "../../services/bookingsService";
 import {
   fetchDayOffsByLocation,
   type DayOff,
 } from "../../services/dayOffsService";
-import { resolvePaymentState } from "../../lib/payments/paymentState";
-import type { ScheduleBooking, SpaceBreak } from "../../services/bookingsService";
 
 const PRIMARY = "#0644C7";
 
 const WEEKDAY_NAMES = [
-  "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
 ];
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 const WEEKDAY_FULL = [
-  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
 ];
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const PICKER_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -97,11 +125,6 @@ const STATUS_COLOR: Record<string, string> = {
 };
 const statusColor = (status: string) => STATUS_COLOR[status] ?? "#F59E0B";
 
-/**
- * The tile's payment chip, from the shared rule. The map this replaces keyed on
- * the stored status word alone, so a part payment that had since settled still
- * showed amber, and a refunded booking fell through to the "anything else" red.
- */
 const paymentTone = (booking: {
   paymentStatus: string;
   totalAmount: number;
@@ -152,21 +175,14 @@ function naturalSort(a: string, b: string): number {
 // Only these statuses occupy a space on the schedule (matches the web).
 const SCHEDULE_STATUSES = new Set(["confirmed", "checked-in", "pending"]);
 
-// Grid geometry. GUTTER_WIDTH/COLUMN_WIDTH are fixed; row height is continuous
-// (pixels-per-minute × zoom), matching the web's timeline rather than mobile's
-// old fixed 15-minute-slot grid — arbitrary durations place exactly, and
-// overlapping bookings in one room lane out side by side instead of hiding
-// under each other.
 const GUTTER_WIDTH = 60;
-const COLUMN_WIDTH = 168;
+
+const COLUMN_MIN_WIDTH = 96;
+const COLUMN_MAX_WIDTH = 220;
+const COLUMN_BOOKED_MIN_WIDTH = 168;
+const HEADER_CHAR_WIDTH = 7.5;
 
 type ViewMode = "grid" | "list";
-
-/* ------------------------------------------------------------------ */
-/* Saved filters — in-memory for the life of the app run (RN's analogue */
-/* of the web's sessionStorage: survives screen navigation, resets on   */
-/* a fresh app launch). Web parity: VIEW_STATE_KEY / readViewState.     */
-/* ------------------------------------------------------------------ */
 
 type ScheduleViewState = {
   categoryFilter: string;
@@ -185,10 +201,6 @@ function readViewState(): Partial<ScheduleViewState> {
 function writeViewState(state: ScheduleViewState): void {
   savedViewState = state;
 }
-
-/* ------------------------------------------------------------------ */
-/* List (card) view                                                    */
-/* ------------------------------------------------------------------ */
 
 const BookingCard = ({
   booking,
@@ -216,19 +228,31 @@ const BookingCard = ({
           </Text>
         </View>
         {!!booking.referenceNumber && (
-          <Text style={{ color: pkg.text }} className="text-[10px] font-medium opacity-70">
+          <Text
+            style={{ color: pkg.text }}
+            className="text-[10px] font-medium opacity-70"
+          >
             #{booking.referenceNumber.slice(-6)}
           </Text>
         )}
       </View>
 
       <Text style={{ color: pkg.text }} className="text-sm font-bold">
-        {minutesToLabel(start)} – {minutesToLabel(start + booking.durationMinutes)}
+        {minutesToLabel(start)} –{" "}
+        {minutesToLabel(start + booking.durationMinutes)}
       </Text>
-      <Text style={{ color: pkg.text }} className="text-sm font-semibold mt-0.5" numberOfLines={1}>
+      <Text
+        style={{ color: pkg.text }}
+        className="text-sm font-semibold mt-0.5"
+        numberOfLines={1}
+      >
         {booking.customerName}
       </Text>
-      <Text style={{ color: pkg.text }} className="text-xs opacity-80 mt-0.5" numberOfLines={1}>
+      <Text
+        style={{ color: pkg.text }}
+        className="text-xs opacity-80 mt-0.5"
+        numberOfLines={1}
+      >
         {booking.packageName}
       </Text>
 
@@ -286,7 +310,10 @@ const ColumnSection = ({
 }) => (
   <View className="mb-5">
     <View className="flex-row items-center justify-between mb-3 flex-wrap gap-1.5">
-      <Text className="text-base font-bold text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>
+      <Text
+        className="text-base font-bold text-gray-900 dark:text-white flex-1 mr-2"
+        numberOfLines={1}
+      >
         {column.name}
       </Text>
       {column.virtual ? (
@@ -316,7 +343,9 @@ const ColumnSection = ({
     </View>
     {items.length === 0 ? (
       <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 items-center border border-gray-100 dark:border-neutral-800">
-        <Text className="text-sm text-gray-400 dark:text-gray-500">No bookings</Text>
+        <Text className="text-sm text-gray-400 dark:text-gray-500">
+          No bookings
+        </Text>
       </View>
     ) : (
       items.map((item) =>
@@ -327,16 +356,15 @@ const ColumnSection = ({
             onPress={() => onBookingPress(item.booking.id)}
           />
         ) : (
-          <BreakCard key={`k-${column.key}-${item.brk.startTime}`} brk={item.brk} />
+          <BreakCard
+            key={`k-${column.key}-${item.brk.startTime}`}
+            brk={item.brk}
+          />
         ),
       )
     )}
   </View>
 );
-
-/* ------------------------------------------------------------------ */
-/* Grid (timeline) view                                                */
-/* ------------------------------------------------------------------ */
 
 const GridBookingBlock = ({
   item,
@@ -372,14 +400,20 @@ const GridBookingBlock = ({
             : ""
       }`}
     >
-      <View className={`h-full ${compact ? "px-2 py-0.5 justify-center" : "p-2"}`}>
+      <View
+        className={`h-full ${compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
+      >
         {compact ? (
           <View className="flex-row items-center gap-1.5">
             <View
               style={{ backgroundColor: statusColor(b.status) }}
               className="w-1.5 h-1.5 rounded-full"
             />
-            <Text style={{ color: pkg.text }} className="text-xs font-semibold flex-shrink" numberOfLines={1}>
+            <Text
+              style={{ color: pkg.text }}
+              className="text-xs font-semibold flex-shrink"
+              numberOfLines={1}
+            >
               {b.customerName || "Walk-in"}
             </Text>
             {item.laneCount === 1 && (
@@ -395,49 +429,79 @@ const GridBookingBlock = ({
                 style={{ backgroundColor: statusColor(b.status) }}
                 className="px-1.5 py-0.5 rounded-full"
               >
-                <Text className="text-[9px] font-bold uppercase text-white">{b.status}</Text>
+                <Text className="text-[9px] font-bold uppercase text-white">
+                  {b.status}
+                </Text>
               </View>
               {needsCheckIn ? (
                 <View className="flex-row items-center gap-0.5 px-1.5 py-px rounded-full bg-red-500">
                   <Feather name="alert-circle" size={9} color="#FFFFFF" />
-                  <Text className="text-[9px] font-bold uppercase text-white">Check in</Text>
+                  <Text className="text-[9px] font-bold uppercase text-white">
+                    Check in
+                  </Text>
                 </View>
               ) : inProgress ? (
                 <View className="px-1.5 py-px rounded-full bg-emerald-500">
-                  <Text className="text-[9px] font-bold uppercase text-white">Now</Text>
+                  <Text className="text-[9px] font-bold uppercase text-white">
+                    Now
+                  </Text>
                 </View>
               ) : (
                 !!b.referenceNumber && (
-                  <Text style={{ color: pkg.text }} className="text-[10px] font-medium opacity-70">
+                  <Text
+                    style={{ color: pkg.text }}
+                    className="text-[10px] font-medium opacity-70"
+                  >
                     #{b.referenceNumber.slice(-6)}
                   </Text>
                 )
               )}
             </View>
-            <Text style={{ color: pkg.text }} className="text-[11px] font-bold" numberOfLines={1}>
-              {minutesToLabel(item.startMin)} – {minutesToLabel(item.startMin + b.durationMinutes)}
+            <Text
+              style={{ color: pkg.text }}
+              className="text-[11px] font-bold"
+              numberOfLines={1}
+            >
+              {minutesToLabel(item.startMin)} –{" "}
+              {minutesToLabel(item.startMin + b.durationMinutes)}
             </Text>
-            <Text style={{ color: pkg.text }} className="text-[11px] font-semibold" numberOfLines={1}>
+            <Text
+              style={{ color: pkg.text }}
+              className="text-[11px] font-semibold"
+              numberOfLines={1}
+            >
               {b.customerName || "Walk-in"}
             </Text>
             {item.height >= 100 && (
               <>
-                <Text style={{ color: pkg.text }} className="text-[10px] opacity-80" numberOfLines={1}>
+                <Text
+                  style={{ color: pkg.text }}
+                  className="text-[10px] opacity-80"
+                  numberOfLines={1}
+                >
                   {b.packageName}
                 </Text>
                 <View className="flex-row items-center gap-1 mt-0.5">
                   <Feather name="users" size={10} color={pkg.text} />
-                  <Text style={{ color: pkg.text }} className="text-[10px] opacity-80">
+                  <Text
+                    style={{ color: pkg.text }}
+                    className="text-[10px] opacity-80"
+                  >
                     {b.participants} {b.participants === 1 ? "guest" : "guests"}
                   </Text>
                 </View>
                 <View className="flex-1" />
                 <View className="flex-row items-center justify-between">
-                  <Text style={{ color: pkg.text }} className="text-[10px] font-bold">
+                  <Text
+                    style={{ color: pkg.text }}
+                    className="text-[10px] font-bold"
+                  >
                     {formatMoney(b.totalAmount)}
                   </Text>
                   <View className={`px-1 py-0.5 rounded ${pay.bg}`}>
-                    <Text className={`text-[9px] font-medium ${pay.text}`}>{pay.label}</Text>
+                    <Text className={`text-[9px] font-medium ${pay.text}`}>
+                      {pay.label}
+                    </Text>
                   </View>
                 </View>
               </>
@@ -448,7 +512,10 @@ const GridBookingBlock = ({
       {item.clipped && (
         <View className="absolute bottom-0 inset-x-0 border-b-2 border-dashed border-current opacity-60 items-center">
           {item.height >= 56 && (
-            <Text style={{ color: pkg.text }} className="text-[9px] font-semibold bg-white/70 rounded-t px-1">
+            <Text
+              style={{ color: pkg.text }}
+              className="text-[9px] font-semibold bg-white/70 rounded-t px-1"
+            >
               continues past midnight
             </Text>
           )}
@@ -473,7 +540,13 @@ const GridColumnBackground = ({
   closure: SpaceClosure | undefined;
   timeWindow: TimeWindow;
   pxPerMinute: number;
-  meta: { open: number | null; close: number | null; bookable: boolean; windowKnown: boolean; reason: string | null };
+  meta: {
+    open: number | null;
+    close: number | null;
+    bookable: boolean;
+    windowKnown: boolean;
+    reason: string | null;
+  };
   isPastDate: boolean;
   onPressBand: (bandOrigin: number, locationY: number) => void;
 }) => {
@@ -482,86 +555,101 @@ const GridColumnBackground = ({
   const clickable = !!band && meta.bookable && !isPastDate;
 
   return (
-  <>
-    {/* Free time — the whole open/close window, shaded and (when bookable)
-        tappable to start a booking there. Drawn first so closures/breaks and
-        booking blocks layer on top of it, never the other way around. */}
-    {band && (
-      <Pressable
-        disabled={!clickable}
-        onPress={(e) => onPressBand(bandOrigin, e.nativeEvent.locationY)}
-        accessibilityRole={clickable ? "button" : undefined}
-        accessibilityLabel={clickable ? `Start a booking in ${column.name}` : undefined}
-        style={{ position: "absolute", left: 0, right: 0, top: band.top, height: band.height }}
-        className={clickable ? "bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60" : "bg-gray-50 dark:bg-neutral-900/40"}
-      />
-    )}
-    {!band && !closure?.fullDay && meta.reason && (
-      <View className="absolute inset-0 z-[1] items-center pt-8">
-        <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
-          {meta.reason}
-        </Text>
-      </View>
-    )}
-    {!band && !closure?.fullDay && !meta.windowKnown && !meta.reason && (
-      <View className="absolute inset-0 z-[1] items-center pt-8">
-        <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
-          Schedule unavailable
-        </Text>
-      </View>
-    )}
-    {closure?.fullDay && (
-      <View className="absolute inset-0 bg-red-50/80 dark:bg-red-950/40 items-center pt-8 z-10">
-        <Text className="text-[10px] font-semibold text-red-500 bg-white/80 dark:bg-black/40 border border-red-200 dark:border-red-900/40 rounded-full px-2 py-0.5">
-          Closed all day
-        </Text>
-      </View>
-    )}
-    {!closure?.fullDay &&
-      closure?.ranges.map((r, i) => {
-        const start = Math.max(
-          r.timeStart ? timeToMinutes(r.timeStart) : timeWindow.start,
-          timeWindow.start,
-        );
-        const end = Math.min(
-          r.timeEnd ? timeToMinutes(r.timeEnd) : timeWindow.end,
-          timeWindow.end,
-        );
-        if (end <= start) return null;
-        return (
-          <View
-            key={`closure-${i}`}
-            style={{
-              position: "absolute",
-              left: 2,
-              right: 2,
-              top: (start - timeWindow.start) * pxPerMinute,
-              height: (end - start) * pxPerMinute,
-            }}
-            className="bg-red-50/90 dark:bg-red-950/50 border border-dashed border-red-200 dark:border-red-900/40 rounded items-center justify-center z-10"
-          >
-            <Text className="text-[10px] font-medium text-red-500">Closed</Text>
-          </View>
-        );
-      })}
-    {breaks.map((brk, i) => (
-      <View
-        key={`break-${i}`}
-        style={{
-          position: "absolute",
-          left: 2,
-          right: 2,
-          top: (brk.start - timeWindow.start) * pxPerMinute,
-          height: (brk.end - brk.start) * pxPerMinute,
-        }}
-        className="bg-gray-100 dark:bg-neutral-800 border-2 border-dashed border-gray-300 dark:border-neutral-600 rounded items-center justify-center"
-      >
-        <Feather name="coffee" size={14} color="#9CA3AF" />
-        <Text className="text-[9px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">Break</Text>
-      </View>
-    ))}
-    {column.virtual && <View className="absolute inset-0 bg-amber-50/20 dark:bg-amber-900/5" />}
-  </>
+    <>
+      {band && (
+        <Pressable
+          disabled={!clickable}
+          onPress={(e) => onPressBand(bandOrigin, e.nativeEvent.locationY)}
+          accessibilityRole={clickable ? "button" : undefined}
+          accessibilityLabel={
+            clickable ? `Start a booking in ${column.name}` : undefined
+          }
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: band.top,
+            height: band.height,
+          }}
+          className={
+            clickable
+              ? "bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
+              : "bg-gray-50 dark:bg-neutral-900/40"
+          }
+        />
+      )}
+      {!band && !closure?.fullDay && meta.reason && (
+        <View className="absolute inset-0 z-[1] items-center pt-8">
+          <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
+            {meta.reason}
+          </Text>
+        </View>
+      )}
+      {!band && !closure?.fullDay && !meta.windowKnown && !meta.reason && (
+        <View className="absolute inset-0 z-[1] items-center pt-8">
+          <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
+            Schedule unavailable
+          </Text>
+        </View>
+      )}
+      {closure?.fullDay && (
+        <View className="absolute inset-0 bg-red-50/80 dark:bg-red-950/40 items-center pt-8 z-10">
+          <Text className="text-[10px] font-semibold text-red-500 bg-white/80 dark:bg-black/40 border border-red-200 dark:border-red-900/40 rounded-full px-2 py-0.5">
+            Closed all day
+          </Text>
+        </View>
+      )}
+      {!closure?.fullDay &&
+        closure?.ranges.map((r, i) => {
+          const start = Math.max(
+            r.timeStart ? timeToMinutes(r.timeStart) : timeWindow.start,
+            timeWindow.start,
+          );
+          const end = Math.min(
+            r.timeEnd ? timeToMinutes(r.timeEnd) : timeWindow.end,
+            timeWindow.end,
+          );
+          if (end <= start) return null;
+          return (
+            <View
+              key={`closure-${i}`}
+              style={{
+                position: "absolute",
+                left: 2,
+                right: 2,
+                top: (start - timeWindow.start) * pxPerMinute,
+                height: (end - start) * pxPerMinute,
+              }}
+              className="bg-red-50/90 dark:bg-red-950/50 border border-dashed border-red-200 dark:border-red-900/40 rounded items-center justify-center z-10"
+            >
+              <Text className="text-[10px] font-medium text-red-500">
+                Closed
+              </Text>
+            </View>
+          );
+        })}
+      {breaks.map((brk, i) => (
+        <View
+          key={`break-${i}`}
+          style={{
+            position: "absolute",
+            left: 2,
+            right: 2,
+            top: (brk.start - timeWindow.start) * pxPerMinute,
+            height: (brk.end - brk.start) * pxPerMinute,
+          }}
+          className="bg-gray-100 dark:bg-neutral-800 border-2 border-dashed border-gray-300 dark:border-neutral-600 rounded items-center justify-center"
+        >
+          <Feather name="coffee" size={14} color="#9CA3AF" />
+          <Text className="text-[9px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">
+            Break
+          </Text>
+        </View>
+      ))}
+      {column.virtual && (
+        <View className="absolute inset-0 bg-amber-50/20 dark:bg-amber-900/5" />
+      )}
+    </>
   );
 };
 
@@ -596,21 +684,52 @@ const ScheduleGrid = ({
   isVenueToday: boolean;
   nowMinutes: number;
   onBookingPress: (id: number) => void;
-  refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
+  refreshControl: React.ReactElement<
+    React.ComponentProps<typeof RefreshControl>
+  >;
   bottomInset: number;
   scrollRef: React.RefObject<ScrollView | null>;
-  metaByColumn: Map<string, { open: number | null; close: number | null; bookable: boolean; windowKnown: boolean; reason: string | null }>;
+  metaByColumn: Map<
+    string,
+    {
+      open: number | null;
+      close: number | null;
+      bookable: boolean;
+      windowKnown: boolean;
+      reason: string | null;
+    }
+  >;
   freeStateByColumn: Map<string, FreeState>;
   isPastDate: boolean;
-  onOpenSlot: (column: ScheduleColumn, bandOrigin: number, locationY: number) => void;
+  onOpenSlot: (
+    column: ScheduleColumn,
+    bandOrigin: number,
+    locationY: number,
+  ) => void;
 }) => {
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyHeight = timeWindow.total * pxPerMinute;
   const marks = hourMarks(timeWindow);
 
+  const columnWidths = useMemo(() => {
+    const widths = new Map<string, number>();
+    for (const column of columns) {
+      const label = Math.ceil(column.name.length * HEADER_CHAR_WIDTH) + 24;
+      const floor =
+        (positionedByColumn.get(column.key) ?? []).length > 0
+          ? COLUMN_BOOKED_MIN_WIDTH
+          : COLUMN_MIN_WIDTH;
+      widths.set(
+        column.key,
+        Math.min(COLUMN_MAX_WIDTH, Math.max(floor, label)),
+      );
+    }
+    return widths;
+  }, [columns, positionedByColumn]);
+  const widthOf = (key: string) => columnWidths.get(key) ?? COLUMN_MIN_WIDTH;
+
   return (
     <View className="flex-1">
-      {/* Header row — sticky at top; scrolls horizontally in sync with body */}
       <View className="flex-row border-b border-gray-200 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-900">
         <View
           style={{ width: GUTTER_WIDTH }}
@@ -629,7 +748,7 @@ const ScheduleGrid = ({
             {columns.map((column) => (
               <View
                 key={column.key}
-                style={{ width: COLUMN_WIDTH }}
+                style={{ width: widthOf(column.key) }}
                 className="px-2 py-2 border-r border-gray-200 dark:border-neutral-800 items-center justify-center"
               >
                 <Text
@@ -654,26 +773,38 @@ const ScheduleGrid = ({
                     </View>
                   )
                 )}
-                {column.roomId != null && closuresBySpace.has(column.roomId) && (
-                  <View className="mt-0.5 px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40">
-                    <Text className="text-[9px] font-semibold text-red-600 dark:text-red-400" numberOfLines={1}>
-                      {closureLabel(closuresBySpace.get(column.roomId))}
-                    </Text>
-                  </View>
-                )}
+                {column.roomId != null &&
+                  closuresBySpace.has(column.roomId) && (
+                    <View className="mt-0.5 px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40">
+                      <Text
+                        className="text-[9px] font-semibold text-red-600 dark:text-red-400"
+                        numberOfLines={1}
+                      >
+                        {closureLabel(closuresBySpace.get(column.roomId))}
+                      </Text>
+                    </View>
+                  )}
                 {(() => {
                   const state = freeStateByColumn.get(column.key);
                   const meta = metaByColumn.get(column.key);
                   if (!state || !meta) return null;
-                  // Already covered by the red "Closed all day" badge above.
-                  if (state.kind === "closed" && column.roomId != null && closuresBySpace.has(column.roomId)) {
+                  if (
+                    state.kind === "closed" &&
+                    column.roomId != null &&
+                    closuresBySpace.has(column.roomId)
+                  ) {
                     return null;
                   }
                   if (state.kind === "closed") {
                     return (
                       <View className="mt-0.5 px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700">
-                        <Text className="text-[9px] font-semibold text-gray-500 dark:text-gray-400" numberOfLines={1}>
-                          {meta.windowKnown ? (meta.reason ?? "Not bookable") : "Schedule unavailable"}
+                        <Text
+                          className="text-[9px] font-semibold text-gray-500 dark:text-gray-400"
+                          numberOfLines={1}
+                        >
+                          {meta.windowKnown
+                            ? (meta.reason ?? "Not bookable")
+                            : "Schedule unavailable"}
                         </Text>
                       </View>
                     );
@@ -687,7 +818,10 @@ const ScheduleGrid = ({
                   }
                   if (state.kind === "blocked") {
                     return (
-                      <Text className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400" numberOfLines={1}>
+                      <Text
+                        className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400"
+                        numberOfLines={1}
+                      >
                         {state.reason}
                       </Text>
                     );
@@ -707,7 +841,10 @@ const ScheduleGrid = ({
                     );
                   }
                   return (
-                    <Text className="mt-0.5 text-[9px] font-medium text-gray-600 dark:text-gray-300" numberOfLines={1}>
+                    <Text
+                      className="mt-0.5 text-[9px] font-medium text-gray-600 dark:text-gray-300"
+                      numberOfLines={1}
+                    >
                       Free {minutesToLabel(state.atMinute)}
                     </Text>
                   );
@@ -727,7 +864,10 @@ const ScheduleGrid = ({
       >
         <View className="flex-row">
           {/* Fixed time gutter */}
-          <View style={{ width: GUTTER_WIDTH, height: bodyHeight }} className="border-r border-gray-200 dark:border-neutral-800">
+          <View
+            style={{ width: GUTTER_WIDTH, height: bodyHeight }}
+            className="border-r border-gray-200 dark:border-neutral-800"
+          >
             {marks.map((mark) => (
               <Text
                 key={mark}
@@ -746,7 +886,9 @@ const ScheduleGrid = ({
                 style={{ position: "absolute", top: nowTop - 7, right: 4 }}
                 className="px-1.5 py-0.5 rounded bg-red-500"
               >
-                <Text className="text-[9px] font-bold text-white">{nowLabel}</Text>
+                <Text className="text-[9px] font-bold text-white">
+                  {nowLabel}
+                </Text>
               </View>
             )}
           </View>
@@ -769,36 +911,58 @@ const ScheduleGrid = ({
                 {columns.map((column) => (
                   <View
                     key={column.key}
-                    style={{ width: COLUMN_WIDTH, height: bodyHeight }}
+                    style={{ width: widthOf(column.key), height: bodyHeight }}
                     className="relative border-r border-gray-200 dark:border-neutral-800"
                   >
                     {/* Hour gridlines */}
                     {marks.map((mark) => (
                       <View
                         key={mark}
-                        style={{ position: "absolute", top: (mark - timeWindow.start) * pxPerMinute, left: 0, right: 0 }}
+                        style={{
+                          position: "absolute",
+                          top: (mark - timeWindow.start) * pxPerMinute,
+                          left: 0,
+                          right: 0,
+                        }}
                         className="border-t border-gray-100 dark:border-neutral-800"
                       />
                     ))}
                     <GridColumnBackground
                       column={column}
-                      breaks={column.roomId != null ? breaksByRoom.get(column.roomId) ?? [] : []}
-                      closure={column.roomId != null ? closuresBySpace.get(column.roomId) : undefined}
+                      breaks={
+                        column.roomId != null
+                          ? (breaksByRoom.get(column.roomId) ?? [])
+                          : []
+                      }
+                      closure={
+                        column.roomId != null
+                          ? closuresBySpace.get(column.roomId)
+                          : undefined
+                      }
                       timeWindow={timeWindow}
                       pxPerMinute={pxPerMinute}
                       meta={
-                        metaByColumn.get(column.key) ??
-                        { open: null, close: null, bookable: false, windowKnown: false, reason: null }
+                        metaByColumn.get(column.key) ?? {
+                          open: null,
+                          close: null,
+                          bookable: false,
+                          windowKnown: false,
+                          reason: null,
+                        }
                       }
                       isPastDate={isPastDate}
-                      onPressBand={(bandOrigin, locationY) => onOpenSlot(column, bandOrigin, locationY)}
+                      onPressBand={(bandOrigin, locationY) =>
+                        onOpenSlot(column, bandOrigin, locationY)
+                      }
                     />
                     {(positionedByColumn.get(column.key) ?? []).map((item) => (
                       <GridBookingBlock
                         key={`b-${item.booking.id}`}
                         item={item}
                         inProgress={
-                          isVenueToday && nowMinutes >= item.startMin && nowMinutes < item.endMin
+                          isVenueToday &&
+                          nowMinutes >= item.startMin &&
+                          nowMinutes < item.endMin
                         }
                         onPress={() => onBookingPress(item.booking.id)}
                       />
@@ -809,7 +973,12 @@ const ScheduleGrid = ({
               {nowTop !== null && (
                 <View
                   pointerEvents="none"
-                  style={{ position: "absolute", top: nowTop, left: 0, right: 0 }}
+                  style={{
+                    position: "absolute",
+                    top: nowTop,
+                    left: 0,
+                    right: 0,
+                  }}
                 >
                   <View style={{ height: 2 }} className="bg-red-500" />
                 </View>
@@ -876,7 +1045,9 @@ const SpaceScheduleScreen = () => {
   const user = getCurrentUser();
 
   const [selectedDate, setSelectedDate] = useState<Date>(() => venueToday());
-  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
+    null,
+  );
   const [showPicker, setShowPicker] = useState(false);
   const [pickerMonth, setPickerMonth] = useState<Date>(() => venueToday());
   const [showLegend, setShowLegend] = useState(false);
@@ -887,13 +1058,21 @@ const SpaceScheduleScreen = () => {
   // Saved filters — seeded once from the in-memory view state, persisted back
   // on every change (web parity: readViewState/writeViewState).
   const savedFilters = useRef(readViewState()).current;
-  const [categoryFilter, setCategoryFilter] = useState(savedFilters.categoryFilter ?? "all");
-  const [statusFilter, setStatusFilter] = useState(savedFilters.statusFilter ?? "all");
-  const [searchInput, setSearchInput] = useState(savedFilters.searchInput ?? "");
+  const [categoryFilter, setCategoryFilter] = useState(
+    savedFilters.categoryFilter ?? "all",
+  );
+  const [statusFilter, setStatusFilter] = useState(
+    savedFilters.statusFilter ?? "all",
+  );
+  const [searchInput, setSearchInput] = useState(
+    savedFilters.searchInput ?? "",
+  );
   // Free time now makes an empty room worth seeing (it's not just a blank
   // column anymore), so this defaults to showing every space, matching the
   // web's post-parity default.
-  const [hideEmptySpaces, setHideEmptySpaces] = useState(savedFilters.hideEmptySpaces ?? false);
+  const [hideEmptySpaces, setHideEmptySpaces] = useState(
+    savedFilters.hideEmptySpaces ?? false,
+  );
   const [zoomIndex, setZoomIndex] = useState(
     typeof savedFilters.zoomIndex === "number" &&
       savedFilters.zoomIndex >= 0 &&
@@ -903,7 +1082,13 @@ const SpaceScheduleScreen = () => {
   );
 
   useEffect(() => {
-    writeViewState({ categoryFilter, statusFilter, searchInput, hideEmptySpaces, zoomIndex });
+    writeViewState({
+      categoryFilter,
+      statusFilter,
+      searchInput,
+      hideEmptySpaces,
+      zoomIndex,
+    });
   }, [categoryFilter, statusFilter, searchInput, hideEmptySpaces, zoomIndex]);
 
   const pxPerMinute = ZOOM_LEVELS[zoomIndex];
@@ -933,11 +1118,13 @@ const SpaceScheduleScreen = () => {
   // Active workspace location (company_admin only — undefined for everyone
   // else, who the backend already scopes to their own location).
   const activeLocation = useActiveLocation();
-  const effectiveLocationId = activeLocation.id === "all" ? undefined : activeLocation.id;
+  const effectiveLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
   // Day-offs need a concrete location id (no "all locations" query exists for
   // that endpoint): the active selection when there is one, else the caller's
   // own assigned location — so managers/attendants still see their closures.
-  const dayOffLocationId = effectiveLocationId ?? user?.location_id ?? undefined;
+  const dayOffLocationId =
+    effectiveLocationId ?? user?.location_id ?? undefined;
 
   const { allSpaces, bookings, loading, error, refetch } = useSpaceSchedule(
     selectedKey,
@@ -947,7 +1134,10 @@ const SpaceScheduleScreen = () => {
   // The day's operating window, from the same server truth the web admin
   // uses. `dayWindow` stays null on failure — never a guessed fallback — so a
   // failed request can only ever make the timeline unclickable, never wrong.
-  const { dayWindow, windowLoading } = useScheduleDayWindow(selectedKey, effectiveLocationId);
+  const { dayWindow, windowLoading } = useScheduleDayWindow(
+    selectedKey,
+    effectiveLocationId,
+  );
   const isPastDate = selectedKey < dateKey(venueToday());
 
   // The week strip runs from today forward (web parity: SpaceSchedule's
@@ -962,11 +1152,12 @@ const SpaceScheduleScreen = () => {
     });
   }, [nowTick.year, nowTick.month, nowTick.day]);
 
-  const { counts: weekCounts, refetch: refetchWeekCounts } = useWeekBookingCounts(
-    dateKey(weekDays[0]),
-    dateKey(weekDays[6]),
-    effectiveLocationId,
-  );
+  const { counts: weekCounts, refetch: refetchWeekCounts } =
+    useWeekBookingCounts(
+      dateKey(weekDays[0]),
+      dateKey(weekDays[6]),
+      effectiveLocationId,
+    );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1022,7 +1213,8 @@ const SpaceScheduleScreen = () => {
   );
   const effectiveCategory = useMemo(
     () =>
-      categoryFilter !== "all" && categoryOptions.some((o) => o.value === categoryFilter)
+      categoryFilter !== "all" &&
+      categoryOptions.some((o) => o.value === categoryFilter)
         ? categoryFilter
         : "all",
     [categoryFilter, categoryOptions],
@@ -1033,13 +1225,15 @@ const SpaceScheduleScreen = () => {
     return activeBookings.filter((b) => {
       if (
         effectiveCategory !== "all" &&
-        (normalizeCategory(b.packageCategory) || UNCATEGORIZED_LABEL) !== effectiveCategory
+        (normalizeCategory(b.packageCategory) || UNCATEGORIZED_LABEL) !==
+          effectiveCategory
       ) {
         return false;
       }
       if (statusFilter !== "all" && b.status !== statusFilter) return false;
       if (term) {
-        const haystack = `${b.customerName} ${b.referenceNumber ?? ""} ${b.packageName}`.toLowerCase();
+        const haystack =
+          `${b.customerName} ${b.referenceNumber ?? ""} ${b.packageName}`.toLowerCase();
         if (!haystack.includes(term)) return false;
       }
       return true;
@@ -1066,7 +1260,10 @@ const SpaceScheduleScreen = () => {
     for (const space of sortedSpaces) {
       const list = space.breaks
         .filter((b) => b.days.includes(currentDayName))
-        .map((b) => ({ start: timeToMinutes(b.startTime), end: timeToMinutes(b.endTime) }))
+        .map((b) => ({
+          start: timeToMinutes(b.startTime),
+          end: timeToMinutes(b.endTime),
+        }))
         .filter((r) => r.end > r.start);
       if (list.length) map.set(space.id, list);
     }
@@ -1079,7 +1276,13 @@ const SpaceScheduleScreen = () => {
   const roomWindows = useMemo(() => {
     const map = new Map<
       number,
-      { open: number | null; close: number | null; closedAllDay: boolean; bookable: boolean; reason: string | null }
+      {
+        open: number | null;
+        close: number | null;
+        closedAllDay: boolean;
+        bookable: boolean;
+        reason: string | null;
+      }
     >();
     for (const entry of dayWindow?.rooms ?? []) {
       map.set(entry.room_id, {
@@ -1107,7 +1310,9 @@ const SpaceScheduleScreen = () => {
   // The visible time window only ever widens within a date+location — once
   // computed it never snaps narrower as filters/data change (web parity:
   // windowExtentRef).
-  const windowExtentRef = useRef<{ key: string; window: TimeWindow } | null>(null);
+  const windowExtentRef = useRef<{ key: string; window: TimeWindow } | null>(
+    null,
+  );
   const timeWindow = useMemo(() => {
     const bookingRanges = filteredBookings.map((b) => {
       const start = timeToMinutes(b.time);
@@ -1118,7 +1323,10 @@ const SpaceScheduleScreen = () => {
       closureBoundaryMinutes(spaceClosures.get(s.id)),
     );
     const extentKey = `${selectedKey}:${effectiveLocationId ?? "all"}`;
-    const prev = windowExtentRef.current?.key === extentKey ? windowExtentRef.current.window : null;
+    const prev =
+      windowExtentRef.current?.key === extentKey
+        ? windowExtentRef.current.window
+        : null;
     const win = computeTimeWindow({
       bookingRanges,
       breakRanges,
@@ -1160,7 +1368,13 @@ const SpaceScheduleScreen = () => {
   const scheduleMetaByColumn = useMemo(() => {
     const map = new Map<
       string,
-      { open: number | null; close: number | null; bookable: boolean; windowKnown: boolean; reason: string | null }
+      {
+        open: number | null;
+        close: number | null;
+        bookable: boolean;
+        windowKnown: boolean;
+        reason: string | null;
+      }
     >();
     for (const column of columns) {
       if (column.roomId != null) {
@@ -1196,7 +1410,10 @@ const SpaceScheduleScreen = () => {
     for (const b of activeBookings) {
       const key = columnKeyFor(b, knownRoomIds);
       const start = timeToMinutes(b.time);
-      const range: TimeRange = { startMinutes: start, endMinutes: start + Math.max(15, b.durationMinutes) };
+      const range: TimeRange = {
+        startMinutes: start,
+        endMinutes: start + Math.max(15, b.durationMinutes),
+      };
       const list = map.get(key);
       if (list) list.push(range);
       else map.set(key, [range]);
@@ -1205,8 +1422,12 @@ const SpaceScheduleScreen = () => {
   }, [activeBookings, knownRoomIds]);
 
   const blockedRangesFor = useCallback(
-    (column: ScheduleColumn, meta: { open: number | null; close: number | null }): TimeRange[] => {
-      const closure = column.roomId != null ? spaceClosures.get(column.roomId) : undefined;
+    (
+      column: ScheduleColumn,
+      meta: { open: number | null; close: number | null },
+    ): TimeRange[] => {
+      const closure =
+        column.roomId != null ? spaceClosures.get(column.roomId) : undefined;
       return [
         ...(occupancyByColumn.get(column.key) ?? []),
         ...(column.roomId != null
@@ -1218,8 +1439,12 @@ const SpaceScheduleScreen = () => {
           : []),
         ...(closure && !closure.fullDay
           ? closure.ranges.map((r) => ({
-              startMinutes: r.timeStart ? timeToMinutes(r.timeStart) : (meta.open ?? timeWindow.start),
-              endMinutes: r.timeEnd ? timeToMinutes(r.timeEnd) : (meta.close ?? timeWindow.end),
+              startMinutes: r.timeStart
+                ? timeToMinutes(r.timeStart)
+                : (meta.open ?? timeWindow.start),
+              endMinutes: r.timeEnd
+                ? timeToMinutes(r.timeEnd)
+                : (meta.close ?? timeWindow.end),
               reason: "Closed",
             }))
           : []),
@@ -1234,10 +1459,26 @@ const SpaceScheduleScreen = () => {
       const meta = scheduleMetaByColumn.get(column.key);
       if (!meta) continue;
       const from = isVenueToday ? nowMinutes : (meta.open ?? timeWindow.start);
-      map.set(column.key, freeState(meta.open, meta.close, blockedRangesFor(column, meta), from, meta.bookable));
+      map.set(
+        column.key,
+        freeState(
+          meta.open,
+          meta.close,
+          blockedRangesFor(column, meta),
+          from,
+          meta.bookable,
+        ),
+      );
     }
     return map;
-  }, [columns, scheduleMetaByColumn, blockedRangesFor, isVenueToday, nowMinutes, timeWindow]);
+  }, [
+    columns,
+    scheduleMetaByColumn,
+    blockedRangesFor,
+    isVenueToday,
+    nowMinutes,
+    timeWindow,
+  ]);
 
   const roomLocationById = useMemo(() => {
     const map = new Map<number, number | null>();
@@ -1286,11 +1527,20 @@ const SpaceScheduleScreen = () => {
         interval,
         isVenueToday ? nowMinutes : undefined,
       );
-      const free = nextFreeMinute(meta.open, meta.close, blockedRangesFor(column, meta), raw);
+      const free = nextFreeMinute(
+        meta.open,
+        meta.close,
+        blockedRangesFor(column, meta),
+        raw,
+      );
       const minute =
         free === null || free === raw
           ? raw
-          : snapToInterval(free, interval, isVenueToday ? Math.max(free, nowMinutes) : undefined);
+          : snapToInterval(
+              free,
+              interval,
+              isVenueToday ? Math.max(free, nowMinutes) : undefined,
+            );
 
       const candidates = packagesForColumnSlot(column, minute);
       const locationId =
@@ -1336,7 +1586,9 @@ const SpaceScheduleScreen = () => {
   );
 
   const hasActiveFilters =
-    effectiveCategory !== "all" || statusFilter !== "all" || searchInput.trim() !== "";
+    effectiveCategory !== "all" ||
+    statusFilter !== "all" ||
+    searchInput.trim() !== "";
   const clearFilters = () => {
     setCategoryFilter("all");
     setStatusFilter("all");
@@ -1349,13 +1601,21 @@ const SpaceScheduleScreen = () => {
     return columns.map((column) => {
       const items: ListItem[] = [];
       for (const pb of positionedByColumn.get(column.key) ?? []) {
-        items.push({ kind: "booking", start: pb.startMin, booking: pb.booking });
+        items.push({
+          kind: "booking",
+          start: pb.startMin,
+          booking: pb.booking,
+        });
       }
       if (column.roomId != null) {
         const space = sortedSpaces.find((s) => s.id === column.roomId);
         for (const brk of space?.breaks ?? []) {
           if (brk.days.includes(currentDayName)) {
-            items.push({ kind: "break", start: timeToMinutes(brk.startTime), brk });
+            items.push({
+              kind: "break",
+              start: timeToMinutes(brk.startTime),
+              brk,
+            });
           }
         }
       }
@@ -1367,7 +1627,10 @@ const SpaceScheduleScreen = () => {
   const scrollRef = useRef<ScrollView>(null);
   const scrollToNow = () => {
     if (nowTop === null || !scrollRef.current) return;
-    scrollRef.current.scrollTo({ y: Math.max(0, nowTop - 160), animated: true });
+    scrollRef.current.scrollTo({
+      y: Math.max(0, nowTop - 160),
+      animated: true,
+    });
   };
 
   // Auto-scroll to "now" (or to the top) once per day change, after the day's
@@ -1378,7 +1641,10 @@ const SpaceScheduleScreen = () => {
     if (lastScrolledDayRef.current === selectedKey) return;
     lastScrolledDayRef.current = selectedKey;
     if (nowTop !== null) {
-      scrollRef.current.scrollTo({ y: Math.max(0, nowTop - 160), animated: false });
+      scrollRef.current.scrollTo({
+        y: Math.max(0, nowTop - 160),
+        animated: false,
+      });
     } else {
       scrollRef.current.scrollTo({ y: 0, animated: false });
     }
@@ -1432,7 +1698,11 @@ const SpaceScheduleScreen = () => {
   // only "no spaces at all" takes over the whole screen now — a quiet day or a
   // filtered-out one just gets a small banner above the still-visible grid.
   const noSchedule = !loading && !error && activeBookings.length === 0;
-  const noMatches = !loading && !error && activeBookings.length > 0 && filteredBookings.length === 0;
+  const noMatches =
+    !loading &&
+    !error &&
+    activeBookings.length > 0 &&
+    filteredBookings.length === 0;
 
   const renderNoSpaces = () => (
     <View className="px-5 pt-6">
@@ -1444,7 +1714,8 @@ const SpaceScheduleScreen = () => {
           No Spaces To Show
         </Text>
         <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-          No spaces are configured for this location, so there is no schedule to display.
+          No spaces are configured for this location, so there is no schedule to
+          display.
         </Text>
       </View>
     </View>
@@ -1478,9 +1749,7 @@ const SpaceScheduleScreen = () => {
       </View>
 
       {/* Controls (fixed) */}
-      <View
-        className="bg-white dark:bg-neutral-900 border-b border-gray-100 dark:border-neutral-800 px-5 pt-4 pb-3.5"
-      >
+      <View className="bg-white dark:bg-neutral-900 border-b border-gray-100 dark:border-neutral-800 px-5 pt-4 pb-3.5">
         <View className="mb-3">
           <LocationWorkspaceSelector />
         </View>
@@ -1518,10 +1787,16 @@ const SpaceScheduleScreen = () => {
             <Pressable
               onPress={goToToday}
               className={`flex-row items-center gap-1.5 px-4 py-2 rounded-full ${
-                isVenueToday ? "bg-[#0644C7]" : "bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
+                isVenueToday
+                  ? "bg-[#0644C7]"
+                  : "bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
               }`}
             >
-              <Feather name="sun" size={14} color={isVenueToday ? "#FFFFFF" : PRIMARY} />
+              <Feather
+                name="sun"
+                size={14}
+                color={isVenueToday ? "#FFFFFF" : PRIMARY}
+              />
               <Text
                 className={`text-sm font-semibold ${isVenueToday ? "text-white" : "text-[#0644C7]"}`}
               >
@@ -1582,7 +1857,9 @@ const SpaceScheduleScreen = () => {
                 <View className="flex-row items-center gap-1 mt-0.5">
                   <Text
                     className={`text-sm font-bold ${
-                      selected ? "text-[#0644C7]" : "text-gray-700 dark:text-gray-200"
+                      selected
+                        ? "text-[#0644C7]"
+                        : "text-gray-700 dark:text-gray-200"
                     }`}
                   >
                     {day.getDate()}
@@ -1615,10 +1892,16 @@ const SpaceScheduleScreen = () => {
         {/* Day summary */}
         <View className="flex-row items-center gap-3 mt-3">
           <Text className="text-xs text-gray-500 dark:text-gray-400">
-            <Text className="font-semibold text-gray-900 dark:text-white">{daySummary.count}</Text> bookings
+            <Text className="font-semibold text-gray-900 dark:text-white">
+              {daySummary.count}
+            </Text>{" "}
+            bookings
           </Text>
           <Text className="text-xs text-gray-500 dark:text-gray-400">
-            <Text className="font-semibold text-gray-900 dark:text-white">{daySummary.guests}</Text> guests
+            <Text className="font-semibold text-gray-900 dark:text-white">
+              {daySummary.guests}
+            </Text>{" "}
+            guests
           </Text>
           {daySummary.unassigned > 0 && (
             <View className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30">
@@ -1695,11 +1978,17 @@ const SpaceScheduleScreen = () => {
                 : "border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800"
             }`}
           >
-            <Feather name="filter" size={16} color={statusFilter !== "all" ? PRIMARY : "#6b7280"} />
+            <Feather
+              name="filter"
+              size={16}
+              color={statusFilter !== "all" ? PRIMARY : "#6b7280"}
+            />
           </Pressable>
           <Pressable
             onPress={() => setHideEmptySpaces((v) => !v)}
-            accessibilityLabel={hideEmptySpaces ? "Show empty spaces" : "Hide empty spaces"}
+            accessibilityLabel={
+              hideEmptySpaces ? "Show empty spaces" : "Hide empty spaces"
+            }
             className={`p-2 rounded-lg border ${
               hideEmptySpaces
                 ? "border-[#0644C7]/40 bg-[#0644C7]/5"
@@ -1719,23 +2008,35 @@ const SpaceScheduleScreen = () => {
                 disabled={zoomIndex === 0}
                 className="p-2 rounded-l-lg"
               >
-                <Feather name="zoom-out" size={16} color={zoomIndex === 0 ? "#D1D5DB" : "#6b7280"} />
+                <Feather
+                  name="zoom-out"
+                  size={16}
+                  color={zoomIndex === 0 ? "#D1D5DB" : "#6b7280"}
+                />
               </Pressable>
               <Pressable
-                onPress={() => setZoomIndex((z) => Math.min(ZOOM_LEVELS.length - 1, z + 1))}
+                onPress={() =>
+                  setZoomIndex((z) => Math.min(ZOOM_LEVELS.length - 1, z + 1))
+                }
                 disabled={zoomIndex === ZOOM_LEVELS.length - 1}
                 className="p-2 rounded-r-lg border-l border-gray-200 dark:border-neutral-700"
               >
                 <Feather
                   name="zoom-in"
                   size={16}
-                  color={zoomIndex === ZOOM_LEVELS.length - 1 ? "#D1D5DB" : "#6b7280"}
+                  color={
+                    zoomIndex === ZOOM_LEVELS.length - 1 ? "#D1D5DB" : "#6b7280"
+                  }
                 />
               </Pressable>
             </View>
           )}
           {hasActiveFilters && (
-            <Pressable onPress={clearFilters} className="p-2 rounded-lg" accessibilityLabel="Clear filters">
+            <Pressable
+              onPress={clearFilters}
+              className="p-2 rounded-lg"
+              accessibilityLabel="Clear filters"
+            >
               <Feather name="x" size={16} color="#9CA3AF" />
             </Pressable>
           )}
@@ -1745,7 +2046,9 @@ const SpaceScheduleScreen = () => {
       {/* Error */}
       {!loading && error && (
         <View className="mx-5 mt-4 bg-red-50 border border-red-100 rounded-2xl p-5">
-          <Text className="text-red-600 font-semibold">Something went wrong</Text>
+          <Text className="text-red-600 font-semibold">
+            Something went wrong
+          </Text>
           <Text className="text-red-500 text-sm mt-1">{error}</Text>
         </View>
       )}
@@ -1756,15 +2059,18 @@ const SpaceScheduleScreen = () => {
           <CalendarDaySkeleton />
         </View>
       ) : error ? null : columns.length === 0 ? (
-        <ScrollView refreshControl={refreshControl}>{renderNoSpaces()}</ScrollView>
+        <ScrollView refreshControl={refreshControl}>
+          {renderNoSpaces()}
+        </ScrollView>
       ) : (
         <>
           {noSchedule && (
             <View className="flex-row items-center gap-2 border-b border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 py-2.5">
               <Feather name="calendar" size={14} color="#9ca3af" />
               <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
-                No bookings for {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()},{" "}
-                {selectedDate.getFullYear()} — every space below is open for its scheduled hours.
+                No bookings for {MONTH_NAMES[selectedDate.getMonth()]}{" "}
+                {selectedDate.getDate()}, {selectedDate.getFullYear()} — every
+                space below is open for its scheduled hours.
               </Text>
             </View>
           )}
@@ -1772,7 +2078,8 @@ const SpaceScheduleScreen = () => {
             <View className="flex-row flex-wrap items-center gap-2 border-b border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 py-2.5">
               <Feather name="search" size={14} color="#9ca3af" />
               <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
-                {activeBookings.length} {activeBookings.length === 1 ? "booking is" : "bookings are"}{" "}
+                {activeBookings.length}{" "}
+                {activeBookings.length === 1 ? "booking is" : "bookings are"}{" "}
                 scheduled this day, but none match the current filters.
               </Text>
               <Pressable
@@ -1819,7 +2126,11 @@ const SpaceScheduleScreen = () => {
                     key={column.key}
                     column={column}
                     items={items}
-                    closure={column.roomId != null ? spaceClosures.get(column.roomId) : undefined}
+                    closure={
+                      column.roomId != null
+                        ? spaceClosures.get(column.roomId)
+                        : undefined
+                    }
                     onBookingPress={setSelectedBookingId}
                   />
                 ))}
@@ -1830,7 +2141,11 @@ const SpaceScheduleScreen = () => {
       )}
 
       {/* Month date picker */}
-      <BottomSheet visible={showPicker} onClose={() => setShowPicker(false)} title="Select Date">
+      <BottomSheet
+        visible={showPicker}
+        onClose={() => setShowPicker(false)}
+        title="Select Date"
+      >
         <View className="px-5 pb-6">
           <View className="flex-row items-center justify-between mb-4">
             <Pressable
@@ -1853,7 +2168,9 @@ const SpaceScheduleScreen = () => {
           <View className="flex-row mb-2">
             {PICKER_WEEKDAYS.map((d) => (
               <View key={d} className="flex-1 items-center">
-                <Text className="text-xs font-medium text-gray-400 dark:text-gray-500">{d}</Text>
+                <Text className="text-xs font-medium text-gray-400 dark:text-gray-500">
+                  {d}
+                </Text>
               </View>
             ))}
           </View>
@@ -1861,20 +2178,34 @@ const SpaceScheduleScreen = () => {
           <View className="flex-row flex-wrap">
             {pickerDays.map((day, i) => {
               if (!day) {
-                return <View key={`e-${i}`} style={{ width: `${100 / 7}%` }} className="aspect-square" />;
+                return (
+                  <View
+                    key={`e-${i}`}
+                    style={{ width: `${100 / 7}%` }}
+                    className="aspect-square"
+                  />
+                );
               }
               const key = dateKey(day);
               const selected = key === selectedKey;
               const dToday = key === todayKey;
               return (
-                <View key={key} style={{ width: `${100 / 7}%` }} className="aspect-square p-0.5">
+                <View
+                  key={key}
+                  style={{ width: `${100 / 7}%` }}
+                  className="aspect-square p-0.5"
+                >
                   <Pressable
                     onPress={() => {
                       setSelectedDate(day);
                       setShowPicker(false);
                     }}
                     className={`flex-1 items-center justify-center rounded-lg ${
-                      selected ? "bg-[#0644C7]" : dToday ? "bg-[#0644C7]/10 dark:bg-[#0644C7]/20" : ""
+                      selected
+                        ? "bg-[#0644C7]"
+                        : dToday
+                          ? "bg-[#0644C7]/10 dark:bg-[#0644C7]/20"
+                          : ""
                     }`}
                   >
                     <Text
@@ -1908,14 +2239,20 @@ const SpaceScheduleScreen = () => {
               onPress={() => setShowPicker(false)}
               className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-neutral-600 items-center"
             >
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Close</Text>
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Close
+              </Text>
             </Pressable>
           </View>
         </View>
       </BottomSheet>
 
       {/* Status filter */}
-      <BottomSheet visible={showStatusPicker} onClose={() => setShowStatusPicker(false)} title="Status">
+      <BottomSheet
+        visible={showStatusPicker}
+        onClose={() => setShowStatusPicker(false)}
+        title="Status"
+      >
         <View className="px-5 pb-6">
           {STATUS_OPTIONS.map((opt) => {
             const selected = statusFilter === opt.value;
@@ -1932,7 +2269,9 @@ const SpaceScheduleScreen = () => {
               >
                 <Text
                   className={`text-base font-medium ${
-                    selected ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-200"
+                    selected
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   }`}
                 >
                   {opt.label}
@@ -1945,18 +2284,29 @@ const SpaceScheduleScreen = () => {
       </BottomSheet>
 
       {/* Legend */}
-      <BottomSheet visible={showLegend} onClose={() => setShowLegend(false)} title="Legend">
+      <BottomSheet
+        visible={showLegend}
+        onClose={() => setShowLegend(false)}
+        title="Legend"
+      >
         <View className="px-5 pb-6">
           <Text className="text-xs font-bold tracking-wide text-gray-500 dark:text-gray-400 uppercase mb-3">
             Booking Status
           </Text>
-          {["confirmed", "pending", "checked-in", "completed", "cancelled"].map((s) => (
-            <View key={s} className="flex-row items-center gap-2.5 py-1.5">
-              <View style={{ backgroundColor: statusColor(s) }} className="px-2 py-0.5 rounded-full">
-                <Text className="text-[10px] font-bold uppercase text-white">{s}</Text>
+          {["confirmed", "pending", "checked-in", "completed", "cancelled"].map(
+            (s) => (
+              <View key={s} className="flex-row items-center gap-2.5 py-1.5">
+                <View
+                  style={{ backgroundColor: statusColor(s) }}
+                  className="px-2 py-0.5 rounded-full"
+                >
+                  <Text className="text-[10px] font-bold uppercase text-white">
+                    {s}
+                  </Text>
+                </View>
               </View>
-            </View>
-          ))}
+            ),
+          )}
 
           <View className="h-px bg-gray-100 dark:bg-neutral-800 my-4" />
 
@@ -1970,15 +2320,24 @@ const SpaceScheduleScreen = () => {
             <View className="w-6 h-6 rounded-md bg-gray-100 dark:bg-neutral-800 border border-dashed border-gray-300 dark:border-neutral-600 items-center justify-center">
               <Feather name="coffee" size={12} color="#6b7280" />
             </View>
-            <Text className="text-sm text-gray-600 dark:text-gray-300">Break Time</Text>
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              Break Time
+            </Text>
           </View>
           <View className="flex-row items-center gap-2.5 mb-2">
-            <View style={{ width: 24, height: 3 }} className="rounded-full bg-red-500" />
-            <Text className="text-sm text-gray-600 dark:text-gray-300">Current time (Michigan)</Text>
+            <View
+              style={{ width: 24, height: 3 }}
+              className="rounded-full bg-red-500"
+            />
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              Current time (Michigan)
+            </Text>
           </View>
           <View className="flex-row items-center gap-2.5 mb-2">
             <View className="px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40">
-              <Text className="text-[9px] font-semibold text-amber-700 dark:text-amber-400">No room</Text>
+              <Text className="text-[9px] font-semibold text-amber-700 dark:text-amber-400">
+                No room
+              </Text>
             </View>
             <Text className="text-sm text-gray-600 dark:text-gray-300">
               Booking not assigned to a space
@@ -1986,7 +2345,9 @@ const SpaceScheduleScreen = () => {
           </View>
           <View className="flex-row items-center gap-2.5">
             <View className="w-6 h-6 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40" />
-            <Text className="text-sm text-gray-600 dark:text-gray-300">Space closed</Text>
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              Space closed
+            </Text>
           </View>
           <View style={{ height: 8 }} />
         </View>
