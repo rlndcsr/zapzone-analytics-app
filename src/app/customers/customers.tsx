@@ -155,7 +155,11 @@ const Customers = () => {
   const [allRows, setAllRows] = useState<ContactRow[]>([]);
   const [stats, setStats] = useState<ContactStats | null>(null);
   const [tagOptions, setTagOptions] = useState<string[]>([]);
+  // `loading` clears as soon as the first page paints; `complete` marks the end
+  // of the whole walk. Anything that must not decide against a partial list
+  // (the openId deep link below) waits on `complete`, not `loading`.
   const [loading, setLoading] = useState(true);
+  const [complete, setComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -202,22 +206,28 @@ const Customers = () => {
   );
 
   // Deep link: open a contact's actions sheet directly when navigated here from
-  // a notification (e.g. /customers/customers?openId=123). Wait until the list
-  // has loaded before resolving so we don't clear the param prematurely; if the
-  // record no longer exists, show a friendly message and stay put.
+  // a notification (e.g. /customers/customers?openId=123). Resolve as soon as
+  // the contact turns up in a page that has landed, but only declare it missing
+  // once the whole walk is done — the list paints progressively, so a contact
+  // on a later page is "not here yet", not gone.
   const { openId } = useLocalSearchParams<{ openId?: string }>();
   useEffect(() => {
-    if (!openId || loading) return;
+    if (!openId) return;
     const match = allRows.find((c) => String(c.id) === openId);
+    if (!match && !complete) return;
     if (match) {
       setSheetContact(match);
     } else {
       Alert.alert("Customer unavailable", "This customer is no longer available.");
     }
     router.setParams({ openId: undefined });
-  }, [openId, loading, allRows, router]);
+  }, [openId, complete, allRows, router]);
 
   const reqRef = useRef(0);
+  // Whether a full walk has ever finished. A ref, not state: `load` is rebuilt
+  // from its deps and re-run by the effect below, so anything it both reads and
+  // sets would refetch in a loop if it were a dependency.
+  const loadedOnceRef = useRef(false);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -227,11 +237,30 @@ const Customers = () => {
       return;
     }
     const rid = ++reqRef.current;
+    // Only the first load paints page by page. A refetch (pull-to-refresh, or
+    // returning from the edit screen) already has the whole list on screen, and
+    // publishing partial pages over it would collapse the list to 200 rows and
+    // grow it back under the user.
+    const progressive = !loadedOnceRef.current;
     setLoading(true);
+    setComplete(false);
     setError(null);
     try {
       const [rows, s, tags] = await Promise.all([
-        fetchAllContacts({ token, companyId: companyId ?? undefined }),
+        fetchAllContacts({
+          token,
+          companyId: companyId ?? undefined,
+          // Paint each page as it lands. A large CRM is many pages even when
+          // fetched concurrently, and the rows are already in server order, so
+          // the list can fill in rather than hold a spinner until the last one.
+          onPage: progressive
+            ? (soFar) => {
+                if (rid !== reqRef.current) return;
+                setAllRows(soFar);
+                setLoading(false);
+              }
+            : undefined,
+        }),
         fetchContactStats({ token, companyId: companyId ?? undefined }).catch(
           () => null,
         ),
@@ -241,6 +270,8 @@ const Customers = () => {
       ]);
       if (rid !== reqRef.current) return;
       setAllRows(rows);
+      setComplete(true);
+      loadedOnceRef.current = true;
       if (s) setStats(s);
       setTagOptions(tags);
     } catch (err) {

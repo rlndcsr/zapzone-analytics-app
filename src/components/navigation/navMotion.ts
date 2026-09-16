@@ -130,8 +130,26 @@ export const PROGRESS_INDETERMINATE_DURATION = 1100;
 /** Width of the travelling indeterminate segment, as a share of the track. */
 export const PROGRESS_INDETERMINATE_RATIO = 0.4;
 
-export const PRESS_TRANSITION = "transition duration-150 ease-out";
-
+/**
+ * Press feedback, as NativeWind state classes.
+ *
+ * There is deliberately NO `transition` class here. A transition is the one
+ * thing that makes NativeWind's interop route the style through a Reanimated
+ * shared value — and the interop reads and writes that value *during render*
+ * (`react-native-css-interop/dist/runtime/native/native-interop.js`, the
+ * `processTransition` / `retainSharedValues` pass). Since a PressableScale sits
+ * under nearly every tappable surface in the app, that produced the flood of
+ * "Reading/Writing to `value` during component render" warnings, plus a
+ * per-press style diff on the JS thread for every one of them.
+ *
+ * Without it the interop applies these on press with no shared value at all:
+ * the feedback lands immediately instead of easing over 150ms. Restoring the
+ * ease means owning the animation in Reanimated, which cannot simply be passed
+ * alongside `className` — the interop spreads inline styles (`{ ...declaration
+ * }`), which strips a `useAnimatedStyle` result of the internals that make it
+ * animate. That would need PressableScale restructured around an unregistered
+ * animated component, so it is not a drop-in.
+ */
 export const PRESS_SCALE_CLASS = {
   surface: "active:scale-97",
   control: "active:scale-95",

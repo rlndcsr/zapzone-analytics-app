@@ -1,6 +1,12 @@
-import { apiRequest, apiUrl, firstMediaUrl } from "../lib/api";
+import { ApiError, apiRequest, apiUrl, firstMediaUrl } from "../lib/api";
+import {
+  addOnUnitPrice,
+  locationAddressLine,
+} from "../lib/bookings/bookingDetailFields";
 import { compareCheckInRows } from "../lib/checkin/checkInOrder";
-import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
+import { fetchAllPages } from "../lib/fetchAllPages";
+import { cardLabelFromPayments } from "../lib/payments/cardLabel";
+import { normalizeCategory } from "../lib/venueCategories";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
   AppliedFee as PricingAppliedFee,
@@ -39,6 +45,7 @@ export type CalendarBooking = {
   /** "Visa ending in 1234" — the most relevant paid card, or null. */
   cardLabel: string | null;
   paymentStatus: string | null;
+  locationId: number | null;
   locationName: string;
   createdAt: string | null;
   updatedAt: string | null;
@@ -58,6 +65,9 @@ export type BookingAddOn = {
   price: number | null;
   quantity: number;
   priceAtBooking: number;
+  /** Charged per unit, resolved the way the web ViewBooking resolves it. */
+  unitPrice: number;
+  isForceAddOn: boolean;
 };
 
 /** A booking's attraction line, with the price frozen at booking time. */
@@ -66,6 +76,26 @@ export type BookingAttraction = {
   name: string;
   quantity: number;
   priceAtBooking: number;
+};
+
+/** One entry of the booking's `applied_discounts` json column. */
+export type AppliedDiscount = {
+  name: string;
+  type: string;
+  amount: number;
+};
+
+/** One row of the booking's payment history (`payments` morph relation). */
+export type BookingPayment = {
+  id: number | null;
+  amount: number;
+  method: string | null;
+  status: string | null;
+  createdAt: string | null;
+  paidAt: string | null;
+  cardType: string | null;
+  cardLastFour: string | null;
+  notes: string | null;
 };
 
 export type AppliedFee = {
@@ -88,8 +118,12 @@ export type BookingDetail = {
   packageName: string;
   packageId: number | null;
   packagePrice: number | null;
+  /** Normalised package category — the web's second line under the package. */
+  packageCategory: string | null;
   locationId: number | null;
   locationName: string;
+  /** "123 Main St, Farmington, MI", or null when the venue has no address. */
+  locationAddress: string | null;
   customerId: number | null;
   roomName: string | null;
   roomId: number | null;
@@ -107,8 +141,16 @@ export type BookingDetail = {
   /** "Visa ending in 1234" — the most relevant paid card, or null. */
   cardLabel: string | null;
   amountPaid: number;
+  discountAmount: number;
   appliedFees: AppliedFee[];
+  appliedDiscounts: AppliedDiscount[];
+  promo: { code: string; discountPercentage: number | null } | null;
+  giftCard: { code: string; balance: number } | null;
+  payments: BookingPayment[];
+  /** The extra confirmation checkboxes and how they were answered. */
+  customFieldResponses: { id: number; label: string; value: boolean }[];
   customerNotes: string | null;
+  specialRequests: string | null;
   internalNotes: string | null;
   createdAt: string | null;
 };
@@ -148,6 +190,7 @@ type RawBooking = {
   room_id?: number | null;
   package_id?: number | null;
   room?: { id?: number | null; name?: string | null } | null;
+  location_id?: number | null;
   location?: { name?: string | null } | null;
   customer?: {
     first_name?: string | null;
@@ -159,7 +202,10 @@ type RawBooking = {
   attractions?: RawBookingAttraction[] | null;
   add_ons?: RawAddOn[] | null;
   // Column-limited eager load, present on both the index and the show response.
-  payments?: CardBearingPayment[] | null;
+  // Typed as the richer `RawPayment` (not `CardBearingPayment`) so it agrees
+  // with `RawBookingDetail`'s own `payments` field rather than intersecting
+  // into an unusable type.
+  payments?: RawPayment[] | null;
 };
 
 type RawBookingAttraction = {
@@ -173,7 +219,7 @@ type RawBookingAttraction = {
 };
 
 /** Raw shape of the full booking model returned by GET /api/bookings/{id}. */
-type RawBookingDetail = RawBooking & {
+export type RawBookingDetail = RawBooking & {
   type?: string | null;
   location_id?: number | null;
   customer_id?: number | null;
@@ -212,18 +258,60 @@ type RawBookingDetail = RawBooking & {
     email?: string | null;
     phone?: string | null;
   } | null;
+  // The detail endpoint eager-loads the full location, unlike the index.
+  location?: {
+    name?: string | null;
+    address?: string | null;
+    city?: string | null;
+    state?: string | null;
+  } | null;
+  discount_amount?: number | string | null;
+  applied_discounts?:
+    | {
+        discount_name?: string | null;
+        discount_type?: string | null;
+        discount_amount?: number | string | null;
+      }[]
+    | null;
+  promo?: {
+    code?: string | null;
+    discount_percentage?: number | string | null;
+  } | null;
+  gift_card?: { code?: string | null; balance?: number | string | null } | null;
+  payments?: RawPayment[] | null;
+  custom_field_responses?:
+    | { id?: number | string | null; label?: string | null; value?: unknown }[]
+    | null;
   add_ons?: RawAddOn[] | null;
   addOns?: RawAddOn[] | null;
+};
+
+type RawPayment = {
+  id?: number | string | null;
+  amount?: number | string | null;
+  method?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  paid_at?: string | null;
+  card_type?: string | null;
+  card_last_four?: string | null;
+  notes?: string | null;
 };
 
 type RawAddOn = {
   id: number;
   name?: string | null;
   price?: number | string | null;
+  is_force_add_on?: boolean | number | null;
+  /** Per-package override price for a forced add-on (web reads this first). */
+  price_each_packages?:
+    | { package_id?: number | null; price?: number | string | null }[]
+    | null;
   pivot?: {
     add_on_id?: number | null;
     quantity?: number | string | null;
     price_at_booking?: number | string | null;
+    price?: number | string | null;
   } | null;
 };
 
@@ -310,6 +398,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     paymentMethod: raw.payment_method ?? null,
     cardLabel: cardLabelFromPayments(raw.payments),
     paymentStatus: raw.payment_status ?? null,
+    locationId: raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
     createdAt: raw.created_at ?? null,
     updatedAt: raw.updated_at ?? null,
@@ -353,20 +442,24 @@ export async function fetchAllBookings({
   locationId,
   signal,
 }: FetchParams): Promise<CalendarBooking[]> {
-  const out: CalendarBooking[] = [];
-  let page = 1;
   let lastPage = 1;
 
-  do {
-    const res = await fetchPage(page, {}, { token, locationId, signal });
-    const items = res?.data?.bookings ?? [];
-    for (const raw of items) {
-      const date = toDateKey(raw.booking_date);
-      if (date) out.push(mapBooking(raw, date));
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
+  const out = await fetchAllPages<CalendarBooking>(
+    async (page) => {
+      const res = await fetchPage(page, {}, { token, locationId, signal });
+      const bookings: CalendarBooking[] = [];
+      for (const raw of res?.data?.bookings ?? []) {
+        const date = toDateKey(raw.booking_date);
+        if (date) bookings.push(mapBooking(raw, date));
+      }
+      const reported = res?.data?.pagination?.last_page ?? page;
+      // Page 1 is the only page whose count decides the walk, so it is also the
+      // only one the "older pages skipped" warning below should believe.
+      if (page === 1) lastPage = reported;
+      return { items: bookings, lastPage: reported };
+    },
+    { maxPages: SYNC_MAX_PAGES },
+  );
 
   if (lastPage > SYNC_MAX_PAGES) {
     console.warn(
@@ -426,6 +519,7 @@ export async function searchBookings({
 
 function mapAddOns(raw: RawBookingDetail): BookingAddOn[] {
   const list = raw.add_ons ?? raw.addOns ?? [];
+  const packageId = raw.package_id ?? raw.package?.id ?? null;
   return list.map((a) => ({
     id: a.id,
     addOnId: Number(a.pivot?.add_on_id ?? a.id),
@@ -433,6 +527,8 @@ function mapAddOns(raw: RawBookingDetail): BookingAddOn[] {
     price: a.price != null ? Number(a.price) : null,
     quantity: Number(a.pivot?.quantity ?? 1),
     priceAtBooking: Number(a.pivot?.price_at_booking ?? 0),
+    unitPrice: addOnUnitPrice(a, packageId),
+    isForceAddOn: a.is_force_add_on === true || a.is_force_add_on === 1,
   }));
 }
 
@@ -490,8 +586,15 @@ export async function fetchBookingDetail(
     token,
     signal,
   });
-  const b = res.data;
+  return mapBookingDetail(res.data);
+}
 
+/**
+ * The booking model from `GET /api/bookings/{id}`, flattened for the Booking
+ * Details screen. Kept separate from the request so the field-by-field parity
+ * with the web admin's ViewBooking page can be unit-tested.
+ */
+export function mapBookingDetail(b: RawBookingDetail): BookingDetail {
   return {
     id: b.id,
     referenceNumber: b.reference_number ?? null,
@@ -505,8 +608,10 @@ export async function fetchBookingDetail(
     packageName: b.package?.name?.trim() || "—",
     packageId: b.package_id ?? b.package?.id ?? null,
     packagePrice: b.package?.price != null ? Number(b.package.price) : null,
+    packageCategory: normalizeCategory(b.package?.category) || null,
     locationId: b.location_id ?? null,
     locationName: b.location?.name?.trim() || "",
+    locationAddress: locationAddressLine(b.location),
     customerId: b.customer_id ?? null,
     roomName: b.room?.name?.trim() || null,
     roomId: b.room_id ?? b.room?.id ?? null,
@@ -523,16 +628,58 @@ export async function fetchBookingDetail(
     paymentMethod: b.payment_method ?? null,
     cardLabel: cardLabelFromPayments(b.payments),
     amountPaid: Number(b.amount_paid ?? 0),
+    discountAmount: Number(b.discount_amount ?? 0),
     appliedFees: (b.applied_fees ?? []).map((f) => ({
       name: f.fee_name ?? "Fee",
       amount: Number(f.fee_amount ?? 0),
       applicationType: f.fee_application_type ?? "additive",
     })),
+    appliedDiscounts: (b.applied_discounts ?? []).map((d) => ({
+      name: d.discount_name?.trim() || "Discount",
+      type: d.discount_type?.trim() || "",
+      amount: Number(d.discount_amount ?? 0),
+    })),
+    promo: b.promo?.code?.trim()
+      ? {
+          code: b.promo.code.trim(),
+          discountPercentage:
+            b.promo.discount_percentage != null
+              ? Number(b.promo.discount_percentage)
+              : null,
+        }
+      : null,
+    giftCard: b.gift_card?.code?.trim()
+      ? {
+          code: b.gift_card.code.trim(),
+          balance: Number(b.gift_card.balance ?? 0),
+        }
+      : null,
+    payments: (b.payments ?? []).map((p) => ({
+      id: p.id != null ? Number(p.id) : null,
+      amount: Number(p.amount ?? 0),
+      method: p.method?.trim() || null,
+      status: p.status?.trim() || null,
+      createdAt: p.created_at ?? null,
+      paidAt: p.paid_at ?? null,
+      cardType: p.card_type?.trim() || null,
+      cardLastFour: p.card_last_four?.trim() || null,
+      notes: p.notes?.trim() || null,
+    })),
+    customFieldResponses: (b.custom_field_responses ?? [])
+      .filter((r) => !!r.label?.trim())
+      .map((r, i) => ({
+        id: r.id != null ? Number(r.id) : i,
+        label: r.label!.trim(),
+        // The column is a boolean cast, but a 0/1 or "1" still reaches us.
+        value: r.value === true || r.value === 1 || r.value === "1",
+      })),
     customerNotes: b.customer_notes ?? b.notes ?? null,
+    specialRequests: b.special_requests?.trim() || null,
     internalNotes: b.internal_notes?.trim() || null,
     createdAt: b.created_at ?? null,
   };
 }
+
 
 export type BookingChangeValue = {
   from?: unknown;
@@ -857,36 +1004,48 @@ export type RoomOptions = {
 export async function fetchRoomOptions(
   token: string,
   locationId?: number | null,
+  /**
+   * Restrict to rooms currently marked available. Off by default so the package
+   * forms keep listing every room they can assign; the Change Location picker
+   * turns it on, matching the web's `is_available` filter — offering a room a
+   * venue has taken out of service would only produce a rejected save.
+   */
+  availableOnly = false,
 ): Promise<RoomOptions> {
-  const out: RoomOption[] = [];
   let slotCleanupMinutes: number | null = null;
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const params = new URLSearchParams({ per_page: "500", page: String(page) });
-    if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
-      token,
-    });
-    const cleanup = res?.data?.slot_cleanup_minutes;
-    if (slotCleanupMinutes == null && cleanup != null) {
-      const minutes = Number(cleanup);
-      if (Number.isFinite(minutes)) slotCleanupMinutes = minutes;
-    }
-    for (const r of extractList<any>(res, "rooms")) {
-      out.push({
-        id: Number(r.id),
-        name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
-        bookingInterval:
-          r.booking_interval != null &&
-          Number.isFinite(Number(r.booking_interval))
-            ? Number(r.booking_interval)
-            : null,
+
+  const out = await fetchAllPages<RoomOption>(
+    async (page) => {
+      const params = new URLSearchParams({
+        per_page: "500",
+        page: String(page),
       });
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
+      if (locationId != null) params.append("location_id", String(locationId));
+      if (availableOnly) params.append("is_available", "1");
+      const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
+        token,
+      });
+      const cleanup = res?.data?.slot_cleanup_minutes;
+      if (slotCleanupMinutes == null && cleanup != null) {
+        const minutes = Number(cleanup);
+        if (Number.isFinite(minutes)) slotCleanupMinutes = minutes;
+      }
+      return {
+        items: extractList<any>(res, "rooms").map((r) => ({
+          id: Number(r.id),
+          name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+          bookingInterval:
+            r.booking_interval != null &&
+            Number.isFinite(Number(r.booking_interval))
+              ? Number(r.booking_interval)
+              : null,
+        })),
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: MAX_LOOKUP_PAGES },
+  );
+
   return { rooms: out, slotCleanupMinutes };
 }
 
@@ -951,42 +1110,43 @@ export async function fetchSpaces({
   includeUnavailable?: boolean;
   signal?: AbortSignal;
 }): Promise<Space[]> {
-  const out: Space[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const params = new URLSearchParams({ per_page: "100", page: String(page) });
-    if (userId != null) params.append("user_id", String(userId));
-    if (includeUnavailable) params.append("include_unavailable", "true");
-    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
-      token,
-      signal,
-    });
-    for (const r of extractList<RawRoom>(res, "rooms")) {
-      out.push({
-        id: Number(r.id),
-        name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
-        capacity: r.capacity != null ? Number(r.capacity) : null,
-        locationId:
-          r.location_id != null
-            ? Number(r.location_id)
-            : r.location?.id != null
-              ? Number(r.location.id)
-              : null,
-        breaks: (r.break_time ?? []).map((b) => ({
-          days: Array.isArray(b.days)
-            ? b.days.map((d) => String(d).toLowerCase())
-            : [],
-          startTime: toTime(b.start_time) ?? String(b.start_time ?? ""),
-          endTime: toTime(b.end_time) ?? String(b.end_time ?? ""),
-        })),
-        isAvailable: r.is_available !== false,
+  return fetchAllPages<Space>(
+    async (page) => {
+      const params = new URLSearchParams({
+        per_page: "100",
+        page: String(page),
       });
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
-  return out;
+      if (userId != null) params.append("user_id", String(userId));
+      if (includeUnavailable) params.append("include_unavailable", "true");
+      const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
+        token,
+        signal,
+      });
+      return {
+        items: extractList<RawRoom>(res, "rooms").map((r) => ({
+          id: Number(r.id),
+          name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
+          capacity: r.capacity != null ? Number(r.capacity) : null,
+          locationId:
+            r.location_id != null
+              ? Number(r.location_id)
+              : r.location?.id != null
+                ? Number(r.location.id)
+                : null,
+          breaks: (r.break_time ?? []).map((b) => ({
+            days: Array.isArray(b.days)
+              ? b.days.map((d) => String(d).toLowerCase())
+              : [],
+            startTime: toTime(b.start_time) ?? String(b.start_time ?? ""),
+            endTime: toTime(b.end_time) ?? String(b.end_time ?? ""),
+          })),
+          isAvailable: r.is_available !== false,
+        })),
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: MAX_LOOKUP_PAGES },
+  );
 }
 
 /** Flattened space/room row backing the Spaces management list. */
@@ -1071,23 +1231,24 @@ export async function fetchSpaceList({
   userId?: number;
   signal?: AbortSignal;
 }): Promise<SpaceRow[]> {
-  const out: SpaceRow[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const params = new URLSearchParams({ per_page: "100", page: String(page) });
-    if (userId != null) params.append("user_id", String(userId));
-    const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
-      token,
-      signal,
-    });
-    for (const r of extractList<RawRoom>(res, "rooms")) {
-      out.push(mapSpaceRow(r));
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= MAX_LOOKUP_PAGES);
-  return out;
+  return fetchAllPages<SpaceRow>(
+    async (page) => {
+      const params = new URLSearchParams({
+        per_page: "100",
+        page: String(page),
+      });
+      if (userId != null) params.append("user_id", String(userId));
+      const res = await apiRequest<any>(`/api/rooms?${params.toString()}`, {
+        token,
+        signal,
+      });
+      return {
+        items: extractList<RawRoom>(res, "rooms").map(mapSpaceRow),
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: MAX_LOOKUP_PAGES },
+  );
 }
 
 type RoomMutationResponse = {
@@ -1180,6 +1341,8 @@ export async function updateAreaGroupInterval(
 export type ScheduleBooking = {
   id: number;
   roomId: number | null;
+  /** Assigned room name, when the endpoint eager-loads the relation. */
+  roomName: string | null;
   packageId: number | null;
   packageCategory: string;
   referenceNumber: string | null;
@@ -1200,6 +1363,7 @@ type RawScheduleBooking = {
   status?: string | null;
   booking_time?: string | null;
   room_id?: number | null;
+  room?: { id?: number | null; name?: string | null } | null;
   duration?: number | string | null;
   duration_unit?: string | null;
   participants?: number | string | null;
@@ -1233,6 +1397,7 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
   return {
     id: raw.id,
     roomId: raw.room_id ?? null,
+    roomName: raw.room?.name?.trim() || null,
     packageId: raw.package?.id ?? null,
     packageCategory: raw.package?.category?.trim() || "",
     referenceNumber: raw.reference_number ?? null,
@@ -1264,30 +1429,28 @@ export async function fetchDaySchedule({
   locationId?: number;
   signal?: AbortSignal;
 }): Promise<ScheduleBooking[]> {
-  const out: ScheduleBooking[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const params = new URLSearchParams({
-      booking_date: date,
-      per_page: String(PER_PAGE),
-      page: String(page),
-    });
-    if (userId != null) params.append("user_id", String(userId));
-    if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<{
-      data?: {
-        bookings?: RawScheduleBooking[];
-        pagination?: { last_page?: number };
+  return fetchAllPages<ScheduleBooking>(
+    async (page) => {
+      const params = new URLSearchParams({
+        booking_date: date,
+        per_page: String(PER_PAGE),
+        page: String(page),
+      });
+      if (userId != null) params.append("user_id", String(userId));
+      if (locationId != null) params.append("location_id", String(locationId));
+      const res = await apiRequest<{
+        data?: {
+          bookings?: RawScheduleBooking[];
+          pagination?: { last_page?: number };
+        };
+      }>(`/api/bookings?${params.toString()}`, { token, signal });
+      return {
+        items: (res?.data?.bookings ?? []).map(mapScheduleBooking),
+        lastPage: res?.data?.pagination?.last_page ?? page,
       };
-    }>(`/api/bookings?${params.toString()}`, { token, signal });
-    for (const raw of res?.data?.bookings ?? []) {
-      out.push(mapScheduleBooking(raw));
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
-  return out;
+    },
+    { maxPages: SYNC_MAX_PAGES },
+  );
 }
 
 /** Statuses that occupy a space, so only these are counted per day. */
@@ -1312,34 +1475,39 @@ export async function fetchBookingCountsByDate({
   locationId?: number;
   signal?: AbortSignal;
 }): Promise<Record<string, number>> {
+  // Each page contributes the date keys of its countable bookings; the tally
+  // happens once at the end so pages can land in any order.
+  const dateKeys = await fetchAllPages<string>(
+    async (page) => {
+      const params = new URLSearchParams({
+        date_from: from,
+        date_to: to,
+        per_page: String(PER_PAGE),
+        page: String(page),
+      });
+      if (userId != null) params.append("user_id", String(userId));
+      if (locationId != null) params.append("location_id", String(locationId));
+      const res = await apiRequest<{
+        data?: {
+          bookings?: { booking_date?: string | null; status?: string | null }[];
+          pagination?: { last_page?: number };
+        };
+      }>(`/api/bookings?${params.toString()}`, { token, signal });
+      const keys: string[] = [];
+      for (const raw of res?.data?.bookings ?? []) {
+        // booking_date comes back as a bare date, but tolerate a timestamp.
+        const key = String(raw.booking_date ?? "").split("T")[0];
+        if (!key || !COUNTED_SCHEDULE_STATUSES.has(String(raw.status ?? "")))
+          continue;
+        keys.push(key);
+      }
+      return { items: keys, lastPage: res?.data?.pagination?.last_page ?? page };
+    },
+    { maxPages: SYNC_MAX_PAGES },
+  );
+
   const counts: Record<string, number> = {};
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const params = new URLSearchParams({
-      date_from: from,
-      date_to: to,
-      per_page: String(PER_PAGE),
-      page: String(page),
-    });
-    if (userId != null) params.append("user_id", String(userId));
-    if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<{
-      data?: {
-        bookings?: { booking_date?: string | null; status?: string | null }[];
-        pagination?: { last_page?: number };
-      };
-    }>(`/api/bookings?${params.toString()}`, { token, signal });
-    for (const raw of res?.data?.bookings ?? []) {
-      // booking_date comes back as a bare date, but tolerate a timestamp.
-      const key = String(raw.booking_date ?? "").split("T")[0];
-      if (!key || !COUNTED_SCHEDULE_STATUSES.has(String(raw.status ?? "")))
-        continue;
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
+  for (const key of dateKeys) counts[key] = (counts[key] ?? 0) + 1;
   return counts;
 }
 
@@ -1486,6 +1654,8 @@ export type BookingUpdateInput = {
   customerPhone?: string;
   date?: string;
   time?: string;
+  duration?: number;
+  durationUnit?: string;
   participants?: number;
   status?: string;
   guestOfHonorName?: string | null;
@@ -1513,6 +1683,57 @@ export type BookingUpdateInput = {
   paymentStatus?: string;
 };
 
+/** One reason the destination room can't take this booking, from a 409. */
+export type LocationConflict = { type: string; message: string };
+
+/**
+ * PATCH /api/bookings/{id}/location — move a booking to another venue.
+ *
+ * The backend answers 409 with `{ conflict: true, conflicts: [...] }` when the
+ * destination room is already occupied, too close to a neighbouring booking in
+ * the same area group, or overlapping a scheduled break. That is a question,
+ * not a failure: resending with `force` overrides it, which is what the web's
+ * "Change anyway" button does. Read the list with {@link locationConflictsOf}.
+ *
+ * `roomId: null` clears the assignment, but the backend refuses that for a
+ * booking that currently HAS a room (422) rather than silently unassigning it.
+ */
+export async function updateBookingLocation(
+  token: string,
+  id: number,
+  {
+    locationId,
+    roomId,
+    force,
+  }: { locationId: number; roomId: number | null; force?: boolean },
+): Promise<void> {
+  await apiRequest(`/api/bookings/${id}/location`, {
+    method: "PATCH",
+    token,
+    body: {
+      location_id: locationId,
+      room_id: roomId,
+      ...(force ? { force: true } : {}),
+    },
+  });
+}
+
+/**
+ * The conflicts behind a rejected location change, or [] for any other error.
+ * Only a 409 carries them, so anything else is a real failure to surface.
+ */
+export function locationConflictsOf(err: unknown): LocationConflict[] {
+  if (!(err instanceof ApiError) || err.status !== 409) return [];
+  const list = (err.body as { conflicts?: unknown } | undefined)?.conflicts;
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((c) => ({
+      type: String((c as LocationConflict)?.type ?? ""),
+      message: String((c as LocationConflict)?.message ?? "").trim(),
+    }))
+    .filter((c) => !!c.message);
+}
+
 export async function updateBooking(
   token: string,
   id: number,
@@ -1527,6 +1748,8 @@ export async function updateBooking(
   if (input.customerPhone != null) body.guest_phone = input.customerPhone;
   if (input.date != null) body.booking_date = input.date;
   if (input.time != null) body.booking_time = input.time;
+  if (input.duration != null) body.duration = input.duration;
+  if (input.durationUnit != null) body.duration_unit = input.durationUnit;
   if (input.participants != null) body.participants = input.participants;
   if (input.status != null) body.status = input.status;
   if (input.guestOfHonorName !== undefined)
@@ -1701,30 +1924,28 @@ export async function fetchTrashedBookings({
   locationId,
   signal,
 }: FetchParams): Promise<TrashedBooking[]> {
-  const out: TrashedBooking[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const params = new URLSearchParams({
-      per_page: String(PER_PAGE),
-      page: String(page),
-      sort_by: "deleted_at",
-      sort_order: "desc",
-    });
-    if (locationId != null) params.append("location_id", String(locationId));
-    const res = await apiRequest<
-      BookingsListResponse & { data: { bookings: RawBooking[] } }
-    >(`/api/bookings/trashed?${params.toString()}`, { token, signal });
-    for (const raw of res?.data?.bookings ?? []) {
-      out.push({
-        ...mapBooking(raw, toDateKey(raw.booking_date) ?? ""),
-        deletedAt: raw.deleted_at ?? null,
+  return fetchAllPages<TrashedBooking>(
+    async (page) => {
+      const params = new URLSearchParams({
+        per_page: String(PER_PAGE),
+        page: String(page),
+        sort_by: "deleted_at",
+        sort_order: "desc",
       });
-    }
-    lastPage = res?.data?.pagination?.last_page ?? page;
-    page++;
-  } while (page <= lastPage && page <= SYNC_MAX_PAGES);
-  return out;
+      if (locationId != null) params.append("location_id", String(locationId));
+      const res = await apiRequest<
+        BookingsListResponse & { data: { bookings: RawBooking[] } }
+      >(`/api/bookings/trashed?${params.toString()}`, { token, signal });
+      return {
+        items: (res?.data?.bookings ?? []).map((raw) => ({
+          ...mapBooking(raw, toDateKey(raw.booking_date) ?? ""),
+          deletedAt: raw.deleted_at ?? null,
+        })),
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: SYNC_MAX_PAGES },
+  );
 }
 
 /** POST /api/bookings/{id}/restore — restore a soft-deleted booking. */

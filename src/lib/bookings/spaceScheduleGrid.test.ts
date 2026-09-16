@@ -28,6 +28,7 @@ function makeBooking(
   return {
     id: nextId++,
     roomId: null,
+    roomName: null,
     packageId: null,
     packageCategory: "",
     referenceNumber: `REF${nextId}`,

@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages } from "../lib/fetchAllPages";
 
 /**
  * The web `/customers` LIST page is backed by the CRM `contacts` API (NOT the
@@ -175,6 +176,7 @@ export async function fetchContacts({
 
 // Safety cap: 200 * 50 = 10k contacts, far beyond any real single-company CRM.
 const ALL_MAX_PAGES = 50;
+const ALL_PER_PAGE = 200;
 
 /**
  * Page through the auth-scoped /api/contacts index and return EVERY contact the
@@ -187,27 +189,28 @@ export async function fetchAllContacts({
   token,
   companyId,
   signal,
+  onPage,
 }: {
   token: string;
   companyId?: number;
   signal?: AbortSignal;
+  /** Rows gathered so far, as each page lands — lets the list paint the first
+   *  200 contacts in one round trip instead of after the whole walk. */
+  onPage?: (rows: ContactRow[], pagesLoaded: number, totalPages: number) => void;
 }): Promise<ContactRow[]> {
-  const out: ContactRow[] = [];
-  let page = 1;
-  let lastPage = 1;
-  do {
-    const res = await fetchContacts({
-      token,
-      companyId,
-      page,
-      perPage: 200,
-      signal,
-    });
-    out.push(...res.rows);
-    lastPage = res.lastPage;
-    page += 1;
-  } while (page <= lastPage && page <= ALL_MAX_PAGES);
-  return out;
+  return fetchAllPages<ContactRow>(
+    async (page) => {
+      const res = await fetchContacts({
+        token,
+        companyId,
+        page,
+        perPage: ALL_PER_PAGE,
+        signal,
+      });
+      return { items: res.rows, lastPage: res.lastPage };
+    },
+    { maxPages: ALL_MAX_PAGES, onPage },
+  );
 }
 
 /** GET /api/contacts/{id} — one contact, mapped via the shared mapper (Edit screen). */

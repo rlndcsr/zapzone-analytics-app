@@ -2,6 +2,7 @@ import {
   AlertCircle,
   Cake,
   Calendar,
+  Check,
   CheckCircle,
   Clock,
   CreditCard,
@@ -17,12 +18,18 @@ import {
   User,
   Users,
   Wallet,
+  X,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { bookingDurationMinutes, buildCalendarEventDraft } from "../../lib/calendarEvent";
 import { addEventToCalendar } from "../../lib/nativeCalendar";
+import {
+  cardFromPayments,
+  formatCardLabel,
+} from "../../lib/payments/cardLabel";
 import { resolvePaymentState } from "../../lib/payments/paymentState";
+import { formatDuration } from "../../lib/time";
 import { getToken } from "../../lib/session";
 import { deleteBooking, type BookingDetail } from "../../services/bookingsService";
 import { BookingChangeHistory } from "./BookingChangeHistory";
@@ -53,6 +60,12 @@ const STATUS_BADGE: Record<string, string> = {
 // payment colours it used to hold (amber for partial, grey for unpaid) now come
 // from lib/payments/paymentState.ts, which paints anything owing red.
 const NEUTRAL_BADGE = "bg-gray-200 text-gray-700";
+
+/** Status pill on a single payment-history row (the web's per-row colours). */
+const PAYMENT_ROW_BADGE: Record<string, string> = {
+  completed: "bg-green-100 text-green-800",
+  pending: "bg-amber-100 text-amber-800",
+};
 
 const formatMoney = (value: number) =>
   `$${value.toLocaleString("en-US", {
@@ -114,6 +127,51 @@ const Section = ({
       {children}
     </View>
   </>
+);
+
+/**
+ * One priced line in Additional Services. Mirrors the web ViewBooking: the
+ * quantity line reads "3 × $12.00" once there is more than one, and stays
+ * "Quantity: 1" for a single unit, with the line total on the right.
+ */
+const LineItem = ({
+  name,
+  quantity,
+  unitPrice,
+  forced = false,
+}: {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  forced?: boolean;
+}) => (
+  <View className="flex-row items-start justify-between py-1">
+    <View className="flex-1 mr-2 flex-row items-start">
+      <View className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-2 mr-2" />
+      <View className="flex-1">
+        <View className="flex-row items-center gap-1.5 flex-wrap">
+          <Text className="text-sm font-medium text-gray-900 dark:text-white">
+            {name}
+          </Text>
+          {forced && (
+            <View className="bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 rounded">
+              <Text className="text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                Forced
+              </Text>
+            </View>
+          )}
+        </View>
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+          {quantity > 1
+            ? `${quantity} × ${formatMoney(unitPrice)}`
+            : `Quantity: ${quantity}`}
+        </Text>
+      </View>
+    </View>
+    <Text className="text-sm font-medium text-gray-900 dark:text-white">
+      {formatMoney(unitPrice * quantity)}
+    </Text>
+  </View>
 );
 
 /** Icon-tile row: rounded tinted icon + label above value (or custom children). */
@@ -228,6 +286,8 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
   // Clamped for display — an overpayment is called out by `balanceLabel`
   // ("Credit Due") rather than by showing a negative figure here.
   const remaining = Math.max(0, payment.balance);
+  // The card behind "Card Used": the completed payment, else the most recent.
+  const card = cardFromPayments(detail.payments);
 
   // Null when the booking has no valid scheduled date/time — the action is
   // hidden rather than falling back to midnight or any other placeholder.
@@ -322,6 +382,35 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
             </Pressable>
           )}
 
+          {/* Status banners — the web calls out these two terminal states
+              above the details so they are not missed in the status pill. */}
+          {detail.status === "cancelled" && (
+            <View className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30 flex-row items-start gap-2">
+              <AlertCircle size={16} color="#dc2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-800 dark:text-red-300">
+                  Cancelled Booking
+                </Text>
+                <Text className="text-xs text-red-600 dark:text-red-400 mt-0.5">
+                  This booking has been cancelled.
+                </Text>
+              </View>
+            </View>
+          )}
+          {detail.status === "completed" && (
+            <View className="mt-4 p-3 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30 flex-row items-start gap-2">
+              <CheckCircle size={16} color="#16a34a" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-green-800 dark:text-green-300">
+                  Completed Booking
+                </Text>
+                <Text className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                  This booking has been completed successfully.
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Booking Information */}
           <Section title="Booking Information">
             <InfoTile icon={User} label="Customer">
@@ -340,19 +429,23 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
               )}
             </InfoTile>
 
-            <InfoTile icon={Package} label="Package">
-              <Text
-                className="text-sm font-semibold text-gray-900 dark:text-white uppercase"
-                numberOfLines={2}
-              >
-                {detail.packageName}
-              </Text>
-              {detail.packagePrice != null && (
-                <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {formatMoney(detail.packagePrice)}
+            {/* Web parity: the Package tile is omitted entirely when the
+                booking has no package, rather than showing a dash. */}
+            {!!detail.packageId && (
+              <InfoTile icon={Package} label="Package">
+                <Text
+                  className="text-sm font-semibold text-gray-900 dark:text-white"
+                  numberOfLines={2}
+                >
+                  {detail.packageName}
                 </Text>
-              )}
-            </InfoTile>
+                {!!detail.packageCategory && (
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {detail.packageCategory}
+                  </Text>
+                )}
+              </InfoTile>
+            )}
 
             <InfoTile icon={Calendar} label="Date & Time">
               <Text className="text-sm font-semibold text-gray-900 dark:text-white">
@@ -363,31 +456,36 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
               </Text>
             </InfoTile>
 
+            {/* Not the raw "11 hours" of `duration` + `duration_unit`: the web
+                runs both through formatDurationDisplay, so 0 reads "Unlimited",
+                90 minutes reads "1 hr 30 min" and 1 reads "1 hour". */}
             <InfoTile
               icon={Clock}
               label="Duration"
-              value={`${detail.duration} ${detail.durationUnit}`}
+              value={formatDuration(detail.duration, detail.durationUnit)}
             />
             <InfoTile
               icon={Users}
               label="Participants"
-              value={`${detail.participants} ${
-                detail.participants === 1 ? "person" : "people"
-              }`}
+              value={`${detail.participants} people`}
             />
-            <InfoTile
-              icon={MapPin}
-              label="Location"
-              value={detail.locationName || "—"}
-            />
-            {/* Assigned table/space — always shown (web parity); the room can be
-                named e.g. "Table 1". Falls back to the same dash the Location
-                tile uses when nothing is assigned. */}
-            <InfoTile
-              icon={DoorOpen}
-              label="Assigned Table / Space"
-              value={detail.roomName || "—"}
-            />
+            {!!detail.locationName && (
+              <InfoTile icon={MapPin} label="Location">
+                <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {detail.locationName}
+                </Text>
+                {!!detail.locationAddress && (
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {detail.locationAddress}
+                  </Text>
+                )}
+              </InfoTile>
+            )}
+            {/* Web parity: shown only when a space is actually assigned, and
+                labelled "Space" as the web labels it. */}
+            {!!detail.roomName && (
+              <InfoTile icon={DoorOpen} label="Space" value={detail.roomName} />
+            )}
 
             <InfoTile icon={CheckCircle} label="Booking Status">
               <View className="flex-row">
@@ -415,25 +513,52 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
                   value={`${detail.guestOfHonorAge} years old`}
                 />
               )}
+              {!!detail.guestOfHonorGender && (
+                <InfoTile
+                  icon={User}
+                  label="Gender"
+                  value={capitalize(detail.guestOfHonorGender)}
+                />
+              )}
             </Section>
           )}
 
-          {/* Add-ons */}
-          {detail.addOns.length > 0 && (
-            <Section title="Add-ons">
-              {detail.addOns.map((a) => (
-                <View
-                  key={a.id}
-                  className="flex-row items-center justify-between py-1.5"
-                >
-                  <Text className="text-sm text-gray-900 dark:text-white flex-1 mr-2">
-                    {a.name}
+          {/* Additional Services — attractions and add-ons, each priced the way
+              the web ViewBooking prices them (unit × qty, with the line total on
+              the right) rather than showing a bare quantity. */}
+          {(detail.attractions.length > 0 || detail.addOns.length > 0) && (
+            <Section title="Additional Services">
+              {detail.attractions.length > 0 && (
+                <View className="py-1.5">
+                  <Text className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
+                    Attractions ({detail.attractions.length})
                   </Text>
-                  <Text className="text-sm text-gray-500 dark:text-gray-400">
-                    Qty: {a.quantity}
-                  </Text>
+                  {detail.attractions.map((a, i) => (
+                    <LineItem
+                      key={`attraction-${a.id}-${i}`}
+                      name={a.name}
+                      quantity={a.quantity}
+                      unitPrice={a.priceAtBooking}
+                    />
+                  ))}
                 </View>
-              ))}
+              )}
+              {detail.addOns.length > 0 && (
+                <View className="py-1.5">
+                  <Text className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
+                    Add-Ons ({detail.addOns.length})
+                  </Text>
+                  {detail.addOns.map((a, i) => (
+                    <LineItem
+                      key={`addon-${a.id}-${i}`}
+                      name={a.name}
+                      quantity={a.quantity}
+                      unitPrice={a.unitPrice}
+                      forced={a.isForceAddOn}
+                    />
+                  ))}
+                </View>
+              )}
             </Section>
           )}
 
@@ -463,6 +588,35 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
                 {formatMoney(remaining)}
               </Text>
             </InfoTile>
+            {detail.discountAmount > 0 && (
+              <InfoTile
+                icon={DollarSign}
+                label="Discount"
+                value={formatMoney(detail.discountAmount)}
+              />
+            )}
+            {!!detail.promo && (
+              <InfoTile icon={Tag} label="Promo Code">
+                <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {detail.promo.code}
+                </Text>
+                {detail.promo.discountPercentage != null && (
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {detail.promo.discountPercentage}% off
+                  </Text>
+                )}
+              </InfoTile>
+            )}
+            {!!detail.giftCard && (
+              <InfoTile icon={CreditCard} label="Gift Card">
+                <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {detail.giftCard.code}
+                </Text>
+                <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Balance: {formatMoney(detail.giftCard.balance)}
+                </Text>
+              </InfoTile>
+            )}
             {!!detail.paymentMethod && (
               <InfoTile icon={CreditCard} label="Payment Method">
                 <Text className="text-sm font-semibold text-gray-900 dark:text-white">
@@ -473,6 +627,16 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
                     {detail.cardLabel}
                   </Text>
                 )}
+              </InfoTile>
+            )}
+            {!!card && (
+              <InfoTile icon={CreditCard} label="Card Used">
+                <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {card.label}
+                </Text>
+                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  Ask the guest to confirm the last four digits.
+                </Text>
               </InfoTile>
             )}
             <InfoTile icon={Wallet} label="Payment Status">
@@ -502,7 +666,113 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
                 ))}
               </View>
             )}
+
+            {detail.appliedDiscounts.length > 0 && (
+              <View className="border-t border-gray-200 dark:border-neutral-700 mt-1 pt-2 pb-1">
+                <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                  Applied Discounts
+                </Text>
+                {detail.appliedDiscounts.map((d, i) => (
+                  <View
+                    key={`${d.name}-${i}`}
+                    className="flex-row items-center justify-between py-0.5"
+                  >
+                    <Text className="text-xs text-gray-500 dark:text-gray-400 flex-1 mr-2">
+                      {d.name}
+                      {!!d.type && ` (${d.type})`}
+                    </Text>
+                    <Text className="text-xs font-medium text-green-600">
+                      -{formatMoney(d.amount)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </Section>
+
+          {/* Payment History — every recorded payment, as the web lists them. */}
+          {detail.payments.length > 0 && (
+            <Section title="Payment History">
+              {detail.payments.map((p, i) => (
+                <View
+                  key={p.id ?? `payment-${i}`}
+                  className="flex-row items-start justify-between py-2"
+                >
+                  <View className="flex-1 mr-2">
+                    <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {formatMoney(p.amount)}
+                    </Text>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {p.method
+                        ? capitalize(p.method.replace(/_/g, " "))
+                        : "N/A"}
+                      {" • "}
+                      {p.createdAt ? formatCreated(p.createdAt) : "—"}
+                    </Text>
+                    {!!formatCardLabel(p.cardType, p.cardLastFour) && (
+                      <View className="flex-row items-center gap-1 mt-0.5">
+                        <CreditCard size={11} color="#9ca3af" />
+                        <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+                          {formatCardLabel(p.cardType, p.cardLastFour)}
+                        </Text>
+                      </View>
+                    )}
+                    {!!p.notes && (
+                      <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                        {p.notes}
+                      </Text>
+                    )}
+                  </View>
+                  <Badge
+                    text={p.status ? capitalize(p.status) : "Unknown"}
+                    className={
+                      PAYMENT_ROW_BADGE[p.status ?? ""] ?? NEUTRAL_BADGE
+                    }
+                  />
+                </View>
+              ))}
+            </Section>
+          )}
+
+          {/* Extra confirmations — the custom checkbox answers, ticked or not,
+              exactly as the web's CustomFieldAnswers block shows them. */}
+          {detail.customFieldResponses.length > 0 && (
+            <Section title="Extra confirmations">
+              {detail.customFieldResponses.map((r) => (
+                <View key={r.id} className="flex-row items-start gap-2 py-1.5">
+                  {r.value ? (
+                    <Check size={15} color="#16a34a" />
+                  ) : (
+                    <X size={15} color="#9ca3af" />
+                  )}
+                  <Text
+                    className={`flex-1 text-sm ${
+                      r.value
+                        ? "text-gray-800 dark:text-gray-100"
+                        : "text-gray-500 dark:text-gray-400"
+                    }`}
+                  >
+                    {r.label}
+                  </Text>
+                </View>
+              ))}
+            </Section>
+          )}
+
+          {/* Special Requests — a separate column from customer notes, and the
+              web shows it as its own block above them. */}
+          {!!detail.specialRequests && (
+            <Section title="Special Requests">
+              <View className="flex-row items-start gap-3 py-2">
+                <View className="w-9 h-9 rounded-xl items-center justify-center bg-[#0644C7]/10">
+                  <StickyNote size={16} color="#0644C7" />
+                </View>
+                <Text className="flex-1 text-sm text-gray-900 dark:text-white">
+                  {detail.specialRequests}
+                </Text>
+              </View>
+            </Section>
+          )}
 
           {/* Customer Notes */}
           <Section title="Customer Notes">

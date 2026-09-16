@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages } from "../lib/fetchAllPages";
 import { roleLabel, type StaffRole } from "./usersService";
 
 /*
@@ -244,14 +245,13 @@ export async function fetchAllActivityLogs(
   perPage = 100,
   maxPages = 50,
 ): Promise<ActivityLogEntry[]> {
-  const first = await fetchActivityLogs(token, filters, 1, perPage, signal);
-  const logs = [...first.logs];
-  const pages = Math.min(first.lastPage, maxPages);
-  for (let page = 2; page <= pages; page += 1) {
-    const next = await fetchActivityLogs(token, filters, page, perPage, signal);
-    logs.push(...next.logs);
-  }
-  return logs;
+  return fetchAllPages<ActivityLogEntry>(
+    async (page) => {
+      const res = await fetchActivityLogs(token, filters, page, perPage, signal);
+      return { items: res.logs, lastPage: res.lastPage };
+    },
+    { maxPages },
+  );
 }
 
 /** Total entry count matching a filter (via a cheap `per_page=1` request). */

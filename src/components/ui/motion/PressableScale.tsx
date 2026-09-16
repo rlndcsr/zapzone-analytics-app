@@ -11,7 +11,6 @@ import { useReducedMotion } from "react-native-reanimated";
 import {
   PRESS_DIM_CLASS,
   PRESS_SCALE_CLASS,
-  PRESS_TRANSITION,
   type PressScale,
 } from "../../navigation/navMotion";
 
@@ -29,8 +28,8 @@ export const PressableScale = forwardRef<View, PressableScaleProps>(
   ) {
     const reduceMotion = useReducedMotion();
 
+    // No `transition` class — see PRESS_SCALE_CLASS for why that matters.
     const motion = [
-      PRESS_TRANSITION,
       reduceMotion ? "" : PRESS_SCALE_CLASS[pressScale],
       dim ? PRESS_DIM_CLASS : "",
     ]

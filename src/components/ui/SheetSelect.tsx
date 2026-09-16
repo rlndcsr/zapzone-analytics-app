@@ -25,6 +25,7 @@ export function SheetSelect({
   value,
   options,
   onSelect,
+  disabled = false,
 }: {
   icon?: ComponentProps<typeof Feather>["name"];
   title: string;
@@ -32,6 +33,9 @@ export function SheetSelect({
   value: string | number | null;
   options: SheetSelectOption[];
   onSelect: (value: string | number) => void;
+  /** Greys the trigger and swallows the press — for a field that has nothing
+   *  to offer yet (options still loading, or a prerequisite unchosen). */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value) ?? null;
@@ -40,12 +44,21 @@ export function SheetSelect({
     <>
       <PressableScale
         pressScale="flat"
-        onPress={() => setOpen(true)}
-        className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+        onPress={() => !disabled && setOpen(true)}
+        accessibilityState={{ disabled }}
+        className={`flex-row items-center gap-2 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 ${
+          disabled
+            ? "bg-gray-100 dark:bg-neutral-800 opacity-60"
+            : "bg-white dark:bg-neutral-900"
+        }`}
       >
         {icon ? <Feather name={icon} size={16} color={PRIMARY} /> : null}
         <Text
-          className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
+          className={`text-xs font-medium flex-1 ${
+            selected
+              ? "text-gray-700 dark:text-gray-200"
+              : "text-gray-400 dark:text-gray-500"
+          }`}
           numberOfLines={1}
         >
           {selected ? selected.label : placeholder}
