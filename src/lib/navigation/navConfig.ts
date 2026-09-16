@@ -8,7 +8,7 @@ export type TabKey =
   | "activity"
   | "navigation"
   | "calendar"
-  | "profile";
+  | "accounts";
 
 /** The shared/default tab set (Company Admin and any unlisted role). */
 const BASE_TABS: TabKey[] = [
@@ -16,7 +16,7 @@ const BASE_TABS: TabKey[] = [
   "location",
   "navigation",
   "calendar",
-  "profile",
+  "accounts",
 ];
 
 /** Location Manager swaps the Locations tab for the operational Activity tab. */
@@ -25,7 +25,7 @@ const MANAGER_TABS: TabKey[] = [
   "activity",
   "navigation",
   "calendar",
-  "profile",
+  "accounts",
 ];
 
 /** Role → ordered tab set. Unlisted roles fall back to {@link DEFAULT_TABS}. */
@@ -49,7 +49,7 @@ const ALL_TAB_KEYS: TabKey[] = [
   "activity",
   "navigation",
   "calendar",
-  "profile",
+  "accounts",
 ];
 
 /**
@@ -62,7 +62,8 @@ const ALL_TAB_KEYS: TabKey[] = [
  * leave a floating banner sitting on top of it.
  */
 export function isTabRoute(pathname: string): boolean {
-  // Exact match only: `/profile` is the tab, `/profile/edit-profile` is a
-  // pushed stack screen with no tab bar under it.
+  // Exact match only: `/calendar` is the tab, `/bookings/calendar` is a
+  // pushed stack screen with no tab bar under it. `/profile` is pushed too —
+  // it left the tab bar when Accounts took its slot.
   return ALL_TAB_KEYS.some((key) => pathname === `/${key}`);
 }

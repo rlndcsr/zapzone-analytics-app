@@ -68,7 +68,11 @@ import {
   SHEET_SCALE_FROM,
   SHEET_TRANSLATE_Y,
 } from "./fabMenuMotion";
-import { getNavMenuItems, type NavMenuItem } from "./navMenuItems";
+import {
+  getNavMenuItems,
+  PROFILE_SUPPORT_ITEMS,
+  type NavMenuItem,
+} from "./navMenuItems";
 import { QUICK_ACTION_ITEMS, type QuickActionItem } from "./quickActionItems";
 
 const FAB_COLOR = "#0644C7";
@@ -631,6 +635,22 @@ export function MorphingFabMenu({
     )),
   );
 
+  // The stagger runs on past the nav grid, so this card deals in last.
+  const profileGrid = gridWrapper(
+    PROFILE_SUPPORT_ITEMS.map((item, i) => (
+      <MenuCell
+        key={item.key}
+        label={item.label}
+        icon={
+          <Feather name={item.icon} size={CHIP_ICON_SIZE} color={FAB_COLOR} />
+        }
+        index={visibleQuickActions.length + items.length + i}
+        onPress={() => handleSelect(item)}
+        itemsProgress={itemsProgress}
+      />
+    )),
+  );
+
   let petalIndex = 0;
 
   return (
@@ -700,6 +720,14 @@ export function MorphingFabMenu({
               itemsProgress={itemsProgress}
             >
               {navGrid}
+            </SectionCard>
+
+            <SectionCard
+              title="Profile & Support"
+              index={2}
+              itemsProgress={itemsProgress}
+            >
+              {profileGrid}
             </SectionCard>
           </ScrollView>
         </View>

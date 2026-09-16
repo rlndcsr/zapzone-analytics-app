@@ -133,3 +133,36 @@ export function getNavMenuItems(
   items.splice(items.length - 1, 0, management);
   return items;
 }
+
+/**
+ * The menu's "Profile & Support" section: the account-level destinations that
+ * sit outside the module list above. Accounts is the tab, so it navigates;
+ * everything else here is pushed over whatever screen opened the menu.
+ */
+export const PROFILE_SUPPORT_ITEMS: NavMenuItem[] = [
+  {
+    key: "profile",
+    label: "Profile",
+    icon: "user",
+    route: "/profile",
+  },
+  {
+    key: "accounts",
+    label: "Accounts",
+    icon: "users",
+    route: "/accounts",
+    mode: "navigate",
+  },
+  {
+    key: "settings",
+    label: "Settings",
+    icon: "settings",
+    route: "/settings/settings",
+  },
+  {
+    key: "notifications",
+    label: "Notifications",
+    icon: "bell",
+    route: "/notification/notification",
+  },
+];

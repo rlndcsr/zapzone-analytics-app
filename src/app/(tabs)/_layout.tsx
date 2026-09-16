@@ -302,11 +302,11 @@ const TabLayout = () => {
           }}
         />
         <Tabs.Screen
-          name="profile"
+          name="accounts"
           options={{
-            title: "Profile",
+            title: "Accounts",
             tabBarIcon: ({ focused }) => (
-              <TabIcon name="person" focused={focused} />
+              <TabIcon name="people" focused={focused} />
             ),
           }}
         />

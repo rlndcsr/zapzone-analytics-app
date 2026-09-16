@@ -723,7 +723,11 @@ const Home = () => {
         </Svg>
       )}
 
-      <DashboardHeader unreadCount={unreadNotificationsCount} transparent />
+      <DashboardHeader
+        unreadCount={unreadNotificationsCount}
+        transparent
+        variant="brand"
+      />
 
       <ScrollView
         className="flex-1"

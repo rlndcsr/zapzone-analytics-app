@@ -185,7 +185,7 @@ export default function HomeScreen() {
         >
           {entry.addAccount ? (
             // Same header shape as every other pushed screen (edit-profile,
-            // saved-accounts): circular back button, then the title. Adding an
+            // settings): circular back button, then the title. Adding an
             // account is a place in the hierarchy, not a modal interruption.
             <>
               <View className="flex-row items-center gap-3">
