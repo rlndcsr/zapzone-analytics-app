@@ -29,11 +29,10 @@ describe("snapToInterval", () => {
 
 describe("minuteAtOffset", () => {
   it("adds the pixel offset scaled by px-per-minute to the band's own origin", () => {
-    assert.equal(minuteAtOffset(600, 60, 2), 630); // 60px at 2px/min = 30 min past 10:00
+    assert.equal(minuteAtOffset(600, 60, 2), 630);
   });
 
   it("never crosses the whole-timeline anchor bug — origin is the band's top, not 0", () => {
-    // A click 10px into a band opening at 6pm must land near 6pm, not near midnight.
     const result = minuteAtOffset(18 * 60, 10, 2);
     assert.ok(Math.abs(result - 18 * 60) < 10);
   });
@@ -68,15 +67,13 @@ describe("nextFreeMinute", () => {
 
   it("walks past back-to-back bookings instead of stopping at the first", () => {
     const busy: TimeRange[] = [
-      { startMinutes: 360, endMinutes: 420 }, // 6:00-7:00
-      { startMinutes: 420, endMinutes: 480 }, // 7:00-8:00
+      { startMinutes: 360, endMinutes: 420 },
+      { startMinutes: 420, endMinutes: 480 },
     ];
-    // A click landing inside the first booking must resolve past BOTH, at 8:00.
     assert.equal(nextFreeMinute(0, 1440, busy, 380), 480);
   });
 
   it("uses a booking's real end minute even past the visible grid, never snapping backward", () => {
-    // Booking runs to 23:30, well past a grid that only draws to 22:00.
     const busy: TimeRange[] = [{ startMinutes: 1300, endMinutes: 1410 }];
     assert.equal(nextFreeMinute(0, 1440, busy, 1305), 1410);
   });

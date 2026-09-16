@@ -110,6 +110,7 @@ import {
   type DiscountCodeResult,
 } from "../../services/discountCodesService";
 import { readBookingPrefill } from "../../lib/bookings/bookingPrefill";
+import { isBlankOrValidEmail, isWalkInCustomerValid } from "../../lib/bookings/walkInCustomer";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -1271,11 +1272,13 @@ const CreateBookingScreen = () => {
       case 3:
         return true;
       case 4:
-        return customerName.trim().length > 0;
+        // Name and phone are required; email is optional for a walk-in but
+        // must be a real address when one is given (web parity).
+        return isWalkInCustomerValid({ name: customerName, phone: customerPhone, email: customerEmail });
       default:
         return true;
     }
-  }, [step, pkg, scheduledDate, slot, slots.length, participants, customerName]);
+  }, [step, pkg, scheduledDate, slot, slots.length, participants, customerName, customerPhone, customerEmail]);
 
   // A card booking can't be confirmed until the card details are complete and
   // the location actually has a merchant account (web parity).
@@ -1302,8 +1305,18 @@ const CreateBookingScreen = () => {
   const handleSubmit = async () => {
     if (submitLockRef.current) return;
     if (!pkg) return;
-    if (!customerName.trim() || !scheduledDate || !slot || effectiveLocationId == null) {
+    if (
+      !customerName.trim() ||
+      !customerPhone.trim() ||
+      !scheduledDate ||
+      !slot ||
+      effectiveLocationId == null
+    ) {
       Alert.alert("Incomplete booking", "Please complete every step before submitting.");
+      return;
+    }
+    if (!isBlankOrValidEmail(customerEmail)) {
+      Alert.alert("Invalid email", "Enter a valid email address, or leave it blank.");
       return;
     }
     if (paymentMethod !== "paylater" && paymentType === "custom" && !(Number(customAmount) > 0)) {
@@ -2096,12 +2109,17 @@ const CreateBookingScreen = () => {
             <>
               <Section icon="user" title="Contact Details">
                 <InputField
-                  label="Email Address *"
+                  label="Email Address (optional)"
                   value={customerEmail}
                   onChangeText={setCustomerEmail}
                   placeholder="john.doe@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  error={
+                    customerEmail.trim() && !isBlankOrValidEmail(customerEmail)
+                      ? "Enter a valid email address, or leave it blank."
+                      : undefined
+                  }
                 />
                 <EmailSuggestions
                   value={customerEmail}
@@ -2109,7 +2127,9 @@ const CreateBookingScreen = () => {
                   suppressed={showCustomerList}
                 />
                 <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  We&apos;ll auto-fill info if this customer exists
+                  {customerEmail.trim()
+                    ? "We'll auto-fill info if this customer exists"
+                    : "Leave blank for a walk-in — no confirmation email will be sent"}
                 </Text>
                 {showCustomerList && (
                   <View className="mt-2 rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
