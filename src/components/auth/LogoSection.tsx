@@ -1,15 +1,18 @@
 import { Image } from "expo-image";
 import { Text, View } from "react-native";
 
-const logo = require("../../../assets/zapzone-assests/zapzone.png");
+import { BRAND_MARK, BRAND_MARK_RATIO } from "../ui/brandMark";
+
+const LOGO_WIDTH = 168;
+const LOGO_HEIGHT = Math.round(LOGO_WIDTH / BRAND_MARK_RATIO);
 
 /** Brand logo with the screen title and supporting subtitle. */
 export function LogoSection() {
   return (
     <View className="items-center">
       <Image
-        source={logo}
-        style={{ width: 76, height: 60 }}
+        source={BRAND_MARK}
+        style={{ width: LOGO_WIDTH, height: LOGO_HEIGHT }}
         contentFit="contain"
       />
 

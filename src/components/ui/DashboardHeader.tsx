@@ -104,16 +104,18 @@ export function DashboardHeader({
           style={{ height: PROFILE_BUTTON_SIZE }}
         >
           {/* Left: profile — pushed over the tabs, since Accounts holds the
-              tab slot the Profile screen used to. */}
+              tab slot the Profile screen used to. A bare glyph, sized to sit
+              level with the bell opposite it; the button keeps its full tap
+              target without drawing a chip. */}
           <Pressable
             onPress={() => router.push("/profile")}
             hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel="Profile"
-            className="items-center justify-center rounded-full bg-blue-100 active:opacity-70 dark:bg-blue-900/40"
+            className="-ml-1 items-center justify-center active:opacity-50"
             style={{ width: PROFILE_BUTTON_SIZE, height: PROFILE_BUTTON_SIZE }}
           >
-            <Ionicons name="person" size={20} color="#2563EB" />
+            <Ionicons name="person" size={24} color={headerIcon} />
           </Pressable>
 
           {/* Centre: the brand logo, centred on the row itself so an unread

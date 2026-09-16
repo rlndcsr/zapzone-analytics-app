@@ -17,7 +17,10 @@ import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { StatusModal } from "../../components/ui/StatusModal";
-import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton";
+import {
+  CONTROL_RADIUS,
+  PrimaryButton,
+} from "../../components/ui/PrimaryButton";
 import { mediaUrl } from "../../lib/api";
 import { setCachedCompanyLogo } from "../../lib/hooks/useBrandLogo";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
@@ -206,17 +209,28 @@ const EditProfile = () => {
   const displayName =
     `${firstName} ${lastName}`.trim() || user?.name || "Your profile";
 
+  // Set on the Profile screen; shown here so both screens agree on the face.
+  const avatarUri = mediaUrl(user?.profile_path);
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Cream hero — centered title, then centered avatar / name */}
       <ScreenHeader title="Edit Profile" className="pb-8">
         <View className="items-center mt-5">
-          <View className="h-24 w-24 rounded-full bg-white dark:bg-neutral-800 items-center justify-center overflow-hidden border border-black/5 dark:border-white/10">
-            <Image
-              source={require("../../../assets/zapzone-assests/zapzone.png")}
-              style={{ width: 58, height: 58 }}
-              contentFit="contain"
-            />
+          {/* The picture set on the Profile screen, fitted rather than cropped;
+              a plain glyph until there is one. */}
+          <View className="h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-black/5 bg-white dark:border-white/10 dark:bg-neutral-800">
+            {avatarUri ? (
+              <Image
+                source={{ uri: avatarUri }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="contain"
+                accessibilityRole="image"
+                accessibilityLabel="Profile picture"
+              />
+            ) : (
+              <Feather name="user" size={38} color="#9CA3AF" />
+            )}
           </View>
           <Text className="mt-3 text-lg font-semibold text-gray-900 dark:text-white">
             {displayName}
@@ -501,7 +515,6 @@ const EditProfile = () => {
                   />
                 </View>
               )}
-
 
               {/* Softer corners than the pill default — className cannot win
                   against `rounded-full` (NativeWind resolves by CSS order), so

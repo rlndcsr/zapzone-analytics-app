@@ -20,6 +20,17 @@ describe("resolving a single image reference", () => {
     );
   });
 
+  it("resolves a profile picture the way the web admin does", () => {
+    // Both clients read the same `users.profile_path` and both write it through
+    // PATCH /api/users/{id}/update-profile-path, so a picture set on either one
+    // has to resolve to the same URL here as `getImageUrl` builds there —
+    // ASSET_URL is the API origin with `/storage/` appended, same as this.
+    assert.equal(
+      one("images/profiles/abc123.jpg"),
+      `${BASE}/storage/images/profiles/abc123.jpg`,
+    );
+  });
+
   it("does not double the storage prefix", () => {
     assert.equal(
       one("storage/images/packages/abc.jpg"),
@@ -28,8 +39,14 @@ describe("resolving a single image reference", () => {
   });
 
   it("passes an absolute URL through untouched", () => {
-    assert.equal(one("https://cdn.example.com/a.png"), "https://cdn.example.com/a.png");
-    assert.equal(one("http://cdn.example.com/a.png"), "http://cdn.example.com/a.png");
+    assert.equal(
+      one("https://cdn.example.com/a.png"),
+      "https://cdn.example.com/a.png",
+    );
+    assert.equal(
+      one("http://cdn.example.com/a.png"),
+      "http://cdn.example.com/a.png",
+    );
   });
 
   it("passes a data URI through untouched", () => {

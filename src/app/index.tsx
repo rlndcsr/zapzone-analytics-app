@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoginForm } from "../components/auth/LoginForm";
 import { SavedAccountsStrip } from "../components/auth/SavedAccountsStrip";
+import { BRAND_MARK, BRAND_MARK_RATIO } from "../components/ui/brandMark";
 import { useSavedAccounts } from "../lib/accounts/savedAccountsStore";
 // TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
 import { authDebug } from "../lib/debug/authDebug";
@@ -27,7 +28,8 @@ import { consumeSessionExpiredNotice, isAuthenticated } from "../lib/session";
 import { hasPlayedSplash } from "../lib/splashState";
 import type { AuthUser } from "../services/auth";
 
-const logo = require("../../assets/zapzone-assests/zapzone.png");
+const LOGO_WIDTH = 208;
+const LOGO_HEIGHT = Math.round(LOGO_WIDTH / BRAND_MARK_RATIO);
 const LOGIN_BLUE = "#2563EB";
 
 export default function HomeScreen() {
@@ -167,8 +169,8 @@ export default function HomeScreen() {
           ]}
         >
           <Image
-            source={logo}
-            style={{ width: 104, height: 80 }}
+            source={BRAND_MARK}
+            style={{ width: LOGO_WIDTH, height: LOGO_HEIGHT }}
             contentFit="contain"
           />
         </Animated.View>

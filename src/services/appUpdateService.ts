@@ -35,8 +35,7 @@ export type AppUpdateStatus = {
 };
 
 /** Shown when the backend sends no message of its own. */
-const DEFAULT_UPDATE_MESSAGE =
-  "A new version of ZapZone Admin is available.";
+const DEFAULT_UPDATE_MESSAGE = "A new version of ZapZone Admin is available.";
 
 /**
  * Startup must never stall on this call, so it fails faster than the app-wide
@@ -81,6 +80,17 @@ export function getInstalledAppVersion(): string | null {
     Constants.expoConfig?.version ??
     null
   );
+}
+
+/**
+ * The build line screens print at the foot of a menu, e.g. "Version 1.1.5 (11)".
+ * `null` when the platform can't tell us what is installed.
+ */
+export function getAppVersionLabel(): string | null {
+  const version = getInstalledAppVersion();
+  if (!version) return null;
+  const build = Application.nativeBuildVersion;
+  return build ? `Version ${version} (${build})` : `Version ${version}`;
 }
 
 function trimmedOrNull(value: string | null | undefined): string | null {

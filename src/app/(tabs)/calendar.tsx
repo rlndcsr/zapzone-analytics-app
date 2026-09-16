@@ -181,21 +181,31 @@ const statusStyle = (status: string) =>
 // Soft border + background tint for a booking card, keyed by status (mirrors the
 // colored day-detail cards on the web calendar).
 const BOOKING_TONE: Record<string, string> = {
-  confirmed: "bg-green-50/70 dark:bg-green-900/10 border-green-200 dark:border-green-900/40",
-  pending: "bg-amber-50/70 dark:bg-amber-900/10 border-amber-300 dark:border-amber-900/40",
-  "checked-in": "bg-indigo-50/70 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-900/40",
-  completed: "bg-blue-50/70 dark:bg-blue-900/10 border-blue-200 dark:border-blue-900/40",
-  cancelled: "bg-red-50/70 dark:bg-red-900/10 border-red-200 dark:border-red-900/40",
+  confirmed:
+    "bg-green-50/70 dark:bg-green-900/10 border-green-200 dark:border-green-900/40",
+  pending:
+    "bg-amber-50/70 dark:bg-amber-900/10 border-amber-300 dark:border-amber-900/40",
+  "checked-in":
+    "bg-indigo-50/70 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-900/40",
+  completed:
+    "bg-blue-50/70 dark:bg-blue-900/10 border-blue-200 dark:border-blue-900/40",
+  cancelled:
+    "bg-red-50/70 dark:bg-red-900/10 border-red-200 dark:border-red-900/40",
 };
-const bookingTone = (status: string) => BOOKING_TONE[status] ?? BOOKING_TONE.pending;
+const bookingTone = (status: string) =>
+  BOOKING_TONE[status] ?? BOOKING_TONE.pending;
 
 const STATUS_BADGE: Record<string, string> = {
-  confirmed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  "checked-in": "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
+  confirmed:
+    "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  pending:
+    "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  "checked-in":
+    "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
   completed: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   cancelled: "bg-gray-100 text-gray-600 dark:bg-neutral-800 dark:text-gray-400",
-  refunded: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  refunded:
+    "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
   voided: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 };
 
@@ -279,9 +289,15 @@ const CountPill = ({
   tint: string;
   bg: string;
 }) => (
-  <View className={`flex-row items-center gap-1 rounded-md px-1 py-0.5 mb-0.5 ${bg}`}>
+  <View
+    className={`flex-row items-center gap-1 rounded-md px-1 py-0.5 mb-0.5 ${bg}`}
+  >
     <Icon size={9} color={tint} />
-    <Text className="text-[10px] font-bold" style={{ color: tint }} numberOfLines={1}>
+    <Text
+      className="text-[10px] font-bold"
+      style={{ color: tint }}
+      numberOfLines={1}
+    >
       {count}
     </Text>
   </View>
@@ -313,7 +329,10 @@ const DayBookingCard = ({
         </View>
         <View className="flex-row items-center gap-1.5">
           <StatusIcon size={13} color={style.color} />
-          <Text className="text-xs font-semibold" style={{ color: style.color }}>
+          <Text
+            className="text-xs font-semibold"
+            style={{ color: style.color }}
+          >
             {style.label}
           </Text>
         </View>
@@ -331,7 +350,10 @@ const DayBookingCard = ({
         </Text>
       </View>
 
-      <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5" numberOfLines={1}>
+      <Text
+        className="text-sm text-gray-500 dark:text-gray-400 mt-0.5"
+        numberOfLines={1}
+      >
         {booking.customerName}
       </Text>
 
@@ -383,7 +405,10 @@ const AttractionCard = ({
             >
               {purchase.attractionName}
             </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400" numberOfLines={1}>
+            <Text
+              className="text-sm text-gray-500 dark:text-gray-400"
+              numberOfLines={1}
+            >
               {purchase.customerName}
             </Text>
           </View>
@@ -611,7 +636,11 @@ const DaySections = ({
             </Text>
           </View>
           {bookings.map((b) => (
-            <DayBookingCard key={b.id} booking={b} onPress={() => onBooking(b.id)} />
+            <DayBookingCard
+              key={b.id}
+              booking={b}
+              onPress={() => onBooking(b.id)}
+            />
           ))}
         </View>
       )}
@@ -625,7 +654,11 @@ const DaySections = ({
             </Text>
           </View>
           {attractions.map((p) => (
-            <AttractionCard key={p.id} purchase={p} onPress={() => onAttraction(p.id)} />
+            <AttractionCard
+              key={p.id}
+              purchase={p}
+              onPress={() => onAttraction(p.id)}
+            />
           ))}
         </View>
       )}
@@ -865,7 +898,10 @@ const Calendar = () => {
       }),
     [spaces, dayBookings, hideEmptySpaces, knownRoomIds],
   );
-  const dayWindow = useMemo(() => computeSlotWindow(dayBookings), [dayBookings]);
+  const dayWindow = useMemo(
+    () => computeSlotWindow(dayBookings),
+    [dayBookings],
+  );
   const daySlots = useMemo(
     () =>
       Array.from(
@@ -969,7 +1005,9 @@ const Calendar = () => {
   const isAnchoredOnToday = useMemo(() => {
     if (viewMode === "day") return dateKey(anchor) === todayKey;
     if (viewMode === "week") {
-      return todayKey >= dateKey(weekDays[0]) && todayKey <= dateKey(weekDays[6]);
+      return (
+        todayKey >= dateKey(weekDays[0]) && todayKey <= dateKey(weekDays[6])
+      );
     }
     return (
       anchor.getFullYear() === today.getFullYear() &&
@@ -1039,7 +1077,7 @@ const Calendar = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      <DashboardHeader unreadCount={unreadNotificationsCount} />
+      <DashboardHeader unreadCount={unreadNotificationsCount} variant="brand" />
 
       <ScrollView
         className="flex-1"
@@ -1522,7 +1560,10 @@ const Calendar = () => {
                       ))}
                     </View>
 
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                    >
                       <View className="flex-row">
                         {dayColumns.map((column) => (
                           <View

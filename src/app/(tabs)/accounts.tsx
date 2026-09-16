@@ -2,9 +2,20 @@ import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { setStatusBarStyle } from "expo-status-bar";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import {
+  TAB_BAR_HEIGHT,
+  tabBarBottomPadding,
+} from "../../components/navigation/fabLayout";
 import { ConfirmationModal } from "../../components/ui/ConfirmationModal";
 import { SavedAccountRow } from "../../components/ui/SavedAccountRow";
 import {
@@ -16,23 +27,37 @@ import {
   type SavedAccount,
 } from "../../lib/accounts/savedAccountsStore";
 import { prepareAccountSwitch } from "../../lib/accounts/switchAccount";
+import { useLogout } from "../../lib/hooks/useLogout";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { unregisterCurrentPushDevice } from "../../lib/notifications/pushDevice";
 import { clearSession, getToken, useCurrentUserId } from "../../lib/session";
+import { getAppVersionLabel } from "../../services/appUpdateService";
 import { revokeToken } from "../../services/auth";
 
 const BRAND = "#0644C7";
-const HERO_RADIUS = 36;
-const HERO_PADDING_X = 24;
-/** The list is pulled up into this, exactly as on the Profile screen. */
-const HERO_PADDING_BOTTOM = 44;
-const CARD_OVERLAP = 20;
-const CONTENT_PADDING_X = 20;
+const DANGER = "#E11D48";
+/** Matches the Profile screen's panels, so the two read as one surface. */
+const PANEL_RADIUS = 20;
+
+/** The screen gutter, matching the Profile screen's. */
+const SCREEN_PADDING_X = 20;
+const HERO_RADIUS = 32;
+/** Breathing room above the title, measured from the status bar. */
+const HERO_TOP_GAP = 14;
+/** Air under the subtitle, before the hero's rounded bottom edge. */
+const HERO_BOTTOM_GAP = 28;
+/**
+ * Gap between the hero and the first row. The list sits below the hero rather
+ * than overlapping it: a negative margin here puts the first card's corners
+ * inside the hero's rounded ones, which is what made the two collide.
+ */
+const CONTENT_TOP_GAP = 20;
+/** Clear air under the last row, below the floating tab bar. */
+const LIST_BOTTOM_GAP = 24;
 
 /**
  * The Accounts tab: every account saved on this device, which one is live, and
- * the way into another one. The hero matches the Profile screen's, so the two
- * halves of "your account" read as one surface.
+ * the way into another one.
  */
 const Accounts = () => {
   const router = useRouter();
@@ -40,13 +65,7 @@ const Accounts = () => {
 
   const accounts = useSavedAccounts();
   const activeId = useCurrentUserId();
-  const [busyId, setBusyId] = useState<number | null>(null);
-  const [error, setError] = useTransientAlert<string>();
-  const [pendingRemoval, setPendingRemoval] = useState<SavedAccount | null>(
-    null,
-  );
-  const removingActive = pendingRemoval?.userId === activeId;
-  const removing = pendingRemoval != null && busyId === pendingRemoval.userId;
+  const { loggingOut, logout } = useLogout();
 
   // Light status bar for the blue hero, back to `auto` on the way out — the
   // other tabs stay mounted behind this one on a light background.
@@ -56,6 +75,14 @@ const Accounts = () => {
       return () => setStatusBarStyle("auto", true);
     }, []),
   );
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [error, setError] = useTransientAlert<string>();
+  const [pendingRemoval, setPendingRemoval] = useState<SavedAccount | null>(
+    null,
+  );
+  const version = getAppVersionLabel();
+  const removingActive = pendingRemoval?.userId === activeId;
+  const removing = pendingRemoval != null && busyId === pendingRemoval.userId;
 
   const ordered = [...accounts].sort((a, b) => {
     if (a.userId === activeId) return -1;
@@ -139,11 +166,18 @@ const Accounts = () => {
   };
 
   return (
-    <View className="flex-1 bg-gray-50 dark:bg-black">
+    <View className="flex-1 mb-10 bg-gray-50 dark:bg-black">
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        contentContainerStyle={{
+          // The tab bar floats over the page, so the list has to clear its full
+          // height rather than just the safe-area inset.
+          paddingBottom:
+            TAB_BAR_HEIGHT +
+            tabBarBottomPadding(insets.bottom) +
+            LIST_BOTTOM_GAP,
+        }}
       >
         <View
           className="overflow-hidden"
@@ -151,21 +185,21 @@ const Accounts = () => {
             backgroundColor: BRAND,
             borderBottomLeftRadius: HERO_RADIUS,
             borderBottomRightRadius: HERO_RADIUS,
-            paddingHorizontal: HERO_PADDING_X,
-            paddingTop: insets.top + 10,
-            paddingBottom: HERO_PADDING_BOTTOM,
+            paddingHorizontal: SCREEN_PADDING_X,
+            paddingTop: insets.top + HERO_TOP_GAP,
+            paddingBottom: HERO_BOTTOM_GAP,
           }}
         >
-          <Text className="text-[22px] font-bold text-white">Accounts</Text>
-          <Text className="mt-2 text-[13px] text-white/80">
+          <Text className="text-[24px] font-bold text-white">Accounts</Text>
+          <Text className="mt-1.5 text-[13px] leading-5 text-white/80">
             Switch between your accounts without signing in again.
           </Text>
         </View>
 
         <View
           style={{
-            paddingHorizontal: CONTENT_PADDING_X,
-            marginTop: -CARD_OVERLAP,
+            paddingHorizontal: SCREEN_PADDING_X,
+            paddingTop: CONTENT_TOP_GAP,
           }}
         >
           {error ? (
@@ -195,9 +229,9 @@ const Accounts = () => {
             disabled={busyId !== null}
             accessibilityRole="button"
             accessibilityLabel="Add another account"
-            className="mt-3 flex-row items-center rounded-2xl border border-dashed border-gray-300 px-4 py-4 active:opacity-70 dark:border-neutral-700"
+            className="mt-3 flex-row items-center rounded-2xl bg-[#EDF2F5] px-4 py-4 active:opacity-70 dark:bg-neutral-900"
           >
-            <View className="h-12 w-12 items-center justify-center rounded-full bg-[#0644C7]/10">
+            <View className="h-11 w-11 items-center justify-center rounded-full bg-[#0644C7]/10">
               <Feather name="plus" size={20} color={BRAND} />
             </View>
             <Text className="ml-3 flex-1 text-[15px] font-semibold text-gray-900 dark:text-white">
@@ -205,6 +239,37 @@ const Accounts = () => {
             </Text>
             <Feather name="chevron-right" size={18} color="#9CA3AF" />
           </Pressable>
+
+          <Text className="mt-3 text-center text-xs text-gray-400 dark:text-gray-500">
+            {accounts.length} of {MAX_SAVED_ACCOUNTS} accounts saved on this
+            device
+          </Text>
+
+          <Pressable
+            onPress={() => void logout()}
+            disabled={loggingOut}
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            className="mt-6 items-center justify-center bg-[#EDF2F5] py-[18px] active:opacity-60 dark:bg-neutral-900"
+            style={{ borderRadius: PANEL_RADIUS }}
+          >
+            {loggingOut ? (
+              <ActivityIndicator size="small" color={DANGER} />
+            ) : (
+              <Text
+                className="text-[16px] font-semibold"
+                style={{ color: DANGER }}
+              >
+                Log out
+              </Text>
+            )}
+          </Pressable>
+
+          {version ? (
+            <Text className="mt-6 text-center text-xs text-gray-400 dark:text-gray-500">
+              {version}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
 

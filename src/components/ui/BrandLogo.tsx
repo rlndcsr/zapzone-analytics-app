@@ -3,8 +3,7 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 
 import { mediaUrl } from "../../lib/api";
-
-const DEFAULT_LOGO = require("../../../assets/zapzone-assests/zapzone.png");
+import { BRAND_MARK } from "./brandMark";
 
 /** Web parity: every logo renders in one fixed 5:2 box, never stretched. */
 const BOX_RATIO = 2.5;
@@ -45,7 +44,7 @@ export function BrandLogo({ src, size = "md", className }: BrandLogoProps) {
   return (
     <View style={{ width, height }} className={className}>
       <Image
-        source={!resolved || failed ? DEFAULT_LOGO : { uri: resolved }}
+        source={!resolved || failed ? BRAND_MARK : { uri: resolved }}
         style={{ width: "100%", height: "100%" }}
         contentFit="contain"
         onError={() => setFailed(true)}

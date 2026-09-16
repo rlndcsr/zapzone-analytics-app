@@ -15,12 +15,11 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Defs, RadialGradient, Rect, Stop } from "react-native-svg";
 
+import { BRAND_MARK, BRAND_MARK_RATIO } from "../components/ui/brandMark";
 // TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
 import { authDebug } from "../lib/debug/authDebug";
 import { isAuthenticated } from "../lib/session";
 import { hasPlayedSplash, markSplashPlayed } from "../lib/splashState";
-
-const logo = require("../../assets/zapzone-assests/zapzone.png");
 
 // Snappy: entrance is immediate, then a gentle breathe, then hand off to login.
 const HOLD_MS = 1500;
@@ -35,7 +34,8 @@ export default function Splash() {
   if (instanceRef.current === null) instanceRef.current = ++splashInstances;
   const instance = instanceRef.current;
   const { width, height } = useWindowDimensions();
-  const logoSize = Math.min(width * 0.28, 200);
+  const logoWidth = Math.min(width * 0.62, 340);
+  const logoHeight = logoWidth / BRAND_MARK_RATIO;
 
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.82);
@@ -153,8 +153,8 @@ export default function Splash() {
 
       <Animated.View style={logoStyle}>
         <Image
-          source={logo}
-          style={{ width: logoSize, height: logoSize }}
+          source={BRAND_MARK}
+          style={{ width: logoWidth, height: logoHeight }}
           contentFit="contain"
         />
       </Animated.View>

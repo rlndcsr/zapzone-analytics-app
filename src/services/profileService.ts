@@ -64,7 +64,14 @@ export type ProfileUser = {
 /** Auto-calculated company rollups from GET /api/companies/{id}/statistics. */
 export type CompanyStatistics = {
   total_locations: number;
+  /** Every user on the company, company admins included. */
   total_users: number;
+  /**
+   * Staff excluding company admins — what the web admin profile calls "Total
+   * Employees". Optional because a backend that predates the field omits it;
+   * callers fall back to {@link total_users}.
+   */
+  total_employees?: number;
   active_users: number;
   recent_bookings: number;
 };
@@ -136,6 +143,25 @@ export async function updateUserProfile(
   const res = await apiRequest<ApiEnvelope<ProfileUser>>(
     `/api/users/${userId}`,
     { method: "PATCH", token, body: payload },
+  );
+  return res.data;
+}
+
+/**
+ * PATCH /api/users/{id}/update-profile-path — the avatar, on its own endpoint.
+ *
+ * `dataUri` is a base64 image data URI; the API stores the bytes and returns
+ * the user with `profile_path` pointing at the stored file. Sending the path
+ * back unchanged is a no-op, so only send a freshly picked image.
+ */
+export async function updateProfilePicture(
+  userId: number,
+  token: string,
+  dataUri: string,
+): Promise<ProfileUser> {
+  const res = await apiRequest<ApiEnvelope<ProfileUser>>(
+    `/api/users/${userId}/update-profile-path`,
+    { method: "PATCH", token, body: { profile_path: dataUri } },
   );
   return res.data;
 }

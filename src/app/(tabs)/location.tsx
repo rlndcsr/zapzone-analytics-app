@@ -31,12 +31,7 @@ import {
 } from "../../lib/location/activeLocationStore";
 
 type DateFilterType =
-  | "today"
-  | "last_24h"
-  | "last_7d"
-  | "last_30d"
-  | "all_time"
-  | "custom";
+  "today" | "last_24h" | "last_7d" | "last_30d" | "all_time" | "custom";
 
 /** Flattened per-location row used by every card on this screen. */
 type LocationRow = {
@@ -403,8 +398,8 @@ const Location = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header — shared DashboardHeader (same as Home) */}
-      <DashboardHeader unreadCount={unreadNotificationsCount} />
+      {/* Header — shared DashboardHeader, in Home's logo-first layout */}
+      <DashboardHeader unreadCount={unreadNotificationsCount} variant="brand" />
 
       <ScrollView
         className="flex-1"
