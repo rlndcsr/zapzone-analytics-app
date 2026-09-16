@@ -84,6 +84,22 @@ function loadLocations(token: string): Promise<LocationOption[]> {
   return locationsInFlight;
 }
 
+/**
+ * Call after saving a location's logo so the header stops showing the old one.
+ * Patches the cached list in place — the counterpart to
+ * {@link setCachedCompanyLogo}, and like it, it takes effect the next time a
+ * consumer renders rather than pushing an update into mounted ones.
+ */
+export function setCachedLocationLogo(
+  locationId: number,
+  logoPath: string | null,
+): void {
+  if (!cachedLocations) return;
+  cachedLocations = cachedLocations.map((l) =>
+    l.id === locationId ? { ...l, logoPath } : l,
+  );
+}
+
 /** The given location's logo, from the same lightweight list the location picker uses. */
 function useLocationLogo(locationId: number | null): string | null {
   const [logoPath, setLogoPath] = useState<string | null>(

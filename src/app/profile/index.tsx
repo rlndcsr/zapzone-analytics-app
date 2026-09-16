@@ -17,7 +17,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BrandLogo } from "../../components/ui/BrandLogo";
+import { ConfirmationModal } from "../../components/ui/ConfirmationModal";
 import { mediaUrl } from "../../lib/api";
+import { setCachedLocationLogo } from "../../lib/hooks/useBrandLogo";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useLogout } from "../../lib/hooks/useLogout";
 import { useProfile } from "../../lib/hooks/useProfile";
@@ -27,6 +29,10 @@ import {
   useCurrentUserRole,
 } from "../../lib/session";
 import { getAppVersionLabel } from "../../services/appUpdateService";
+import {
+  updateLocationLogo,
+  type LocationOption,
+} from "../../services/locationsService";
 import { updateProfilePicture } from "../../services/profileService";
 
 /** Same terms the login screen links to — one canonical URL for the app. */
@@ -51,6 +57,9 @@ const AVATAR_SIZE = 72;
 const AVATAR_BADGE = 26;
 /** The endpoint caps the encoded string at ~27MB, i.e. a 20MB image. */
 const MAX_IMAGE_BASE64 = 27_000_000;
+/** The logo plate, sized to BrandLogo's "sm" box (5:2) plus its padding. */
+const LOGO_PLATE_W = 92;
+const LOGO_PLATE_H = 44;
 /**
  * The icon gutter. Fixed rather than sized by the glyph so every label starts on
  * the same vertical line — Ionicons' advance widths differ between glyphs.
@@ -73,6 +82,49 @@ const formatRole = (role?: string | null) =>
     : null;
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
+
+/**
+ * Pick an image from the library as a base64 data URI — the shape both the
+ * avatar and the location-logo endpoints take. Returns null when the user
+ * cancels or the pick cannot be used; the alerts are raised here so no caller
+ * has to repeat them.
+ *
+ * `square` crops to 1:1 for an avatar. A logo is left uncropped: it is fitted
+ * into its box rather than filled, and forcing a ratio would only add
+ * transparent margin to a wordmark.
+ */
+async function pickImageDataUri(opts?: {
+  square?: boolean;
+}): Promise<string | null> {
+  try {
+    const ImagePicker = await import("expo-image-picker");
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(
+        "Permission needed",
+        "Allow photo library access to choose a picture.",
+      );
+      return null;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      base64: true,
+      quality: 0.8,
+      ...(opts?.square ? { allowsEditing: true, aspect: [1, 1] as const } : {}),
+    });
+    if (result.canceled) return null;
+
+    const asset = result.assets?.[0];
+    if (!asset?.base64) return null;
+    if (asset.base64.length > MAX_IMAGE_BASE64) {
+      Alert.alert("Image too large", "Please choose an image under 20MB.");
+      return null;
+    }
+    return `data:${asset.mimeType ?? "image/jpeg"};base64,${asset.base64}`;
+  } catch {
+    Alert.alert("Image error", "Could not open the image picker.");
+    return null;
+  }
+}
 
 /** The one surface below the hero: a soft tinted panel, no border, no shadow. */
 const Panel = ({
@@ -149,22 +201,103 @@ const SectionHeading = ({
   </>
 );
 
+/** What the web prints under each upload field, said once here. */
+const LOGO_GUIDANCE = [
+  "Recommended: 600 x 240 px (5:2 landscape).",
+  "Every logo is scaled to fit the same box without being stretched, so portrait and square logos work too. A PNG with a transparent background looks best.",
+  "Max size: 20MB. Supported: PNG, JPG, JPEG, WEBP.",
+];
+
+/** A small outlined button — the web's Replace / Remove pair. */
+const LogoButton = ({
+  icon,
+  label,
+  onPress,
+  disabled,
+  destructive,
+}: {
+  icon: ComponentProps<typeof Feather>["name"];
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}) => (
+  <Pressable
+    onPress={onPress}
+    disabled={disabled}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className={`flex-row items-center rounded-xl border px-3 py-2 active:opacity-60 ${
+      destructive
+        ? "border-red-200 dark:border-red-900/50"
+        : "border-gray-200 dark:border-neutral-700"
+    }`}
+    style={{ opacity: disabled ? 0.4 : 1 }}
+  >
+    <Feather name={icon} size={13} color={destructive ? DANGER : "#374151"} />
+    <Text
+      className="ml-1.5 text-[12px] font-semibold"
+      style={{ color: destructive ? DANGER : "#374151" }}
+    >
+      {label}
+    </Text>
+  </Pressable>
+);
+
 /**
  * Every location's own logo, the way the web admin's profile page lists them
- * (`LocationLogosSection`, directly above its Business Metrics). Read-only
- * here: this is the roster, not the editor.
+ * (`LocationLogosSection`, directly above its Business Metrics), with the same
+ * Replace / Remove pair on each row.
  *
- * Sourced from the same lightweight `/api/mobile/locations` list the rest of the
- * app's location pickers use, so it lists the *active* locations — the counter
- * below counts every location, active or not, and the two can differ.
+ * The roster comes from the lightweight `/api/mobile/locations` the rest of the
+ * app's location pickers use, so it covers the *active* locations — the counter
+ * below counts every location, active or not, and the two can differ. Saves go
+ * to `PATCH /api/locations/{id}/logo`, the endpoint the web uses.
  */
-const LocationLogos = ({
-  companyLogoPath,
-}: {
-  /** Shown for a location with no logo of its own, matching the web. */
-  companyLogoPath: string | null;
-}) => {
+const LocationLogos = () => {
   const { locations, loading } = useLocationOptions();
+  /**
+   * Logos changed in this session, keyed by location id. An override layer
+   * rather than a copy of the list: the hook owns the roster, and a copy of it
+   * would quietly go stale behind it.
+   */
+  const [saved, setSaved] = useState<Record<number, string | null>>({});
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<LocationOption | null>(
+    null,
+  );
+
+  const logoFor = (location: LocationOption) =>
+    location.id in saved ? saved[location.id] : location.logoPath;
+
+  const save = async (location: LocationOption, dataUri: string | null) => {
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not signed in", "Please log in again.");
+      return;
+    }
+
+    setBusyId(location.id);
+    try {
+      const path = await updateLocationLogo(token, location.id, dataUri);
+      setSaved((prev) => ({ ...prev, [location.id]: path }));
+      // The header draws the active location's logo off a session cache.
+      setCachedLocationLogo(location.id, path);
+    } catch (err) {
+      Alert.alert(
+        "Logo not saved",
+        err instanceof Error ? err.message : "The logo could not be saved.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const replace = async (location: LocationOption) => {
+    if (busyId !== null) return;
+    const dataUri = await pickImageDataUri();
+    if (dataUri) await save(location, dataUri);
+  };
 
   if (loading) {
     return (
@@ -187,30 +320,101 @@ const LocationLogos = ({
       />
 
       <Panel>
-        {locations.map((location, index) => (
-          <View key={location.id}>
-            {index > 0 ? (
-              <View className="mx-5 h-px bg-black/[0.07] dark:bg-white/10" />
-            ) : null}
-            <View className="flex-row items-center px-5 py-3.5">
-              {/* White plate: most marks are transparent PNGs drawn in dark
-                  ink, which vanish straight into the panel without one. */}
-              <View className="rounded-xl bg-white p-1.5">
-                <BrandLogo
-                  src={location.logoPath ?? companyLogoPath}
-                  size="sm"
-                />
+        {locations.map((location, index) => {
+          const logo = logoFor(location);
+          const busy = busyId === location.id;
+
+          return (
+            <View key={location.id}>
+              {index > 0 ? (
+                <View className="mx-5 h-px bg-black/[0.07] dark:bg-white/10" />
+              ) : null}
+              <View className="px-5 py-4">
+                <Text
+                  numberOfLines={2}
+                  className="text-[14px] font-medium text-gray-900 dark:text-white"
+                >
+                  {location.name}
+                </Text>
+
+                <View className="mt-3 flex-row items-center">
+                  {/* Dashed white plate, as on the web: most marks are
+                      transparent PNGs drawn in dark ink and would vanish
+                      straight into the panel without it. A location with no
+                      logo of its own shows an empty frame rather than the
+                      company logo — this is the upload field, not a preview
+                      of what the rest of the app falls back to. */}
+                  <View
+                    className="items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white p-1.5 dark:border-neutral-600"
+                    style={{ width: LOGO_PLATE_W, height: LOGO_PLATE_H }}
+                  >
+                    {logo ? (
+                      <BrandLogo src={logo} size="sm" />
+                    ) : (
+                      <Feather name="image" size={20} color="#D1D5DB" />
+                    )}
+                    {busy ? (
+                      <View className="absolute inset-0 items-center justify-center rounded-xl bg-white/70">
+                        <ActivityIndicator size="small" color={BRAND} />
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <View className="ml-3 flex-1 flex-row flex-wrap gap-2">
+                    <LogoButton
+                      icon="upload"
+                      label={logo ? "Replace" : "Upload"}
+                      onPress={() => void replace(location)}
+                      disabled={busyId !== null}
+                    />
+                    {logo ? (
+                      <LogoButton
+                        destructive
+                        icon="trash-2"
+                        label="Remove"
+                        onPress={() => setPendingRemoval(location)}
+                        disabled={busyId !== null}
+                      />
+                    ) : null}
+                  </View>
+                </View>
               </View>
-              <Text
-                numberOfLines={2}
-                className="ml-4 flex-1 text-[14px] text-gray-900 dark:text-white"
-              >
-                {location.name}
-              </Text>
             </View>
-          </View>
-        ))}
+          );
+        })}
       </Panel>
+
+      <View className="mt-2 px-1">
+        {LOGO_GUIDANCE.map((line) => (
+          <Text
+            key={line}
+            className="text-[11px] leading-4 text-gray-400 dark:text-gray-500"
+          >
+            {line}
+          </Text>
+        ))}
+      </View>
+
+      <ConfirmationModal
+        visible={pendingRemoval !== null}
+        title="Remove Location Logo"
+        message={
+          pendingRemoval
+            ? `Remove the logo for ${pendingRemoval.name}?\n\nIt will fall back to the company logo.`
+            : ""
+        }
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive
+        loading={pendingRemoval != null && busyId === pendingRemoval.id}
+        onConfirm={() => {
+          const target = pendingRemoval;
+          if (!target || busyId !== null) return;
+          setPendingRemoval(null);
+          void save(target, null);
+        }}
+        onCancel={() => setPendingRemoval(null)}
+      />
     </View>
   );
 };
@@ -231,7 +435,7 @@ const Profile = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const { user, stats, error, refresh } = useProfile();
+  const { user, stats, companyAdminCount, error, refresh } = useProfile();
   const { loggingOut, logout } = useLogout();
   const isCompanyAdmin = useCurrentUserRole() === "company_admin";
   const [refreshing, setRefreshing] = useState(false);
@@ -262,8 +466,16 @@ const Profile = () => {
   const displayName = user?.name ?? session?.name ?? "there";
   const roleLabel = formatRole(user?.role ?? session?.role);
   const avatarUri = mediaUrl(user?.profile_path);
-  const company = user?.company ?? null;
   const version = getAppVersionLabel();
+
+  // "Total Employees" is every account on the company except the company
+  // admins — the rule the web applies. The statistics endpoint only reports the
+  // raw total, so the admins are counted separately and taken off here; without
+  // that count the raw total is the honest fallback.
+  const totalEmployees =
+    stats && companyAdminCount != null
+      ? Math.max(stats.total_users - companyAdminCount, 0)
+      : (stats?.total_users ?? 0);
 
   /**
    * Pick a new avatar and send it straight up — the same base64 data-URI shape
@@ -280,36 +492,8 @@ const Profile = () => {
       return;
     }
 
-    let dataUri: string;
-    try {
-      const ImagePicker = await import("expo-image-picker");
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert(
-          "Permission needed",
-          "Allow photo library access to choose a picture.",
-        );
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        base64: true,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: [1, 1],
-      });
-      if (result.canceled) return;
-
-      const asset = result.assets?.[0];
-      if (!asset?.base64) return;
-      if (asset.base64.length > MAX_IMAGE_BASE64) {
-        Alert.alert("Image too large", "Please choose an image under 20MB.");
-        return;
-      }
-      dataUri = `data:${asset.mimeType ?? "image/jpeg"};base64,${asset.base64}`;
-    } catch {
-      Alert.alert("Image error", "Could not open the image picker.");
-      return;
-    }
+    const dataUri = await pickImageDataUri({ square: true });
+    if (!dataUri) return;
 
     setSavingPhoto(true);
     try {
@@ -490,16 +674,13 @@ const Profile = () => {
 
           {/* Company-admin only, as on the web — a manager has one location and
               no say over any other's branding. */}
-          {isCompanyAdmin ? (
-            <LocationLogos companyLogoPath={company?.logo_path ?? null} />
-          ) : null}
+          {isCompanyAdmin ? <LocationLogos /> : null}
 
-          {/* Only once the counts have arrived, so the menu above never shifts
-              under a finger on its way to a row. `total_employees` excludes
-              company admins — the same rule the web applies, served by the API
-              so both clients show one number; `total_users` is the fallback for
-              a backend that predates the field. */}
-          {stats ? (
+          {/* Company-admin only, as on the web — and `/api/users` scopes a
+              manager to their own location, so the employee count is only
+              meaningful for an admin. Rendered once the counts arrive, so the
+              menu above never shifts under a finger on its way to a row. */}
+          {stats && isCompanyAdmin ? (
             <View className="mt-6">
               <SectionHeading
                 icon="people"
@@ -511,10 +692,7 @@ const Profile = () => {
                   value={stats.total_locations}
                   label="Total Locations"
                 />
-                <StatTile
-                  value={stats.total_employees ?? stats.total_users}
-                  label="Total Employees"
-                />
+                <StatTile value={totalEmployees} label="Total Employees" />
               </View>
             </View>
           ) : null}

@@ -66,12 +66,6 @@ export type CompanyStatistics = {
   total_locations: number;
   /** Every user on the company, company admins included. */
   total_users: number;
-  /**
-   * Staff excluding company admins — what the web admin profile calls "Total
-   * Employees". Optional because a backend that predates the field omits it;
-   * callers fall back to {@link total_users}.
-   */
-  total_employees?: number;
   active_users: number;
   recent_bookings: number;
 };

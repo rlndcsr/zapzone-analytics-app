@@ -5,15 +5,30 @@ import {
   type CompanyStatistics,
   type ProfileUser,
 } from "../../services/profileService";
+import { fetchStaffCount } from "../../services/usersService";
 import { getCurrentUser, getToken } from "../session";
 
 /**
  * Loads the signed-in user's profile plus their company's auto-calculated
  * stats (best-effort: stats failing is non-fatal, the profile still renders).
+ *
+ * `companyAdminCount` exists to turn the API's `total_users` — every account on
+ * the company — into the web admin's "Total Employees", which is every account
+ * *except* the company admins. The statistics endpoint has no such field, so it
+ * is counted here with a `per_page=1` request that reads `pagination.total`.
+ * Subtracting rather than adding up the other roles keeps it right if a new
+ * staff role is ever introduced.
+ *
+ * Only meaningful for a company admin: `/api/users` scopes a manager or
+ * attendant to their own location, so the count would be of that location, not
+ * the company. Callers gate the metric on the role, as the web does.
  */
 export function useProfile() {
   const [user, setUser] = useState<ProfileUser | null>(null);
   const [stats, setStats] = useState<CompanyStatistics | null>(null);
+  const [companyAdminCount, setCompanyAdminCount] = useState<number | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Track the first successful fetch so focus/refresh revalidations don't
@@ -48,6 +63,19 @@ export function useProfile() {
       } else {
         setStats(null);
       }
+
+      if (profile.role === "company_admin") {
+        try {
+          setCompanyAdminCount(
+            await fetchStaffCount(token, { role: "company_admin" }),
+          );
+        } catch {
+          // Also best-effort — the counters fall back to the raw user total.
+          setCompanyAdminCount(null);
+        }
+      } else {
+        setCompanyAdminCount(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load profile");
     } finally {
@@ -66,5 +94,5 @@ export function useProfile() {
     };
   }, [load]);
 
-  return { user, stats, loading, error, refresh: load };
+  return { user, stats, companyAdminCount, loading, error, refresh: load };
 }

@@ -93,6 +93,32 @@ export async function fetchLocationById(
   return list.find((l) => l.id === id) ?? null;
 }
 
+/**
+ * PATCH /api/locations/{id}/logo — set or clear one location's logo, the same
+ * endpoint and payload the web admin's Location Logos section uses.
+ *
+ * `dataUri` is a base64 image data URI; `null` removes the logo, after which
+ * the location falls back to the company's. Returns the storage path the API
+ * saved it to (null after a removal) — resolve it with `mediaUrl()`.
+ *
+ * Company admins only: the route is gated `staff:company_admin|admin`.
+ *
+ * The response echoes the whole location with its company and packages loaded,
+ * which can be heavy on mobile; only `logo_path` is read off it, the same way
+ * {@link updateLocation} ignores its own response body.
+ */
+export async function updateLocationLogo(
+  token: string,
+  id: number,
+  dataUri: string | null,
+): Promise<string | null> {
+  const res = await apiRequest<{ data?: { logo_path?: string | null } }>(
+    `/api/locations/${id}/logo`,
+    { method: "PATCH", token, body: { logo_path: dataUri } },
+  );
+  return res?.data?.logo_path?.trim() || null;
+}
+
 /** Editable location fields (mirrors the web EditLocationModal payload). */
 export type UpdateLocationPayload = {
   name: string;
