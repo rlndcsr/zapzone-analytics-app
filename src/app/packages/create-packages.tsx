@@ -33,33 +33,33 @@ import {
 import { markPackagesStale } from "../../lib/hooks/usePackages";
 
 import {
+  packageDurationMinutes,
+  validatePackageSetup,
+} from "../../lib/packageSetup";
+import {
   ADVANCE_NOTICE_PRESETS,
   BOOKING_WINDOW_PRESETS,
   bookingWindowMonthsLabel,
 } from "../../lib/packages/bookingWindow";
 import {
-  DEFAULT_SLOT_CLEANUP_MINUTES,
-  resolveScheduleSlots,
-  spaceDrivenIntervalHint,
-  spaceDrivenSourceLabel,
-  spacesDriveStartTimes,
+  generateScheduleSlots,
+  scheduleIntervalMessage,
 } from "../../lib/packages/scheduleSlots";
-import { formatDuration } from "../../lib/time";
-import {
-  packageDurationMinutes,
-  validatePackageSetup,
-} from "../../lib/packageSetup";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { formatDuration } from "../../lib/time";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
 import {
   fetchAttractions,
   type AttractionRow,
 } from "../../services/attractionsService";
-import { fetchCategories, type Category } from "../../services/categoriesService";
 import {
   fetchRoomOptions,
   type RoomOption,
 } from "../../services/bookingsService";
+import {
+  fetchCategories,
+  type Category,
+} from "../../services/categoriesService";
 import {
   fetchLocations,
   type LocationOption,
@@ -71,9 +71,7 @@ import {
   type PackageScheduleInput,
 } from "../../services/packagesService";
 
-
 const PRIMARY = "#0644C7";
-
 
 const PACKAGE_TYPES: SelectOption[] = [
   { label: "Regular", value: "regular" },
@@ -118,7 +116,6 @@ const WEEKDAY_OPTIONS: SelectOption[] = WEEKDAYS.map((d) => ({
   value: d,
 }));
 
-
 const parseNum = (s: string): number | null => {
   const t = s.trim();
   if (!t) return null;
@@ -161,14 +158,10 @@ type SchedRow = {
   start: string;
   end: string;
   interval: string;
-  /** Per-schedule override of the package minimum; blank uses the default. */
   minPlayers: string;
   isActive: boolean;
 };
 
-/** One editor row in the shape `packageIsCallToBook` reads. Times are passed
- *  through as typed — unlike the save payload, which substitutes defaults for
- *  blanks — so a row with no times correctly reads as unusable here. */
 const toScheduleLike = (s: SchedRow): PackageScheduleLike => ({
   availabilityType: s.type,
   dayConfiguration:
@@ -211,7 +204,9 @@ const Chip = ({
   >
     <Text
       className={`text-sm ${
-        selected ? "text-white font-semibold" : "text-gray-700 dark:text-gray-200"
+        selected
+          ? "text-white font-semibold"
+          : "text-gray-700 dark:text-gray-200"
       }`}
     >
       {label}
@@ -220,15 +215,6 @@ const Chip = ({
   </Pressable>
 );
 
-/**
- * Create Package — one scrolling form of stacked sections, mirroring the web
- * `/packages/create` and the app's Edit Attraction layout. Posts to
- * POST /api/packages, then saves availability via
- * PUT /api/packages/{id}/availability-schedules (exactly as the web does).
- * Option lists (attractions/rooms/add-ons/promos/gift-cards/categories) come
- * from existing endpoints — all confirmed payload-safe (no base64), so no new
- * backend endpoints were needed.
- */
 const CreatePackage = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -237,7 +223,6 @@ const CreatePackage = () => {
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
   const userId = user?.id ?? 0;
-
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -291,25 +276,14 @@ const CreatePackage = () => {
   const [rooms, setRooms] = useState<RoomOption[]>([]);
   const [addOns, setAddOns] = useState<AddOnOption[]>([]);
   const [loadingRelations, setLoadingRelations] = useState(false);
-  /** The venue's cleanup gap between two bookings in one space, from the API. */
-  const [slotCleanupMinutes, setSlotCleanupMinutes] = useState<number | null>(
-    null,
-  );
 
   const [attractionSel, setAttractionSel] = useState<number[]>([]);
   const [roomSel, setRoomSel] = useState<number[]>([]);
   const [addonOrder, setAddonOrder] = useState<number[]>([]);
 
-
-
   // --- Step 6: availability ---
   const scheduleKey = useRef(1);
-  /**
-   * Starts empty, as the web's create form does. A package with no schedule is
-   * a valid configuration — it sells as Call to Book — so the form opens on
-   * that state and its notice, rather than pre-filling a 09:00–17:00 daily
-   * schedule the user never asked for.
-   */
+
   const [schedules, setSchedules] = useState<SchedRow[]>([]);
 
   // --- Step 7: image + invitation ---
@@ -319,7 +293,6 @@ const CreatePackage = () => {
   const [invitationFile, setInvitationFile] = useState<string | null>(null);
   const [invitationFileName, setInvitationFileName] = useState("");
 
-  // Load locations + categories on mount (needed by the Details section).
   useEffect(() => {
     const token = getToken();
     if (!token) return;
@@ -332,9 +305,6 @@ const CreatePackage = () => {
       if (!active) return;
       setLocations(locs);
       setCategories(cats);
-      // Deliberately not auto-selecting the first location: the grid starts
-      // empty so the "select a location" notice is the first thing staff see,
-      // matching the web. A manager's own location is still locked in below.
     });
     return () => {
       active = false;
@@ -342,21 +312,10 @@ const CreatePackage = () => {
     };
   }, [isCompanyAdmin]);
 
-  /**
-   * Attraction / room / add-on options, keyed on the selected location.
-   *
-   * Deliberately NOT a load-once latch: the form is one page now and starts
-   * with no location chosen, so a latch would fetch unscoped lists on mount and
-   * then never refresh when a location is picked — leaving another venue's
-   * rooms on screen. Re-running per location also clears any selection carried
-   * over from the previous one, which would no longer be valid.
-   */
   useEffect(() => {
-    // A company admin must choose first; a manager is already scoped server-side.
     if (isCompanyAdmin && locationId == null) {
       setAttractions([]);
       setRooms([]);
-      setSlotCleanupMinutes(null);
       setAddOns([]);
       return;
     }
@@ -378,7 +337,6 @@ const CreatePackage = () => {
       if (!active) return;
       setAttractions(atts);
       setRooms(rms.rooms);
-      setSlotCleanupMinutes(rms.slotCleanupMinutes);
       setAddOns(ads);
       setLoadingRelations(false);
     });
@@ -390,14 +348,16 @@ const CreatePackage = () => {
   // A selection made against one venue cannot survive a move to another.
   const prevLocationRef = useRef<number | null>(null);
   useEffect(() => {
-    if (prevLocationRef.current !== null && prevLocationRef.current !== locationId) {
+    if (
+      prevLocationRef.current !== null &&
+      prevLocationRef.current !== locationId
+    ) {
       setAttractionSel([]);
       setRoomSel([]);
       setAddonOrder([]);
     }
     prevLocationRef.current = locationId;
   }, [locationId]);
-
 
   const lockedLocationName = useMemo(() => {
     if (isCompanyAdmin) return null;
@@ -429,7 +389,8 @@ const CreatePackage = () => {
       });
       if (result.canceled) return;
       const a = result.assets?.[0];
-      if (a?.base64) setImage(`data:${a.mimeType ?? "image/jpeg"};base64,${a.base64}`);
+      if (a?.base64)
+        setImage(`data:${a.mimeType ?? "image/jpeg"};base64,${a.base64}`);
     } catch {
       Alert.alert("Image error", "Could not open the image picker.");
     }
@@ -499,11 +460,6 @@ const CreatePackage = () => {
   const playerWord = guestLabel || "Player";
   const participantWord = guestLabel || (perPerson ? "Player" : "Participant");
 
-  /**
-   * Field validation, grouped the way the form reads: 0 is the Details section,
-   * 1 is Pricing & Players. Kept as groups (rather than one flat function) so
-   * the first failure reported is the one nearest the top of the page.
-   */
   const validateStep = (s: number): string | null => {
     if (s === 0) {
       if (locationId == null) return "Please select a location.";
@@ -537,7 +493,6 @@ const CreatePackage = () => {
     return null;
   };
 
-
   const resolvedDuration = (): number | null => {
     if (durationUnit === "hours and minutes") {
       const h = parseNum(durationHours) ?? 0;
@@ -548,21 +503,18 @@ const CreatePackage = () => {
     return parseNum(duration);
   };
 
-  /** Session length in minutes, for the generated-slots preview. 0 means the
-   *  duration fields are still blank, so there is nothing to preview yet. */
   const sessionMinutes =
-    packageDurationMinutes(durationUnit, duration, durationHours, durationMinutes) ||
-    null;
+    packageDurationMinutes(
+      durationUnit,
+      duration,
+      durationHours,
+      durationMinutes,
+    ) || null;
 
   /**
-   * The booking interval of every space this package is being booked into — one
-   * entry per selected space, 0 for a space that sets none, because the server
-   * staggers start times across all of them and sizes the stagger from the
-   * non-zero ones only.
-   *
-   * A selected id missing from `rooms` is dropped rather than counted as 0: the
-   * list holds the location's available spaces, and the server likewise
-   * staggers only across the available ones.
+   * The booking interval of every space this package is being booked into —
+   * not a driver of the schedule's start times, only of the reopen-gap note
+   * shown below the interval field.
    */
   const selectedSpaceIntervals = useMemo(
     () =>
@@ -573,22 +525,18 @@ const CreatePackage = () => {
     [roomSel, rooms],
   );
 
-  /** One schedule row's preview, resolved the way the server resolves it. */
-  const resolveSlotsFor = (schedule: { start: string; end: string; interval: string }) =>
-    resolveScheduleSlots({
+  /** One schedule row's preview — the schedule interval alone decides it. */
+  const resolveSlotsFor = (schedule: {
+    start: string;
+    end: string;
+    interval: string;
+  }) =>
+    generateScheduleSlots({
       start: schedule.start,
       end: schedule.end,
       intervalMinutes: parseIntOrNull(schedule.interval),
       durationMinutes: sessionMinutes,
-      spaceIntervals: selectedSpaceIntervals,
-      cleanupMinutes: slotCleanupMinutes ?? DEFAULT_SLOT_CLEANUP_MINUTES,
     });
-
-  /** True while the spaces — not the typed interval — set the start times. */
-  const spacesRunStartTimes = spacesDriveStartTimes(selectedSpaceIntervals);
-  const spaceStagger = spacesRunStartTimes
-    ? Math.min(...selectedSpaceIntervals.filter((m) => m > 0))
-    : null;
 
   const buildSchedulePayload = (): PackageScheduleInput[] =>
     schedules.map((s, index) => ({
@@ -608,12 +556,6 @@ const CreatePackage = () => {
       priority: index,
     }));
 
-  /**
-   * Reset — the web form's Reset button. Re-navigating to this route remounts
-   * the screen, clearing every field without hand-resetting ~40 pieces of state
-   * (and without the drift that list going stale would cause). The `type` param
-   * is carried over so a custom-package form resets to a custom form.
-   */
   const confirmReset = () => {
     Alert.alert(
       "Reset form?",
@@ -634,11 +576,6 @@ const CreatePackage = () => {
     );
   };
 
-  /**
-   * The package image control. Held here rather than inline so the Package
-   * Image section can sit at the top of the form (as on the web) without the
-   * picker logic drifting from the rest of the image state.
-   */
   const packageImageField = image ? (
     <View>
       <Image
@@ -683,8 +620,6 @@ const CreatePackage = () => {
     parseIntOrNull(bookingWindowDays),
   );
 
-  /* --- Live Preview: how this package will read to a customer ------------ */
-
   const previewCategory = (
     (useCustomCategory ? customCategory : category) ?? ""
   ).trim();
@@ -699,11 +634,6 @@ const CreatePackage = () => {
     return mins > 0 ? formatDuration(mins, "minutes") : "Not specified";
   }, [durationUnit, duration, durationHours, durationMinutes]);
 
-  /**
-   * "Every day (9:00 AM - 5:00 PM)" for a single daily schedule, the weekday
-   * list for a weekly one, and a plain count once several are configured —
-   * spelling out four windows would not fit the card.
-   */
   const previewAvailability = useMemo(() => {
     if (schedules.length === 0) return "No schedules configured";
     if (schedules.length > 1) return `${schedules.length} schedules configured`;
@@ -721,24 +651,18 @@ const CreatePackage = () => {
     return `${s.occurrence} ${s.monthlyDay}${window}`;
   }, [schedules]);
 
-  /**
-   * One line per schedule — "12:30 PM - 9:30 PM (every 90 min)" — so the whole
-   * week is visible even though the Available line above collapses to a count.
-   */
   const previewTimeSlots = useMemo(
     () =>
       schedules
         .filter((s) => s.start && s.end)
         .map((s) => {
-          // The spaces override the typed interval, so the summary quotes
-          // whichever one actually opens the next start.
-          const every = spaceStagger ?? parseIntOrNull(s.interval);
+          const every = parseIntOrNull(s.interval);
           return (
             `${to12h(s.start)} - ${to12h(s.end)}` +
             (every ? ` (a start every ${every} min)` : "")
           );
         }),
-    [schedules, spaceStagger],
+    [schedules],
   );
 
   /** Selected names, or the web's greyed "No X selected" when none are picked. */
@@ -747,7 +671,9 @@ const CreatePackage = () => {
     selected: number[],
     emptyLabel: string,
   ) => {
-    const picked = all.filter((x) => selected.includes(x.id)).map((x) => x.name);
+    const picked = all
+      .filter((x) => selected.includes(x.id))
+      .map((x) => x.name);
     return picked.length > 0 ? picked.join(", ") : emptyLabel;
   };
 
@@ -760,9 +686,6 @@ const CreatePackage = () => {
   const previewAddOns = namesOf(addOns, addonOrder, "No add-ons selected");
 
   const handleSubmit = async () => {
-    // The form is one page now, so every rule runs here rather than gating a
-    // Next button. Groups are checked in reading order so the message names the
-    // first problem the user would scroll to.
     for (const group of [0, 1]) {
       const err = validateStep(group);
       if (err) {
@@ -770,9 +693,7 @@ const CreatePackage = () => {
         return;
       }
     }
-    // No schedule is a valid package — it sells as Call to Book, which the
-    // notice above the list explains. The web create form allows this too
-    // (it simply skips the schedule save), so nothing is blocked here.
+
     for (const s of schedules) {
       if (!normalizeTime(s.start) || !normalizeTime(s.end))
         return Alert.alert(
@@ -858,8 +779,7 @@ const CreatePackage = () => {
           .map((aid) => addOns.find((a) => a.id === aid)?.name)
           .filter((n): n is string => !!n),
         roomIds: roomSel,
-        // Promos and gift cards are not chosen on this form; the fields are
-        // required by the endpoint, so they go up empty.
+
         promoIds: [],
         giftCardIds: [],
       });
@@ -895,7 +815,6 @@ const CreatePackage = () => {
     }
   };
 
-
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
@@ -927,16 +846,12 @@ const CreatePackage = () => {
           className="flex-1"
           contentContainerStyle={{
             padding: 20,
-            // The actions scroll with the content now, so the safe area has to
-            // be cleared here rather than by a pinned footer.
+
             paddingBottom: insets.bottom + 32,
           }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Select Location — a card grid above the form, as on the web. It
-              sits outside the Details card because picking a location is what
-              loads the rooms, add-ons and attractions further down. */}
           {isCompanyAdmin ? (
             <View className="mb-4">
               <View className="flex-row items-center gap-2 mb-3">
@@ -988,12 +903,15 @@ const CreatePackage = () => {
                         )}
                       </View>
                       {active && (
-                        <Feather name="check-circle" size={16} color={PRIMARY} />
+                        <Feather
+                          name="check-circle"
+                          size={16}
+                          color={PRIMARY}
+                        />
                       )}
                     </Pressable>
                   );
                 })}
-                {/* Keeps a lone trailing card in the left column. */}
                 {locations.length % 2 === 1 && <View className="w-[48%]" />}
               </View>
 
@@ -1022,7 +940,6 @@ const CreatePackage = () => {
             </View>
           )}
 
-          {/* Package Image — directly under the location, as on the web. */}
           <Section icon="image" title="Package Image">
             <View className="gap-4">{packageImageField}</View>
           </Section>
@@ -1037,7 +954,6 @@ const CreatePackage = () => {
                 placeholder="Enter package name"
               />
 
-              {/* Duration — unit first, then the value(s), as on the web. */}
               <SelectField
                 label="Duration"
                 required
@@ -1098,8 +1014,6 @@ const CreatePackage = () => {
                 </View>
               </View>
 
-              {/* The web runs these three across one row; stacked here, since
-                  three inputs plus their hints will not fit a phone. */}
               <TextField
                 label="Guest label"
                 value={participantLabel}
@@ -1149,7 +1063,9 @@ const CreatePackage = () => {
               )}
               <Pressable onPress={() => setUseCustomCategory((v) => !v)}>
                 <Text className="text-xs font-semibold text-[#0644C7]">
-                  {useCustomCategory ? "Pick existing category" : "＋ New category"}
+                  {useCustomCategory
+                    ? "Pick existing category"
+                    : "＋ New category"}
                 </Text>
               </Pressable>
 
@@ -1211,7 +1127,11 @@ const CreatePackage = () => {
                 multiline
               />
 
-              <ToggleRow label="Active" value={isActive} onValueChange={setIsActive} />
+              <ToggleRow
+                label="Active"
+                value={isActive}
+                onValueChange={setIsActive}
+              />
             </View>
           </Section>
 
@@ -1396,15 +1316,14 @@ const CreatePackage = () => {
                         }
                         keyboardType="number-pad"
                         placeholder="30"
-                        // Typing here changes nothing while the spaces are in
-                        // charge, so the field says so instead of inviting an
-                        // edit the server would ignore.
-                        disabled={spacesRunStartTimes}
                         hint={
-                          spaceDrivenIntervalHint(selectedSpaceIntervals) ??
-                          (parseIntOrNull(s.interval)
-                            ? `A new start time every ${parseIntOrNull(s.interval)} min.`
-                            : "Minimum 15 minutes.")
+                          sessionMinutes == null
+                            ? "Minimum 15 minutes."
+                            : (scheduleIntervalMessage({
+                                interval: parseIntOrNull(s.interval),
+                                durationMinutes: sessionMinutes,
+                                spaceIntervals: selectedSpaceIntervals,
+                              })?.text ?? "Minimum 15 minutes.")
                         }
                       />
                     </View>
@@ -1429,38 +1348,29 @@ const CreatePackage = () => {
                     onValueChange={(v) => patchSchedule(s.key, { isActive: v })}
                   />
 
-                  {/* The starts a customer will actually be offered — run
-                      through the same rule the server applies, and labelled by
-                      whatever drives it, so a misconfiguration is visible
-                      before saving rather than after a customer cannot book. */}
+                  {/* The starts a customer will actually be offered, straight
+                      from the schedule interval, so a misconfiguration is
+                      visible before saving rather than after a customer
+                      cannot book. */}
                   {(() => {
                     const resolved =
                       sessionMinutes == null ? null : resolveSlotsFor(s);
-                    const source = resolved
-                      ? spaceDrivenSourceLabel(resolved)
-                      : null;
                     return (
                       <View className="border-t border-gray-100 dark:border-neutral-800 pt-3">
                         <Text className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">
                           Start times customers will see:
-                          {source ? (
-                            <Text className="font-normal text-gray-500 dark:text-gray-400">
-                              {" "}
-                              {source}
-                            </Text>
-                          ) : null}
                         </Text>
                         {resolved == null ? (
                           <Text className="text-xs text-gray-400 dark:text-gray-500">
                             Set the package duration to preview slots.
                           </Text>
-                        ) : resolved.slots.length === 0 ? (
+                        ) : resolved.length === 0 ? (
                           <Text className="text-xs text-gray-400 dark:text-gray-500">
                             No start times fit inside this window.
                           </Text>
                         ) : (
                           <View className="flex-row flex-wrap">
-                            {resolved.slots.map((slot) => (
+                            {resolved.map((slot) => (
                               <View
                                 key={slot.start}
                                 className="mr-1.5 mb-1.5 rounded border border-gray-200 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
@@ -1631,7 +1541,9 @@ const CreatePackage = () => {
                     label={a.name}
                     sub={a.price ? `$${a.price}` : undefined}
                     selected={addonOrder.includes(a.id)}
-                    onPress={() => setAddonOrder((prev) => toggleIn(prev, a.id))}
+                    onPress={() =>
+                      setAddonOrder((prev) => toggleIn(prev, a.id))
+                    }
                   />
                 ))}
               </View>
@@ -1984,7 +1896,6 @@ const CreatePackage = () => {
                   </Pressable>
                 )}
               </View>
-
             </View>
           </Section>
 

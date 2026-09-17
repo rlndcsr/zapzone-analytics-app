@@ -14,17 +14,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  CallToBookNotice,
+  CARD_SHADOW,
+  Section,
+} from "../../components/ui/attractionFormKit";
+import {
   SegmentedToggle,
   SelectField,
   TextField,
   ToggleRow,
   type SelectOption,
 } from "../../components/ui/FormControls";
-import {
-  CallToBookNotice,
-  CARD_SHADOW,
-  Section,
-} from "../../components/ui/attractionFormKit";
 import { PackageImageField } from "../../components/ui/PackageImageField";
 import { mediaUrl } from "../../lib/api";
 import {
@@ -38,11 +38,8 @@ import {
   bookingWindowMonthsLabel,
 } from "../../lib/packages/bookingWindow";
 import {
-  DEFAULT_SLOT_CLEANUP_MINUTES,
-  resolveScheduleSlots,
-  spaceDrivenIntervalHint,
-  spaceDrivenSourceLabel,
-  spacesDriveStartTimes,
+  generateScheduleSlots,
+  scheduleIntervalMessage,
 } from "../../lib/packages/scheduleSlots";
 import {
   packageDurationMinutes,
@@ -117,7 +114,6 @@ const WEEKDAY_OPTIONS: SelectOption[] = WEEKDAYS.map((d) => ({
   value: d,
 }));
 
-
 const parseNum = (s: string): number | null => {
   const t = s.trim();
   if (!t) return null;
@@ -150,14 +146,11 @@ const normalizeTime = (v: string): string | null => {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 };
 
-/** "HH:MM:SS" | "HH:MM" → "HH:MM" for the editable time inputs. */
 const toHHMM = (v: string | null): string => (v ? v.substring(0, 5) : "");
 
-/** Label a stored invitation file by its basename ("invitations/a1b2.pdf"). */
 const fileNameOf = (path: string): string =>
   path.split("/").pop() || "Invitation file";
 
-/** Local schedule row (richer than the payload shape to hold monthly occ/day). */
 type SchedRow = {
   key: number;
   type: "daily" | "weekly" | "monthly";
@@ -167,14 +160,10 @@ type SchedRow = {
   start: string;
   end: string;
   interval: string;
-  /** Per-schedule override of the package minimum; blank uses the default. */
   minPlayers: string;
   isActive: boolean;
 };
 
-/** One editor row in the shape `packageIsCallToBook` reads. Times are passed
- *  through as typed — unlike the save payload, which substitutes defaults for
- *  blanks — so a row with no times correctly reads as unusable here. */
 const toScheduleLike = (s: SchedRow): PackageScheduleLike => ({
   availabilityType: s.type,
   dayConfiguration:
@@ -263,7 +252,6 @@ const EditPackage = () => {
   const user = getCurrentUser();
   const userId = user?.id ?? 0;
 
-
   const [submitting, setSubmitting] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -307,10 +295,6 @@ const EditPackage = () => {
   // --- Step 4: attractions / rooms / add-ons ---
   const [attractions, setAttractions] = useState<AttractionRow[]>([]);
   const [rooms, setRooms] = useState<RoomOption[]>([]);
-  /** The venue's cleanup gap between two bookings in one space, from the API. */
-  const [slotCleanupMinutes, setSlotCleanupMinutes] = useState<number | null>(
-    null,
-  );
   const [addOns, setAddOns] = useState<AddOnOption[]>([]);
   const [attractionSel, setAttractionSel] = useState<number[]>([]);
   const [roomSel, setRoomSel] = useState<number[]>([]);
@@ -381,7 +365,6 @@ const EditPackage = () => {
         setCategories(cats);
         setAttractions(atts);
         setRooms(rms.rooms);
-        setSlotCleanupMinutes(rms.slotCleanupMinutes);
         setAddOns(ads);
 
         // Seed every field from the fetched detail.
@@ -548,7 +531,8 @@ const EditPackage = () => {
    * the backend unlinks the old file before re-saving whatever it is given).
    */
   const invitationFileForSave = (): string | null | undefined => {
-    if (invitationType !== "file") return existingInvitationFile ? null : undefined;
+    if (invitationType !== "file")
+      return existingInvitationFile ? null : undefined;
     if (invitationFile) return invitationFile;
     return existingInvitationFile ? undefined : null;
   };
@@ -623,7 +607,6 @@ const EditPackage = () => {
     return null;
   };
 
-
   const resolvedDuration = (): number | null => {
     if (durationUnit === "hours and minutes") {
       const h = parseNum(durationHours) ?? 0;
@@ -641,18 +624,17 @@ const EditPackage = () => {
   /** Session length in minutes, for the generated-slots preview. 0 means the
    *  duration fields are still blank, so there is nothing to preview yet. */
   const sessionMinutes =
-    packageDurationMinutes(durationUnit, duration, durationHours, durationMinutes) ||
-    null;
+    packageDurationMinutes(
+      durationUnit,
+      duration,
+      durationHours,
+      durationMinutes,
+    ) || null;
 
   /**
-   * The booking interval of every space this package is booked into — one entry
-   * per selected space, 0 for a space that sets none, because the server
-   * staggers start times across all of them and sizes the stagger from the
-   * non-zero ones only.
-   *
-   * A selected id missing from `rooms` is dropped rather than counted as 0: the
-   * list holds the location's available spaces, and the server likewise
-   * staggers only across the available ones.
+   * The booking interval of every space this package is booked into — not a
+   * driver of the schedule's start times, only of the reopen-gap note shown
+   * below the interval field.
    */
   const selectedSpaceIntervals = useMemo(
     () =>
@@ -663,26 +645,18 @@ const EditPackage = () => {
     [roomSel, rooms],
   );
 
-  /** One schedule row's preview, resolved the way the server resolves it. */
+  /** One schedule row's preview — the schedule interval alone decides it. */
   const resolveSlotsFor = (schedule: {
     start: string;
     end: string;
     interval: string;
   }) =>
-    resolveScheduleSlots({
+    generateScheduleSlots({
       start: schedule.start,
       end: schedule.end,
       intervalMinutes: parseIntOrNull(schedule.interval),
       durationMinutes: sessionMinutes,
-      spaceIntervals: selectedSpaceIntervals,
-      cleanupMinutes: slotCleanupMinutes ?? DEFAULT_SLOT_CLEANUP_MINUTES,
     });
-
-  /** True while the spaces — not the typed interval — set the start times. */
-  const spacesRunStartTimes = spacesDriveStartTimes(selectedSpaceIntervals);
-  const spaceStagger = spacesRunStartTimes
-    ? Math.min(...selectedSpaceIntervals.filter((m) => m > 0))
-    : null;
 
   /* --- Live Preview: how this package will read to a customer ------------ */
 
@@ -732,15 +706,13 @@ const EditPackage = () => {
       schedules
         .filter((s) => s.start && s.end)
         .map((s) => {
-          // The spaces override the typed interval, so the summary quotes
-          // whichever one actually opens the next start.
-          const every = spaceStagger ?? parseIntOrNull(s.interval);
+          const every = parseIntOrNull(s.interval);
           return (
             `${to12h(s.start)} - ${to12h(s.end)}` +
             (every ? ` (a start every ${every} min)` : "")
           );
         }),
-    [schedules, spaceStagger],
+    [schedules],
   );
 
   /** Selected names, or the web's greyed "No X selected" when none are picked. */
@@ -749,7 +721,9 @@ const EditPackage = () => {
     selected: number[],
     emptyLabel: string,
   ) => {
-    const picked = all.filter((x) => selected.includes(x.id)).map((x) => x.name);
+    const picked = all
+      .filter((x) => selected.includes(x.id))
+      .map((x) => x.name);
     return picked.length > 0 ? picked.join(", ") : emptyLabel;
   };
 
@@ -907,8 +881,6 @@ const EditPackage = () => {
       setSubmitting(false);
     }
   };
-
-
 
   const categoryOptions = useMemo(() => {
     const opts = categories.map((c) => ({ label: c.name, value: c.name }));
@@ -1344,15 +1316,14 @@ const EditPackage = () => {
                           }
                           keyboardType="number-pad"
                           placeholder="30"
-                          // Typing here changes nothing while the spaces are in
-                          // charge, so the field says so instead of inviting an
-                          // edit the server would ignore.
-                          disabled={spacesRunStartTimes}
                           hint={
-                            spaceDrivenIntervalHint(selectedSpaceIntervals) ??
-                            (parseIntOrNull(s.interval)
-                              ? `A new start time every ${parseIntOrNull(s.interval)} min.`
-                              : "Minimum 15 minutes.")
+                            sessionMinutes == null
+                              ? "Minimum 15 minutes."
+                              : (scheduleIntervalMessage({
+                                  interval: parseIntOrNull(s.interval),
+                                  durationMinutes: sessionMinutes,
+                                  spaceIntervals: selectedSpaceIntervals,
+                                })?.text ?? "Minimum 15 minutes.")
                           }
                         />
                       </View>
@@ -1379,38 +1350,29 @@ const EditPackage = () => {
                       }
                     />
 
-                    {/* The starts a customer will actually be offered — run
-                        through the same rule the server applies, and labelled
-                        by whatever drives it, so a misconfiguration is visible
-                        before saving rather than after a customer cannot book. */}
+                    {/* The starts a customer will actually be offered, straight
+                        from the schedule interval, so a misconfiguration is
+                        visible before saving rather than after a customer
+                        cannot book. */}
                     {(() => {
                       const resolved =
                         sessionMinutes == null ? null : resolveSlotsFor(s);
-                      const source = resolved
-                        ? spaceDrivenSourceLabel(resolved)
-                        : null;
                       return (
                         <View className="border-t border-gray-100 dark:border-neutral-800 pt-3">
                           <Text className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">
                             Start times customers will see:
-                            {source ? (
-                              <Text className="font-normal text-gray-500 dark:text-gray-400">
-                                {" "}
-                                {source}
-                              </Text>
-                            ) : null}
                           </Text>
                           {resolved == null ? (
                             <Text className="text-xs text-gray-400 dark:text-gray-500">
                               Set the package duration to preview slots.
                             </Text>
-                          ) : resolved.slots.length === 0 ? (
+                          ) : resolved.length === 0 ? (
                             <Text className="text-xs text-gray-400 dark:text-gray-500">
                               No start times fit inside this window.
                             </Text>
                           ) : (
                             <View className="flex-row flex-wrap">
-                              {resolved.slots.map((slot) => (
+                              {resolved.map((slot) => (
                                 <View
                                   key={slot.start}
                                   className="mr-1.5 mb-1.5 rounded border border-gray-200 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
@@ -1442,7 +1404,9 @@ const EditPackage = () => {
                     No attractions available yet
                   </Text>
                   <Pressable
-                    onPress={() => router.push("/attractions/create-attraction")}
+                    onPress={() =>
+                      router.push("/attractions/create-attraction")
+                    }
                     className="mt-3 flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-4 py-2.5 active:opacity-90"
                     accessibilityRole="button"
                   >
@@ -1507,7 +1471,9 @@ const EditPackage = () => {
                         key={r.id}
                         label={r.name}
                         selected={roomSel.includes(r.id)}
-                        onPress={() => setRoomSel((prev) => toggleIn(prev, r.id))}
+                        onPress={() =>
+                          setRoomSel((prev) => toggleIn(prev, r.id))
+                        }
                       />
                     ))}
                   </View>
@@ -1552,7 +1518,9 @@ const EditPackage = () => {
                       label={a.name}
                       sub={a.price ? `$${a.price}` : undefined}
                       selected={addonOrder.includes(a.id)}
-                      onPress={() => setAddonOrder((prev) => toggleIn(prev, a.id))}
+                      onPress={() =>
+                        setAddonOrder((prev) => toggleIn(prev, a.id))
+                      }
                     />
                   ))}
                 </View>
@@ -1631,7 +1599,6 @@ const EditPackage = () => {
                   </View>
                 </View>
 
-
                 {/* Per-additional pricing — only with a max cap and base pricing (web parity). */}
                 {maxParticipants.trim() !== "" && !perPerson && (
                   <TextField
@@ -1642,8 +1609,6 @@ const EditPackage = () => {
                     placeholder="Enter price per additional"
                   />
                 )}
-
-
               </View>
             </Section>
 
@@ -1713,7 +1678,9 @@ const EditPackage = () => {
                     <Text className="text-sm text-gray-600 dark:text-gray-300">
                       days
                     </Text>
-                    <Text className="text-gray-300 dark:text-neutral-700">|</Text>
+                    <Text className="text-gray-300 dark:text-neutral-700">
+                      |
+                    </Text>
                     {/* Blank is "no limit" — the same value the API stores as null. */}
                     <Pressable
                       onPress={() => setBookingWindowDays("")}
@@ -1738,12 +1705,14 @@ const EditPackage = () => {
                   {bookingWindowDays.trim() !== "" && (
                     <Text className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                       Customers can book up to {bookingWindowDays} days
-                      {bookingWindowMonths ? ` (${bookingWindowMonths})` : ""} in
-                      advance
+                      {bookingWindowMonths
+                        ? ` (${bookingWindowMonths})`
+                        : ""}{" "}
+                      in advance
                     </Text>
                   )}
                 </View>
-  
+
                 {/* Advance Booking Time — how close to the slot a customer may book. */}
                 <View>
                   <Text className="text-sm font-bold text-gray-900 dark:text-white">
@@ -1754,10 +1723,10 @@ const EditPackage = () => {
                   </Text>
                   <Text className="mt-0.5 mb-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
                     Set how far in advance customers must book. For example,
-                    setting 48 hours means if a customer visits on Monday at 2:00
-                    PM, the earliest available time slot would be Wednesday at
-                    2:00 PM. This only affects customer-facing bookings — staff
-                    can still book freely.
+                    setting 48 hours means if a customer visits on Monday at
+                    2:00 PM, the earliest available time slot would be Wednesday
+                    at 2:00 PM. This only affects customer-facing bookings —
+                    staff can still book freely.
                   </Text>
                   <View className="flex-row flex-wrap">
                     {ADVANCE_NOTICE_PRESETS.map((p) => (
@@ -1805,9 +1774,9 @@ const EditPackage = () => {
                   {minNotice.trim() !== "" && minNotice !== "0" && (
                     <Text className="mt-1.5 text-xs text-[#0644C7]">
                       Customers must book at least {minNotice} hours (
-                      {(Number(minNotice) / 24).toFixed(1)} days) in advance. Any
-                      time slots within this window from the current time will be
-                      hidden.
+                      {(Number(minNotice) / 24).toFixed(1)} days) in advance.
+                      Any time slots within this window from the current time
+                      will be hidden.
                     </Text>
                   )}
                 </View>
@@ -1910,7 +1879,7 @@ const EditPackage = () => {
               <Text className="text-lg font-bold text-gray-900 dark:text-white mb-4">
                 Live Preview
               </Text>
-  
+
               <View className="flex-row items-start justify-between gap-3">
                 <Text
                   className={`flex-1 text-xl font-bold ${
@@ -1927,7 +1896,7 @@ const EditPackage = () => {
                     : "$--"}
                 </Text>
               </View>
-  
+
               <Text
                 className={`mt-0.5 text-xs ${
                   previewCategory
@@ -1937,7 +1906,7 @@ const EditPackage = () => {
               >
                 {previewCategory || "Category"}
               </Text>
-  
+
               <View className="mt-2 flex-row items-center gap-1.5">
                 <Feather name="clock" size={13} color="#6B7280" />
                 <Text className="text-xs font-bold text-gray-700 dark:text-gray-200">
@@ -1947,7 +1916,7 @@ const EditPackage = () => {
                   {previewDuration}
                 </Text>
               </View>
-  
+
               <View className="mt-1 flex-row items-start gap-1.5">
                 <Feather
                   name="calendar"
@@ -1998,7 +1967,7 @@ const EditPackage = () => {
               >
                 {description.trim() || "Description"}
               </Text>
-  
+
               <View className="mt-3 gap-1.5">
                 <Text className="text-xs text-gray-600 dark:text-gray-300">
                   <Text className="font-bold text-gray-900 dark:text-white">
