@@ -46,7 +46,11 @@ describe("buildBookingParams / readBookingPrefill round trip", () => {
   });
 
   it("auto-selects a single valid package via packageId", () => {
-    const params = buildBookingParams({ date: "2026-09-20", minute: 600, packageId: 9 });
+    const params = buildBookingParams({
+      date: "2026-09-20",
+      minute: 600,
+      packageId: 9,
+    });
     const prefill = readBookingPrefill(params);
     assert.equal(prefill.packageId, 9);
     assert.deepEqual(prefill.packageIds, []);
@@ -65,11 +69,21 @@ describe("buildBookingParams / readBookingPrefill round trip", () => {
     assert.deepEqual(prefill.packageIds, [3, 7, 11]);
   });
 
-  it("omits package_ids entirely for zero or one candidate (nothing to narrow)", () => {
-    assert.equal(buildBookingParams({ date: "2026-09-20", minute: 600, packageIds: [] }).package_ids, undefined);
+  it("omits package_ids entirely for zero candidates (nothing to narrow)", () => {
     assert.equal(
-      buildBookingParams({ date: "2026-09-20", minute: 600, packageIds: [5] }).package_ids,
+      buildBookingParams({ date: "2026-09-20", minute: 600, packageIds: [] })
+        .package_ids,
       undefined,
+    );
+  });
+
+  it("carries a single candidate through package_ids too, not just package_id", () => {
+    // an off-grid click can leave the lone candidate out of packageId, so
+    // packageIds must still carry it or the package is lost entirely
+    assert.equal(
+      buildBookingParams({ date: "2026-09-20", minute: 600, packageIds: [5] })
+        .package_ids,
+      "5",
     );
   });
 
@@ -109,5 +123,21 @@ describe("buildBookingParams / readBookingPrefill round trip", () => {
     assert.equal(prefill.freeUntilMinutes, null);
     assert.equal(prefill.freeUntilKnown, false);
     assert.equal(prefill.walkIn, false);
+  });
+
+  it("carries the click as an unwrapped absolute minute past midnight", () => {
+    const params = buildBookingParams({
+      date: "2026-09-20",
+      minute: 25 * 60 + 30,
+    });
+    assert.equal(params.time, "01:30");
+    const prefill = readBookingPrefill(params);
+    assert.equal(prefill.time, "01:30");
+    assert.equal(prefill.startMinutes, 25 * 60 + 30);
+  });
+
+  it("falls back to the wrapped minute when start_minutes is missing", () => {
+    const prefill = readBookingPrefill({ time: "01:30" });
+    assert.equal(prefill.startMinutes, 90);
   });
 });

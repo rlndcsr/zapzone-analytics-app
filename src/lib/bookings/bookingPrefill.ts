@@ -22,6 +22,7 @@ export type BookingPrefill = {
   packageIds: number[];
   freeUntilMinutes: number | null;
   freeUntilKnown: boolean;
+  startMinutes: number | null;
   walkIn: boolean;
   hasAny: boolean;
 };
@@ -47,18 +48,23 @@ export function buildBookingParams(
   if (prefill.locationId != null)
     params.location_id = String(prefill.locationId);
   if (prefill.date) params.date = prefill.date;
-  if (Number.isFinite(prefill.minute))
+  if (Number.isFinite(prefill.minute)) {
     params.time = minutesToClock(prefill.minute);
+    params.start_minutes = String(Math.round(prefill.minute));
+  }
   if (prefill.roomId != null) params.room_id = String(prefill.roomId);
   if (prefill.packageId != null) params.package_id = String(prefill.packageId);
 
   const candidates = (prefill.packageIds ?? []).filter(
     (id) => Number.isInteger(id) && id > 0,
   );
-  if (candidates.length > 1)
+  if (candidates.length > 0)
     params.package_ids = Array.from(new Set(candidates)).join(",");
 
-  if (prefill.freeUntilMinute != null && Number.isFinite(prefill.freeUntilMinute)) {
+  if (
+    prefill.freeUntilMinute != null &&
+    Number.isFinite(prefill.freeUntilMinute)
+  ) {
     params.free_until_minutes = String(Math.round(prefill.freeUntilMinute));
   }
   if (prefill.walkIn) params.walk_in = "1";
@@ -112,6 +118,11 @@ export function readBookingPrefill(params: RawParams): BookingPrefill {
     packageIds: toIdList(params.package_ids),
     freeUntilMinutes,
     freeUntilKnown: freeUntilMinutes !== null,
+    startMinutes: (() => {
+      const raw = first(params.start_minutes);
+      const n = raw === null ? NaN : Number(raw);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n) : minute;
+    })(),
     walkIn: first(params.walk_in) === "1",
     hasAny: false,
   };

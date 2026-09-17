@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { packagesValidForSlot, type SchedulePackageCandidate } from "./packageCandidates.ts";
+import { packageServesRoom, packagesValidForSlot, type SchedulePackageCandidate } from "./packageCandidates.ts";
+
+describe("packageServesRoom", () => {
+  it("treats a package with no room list as serving every room", () => {
+    assert.equal(packageServesRoom({ rooms: [] }, 10), true);
+    assert.equal(packageServesRoom(null, 10), true);
+  });
+
+  it("requires the room to be one of the package's own", () => {
+    const pkg = { rooms: [{ id: 10 }, { id: 11 }] };
+    assert.equal(packageServesRoom(pkg, 10), true);
+    assert.equal(packageServesRoom(pkg, 12), false);
+  });
+});
 
 describe("packagesValidForSlot", () => {
   it("auto-selects when exactly one package is valid", () => {

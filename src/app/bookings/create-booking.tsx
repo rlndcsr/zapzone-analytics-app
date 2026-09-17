@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
+import { useColorScheme } from "nativewind";
 import {
   useEffect,
   useMemo,
@@ -21,20 +22,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColorScheme } from "nativewind";
 
-import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
-import { InputField } from "../../components/ui/InputField";
-import {
-  MONTHS as CALENDAR_MONTHS,
-  addMonths,
-  buildMonthCells,
-  parseKey,
-  toKey,
-} from "../../lib/date/calendar";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
-import { packageIsCallToBook } from "../../lib/callToBook";
+import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
+import { InputField } from "../../components/ui/InputField";
 import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
@@ -43,17 +35,40 @@ import {
   seedForcedAddOns,
 } from "../../lib/addOnQuantity";
 import {
+  clockToMinutes,
+  minutesToClock,
+  readBookingPrefill,
+} from "../../lib/bookings/bookingPrefill";
+import { packageServesRoom } from "../../lib/bookings/packageCandidates";
+import {
+  isBlankOrValidEmail,
+  isWalkInCustomerValid,
+} from "../../lib/bookings/walkInCustomer";
+import { packageIsCallToBook } from "../../lib/callToBook";
+import {
+  addMonths,
+  buildMonthCells,
+  MONTHS as CALENDAR_MONTHS,
+  parseKey,
+  toKey,
+} from "../../lib/date/calendar";
+import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
+import { markBookingsStale } from "../../lib/hooks/useBookings";
+import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
+import {
+  packagePriceForParticipants,
+  participantLabelFor,
+} from "../../lib/packages/packagePricing";
+import {
   clampParticipants,
   participantMax,
   participantMin,
 } from "../../lib/participants";
 import {
-  packagePriceForParticipants,
-  participantLabelFor,
-} from "../../lib/packages/packagePricing";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
-import { markBookingsStale } from "../../lib/hooks/useBookings";
-import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
+  credentialsMatchChargeLocation,
+  STALE_GATEWAY_LOCATION_MESSAGE,
+} from "../../lib/payments/acceptJsLocation";
 import {
   formatCardNumber,
   getCardType,
@@ -61,36 +76,13 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
+import { derivePaymentStatus } from "../../lib/payments/paymentState";
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
-import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
-import { derivePaymentStatus } from "../../lib/payments/paymentState";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
 import { formatDuration } from "../../lib/time";
 import { normalizeCategory } from "../../lib/venueCategories";
-import {
-  CHARGE_UNKNOWN_MESSAGE,
-  chargeOutcomeUnknown,
-  declineMessage,
-  fetchAuthorizeNetPublicKey,
-  PAYMENT_TYPE,
-  processCardPayment,
-  type AuthorizeNetPublicKey,
-} from "../../services/paymentsService";
-import {
-  credentialsMatchChargeLocation,
-  STALE_GATEWAY_LOCATION_MESSAGE,
-} from "../../lib/payments/acceptJsLocation";
-import {
-  buildAppliedDiscounts,
-  buildAppliedFees,
-  fetchFeeBreakdown,
-  fetchSpecialPricing,
-  resolveFreshPricing,
-  type FeeBreakdown,
-  type SpecialPricingBreakdown,
-} from "../../services/pricingService";
 import {
   createBooking,
   fetchAvailableTimeSlots,
@@ -103,18 +95,33 @@ import {
   type PackageAvailabilitySchedule,
   type PackageListItem,
 } from "../../services/bookingsService";
-import { searchCustomers, type CustomerHit } from "../../services/customersService";
+import {
+  searchCustomers,
+  type CustomerHit,
+} from "../../services/customersService";
 import {
   validateGiftCardCode,
   validatePromoCode,
   type DiscountCodeResult,
 } from "../../services/discountCodesService";
 import {
-  clockToMinutes,
-  minutesToClock,
-  readBookingPrefill,
-} from "../../lib/bookings/bookingPrefill";
-import { isBlankOrValidEmail, isWalkInCustomerValid } from "../../lib/bookings/walkInCustomer";
+  CHARGE_UNKNOWN_MESSAGE,
+  chargeOutcomeUnknown,
+  declineMessage,
+  fetchAuthorizeNetPublicKey,
+  PAYMENT_TYPE,
+  processCardPayment,
+  type AuthorizeNetPublicKey,
+} from "../../services/paymentsService";
+import {
+  buildAppliedDiscounts,
+  buildAppliedFees,
+  fetchFeeBreakdown,
+  fetchSpecialPricing,
+  resolveFreshPricing,
+  type FeeBreakdown,
+  type SpecialPricingBreakdown,
+} from "../../services/pricingService";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -130,8 +137,18 @@ const CARD_SHADOW = {
 const pad = (n: number) => String(n).padStart(2, "0");
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 /** Unabbreviated month names for the inline calendar header ("July 2026"). */
 const FULL_MONTHS = CALENDAR_MONTHS;
@@ -151,7 +168,6 @@ type PaymentMethod = "authorize.net" | "in-store" | "paylater";
 
 type PaymentType = "full" | "partial" | "custom";
 
-// Wizard steps (mirrors the web /bookings/create flow order).
 const STEP_LABELS = [
   "Package",
   "Date & Time",
@@ -160,7 +176,6 @@ const STEP_LABELS = [
   "Payment",
 ] as const;
 
-/** Heading shown at the top of each step's content (web wizard headings). */
 const STEP_HEADINGS = [
   "Select a Package",
   "Select Space, Date & Time",
@@ -169,7 +184,6 @@ const STEP_HEADINGS = [
   "Review & Payment",
 ] as const;
 const TOTAL_STEPS = STEP_LABELS.length;
-
 
 const Section = ({
   icon,
@@ -180,21 +194,27 @@ const Section = ({
   title: string;
   children: React.ReactNode;
 }) => (
-  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm" style={CARD_SHADOW}>
+  <View
+    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-4 shadow-sm"
+    style={CARD_SHADOW}
+  >
     <View className="flex-row items-center gap-2 mb-4">
       <View className="w-8 h-8 rounded-lg bg-[#0644C7]/10 items-center justify-center">
         <Feather name={icon} size={16} color={PRIMARY} />
       </View>
-      <Text className="text-base font-bold text-gray-900 dark:text-white">{title}</Text>
+      <Text className="text-base font-bold text-gray-900 dark:text-white">
+        {title}
+      </Text>
     </View>
     {children}
   </View>
 );
 
 const FieldLabel = ({ children }: { children: React.ReactNode }) => (
-  <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">{children}</Text>
+  <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+    {children}
+  </Text>
 );
-
 
 const Stepper = ({
   value,
@@ -212,10 +232,16 @@ const Stepper = ({
       onPress={() => onChange(Math.max(min, value - 1))}
       disabled={value <= min}
       className={`w-9 h-9 rounded-full items-center justify-center border ${
-        value <= min ? "border-gray-200 dark:border-neutral-800" : "border-gray-300 dark:border-neutral-600"
+        value <= min
+          ? "border-gray-200 dark:border-neutral-800"
+          : "border-gray-300 dark:border-neutral-600"
       }`}
     >
-      <Feather name="minus" size={16} color={value <= min ? "#D1D5DB" : "#374151"} />
+      <Feather
+        name="minus"
+        size={16}
+        color={value <= min ? "#D1D5DB" : "#374151"}
+      />
     </Pressable>
     <Text className="w-8 text-center text-base font-semibold text-gray-900 dark:text-white">
       {value}
@@ -224,18 +250,25 @@ const Stepper = ({
       onPress={() => onChange(Math.min(max, value + 1))}
       disabled={value >= max}
       className={`w-9 h-9 rounded-full items-center justify-center border ${
-        value >= max ? "border-gray-200 dark:border-neutral-800" : "border-gray-300 dark:border-neutral-600"
+        value >= max
+          ? "border-gray-200 dark:border-neutral-800"
+          : "border-gray-300 dark:border-neutral-600"
       }`}
     >
-      <Feather name="plus" size={16} color={value >= max ? "#D1D5DB" : "#374151"} />
+      <Feather
+        name="plus"
+        size={16}
+        color={value >= max ? "#D1D5DB" : "#374151"}
+      />
     </Pressable>
   </View>
 );
 
-/** Label / value line in the step-5 review blocks (web's definition rows). */
 const ReviewRow = ({ label, value }: { label: string; value: string }) => (
   <View className="flex-row items-start justify-between py-1.5">
-    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">{label}</Text>
+    <Text className="text-sm text-gray-500 dark:text-gray-400 mr-3">
+      {label}
+    </Text>
     <Text
       numberOfLines={2}
       className="flex-1 text-right text-sm font-medium text-gray-900 dark:text-white"
@@ -247,11 +280,6 @@ const ReviewRow = ({ label, value }: { label: string; value: string }) => (
 
 const LEGEND_SWATCH = "w-3 h-3 rounded-sm";
 
-/**
- * One add-on / attraction row — thumbnail placeholder, name, price, then an
- * "Add" button that becomes a ± stepper once any are added (the web shows Add
- * and moves the item into the summary; a stepper is the touch equivalent).
- */
 const AddOnRow = ({
   name,
   price,
@@ -267,12 +295,10 @@ const AddOnRow = ({
   name: string;
   price: string;
   qty: number;
-  /** Thumbnail URL; falls back to the "No Image" tile when absent. */
   image?: string | null;
-  /** Quantity-rule hint ("Required · min 2", "Min 3"), or null when unbounded. */
+  /** Quantity-rule hint ("Required · min 2", "Min 3") or null when unbounded. */
   note?: string | null;
   noteTone?: "muted" | "required";
-  /** Stepper floor — above 0 for a required add-on, which cannot be removed. */
   min?: number;
   max?: number;
   onAdd: () => void;
@@ -362,11 +388,6 @@ const SummaryItemRow = ({
   </View>
 );
 
-/**
- * Inline month grid for picking the visit date — the web's "Select Date" card.
- * Today onward is selectable; earlier days render as unavailable. Rows are built
- * a week at a time with `flex-1` cells so the seven columns always align.
- */
 const MonthCalendar = ({
   value,
   onSelect,
@@ -496,7 +517,9 @@ const MonthCalendar = ({
           </Text>
         </View>
         <View className="flex-row items-center gap-1.5">
-          <View className={`${LEGEND_SWATCH} bg-gray-100 dark:bg-neutral-800`} />
+          <View
+            className={`${LEGEND_SWATCH} bg-gray-100 dark:bg-neutral-800`}
+          />
           <Text className="text-[10px] text-gray-500 dark:text-gray-400">
             Unavailable
           </Text>
@@ -506,11 +529,6 @@ const MonthCalendar = ({
   );
 };
 
-/**
- * Segmented progress bar with a label under each segment — the web wizard's
- * header. Completed and current steps fill blue; the label of the current step
- * is highlighted.
- */
 const StepIndicator = ({ step }: { step: number }) => (
   <View className="px-3 pt-3 pb-2 bg-white dark:bg-neutral-900 border-b border-gray-100 dark:border-neutral-800">
     <View className="flex-row gap-1.5">
@@ -544,35 +562,25 @@ const StepIndicator = ({ step }: { step: number }) => (
 
 const CreateBookingScreen = () => {
   const insets = useSafeAreaInsets();
-  // The update reminder floats above every screen until the app is
-  // updated; without this it would sit on top of the buttons below.
   const updateNoticeInset = useAppUpdateNoticeInset();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
 
-  // A tap on a Space Schedule free slot arrives here as route params — location,
-  // date, start time, room, and the package(s) valid for that room/time.
-  // Re-parsed only when the params object itself changes (expo-router gives a
-  // stable reference across re-renders that don't touch the URL).
   const searchParams = useLocalSearchParams();
-  const slotPrefill = useMemo(() => readBookingPrefill(searchParams), [searchParams]);
-  // Guards so the prefill lands exactly once — re-picking a package afterward
-  // must never re-apply the original click's date/room (web parity).
+  const slotPrefill = useMemo(
+    () => readBookingPrefill(searchParams),
+    [searchParams],
+  );
   const prefillAppliedRef = useRef(false);
   const prefillLandedRef = useRef(false);
   const prefillTimeCheckedRef = useRef(false);
+  const slotsAnsweredForRef = useRef("");
   const [showAllPackages, setShowAllPackages] = useState(false);
 
-  // Wizard step (1..5).
   const [step, setStep] = useState(1);
 
-  // Location filter (company admins only). Left null by default — the backend
-  // auth-scopes packages by role, so a location manager is limited to their own
-  // location automatically and an admin sees all company packages until they
-  // pick a location to narrow by. A prefilled location narrows the search the
-  // same way a manual pick would.
   const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
     isCompanyAdmin ? (slotPrefill.locationId ?? null) : null,
   );
@@ -584,22 +592,15 @@ const CreateBookingScreen = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [metrics]);
 
-  // Package catalog — mobile-first: a LIGHTWEIGHT, paginated, server-searchable
-  // list (scalars only; relations discarded). The heavy full package is fetched
-  // only when one is selected ({@link fetchBookablePackageDetail}). This keeps
-  // memory tiny — the /packages index eager-loads 7 relations per package, so
-  // retaining a hydrated list is what crashed the app.
   const [packageItems, setPackageItems] = useState<PackageListItem[]>([]);
   const [pkgPage, setPkgPage] = useState(1);
   const [pkgLastPage, setPkgLastPage] = useState(1);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [packageSearch, setPackageSearch] = useState("");
-  // The selected package, fully hydrated (add-ons/attractions/deposit rules).
   const [pkg, setPkg] = useState<BookablePackage | null>(null);
   const [pickingId, setPickingId] = useState<number | null>(null);
 
-  // Load page 1 on entry and whenever the location filter or search changes.
   useEffect(() => {
     const token = getToken();
     if (!token) return;
@@ -658,22 +659,23 @@ const CreateBookingScreen = () => {
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [addonQty, setAddonQty] = useState<Record<number, number>>({});
-  const [attractionQty, setAttractionQty] = useState<Record<number, number>>({});
+  const [attractionQty, setAttractionQty] = useState<Record<number, number>>(
+    {},
+  );
   const [gohName, setGohName] = useState("");
   const [gohAge, setGohAge] = useState("");
-  const [gohGender, setGohGender] = useState<"male" | "female" | "other" | "">("");
+  const [gohGender, setGohGender] = useState<"male" | "female" | "other" | "">(
+    "",
+  );
   const [notes, setNotes] = useState("");
 
   // Payment.
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("in-store");
-  // Deposit-first, matching the web's `paymentType: 'partial'` default.
   const [paymentType, setPaymentType] = useState<PaymentType>("partial");
   const [customAmount, setCustomAmount] = useState("");
   const [inStoreAmount, setInStoreAmount] = useState("");
   const [sendEmail, setSendEmail] = useState(true);
-  /** Staff notification — the web's second checkbox on the payment step. */
   const [sendStaffEmail, setSendStaffEmail] = useState(true);
-  // Card (Authorize.Net) fields — same anatomy as the web Card Details panel.
   const [cardNumber, setCardNumber] = useState("");
   const [cardMonth, setCardMonth] = useState("");
   const [cardYear, setCardYear] = useState("");
@@ -682,55 +684,42 @@ const CreateBookingScreen = () => {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [authorizeCredentials, setAuthorizeCredentials] =
     useState<AuthorizeNetPublicKey | null>(null);
-  /** The location `authorizeCredentials` was actually fetched for — Accept.js
-   *  binds a token to the api_login_id that minted it, so this must match the
-   *  location about to be charged before we ever tokenize (web parity: "Bind
-   *  Accept.js credentials to the location being charged"). */
   const [authorizeCredentialsLocationId, setAuthorizeCredentialsLocationId] =
     useState<number | null>(null);
-  /** This location has no active merchant account (web's "Authorize.Net Not
-   *  Configured" modal). */
   const [authorizeUnavailable, setAuthorizeUnavailable] = useState(false);
   const qr = useQrDataUri();
 
   // Customer (email search-as-you-type).
   const [customerEmail, setCustomerEmail] = useState("");
-  // First/last are the entry fields (matching the web); `customerName` stays the
-  // single value the create payload and summary use.
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const customerName = `${firstName.trim()} ${lastName.trim()}`.trim();
   const [customerPhone, setCustomerPhone] = useState("");
 
-  // Guest address (all optional) — posted as the guest_* fields on create.
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [stateField, setStateField] = useState("");
   const [zip, setZip] = useState("");
   const [country, setCountry] = useState("");
 
-  // Discount codes — validated against the running subtotal, redeemed by the
-  // backend when the booking is created.
   const [giftCode, setGiftCode] = useState("");
   const [promoCode, setPromoCode] = useState("");
   const [giftResult, setGiftResult] = useState<DiscountCodeResult | null>(null);
-  const [promoResult, setPromoResult] = useState<DiscountCodeResult | null>(null);
+  const [promoResult, setPromoResult] = useState<DiscountCodeResult | null>(
+    null,
+  );
   const [codeBusy, setCodeBusy] = useState<"gift" | "promo" | null>(null);
   const [foundCustomers, setFoundCustomers] = useState<CustomerHit[]>([]);
   const [showCustomerList, setShowCustomerList] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const submitLockRef = useRef(false);
-  /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
-   *  produce a second card charge. */
   const lastSubmitAtRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
 
-  // Land at the top of each step instead of keeping the previous scroll offset.
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [step]);
-
 
   // Pricing (fees + special pricing), fetched only on the Payment step.
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
@@ -753,7 +742,9 @@ const CreateBookingScreen = () => {
         if (!active) return;
         setFoundCustomers(hits);
         setShowCustomerList(hits.length > 0);
-        const exact = hits.find((c) => c.email.toLowerCase() === email.toLowerCase());
+        const exact = hits.find(
+          (c) => c.email.toLowerCase() === email.toLowerCase(),
+        );
         if (exact) {
           setFirstName(exact.firstName);
           setLastName(exact.lastName);
@@ -777,11 +768,6 @@ const CreateBookingScreen = () => {
     setShowCustomerList(false);
   };
 
-  /**
-   * Quote a gift-card or promo code against the current subtotal. The endpoints
-   * only validate — the backend redeems on booking creation — so a success here
-   * just shows what the code is worth.
-   */
   const applyCode = async (kind: "gift" | "promo") => {
     const code = (kind === "gift" ? giftCode : promoCode).trim();
     if (!code) return;
@@ -817,7 +803,9 @@ const CreateBookingScreen = () => {
   // Hydrate the full package on selection (relations needed for Steps 3 & 5).
   // Returns the fetched package so a caller (the prefill effect below) can
   // chain its own date/time/room application onto the same fetch.
-  const pickPackageById = async (id: number): Promise<BookablePackage | null> => {
+  const pickPackageById = async (
+    id: number,
+  ): Promise<BookablePackage | null> => {
     const token = getToken();
     if (!token) return null;
     setPickingId(id);
@@ -857,7 +845,8 @@ const CreateBookingScreen = () => {
   // list to contain them all.
   const [slotPackages, setSlotPackages] = useState<PackageListItem[]>([]);
   const [loadingSlotPackages, setLoadingSlotPackages] = useState(false);
-  const showNarrowedPackages = slotPrefill.packageIds.length > 1 && !showAllPackages;
+  const showNarrowedPackages =
+    slotPrefill.packageIds.length > 1 && !showAllPackages;
 
   useEffect(() => {
     if (slotPrefill.packageIds.length < 2) return;
@@ -865,24 +854,30 @@ const CreateBookingScreen = () => {
     if (!token) return;
     let active = true;
     setLoadingSlotPackages(true);
-    Promise.all(slotPrefill.packageIds.map((id) => fetchBookablePackageDetail(token, id).catch(() => null)))
+    Promise.all(
+      slotPrefill.packageIds.map((id) =>
+        fetchBookablePackageDetail(token, id).catch(() => null),
+      ),
+    )
       .then((results) => {
         if (!active) return;
         setSlotPackages(
-          results.filter((p): p is BookablePackage => p != null).map((p) => ({
-            id: p.id,
-            name: p.name,
-            description: p.description,
-            category: p.category,
-            price: p.price,
-            duration: p.duration,
-            durationUnit: p.durationUnit,
-            minParticipants: p.minParticipants,
-            maxParticipants: p.maxParticipants,
-            isActive: p.isActive,
-            locationId: p.locationId,
-            locationName: "",
-          })),
+          results
+            .filter((p): p is BookablePackage => p != null)
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              description: p.description,
+              category: p.category,
+              price: p.price,
+              duration: p.duration,
+              durationUnit: p.durationUnit,
+              minParticipants: p.minParticipants,
+              maxParticipants: p.maxParticipants,
+              isActive: p.isActive,
+              locationId: p.locationId,
+              locationName: "",
+            })),
         );
       })
       .finally(() => {
@@ -938,6 +933,7 @@ const CreateBookingScreen = () => {
     const token = getToken();
     if (!token) return;
     let active = true;
+    const answeredFor = `${pkg.id}|${scheduledDate}`;
     setLoadingSlots(true);
     setSlot(null);
     fetchAvailableTimeSlots(token, pkg.id, scheduledDate)
@@ -948,7 +944,10 @@ const CreateBookingScreen = () => {
         if (active) setSlots([]);
       })
       .finally(() => {
-        if (active) setLoadingSlots(false);
+        if (active) {
+          setLoadingSlots(false);
+          slotsAnsweredForRef.current = answeredFor;
+        }
       });
     return () => {
       active = false;
@@ -976,11 +975,23 @@ const CreateBookingScreen = () => {
     if (!slotPrefill.walkIn || !slotPrefill.time || !pkg) return null;
     if (!scheduledDate || scheduledDate !== slotPrefill.date) return null;
     if (slots.some((s) => s.startTime === slotPrefill.time)) return null;
+    // a package picked after the click may not even run in the clicked space
+    if (
+      slotPrefill.roomId != null &&
+      !packageServesRoom(pkg, slotPrefill.roomId)
+    ) {
+      return null;
+    }
 
-    const startMinutes = clockToMinutes(slotPrefill.time);
+    // unwrapped so a start after midnight compares correctly against freeUntilMinutes
+    const startMinutes =
+      slotPrefill.startMinutes ?? clockToMinutes(slotPrefill.time);
     if (startMinutes == null) return null;
     const endMinutes = startMinutes + packageDurationMinutes;
-    if (!slotPrefill.freeUntilKnown || endMinutes > (slotPrefill.freeUntilMinutes ?? -1)) {
+    if (
+      !slotPrefill.freeUntilKnown ||
+      endMinutes > (slotPrefill.freeUntilMinutes ?? -1)
+    ) {
       return null;
     }
 
@@ -1002,28 +1013,34 @@ const CreateBookingScreen = () => {
   );
 
   /**
-   * Re-selects the carried-over room/time once real slots have come back —
-   * never before. Checking against an empty `slots` array (because the fetch
-   * hadn't returned yet) is exactly the race the web version had: it always
-   * decided the time was no longer offered, because there was nothing to find
-   * it in yet. Runs once per landed prefill (`prefillTimeCheckedRef`), and
-   * waits for a package to actually be selected — the narrowed-list case has
-   * nothing to check against until staff picks one.
+   * Re-selects the carried-over room/time once real slots have come back for
+   * THIS package/date — never before. `slotsAnsweredForRef` is what actually
+   * guarantees that: `loadingSlots` alone still let this run against last
+   * render's empty `slots`, since the fetch effect above only flips it true on
+   * its own next render, one commit after this effect's stale pass. Runs once
+   * per landed prefill (`prefillTimeCheckedRef`), and waits for a package to
+   * actually be selected — the narrowed-list case has nothing to check
+   * against until staff picks one.
    */
   useEffect(() => {
     if (!prefillLandedRef.current || prefillTimeCheckedRef.current) return;
     if (!pkg || loadingSlots) return;
     if (scheduledDate !== slotPrefill.date) return;
+    // loadingSlots only flips true on the fetch effect's NEXT render, so without
+    // this a same-commit run above still sees last render's empty `slots`
+    if (slotsAnsweredForRef.current !== `${pkg.id}|${scheduledDate}`) return;
 
     prefillTimeCheckedRef.current = true;
     if (!slotPrefill.time && slotPrefill.roomId == null) return;
 
+    // matched by time alone — the server's own room for a real slot overrides
+    // whatever was clicked, so an unchecked room is never saved
     const matched =
-      slots.find(
-        (s) =>
-          (slotPrefill.time == null || s.startTime === slotPrefill.time) &&
-          (slotPrefill.roomId == null || s.roomId === slotPrefill.roomId),
-      ) ?? null;
+      (slotPrefill.time != null
+        ? slots.find((s) => s.startTime === slotPrefill.time)
+        : slotPrefill.roomId != null
+          ? slots.find((s) => s.roomId === slotPrefill.roomId)
+          : undefined) ?? null;
 
     if (matched) {
       setSlot(matched);
@@ -1088,7 +1105,10 @@ const CreateBookingScreen = () => {
     for (const a of pkg.attractions) {
       const qty = attractionQty[a.id] ?? 0;
       if (qty > 0) {
-        total += a.pricingType === "per_person" ? a.price * qty * participants : a.price * qty;
+        total +=
+          a.pricingType === "per_person"
+            ? a.price * qty * participants
+            : a.price * qty;
       }
     }
     for (const a of pkg.addOns) {
@@ -1098,7 +1118,10 @@ const CreateBookingScreen = () => {
     return Math.max(0, total);
   }, [pkg, participants, attractionQty, addonQty]);
 
-  const extraParticipants = Math.max(0, participants - (pkg?.minParticipants || 1));
+  const extraParticipants = Math.max(
+    0,
+    participants - (pkg?.minParticipants || 1),
+  );
 
   /** Selected add-ons / attractions with line totals, for the summary lists. */
   const chosenAddOns = useMemo(
@@ -1126,7 +1149,8 @@ const CreateBookingScreen = () => {
     [pkg, attractionQty, participants],
   );
 
-  const effectiveLocationId = pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
+  const effectiveLocationId =
+    pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
 
   /** Venue name + number for the Call to Book card — the booking's own venue. */
   const { name: venueName, phone: venuePhone } =
@@ -1135,7 +1159,8 @@ const CreateBookingScreen = () => {
   // Accept.js credentials for the booking's location — fetched as soon as the
   // card method is active, exactly like the web `initializeAuthorizeNet`.
   useEffect(() => {
-    if (paymentMethod !== "authorize.net" || effectiveLocationId == null) return;
+    if (paymentMethod !== "authorize.net" || effectiveLocationId == null)
+      return;
     // Clear immediately on location change — a token minted for the OLD
     // location must never sit around usable while the new location's fetch
     // is still in flight (web parity: credentials are bound to the location
@@ -1148,7 +1173,9 @@ const CreateBookingScreen = () => {
     fetchAuthorizeNetPublicKey(token, effectiveLocationId, controller.signal)
       .then((creds) => {
         setAuthorizeCredentials(creds.apiLoginId ? creds : null);
-        setAuthorizeCredentialsLocationId(creds.apiLoginId ? effectiveLocationId : null);
+        setAuthorizeCredentialsLocationId(
+          creds.apiLoginId ? effectiveLocationId : null,
+        );
         setAuthorizeUnavailable(!creds.apiLoginId);
       })
       .catch(() => {
@@ -1237,7 +1264,9 @@ const CreateBookingScreen = () => {
   const partialDeposit = useMemo(() => {
     if (!pkg) return 0;
     if (pkg.partialPaymentPercentage && pkg.partialPaymentPercentage > 0) {
-      return Math.round(subtotal * (pkg.partialPaymentPercentage / 100) * 100) / 100;
+      return (
+        Math.round(subtotal * (pkg.partialPaymentPercentage / 100) * 100) / 100
+      );
     }
     if (pkg.partialPaymentFixed && pkg.partialPaymentFixed > 0) {
       return Math.min(pkg.partialPaymentFixed, subtotal);
@@ -1294,7 +1323,12 @@ const CreateBookingScreen = () => {
       return "Test card numbers are not allowed. Please use a real card.";
     if (!authorizeCredentials?.apiLoginId)
       return "Payment system not initialized. Please reopen this screen and try again.";
-    if (!credentialsMatchChargeLocation(authorizeCredentialsLocationId, effectiveLocationId))
+    if (
+      !credentialsMatchChargeLocation(
+        authorizeCredentialsLocationId,
+        effectiveLocationId,
+      )
+    )
       return STALE_GATEWAY_LOCATION_MESSAGE;
     return null;
   };
@@ -1310,19 +1344,23 @@ const CreateBookingScreen = () => {
       d.setDate(today.getDate() + i);
       out.push({
         value: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-        label: i === 0 ? "Today" : `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`,
+        label:
+          i === 0
+            ? "Today"
+            : `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`,
       });
     }
     return out;
   }, []);
-  const dateLabel = dateOptions.find((d) => d.value === scheduledDate)?.label ?? null;
+  const dateLabel =
+    dateOptions.find((d) => d.value === scheduledDate)?.label ?? null;
 
-
-  const genderOptions: { label: string; value: "male" | "female" | "other" }[] = [
-    { label: "Male", value: "male" },
-    { label: "Female", value: "female" },
-    { label: "Other", value: "other" },
-  ];
+  const genderOptions: { label: string; value: "male" | "female" | "other" }[] =
+    [
+      { label: "Male", value: "male" },
+      { label: "Female", value: "female" },
+      { label: "Other", value: "other" },
+    ];
 
   // ---- Per-step validation -------------------------------------------------
   const stepValid = useMemo(() => {
@@ -1332,17 +1370,33 @@ const CreateBookingScreen = () => {
       case 2:
         // Date + participants are required; a slot only when the package has
         // any (otherwise the backend auto-assigns the space, as on the web).
-        return !!scheduledDate && participants >= 1 && (slots.length === 0 || !!slot);
+        return (
+          !!scheduledDate && participants >= 1 && (slots.length === 0 || !!slot)
+        );
       case 3:
         return true;
       case 4:
         // Name and phone are required; email is optional for a walk-in but
         // must be a real address when one is given (web parity).
-        return isWalkInCustomerValid({ name: customerName, phone: customerPhone, email: customerEmail });
+        return isWalkInCustomerValid({
+          name: customerName,
+          phone: customerPhone,
+          email: customerEmail,
+        });
       default:
         return true;
     }
-  }, [step, pkg, scheduledDate, slot, slots.length, participants, customerName, customerPhone, customerEmail]);
+  }, [
+    step,
+    pkg,
+    scheduledDate,
+    slot,
+    slots.length,
+    participants,
+    customerName,
+    customerPhone,
+    customerEmail,
+  ]);
 
   // A card booking can't be confirmed until the card details are complete and
   // the location actually has a merchant account (web parity).
@@ -1376,14 +1430,24 @@ const CreateBookingScreen = () => {
       !slot ||
       effectiveLocationId == null
     ) {
-      Alert.alert("Incomplete booking", "Please complete every step before submitting.");
+      Alert.alert(
+        "Incomplete booking",
+        "Please complete every step before submitting.",
+      );
       return;
     }
     if (!isBlankOrValidEmail(customerEmail)) {
-      Alert.alert("Invalid email", "Enter a valid email address, or leave it blank.");
+      Alert.alert(
+        "Invalid email",
+        "Enter a valid email address, or leave it blank.",
+      );
       return;
     }
-    if (paymentMethod !== "paylater" && paymentType === "custom" && !(Number(customAmount) > 0)) {
+    if (
+      paymentMethod !== "paylater" &&
+      paymentType === "custom" &&
+      !(Number(customAmount) > 0)
+    ) {
       Alert.alert("Invalid amount", "Enter a valid custom payment amount.");
       return;
     }
@@ -1416,10 +1480,18 @@ const CreateBookingScreen = () => {
     try {
       const additionalAddons = pkg.addOns
         .filter((a) => (addonQty[a.id] ?? 0) > 0)
-        .map((a) => ({ addon_id: a.id, quantity: addonQty[a.id], price_at_booking: a.price }));
+        .map((a) => ({
+          addon_id: a.id,
+          quantity: addonQty[a.id],
+          price_at_booking: a.price,
+        }));
       const additionalAttractions = pkg.attractions
         .filter((a) => (attractionQty[a.id] ?? 0) > 0)
-        .map((a) => ({ attraction_id: a.id, quantity: attractionQty[a.id], price_at_booking: a.price }));
+        .map((a) => ({
+          attraction_id: a.id,
+          quantity: attractionQty[a.id],
+          price_at_booking: a.price,
+        }));
 
       const { duration, unit } = durationForPayload();
 
@@ -1442,7 +1514,9 @@ const CreateBookingScreen = () => {
         time: slot.startTime,
       });
       const freshFeeBreakdown = freshPricing?.feeBreakdown ?? feeBreakdown;
-      const freshSubmitTotal = freshFeeBreakdown ? freshFeeBreakdown.total : subtotal;
+      const freshSubmitTotal = freshFeeBreakdown
+        ? freshFeeBreakdown.total
+        : subtotal;
       const freshSpecial = freshPricing?.specialPricing ?? special;
       const freshDiscount =
         (freshSpecial?.has_special_pricing ? freshSpecial.total_discount : 0) +
@@ -1454,7 +1528,10 @@ const CreateBookingScreen = () => {
           : paymentMethod === "in-store" && inStoreTyped > 0
             ? Math.min(inStoreTyped, freshSubmitTotal)
             : paymentType === "custom"
-              ? Math.min(Math.max(0, Number(customAmount) || 0), freshSubmitTotal)
+              ? Math.min(
+                  Math.max(0, Number(customAmount) || 0),
+                  freshSubmitTotal,
+                )
               : paymentType === "partial" && partialDeposit > 0
                 ? Math.min(partialDeposit, freshSubmitTotal)
                 : freshSubmitTotal;
@@ -1498,8 +1575,12 @@ const CreateBookingScreen = () => {
             ? { payment_status: "pending" as const }
             : {}),
         notes: notes.trim() || undefined,
-        additional_addons: additionalAddons.length ? additionalAddons : undefined,
-        additional_attractions: additionalAttractions.length ? additionalAttractions : undefined,
+        additional_addons: additionalAddons.length
+          ? additionalAddons
+          : undefined,
+        additional_attractions: additionalAttractions.length
+          ? additionalAttractions
+          : undefined,
         created_by: user?.id,
         guest_of_honor_name:
           pkg.hasGuestOfHonor && gohName.trim() ? gohName.trim() : undefined,
@@ -1535,7 +1616,9 @@ const CreateBookingScreen = () => {
       if (isCardPayment) {
         // The web encodes the booking's reference number (not its id) — that is
         // what the check-in scanner reads off a booking QR.
-        const qrCode = referenceNumber ? await qr.generate(referenceNumber) : null;
+        const qrCode = referenceNumber
+          ? await qr.generate(referenceNumber)
+          : null;
 
         let response;
         try {
@@ -1632,7 +1715,9 @@ const CreateBookingScreen = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">New Booking</Text>
+          <Text className="text-lg font-bold text-gray-900 dark:text-white">
+            New Booking
+          </Text>
           <View style={{ width: 36 }} />
         </View>
       </View>
@@ -1649,7 +1734,10 @@ const CreateBookingScreen = () => {
           className="flex-1"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={{
+            padding: 20,
+            paddingBottom: insets.bottom + 24,
+          }}
         >
           {/* Step heading, matching the web wizard's per-step <h2>. */}
           <Text className="mb-4 text-xl font-bold text-gray-900 dark:text-white">
@@ -1662,7 +1750,8 @@ const CreateBookingScreen = () => {
               {slotPrefill.hasAny && !slotPrefill.packageId && (
                 <View className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-900/10">
                   <Text className="text-xs font-medium text-blue-700 dark:text-blue-300">
-                    Date and time carried over from the schedule — choose a package to continue.
+                    Date and time carried over from the schedule — choose a
+                    package to continue.
                   </Text>
                 </View>
               )}
@@ -1670,9 +1759,14 @@ const CreateBookingScreen = () => {
               {showNarrowedPackages ? (
                 <Section icon="package" title="Suggested Packages">
                   <Text className="mb-3 text-xs text-gray-400 dark:text-gray-500">
-                    Showing the {slotPackages.length || slotPrefill.packageIds.length} package
-                    {(slotPackages.length || slotPrefill.packageIds.length) === 1 ? "" : "s"} that run in
-                    this space at the time you picked.
+                    Showing the{" "}
+                    {slotPackages.length || slotPrefill.packageIds.length}{" "}
+                    package
+                    {(slotPackages.length || slotPrefill.packageIds.length) ===
+                    1
+                      ? ""
+                      : "s"}{" "}
+                    that run in this space at the time you picked.
                   </Text>
                   {loadingSlotPackages ? (
                     <View className="py-8 items-center">
@@ -1694,7 +1788,10 @@ const CreateBookingScreen = () => {
                           }`}
                         >
                           <View className="flex-row items-start justify-between gap-3">
-                            <Text className="flex-1 text-base font-bold text-gray-900 dark:text-white" numberOfLines={2}>
+                            <Text
+                              className="flex-1 text-base font-bold text-gray-900 dark:text-white"
+                              numberOfLines={2}
+                            >
                               {p.name}
                             </Text>
                             <Text className="text-lg font-bold text-[#0644C7] dark:text-blue-400">
@@ -1704,14 +1801,26 @@ const CreateBookingScreen = () => {
                           <View className="mt-2 flex-row flex-wrap items-center gap-2">
                             {p.duration > 0 && (
                               <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
-                                <Feather name="clock" size={10} color="#9333EA" />
+                                <Feather
+                                  name="clock"
+                                  size={10}
+                                  color="#9333EA"
+                                />
                                 <Text className="text-[11px] text-purple-700 dark:text-purple-300">
                                   {formatDuration(p.duration, p.durationUnit)}
                                 </Text>
                               </View>
                             )}
-                            {picking && <ActivityIndicator size="small" color={PRIMARY} />}
-                            {active && !picking && <Feather name="check-circle" size={16} color={PRIMARY} />}
+                            {picking && (
+                              <ActivityIndicator size="small" color={PRIMARY} />
+                            )}
+                            {active && !picking && (
+                              <Feather
+                                name="check-circle"
+                                size={16}
+                                color={PRIMARY}
+                              />
+                            )}
                           </View>
                         </Pressable>
                       );
@@ -1721,183 +1830,222 @@ const CreateBookingScreen = () => {
                     onPress={() => setShowAllPackages(true)}
                     className="mt-1 py-3 items-center rounded-xl border border-gray-200 dark:border-neutral-700"
                   >
-                    <Text className="text-sm font-semibold text-[#0644C7]">Show all packages</Text>
+                    <Text className="text-sm font-semibold text-[#0644C7]">
+                      Show all packages
+                    </Text>
                   </Pressable>
                 </Section>
               ) : (
                 <>
-              {/* Location filter (company admin) — inline chips, optional. */}
-              {isCompanyAdmin && locationOptions.length > 0 && (
-                <Section icon="map-pin" title="Location">
-                  <Text className="mb-3 text-xs text-gray-400 dark:text-gray-500">
-                    Optional — narrow the package list to one location.
-                  </Text>
-                  <View className="flex-row flex-wrap gap-2">
-                    {[{ id: "all" as const, name: "All Locations" }, ...locationOptions].map(
-                      (o) => {
-                        const active =
-                          (o.id === "all" && selectedLocationId == null) ||
-                          o.id === selectedLocationId;
-                        return (
-                          <Pressable
-                            key={String(o.id)}
-                            onPress={() => {
-                              setSelectedLocationId(o.id === "all" ? null : o.id);
-                              setPkg(null);
-                            }}
-                            className={`px-3 py-2 rounded-full border ${
-                              active
-                                ? "bg-[#0644C7] border-[#0644C7]"
-                                : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                            }`}
-                          >
-                            <Text
-                              className={`text-xs font-medium ${
-                                active ? "text-white" : "text-gray-700 dark:text-gray-200"
+                  {/* Location filter (company admin) — inline chips, optional. */}
+                  {isCompanyAdmin && locationOptions.length > 0 && (
+                    <Section icon="map-pin" title="Location">
+                      <Text className="mb-3 text-xs text-gray-400 dark:text-gray-500">
+                        Optional — narrow the package list to one location.
+                      </Text>
+                      <View className="flex-row flex-wrap gap-2">
+                        {[
+                          { id: "all" as const, name: "All Locations" },
+                          ...locationOptions,
+                        ].map((o) => {
+                          const active =
+                            (o.id === "all" && selectedLocationId == null) ||
+                            o.id === selectedLocationId;
+                          return (
+                            <Pressable
+                              key={String(o.id)}
+                              onPress={() => {
+                                setSelectedLocationId(
+                                  o.id === "all" ? null : o.id,
+                                );
+                                setPkg(null);
+                              }}
+                              className={`px-3 py-2 rounded-full border ${
+                                active
+                                  ? "bg-[#0644C7] border-[#0644C7]"
+                                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
                               }`}
-                              numberOfLines={1}
                             >
-                              {o.name}
-                            </Text>
-                          </Pressable>
-                        );
-                      },
-                    )}
-                  </View>
-                </Section>
-              )}
-
-              {/* Package list — rendered IN-PAGE (like the web renderStep1), not
-                  in a Modal/BottomSheet, with an inline search box. */}
-              <Section icon="package" title="Packages">
-                <View className="h-12 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 rounded-lg border border-gray-300 dark:border-neutral-700 mb-4">
-                  <Feather name="search" size={16} color="#9CA3AF" />
-                  <TextInput
-                    value={packageSearch}
-                    onChangeText={setPackageSearch}
-                    placeholder="Search packages by name, category, or description..."
-                    placeholderTextColor="#9CA3AF"
-                    className="flex-1 text-sm text-gray-900 dark:text-white"
-                  />
-                </View>
-
-                {loadingPackages ? (
-                  <View className="py-8 items-center">
-                    <ActivityIndicator color={PRIMARY} />
-                  </View>
-                ) : packageItems.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 text-center py-6">
-                    {packageSearch.trim() ? "No packages match your search." : "No packages found."}
-                  </Text>
-                ) : (
-                  <>
-                    {packageItems.map((p) => {
-                      const active = pkg?.id === p.id;
-                      const picking = pickingId === p.id;
-                      return (
-                        <Pressable
-                          key={p.id}
-                          onPress={() => pickPackage(p)}
-                          disabled={pickingId != null}
-                          className={`rounded-lg border p-4 mb-3 ${
-                            active
-                              ? "border-[#0644C7] bg-[#0644C7]/5"
-                              : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-                          }`}
-                        >
-                          {/* Name + price, price right-aligned with its unit */}
-                          <View className="flex-row items-start justify-between gap-3">
-                            <Text
-                              className="flex-1 text-base font-bold text-gray-900 dark:text-white"
-                              numberOfLines={2}
-                            >
-                              {p.name}
-                            </Text>
-                            <View className="items-end">
-                              <View className="flex-row items-start">
-                                <Text className="text-[10px] text-gray-400 mt-1">$</Text>
-                                <Text className="text-2xl font-bold text-[#0644C7] dark:text-blue-400">
-                                  {p.price % 1 === 0 ? p.price : p.price.toFixed(2)}
-                                </Text>
-                              </View>
-                              <Text className="text-[10px] text-gray-500 dark:text-gray-400">
-                                per booking
+                              <Text
+                                className={`text-xs font-medium ${
+                                  active
+                                    ? "text-white"
+                                    : "text-gray-700 dark:text-gray-200"
+                                }`}
+                                numberOfLines={1}
+                              >
+                                {o.name}
                               </Text>
-                            </View>
-                          </View>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </Section>
+                  )}
 
-                          {!!p.description && (
-                            <Text
-                              numberOfLines={3}
-                              className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300"
+                  {/* Package list — rendered IN-PAGE (like the web renderStep1), not
+                  in a Modal/BottomSheet, with an inline search box. */}
+                  <Section icon="package" title="Packages">
+                    <View className="h-12 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 rounded-lg border border-gray-300 dark:border-neutral-700 mb-4">
+                      <Feather name="search" size={16} color="#9CA3AF" />
+                      <TextInput
+                        value={packageSearch}
+                        onChangeText={setPackageSearch}
+                        placeholder="Search packages by name, category, or description..."
+                        placeholderTextColor="#9CA3AF"
+                        className="flex-1 text-sm text-gray-900 dark:text-white"
+                      />
+                    </View>
+
+                    {loadingPackages ? (
+                      <View className="py-8 items-center">
+                        <ActivityIndicator color={PRIMARY} />
+                      </View>
+                    ) : packageItems.length === 0 ? (
+                      <Text className="text-sm text-gray-400 dark:text-gray-500 text-center py-6">
+                        {packageSearch.trim()
+                          ? "No packages match your search."
+                          : "No packages found."}
+                      </Text>
+                    ) : (
+                      <>
+                        {packageItems.map((p) => {
+                          const active = pkg?.id === p.id;
+                          const picking = pickingId === p.id;
+                          return (
+                            <Pressable
+                              key={p.id}
+                              onPress={() => pickPackage(p)}
+                              disabled={pickingId != null}
+                              className={`rounded-lg border p-4 mb-3 ${
+                                active
+                                  ? "border-[#0644C7] bg-[#0644C7]/5"
+                                  : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                              }`}
                             >
-                              {p.description}
-                            </Text>
-                          )}
+                              {/* Name + price, price right-aligned with its unit */}
+                              <View className="flex-row items-start justify-between gap-3">
+                                <Text
+                                  className="flex-1 text-base font-bold text-gray-900 dark:text-white"
+                                  numberOfLines={2}
+                                >
+                                  {p.name}
+                                </Text>
+                                <View className="items-end">
+                                  <View className="flex-row items-start">
+                                    <Text className="text-[10px] text-gray-400 mt-1">
+                                      $
+                                    </Text>
+                                    <Text className="text-2xl font-bold text-[#0644C7] dark:text-blue-400">
+                                      {p.price % 1 === 0
+                                        ? p.price
+                                        : p.price.toFixed(2)}
+                                    </Text>
+                                  </View>
+                                  <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    per booking
+                                  </Text>
+                                </View>
+                              </View>
 
-                          {/* Chips: location · category · duration · capacity */}
-                          <View className="mt-3 flex-row flex-wrap items-center gap-2">
-                            {!!p.locationName && (
-                              <View className="flex-row items-center gap-1 rounded border border-blue-200 px-2 py-1 dark:border-blue-900/50">
-                                <Feather name="map-pin" size={10} color={PRIMARY} />
-                                <Text className="text-[11px] text-[#0644C7] dark:text-blue-300">
-                                  {p.locationName}
+                              {!!p.description && (
+                                <Text
+                                  numberOfLines={3}
+                                  className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300"
+                                >
+                                  {p.description}
                                 </Text>
+                              )}
+
+                              {/* Chips: location · category · duration · capacity */}
+                              <View className="mt-3 flex-row flex-wrap items-center gap-2">
+                                {!!p.locationName && (
+                                  <View className="flex-row items-center gap-1 rounded border border-blue-200 px-2 py-1 dark:border-blue-900/50">
+                                    <Feather
+                                      name="map-pin"
+                                      size={10}
+                                      color={PRIMARY}
+                                    />
+                                    <Text className="text-[11px] text-[#0644C7] dark:text-blue-300">
+                                      {p.locationName}
+                                    </Text>
+                                  </View>
+                                )}
+                                {!!p.category && (
+                                  <View className="flex-row items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
+                                    <Feather
+                                      name="tag"
+                                      size={10}
+                                      color="#6B7280"
+                                    />
+                                    <Text className="text-[11px] text-gray-700 dark:text-gray-200">
+                                      {normalizeCategory(p.category)}
+                                    </Text>
+                                  </View>
+                                )}
+                                {p.duration > 0 && (
+                                  <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
+                                    <Feather
+                                      name="clock"
+                                      size={10}
+                                      color="#9333EA"
+                                    />
+                                    <Text className="text-[11px] text-purple-700 dark:text-purple-300">
+                                      {formatDuration(
+                                        p.duration,
+                                        p.durationUnit,
+                                      )}
+                                    </Text>
+                                  </View>
+                                )}
+                                {p.maxParticipants > 0 && (
+                                  <View className="flex-row items-center gap-1 rounded border border-green-200 px-2 py-1 dark:border-green-900/50">
+                                    <Feather
+                                      name="users"
+                                      size={10}
+                                      color="#16A34A"
+                                    />
+                                    <Text className="text-[11px] text-green-700 dark:text-green-300">
+                                      Up to {p.maxParticipants}
+                                    </Text>
+                                  </View>
+                                )}
+                                {picking && (
+                                  <ActivityIndicator
+                                    size="small"
+                                    color={PRIMARY}
+                                  />
+                                )}
+                                {active && !picking && (
+                                  <Feather
+                                    name="check-circle"
+                                    size={16}
+                                    color={PRIMARY}
+                                  />
+                                )}
                               </View>
-                            )}
-                            {!!p.category && (
-                              <View className="flex-row items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
-                                <Feather name="tag" size={10} color="#6B7280" />
-                                <Text className="text-[11px] text-gray-700 dark:text-gray-200">
-                                  {normalizeCategory(p.category)}
-                                </Text>
-                              </View>
-                            )}
-                            {p.duration > 0 && (
-                              <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
-                                <Feather name="clock" size={10} color="#9333EA" />
-                                <Text className="text-[11px] text-purple-700 dark:text-purple-300">
-                                  {formatDuration(p.duration, p.durationUnit)}
-                                </Text>
-                              </View>
-                            )}
-                            {p.maxParticipants > 0 && (
-                              <View className="flex-row items-center gap-1 rounded border border-green-200 px-2 py-1 dark:border-green-900/50">
-                                <Feather name="users" size={10} color="#16A34A" />
-                                <Text className="text-[11px] text-green-700 dark:text-green-300">
-                                  Up to {p.maxParticipants}
-                                </Text>
-                              </View>
-                            )}
-                            {picking && (
+                            </Pressable>
+                          );
+                        })}
+
+                        {pkgPage < pkgLastPage && (
+                          <Pressable
+                            onPress={loadMorePackages}
+                            disabled={loadingMore}
+                            className="mt-1 py-3 items-center rounded-xl border border-gray-200 dark:border-neutral-700"
+                          >
+                            {loadingMore ? (
                               <ActivityIndicator size="small" color={PRIMARY} />
+                            ) : (
+                              <Text className="text-sm font-semibold text-[#0644C7]">
+                                Load more
+                              </Text>
                             )}
-                            {active && !picking && (
-                              <Feather name="check-circle" size={16} color={PRIMARY} />
-                            )}
-                          </View>
-                        </Pressable>
-                      );
-                    })}
-
-                    {pkgPage < pkgLastPage && (
-                      <Pressable
-                        onPress={loadMorePackages}
-                        disabled={loadingMore}
-                        className="mt-1 py-3 items-center rounded-xl border border-gray-200 dark:border-neutral-700"
-                      >
-                        {loadingMore ? (
-                          <ActivityIndicator size="small" color={PRIMARY} />
-                        ) : (
-                          <Text className="text-sm font-semibold text-[#0644C7]">
-                            Load more
-                          </Text>
+                          </Pressable>
                         )}
-                      </Pressable>
+                      </>
                     )}
-                  </>
-                )}
-              </Section>
+                  </Section>
                 </>
               )}
             </>
@@ -1936,8 +2084,12 @@ const CreateBookingScreen = () => {
                     {pkg.minParticipants > 0
                       ? `${pkg.minParticipants} included`
                       : ""}
-                    {pkg.minParticipants > 0 && pkg.maxParticipants > 0 ? " • " : ""}
-                    {pkg.maxParticipants > 0 ? `Max: ${pkg.maxParticipants}` : ""}
+                    {pkg.minParticipants > 0 && pkg.maxParticipants > 0
+                      ? " • "
+                      : ""}
+                    {pkg.maxParticipants > 0
+                      ? `Max: ${pkg.maxParticipants}`
+                      : ""}
                   </Text>
                 </View>
               </View>
@@ -1954,147 +2106,151 @@ const CreateBookingScreen = () => {
                     onRequestCall={() => setCallToBookOpen(true)}
                   />
                 ) : (
-                <>
-                <View className="mb-2 flex-row items-center gap-1.5">
-                  <Feather name="clock" size={14} color="#6B7280" />
-                  <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                    Select Time Slot
-                  </Text>
-                </View>
-
-                {walkInSlot &&
-                  slot?.startTime === walkInSlot.startTime &&
-                  slot?.roomId === walkInSlot.roomId && (
-                    <View className="mb-3 flex-row flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/10">
-                      <Text className="rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                        Walk-in
-                      </Text>
-                      <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
-                        Starting at {formatTime(walkInSlot.startTime)} today — this is the time
-                        that will be recorded.
+                  <>
+                    <View className="mb-2 flex-row items-center gap-1.5">
+                      <Feather name="clock" size={14} color="#6B7280" />
+                      <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        Select Time Slot
                       </Text>
                     </View>
-                  )}
 
-                {!scheduledDate ? (
-                  <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
-                    <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
-                      Pick a date to see available times.
-                    </Text>
-                  </View>
-                ) : loadingSlots ? (
-                  <View className="py-6 items-center">
-                    <ActivityIndicator color={PRIMARY} />
-                  </View>
-                ) : displayedSlots.length === 0 ? (
-                  <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
-                    <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
-                      No available time slots for the selected date. Space will be
-                      auto-assigned.
-                    </Text>
-                  </View>
-                ) : (
-                  <View className="flex-row flex-wrap -m-1">
-                    {displayedSlots.map((s) => {
-                      const active =
-                        slot?.startTime === s.startTime &&
-                        slot?.roomId === s.roomId;
-                      const isWalkIn = s === walkInSlot;
-                      const soldOut = !isWalkIn && isSoldOut(s.remainingTickets);
-                      return (
-                        <View
-                          key={`${s.startTime}-${s.roomId ?? "auto"}`}
-                          style={{ width: "50%" }}
-                          className="p-1"
-                        >
-                          <Pressable
-                            onPress={() => setSlot(s)}
-                            disabled={soldOut}
-                            accessibilityRole="radio"
-                            accessibilityState={{
-                              selected: active,
-                              disabled: soldOut,
-                            }}
-                            className={`rounded-lg border-2 p-3 ${
-                              soldOut
-                                ? "border-gray-200 bg-gray-50 opacity-50 dark:border-neutral-800 dark:bg-neutral-900"
-                                : active
-                                  ? "border-[#0644C7] bg-[#0644C7]/5"
-                                  : "border-gray-200 dark:border-neutral-700"
-                            }`}
-                          >
-                            {/* Radio, time and the seats-left pill share the top
-                                row, the pill pushed to the far edge — the web's
-                                `flex items-center` + `ml-auto`. */}
-                            <View className="flex-row items-center gap-2">
-                              <Feather
-                                name={active ? "check-circle" : "circle"}
-                                size={14}
-                                color={
+                    {walkInSlot &&
+                      slot?.startTime === walkInSlot.startTime &&
+                      slot?.roomId === walkInSlot.roomId && (
+                        <View className="mb-3 flex-row flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/10">
+                          <Text className="rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                            Walk-in
+                          </Text>
+                          <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                            Starting at {formatTime(walkInSlot.startTime)} today
+                            — this is the time that will be recorded.
+                          </Text>
+                        </View>
+                      )}
+
+                    {!scheduledDate ? (
+                      <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
+                        <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
+                          Pick a date to see available times.
+                        </Text>
+                      </View>
+                    ) : loadingSlots ? (
+                      <View className="py-6 items-center">
+                        <ActivityIndicator color={PRIMARY} />
+                      </View>
+                    ) : displayedSlots.length === 0 ? (
+                      <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
+                        <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
+                          No available time slots for the selected date. Space
+                          will be auto-assigned.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View className="flex-row flex-wrap -m-1">
+                        {displayedSlots.map((s) => {
+                          const active =
+                            slot?.startTime === s.startTime &&
+                            slot?.roomId === s.roomId;
+                          const isWalkIn = s === walkInSlot;
+                          const soldOut =
+                            !isWalkIn && isSoldOut(s.remainingTickets);
+                          return (
+                            <View
+                              key={`${s.startTime}-${s.roomId ?? "auto"}`}
+                              style={{ width: "50%" }}
+                              className="p-1"
+                            >
+                              <Pressable
+                                onPress={() => setSlot(s)}
+                                disabled={soldOut}
+                                accessibilityRole="radio"
+                                accessibilityState={{
+                                  selected: active,
+                                  disabled: soldOut,
+                                }}
+                                className={`rounded-lg border-2 p-3 ${
                                   soldOut
-                                    ? "#D1D5DB"
+                                    ? "border-gray-200 bg-gray-50 opacity-50 dark:border-neutral-800 dark:bg-neutral-900"
                                     : active
-                                      ? PRIMARY
-                                      : "#9CA3AF"
-                                }
-                              />
-                              <Text
-                                className={`text-sm font-semibold ${
-                                  soldOut
-                                    ? "text-gray-400 dark:text-gray-500"
-                                    : "text-gray-900 dark:text-white"
+                                      ? "border-[#0644C7] bg-[#0644C7]/5"
+                                      : "border-gray-200 dark:border-neutral-700"
                                 }`}
                               >
-                                {formatTime(s.startTime)}
-                              </Text>
-                              {isWalkIn ? (
-                                <View className="ml-auto rounded-full bg-amber-100 px-1.5 py-0.5 dark:bg-amber-900/40">
-                                  <Text className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
-                                    Walk-in
-                                  </Text>
-                                </View>
-                              ) : (
-                              /* Live seats left in this slot — red when sold
-                                 out, amber at 3 or fewer, else emerald
-                                 (web OnsiteBooking). */
-                              s.remainingTickets != null && (
-                                <View
-                                  className={`ml-auto rounded-full px-1.5 py-0.5 ${
-                                    soldOut
-                                      ? "bg-red-100 dark:bg-red-900/30"
-                                      : isLowRemaining(s.remainingTickets)
-                                        ? "bg-amber-100 dark:bg-amber-900/30"
-                                        : "bg-emerald-100 dark:bg-emerald-900/30"
-                                  }`}
-                                >
-                                  <Text
-                                    className={`text-[11px] font-semibold ${
+                                {/* Radio, time and the seats-left pill share the top
+                                row, the pill pushed to the far edge — the web's
+                                `flex items-center` + `ml-auto`. */}
+                                <View className="flex-row items-center gap-2">
+                                  <Feather
+                                    name={active ? "check-circle" : "circle"}
+                                    size={14}
+                                    color={
                                       soldOut
-                                        ? "text-red-800 dark:text-red-300"
-                                        : isLowRemaining(s.remainingTickets)
-                                          ? "text-amber-800 dark:text-amber-300"
-                                          : "text-emerald-800 dark:text-emerald-300"
+                                        ? "#D1D5DB"
+                                        : active
+                                          ? PRIMARY
+                                          : "#9CA3AF"
+                                    }
+                                  />
+                                  <Text
+                                    className={`text-sm font-semibold ${
+                                      soldOut
+                                        ? "text-gray-400 dark:text-gray-500"
+                                        : "text-gray-900 dark:text-white"
                                     }`}
                                   >
-                                    {soldOut
-                                      ? "Sold out"
-                                      : `${s.remainingTickets} left`}
+                                    {formatTime(s.startTime)}
                                   </Text>
+                                  {isWalkIn ? (
+                                    <View className="ml-auto rounded-full bg-amber-100 px-1.5 py-0.5 dark:bg-amber-900/40">
+                                      <Text className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                                        Walk-in
+                                      </Text>
+                                    </View>
+                                  ) : (
+                                    /* Live seats left in this slot — red when sold
+                                 out, amber at 3 or fewer, else emerald
+                                 (web OnsiteBooking). */
+                                    s.remainingTickets != null && (
+                                      <View
+                                        className={`ml-auto rounded-full px-1.5 py-0.5 ${
+                                          soldOut
+                                            ? "bg-red-100 dark:bg-red-900/30"
+                                            : isLowRemaining(s.remainingTickets)
+                                              ? "bg-amber-100 dark:bg-amber-900/30"
+                                              : "bg-emerald-100 dark:bg-emerald-900/30"
+                                        }`}
+                                      >
+                                        <Text
+                                          className={`text-[11px] font-semibold ${
+                                            soldOut
+                                              ? "text-red-800 dark:text-red-300"
+                                              : isLowRemaining(
+                                                    s.remainingTickets,
+                                                  )
+                                                ? "text-amber-800 dark:text-amber-300"
+                                                : "text-emerald-800 dark:text-emerald-300"
+                                          }`}
+                                        >
+                                          {soldOut
+                                            ? "Sold out"
+                                            : `${s.remainingTickets} left`}
+                                        </Text>
+                                      </View>
+                                    )
+                                  )}
                                 </View>
-                              ))}
-                            </View>
-                            {/* Indented past the radio so it lines up under the
+                                {/* Indented past the radio so it lines up under the
                                 start time, like the web's `ml-6`. */}
-                            <Text className="ml-[22px] text-xs text-gray-500 dark:text-gray-400">
-                              to {formatTime(s.endTime)}
-                            </Text>
-                          </Pressable>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-                </>
+                                <Text className="ml-[22px] text-xs text-gray-500 dark:text-gray-400">
+                                  to {formatTime(s.endTime)}
+                                </Text>
+                              </Pressable>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </>
                 )}
               </View>
 
@@ -2186,7 +2342,6 @@ const CreateBookingScreen = () => {
                   </Text>
                 </Section>
               )}
-
             </>
           )}
 
@@ -2292,7 +2447,9 @@ const CreateBookingScreen = () => {
                     {codeBusy === "gift" ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <Text className="text-sm font-semibold text-white">Apply</Text>
+                      <Text className="text-sm font-semibold text-white">
+                        Apply
+                      </Text>
                     )}
                   </Pressable>
                 </View>
@@ -2338,7 +2495,9 @@ const CreateBookingScreen = () => {
                       {codeBusy === "promo" ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
                       ) : (
-                        <Text className="text-sm font-semibold text-white">Apply</Text>
+                        <Text className="text-sm font-semibold text-white">
+                          Apply
+                        </Text>
                       )}
                     </Pressable>
                   </View>
@@ -2585,9 +2744,21 @@ const CreateBookingScreen = () => {
                 <View className="flex-row gap-2 mb-4">
                   {(
                     [
-                      { v: "authorize.net", label: "Online", icon: "credit-card" as IconName },
-                      { v: "in-store", label: "In-Store", icon: "dollar-sign" as IconName },
-                      { v: "paylater", label: "Pay Later", icon: "clock" as IconName },
+                      {
+                        v: "authorize.net",
+                        label: "Online",
+                        icon: "credit-card" as IconName,
+                      },
+                      {
+                        v: "in-store",
+                        label: "In-Store",
+                        icon: "dollar-sign" as IconName,
+                      },
+                      {
+                        v: "paylater",
+                        label: "Pay Later",
+                        icon: "clock" as IconName,
+                      },
                     ] as const
                   ).map((m) => {
                     const active = paymentMethod === m.v;
@@ -2628,8 +2799,8 @@ const CreateBookingScreen = () => {
                         Payment will be collected later
                       </Text>
                       <Text className="mt-1 text-xs text-orange-700 dark:text-orange-400">
-                        No payment is being processed now. Customer will pay at a
-                        later time.
+                        No payment is being processed now. Customer will pay at
+                        a later time.
                       </Text>
                     </View>
                   </View>
@@ -2673,11 +2844,16 @@ const CreateBookingScreen = () => {
                     {/* Web parity: the "Authorize.Net Not Configured" modal. */}
                     {authorizeUnavailable && (
                       <View className="mb-3 flex-row items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-900/40 dark:bg-amber-900/20">
-                        <Feather name="alert-triangle" size={13} color="#B45309" />
+                        <Feather
+                          name="alert-triangle"
+                          size={13}
+                          color="#B45309"
+                        />
                         <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
                           This location has no active Authorize.Net account, so
-                          cards can&apos;t be charged. Use In-Store or Pay Later,
-                          or ask an administrator to connect the merchant account.
+                          cards can&apos;t be charged. Use In-Store or Pay
+                          Later, or ask an administrator to connect the merchant
+                          account.
                         </Text>
                       </View>
                     )}
@@ -2704,7 +2880,11 @@ const CreateBookingScreen = () => {
                         className="flex-1 py-0 text-sm text-gray-900 dark:text-white"
                       />
                       {!!cardNumber && cardValid && (
-                        <Feather name="check-circle" size={15} color="#16A34A" />
+                        <Feather
+                          name="check-circle"
+                          size={15}
+                          color="#16A34A"
+                        />
                       )}
                     </View>
                     {!!cardNumber && (
@@ -2716,9 +2896,27 @@ const CreateBookingScreen = () => {
                     <View className="mt-3 flex-row gap-2">
                       {(
                         [
-                          { label: "Month", value: cardMonth, set: setCardMonth, ph: "MM", max: 2 },
-                          { label: "Year", value: cardYear, set: setCardYear, ph: "YYYY", max: 4 },
-                          { label: "CVV", value: cardCvv, set: setCardCvv, ph: "123", max: 4 },
+                          {
+                            label: "Month",
+                            value: cardMonth,
+                            set: setCardMonth,
+                            ph: "MM",
+                            max: 2,
+                          },
+                          {
+                            label: "Year",
+                            value: cardYear,
+                            set: setCardYear,
+                            ph: "YYYY",
+                            max: 4,
+                          },
+                          {
+                            label: "CVV",
+                            value: cardCvv,
+                            set: setCardCvv,
+                            ph: "123",
+                            max: 4,
+                          },
                         ] as const
                       ).map((f) => (
                         <View key={f.label} className="flex-1">
@@ -2817,7 +3015,9 @@ const CreateBookingScreen = () => {
                       <View className="mt-1 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900/40 dark:bg-green-900/20">
                         <FieldLabel>Enter Custom Amount</FieldLabel>
                         <View className="h-12 flex-row items-center rounded-lg border border-green-300 bg-white px-3 dark:border-green-900/50 dark:bg-neutral-900">
-                          <Text className="mr-1 font-medium text-gray-500">$</Text>
+                          <Text className="mr-1 font-medium text-gray-500">
+                            $
+                          </Text>
                           <TextInput
                             value={customAmount}
                             onChangeText={setCustomAmount}
@@ -2874,21 +3074,24 @@ const CreateBookingScreen = () => {
                     </View>
                   </View>
 
-                  {!isPerPlayerPackage && extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
-                    <View className="mt-2 flex-row items-start justify-between">
-                      <View className="flex-1 mr-2">
-                        <Text className="text-sm text-gray-700 dark:text-gray-200">
-                          Additional Participants
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {extraParticipants} extra × {money(pkg.pricePerAdditional)} each
+                  {!isPerPlayerPackage &&
+                    extraParticipants > 0 &&
+                    pkg.pricePerAdditional > 0 && (
+                      <View className="mt-2 flex-row items-start justify-between">
+                        <View className="flex-1 mr-2">
+                          <Text className="text-sm text-gray-700 dark:text-gray-200">
+                            Additional Participants
+                          </Text>
+                          <Text className="text-xs text-gray-500 dark:text-gray-400">
+                            {extraParticipants} extra ×{" "}
+                            {money(pkg.pricePerAdditional)} each
+                          </Text>
+                        </View>
+                        <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                          {money(extraParticipants * pkg.pricePerAdditional)}
                         </Text>
                       </View>
-                      <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                        {money(extraParticipants * pkg.pricePerAdditional)}
-                      </Text>
-                    </View>
-                  )}
+                    )}
 
                   <View className="mt-2 flex-row items-center justify-between border-t border-gray-200 py-2 dark:border-neutral-700">
                     <Text className="text-sm text-gray-600 dark:text-gray-400">
@@ -3227,27 +3430,34 @@ const CreateBookingScreen = () => {
                         )}
                       </View>
                       <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                        {money(isPerPlayerPackage ? pkg.price * participants : pkg.price)}
+                        {money(
+                          isPerPlayerPackage
+                            ? pkg.price * participants
+                            : pkg.price,
+                        )}
                       </Text>
                     </View>
                   </View>
 
-                  {!isPerPlayerPackage && extraParticipants > 0 && pkg.pricePerAdditional > 0 && (
-                    <View className="mt-2 flex-row items-start justify-between">
-                      <View className="flex-1 mr-2">
-                        <Text className="text-sm text-gray-700 dark:text-gray-200">
-                          Additional Participants
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {extraParticipants} extra × {money(pkg.pricePerAdditional)}
-                          /person
+                  {!isPerPlayerPackage &&
+                    extraParticipants > 0 &&
+                    pkg.pricePerAdditional > 0 && (
+                      <View className="mt-2 flex-row items-start justify-between">
+                        <View className="flex-1 mr-2">
+                          <Text className="text-sm text-gray-700 dark:text-gray-200">
+                            Additional Participants
+                          </Text>
+                          <Text className="text-xs text-gray-500 dark:text-gray-400">
+                            {extraParticipants} extra ×{" "}
+                            {money(pkg.pricePerAdditional)}
+                            /person
+                          </Text>
+                        </View>
+                        <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                          +{money(extraParticipants * pkg.pricePerAdditional)}
                         </Text>
                       </View>
-                      <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                        +{money(extraParticipants * pkg.pricePerAdditional)}
-                      </Text>
-                    </View>
-                  )}
+                    )}
 
                   <View className="mt-2 flex-row items-center justify-between border-t border-gray-100 pt-2 dark:border-neutral-800">
                     <Text className="text-xs text-gray-500 dark:text-gray-400">

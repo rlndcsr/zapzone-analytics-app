@@ -6,6 +6,14 @@ export type SchedulePackageCandidate = {
   closedRanges?: { startMinutes: number; endMinutes: number }[];
 };
 
+export function packageServesRoom(
+  pkg: { rooms?: { id: number }[] } | null | undefined,
+  roomId: number,
+): boolean {
+  const rooms = pkg?.rooms ?? [];
+  return rooms.length === 0 || rooms.some((r) => r.id === roomId);
+}
+
 export function packagesValidForSlot(
   candidates: SchedulePackageCandidate[],
   roomId: number,
