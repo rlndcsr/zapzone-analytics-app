@@ -109,7 +109,11 @@ import {
   validatePromoCode,
   type DiscountCodeResult,
 } from "../../services/discountCodesService";
-import { readBookingPrefill } from "../../lib/bookings/bookingPrefill";
+import {
+  clockToMinutes,
+  minutesToClock,
+  readBookingPrefill,
+} from "../../lib/bookings/bookingPrefill";
 import { isBlankOrValidEmail, isWalkInCustomerValid } from "../../lib/bookings/walkInCustomer";
 
 const PRIMARY = "#0644C7";
@@ -951,16 +955,64 @@ const CreateBookingScreen = () => {
     };
   }, [pkg, scheduledDate]);
 
+  const packageDurationMinutes = useMemo(() => {
+    if (!pkg) return 0;
+    const value = Number(pkg.duration);
+    if (!Number.isFinite(value) || value <= 0) return 60;
+    if (pkg.durationUnit === "minutes") return Math.round(value);
+    if (pkg.durationUnit === "hours and minutes") {
+      return Math.floor(value) * 60 + Math.round((value % 1) * 60);
+    }
+    return Math.round(value * 60);
+  }, [pkg]);
+
+  /**
+   * A synthetic slot for a same-day click that isn't one of the package's own
+   * offered starts — a real walk-in. Only constructed when the package's own
+   * duration actually fits before the space books up again (the carried
+   * `freeUntilMinutes`), so a package that wouldn't fit is never offered.
+   */
+  const walkInSlot = useMemo<AvailableSlot | null>(() => {
+    if (!slotPrefill.walkIn || !slotPrefill.time || !pkg) return null;
+    if (!scheduledDate || scheduledDate !== slotPrefill.date) return null;
+    if (slots.some((s) => s.startTime === slotPrefill.time)) return null;
+
+    const startMinutes = clockToMinutes(slotPrefill.time);
+    if (startMinutes == null) return null;
+    const endMinutes = startMinutes + packageDurationMinutes;
+    if (!slotPrefill.freeUntilKnown || endMinutes > (slotPrefill.freeUntilMinutes ?? -1)) {
+      return null;
+    }
+
+    return {
+      startTime: slotPrefill.time,
+      endTime: minutesToClock(endMinutes),
+      roomId: slotPrefill.roomId ?? null,
+      roomName: null,
+      remainingTickets: null,
+    };
+  }, [slotPrefill, pkg, scheduledDate, slots, packageDurationMinutes]);
+
+  const displayedSlots = useMemo(
+    () =>
+      (walkInSlot ? [...slots, walkInSlot] : slots)
+        .slice()
+        .sort((a, b) => a.startTime.localeCompare(b.startTime)),
+    [slots, walkInSlot],
+  );
+
   /**
    * Re-selects the carried-over room/time once real slots have come back —
    * never before. Checking against an empty `slots` array (because the fetch
    * hadn't returned yet) is exactly the race the web version had: it always
    * decided the time was no longer offered, because there was nothing to find
-   * it in yet. Runs once per landed prefill (`prefillTimeCheckedRef`).
+   * it in yet. Runs once per landed prefill (`prefillTimeCheckedRef`), and
+   * waits for a package to actually be selected — the narrowed-list case has
+   * nothing to check against until staff picks one.
    */
   useEffect(() => {
     if (!prefillLandedRef.current || prefillTimeCheckedRef.current) return;
-    if (loadingSlots) return;
+    if (!pkg || loadingSlots) return;
     if (scheduledDate !== slotPrefill.date) return;
 
     prefillTimeCheckedRef.current = true;
@@ -975,13 +1027,25 @@ const CreateBookingScreen = () => {
 
     if (matched) {
       setSlot(matched);
-    } else if (slotPrefill.time) {
+      return;
+    }
+
+    if (walkInSlot) {
+      setSlot(walkInSlot);
+      Alert.alert(
+        "Walk-in start kept",
+        `Starting at ${formatTime(slotPrefill.time ?? "")} today — outside this package's usual start times.`,
+      );
+      return;
+    }
+
+    if (slotPrefill.time) {
       Alert.alert(
         "Time no longer available",
         "That start time is no longer offered for this package — pick another below.",
       );
     }
-  }, [slots, loadingSlots, scheduledDate, slotPrefill]);
+  }, [slots, loadingSlots, pkg, scheduledDate, slotPrefill, walkInSlot]);
 
   /**
    * Call to Book: whether the selected package has any usable schedule at all.
@@ -1898,6 +1962,20 @@ const CreateBookingScreen = () => {
                   </Text>
                 </View>
 
+                {walkInSlot &&
+                  slot?.startTime === walkInSlot.startTime &&
+                  slot?.roomId === walkInSlot.roomId && (
+                    <View className="mb-3 flex-row flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/10">
+                      <Text className="rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                        Walk-in
+                      </Text>
+                      <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+                        Starting at {formatTime(walkInSlot.startTime)} today — this is the time
+                        that will be recorded.
+                      </Text>
+                    </View>
+                  )}
+
                 {!scheduledDate ? (
                   <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
                     <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
@@ -1908,7 +1986,7 @@ const CreateBookingScreen = () => {
                   <View className="py-6 items-center">
                     <ActivityIndicator color={PRIMARY} />
                   </View>
-                ) : slots.length === 0 ? (
+                ) : displayedSlots.length === 0 ? (
                   <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
                     <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
                       No available time slots for the selected date. Space will be
@@ -1917,11 +1995,12 @@ const CreateBookingScreen = () => {
                   </View>
                 ) : (
                   <View className="flex-row flex-wrap -m-1">
-                    {slots.map((s) => {
+                    {displayedSlots.map((s) => {
                       const active =
                         slot?.startTime === s.startTime &&
                         slot?.roomId === s.roomId;
-                      const soldOut = isSoldOut(s.remainingTickets);
+                      const isWalkIn = s === walkInSlot;
+                      const soldOut = !isWalkIn && isSoldOut(s.remainingTickets);
                       return (
                         <View
                           key={`${s.startTime}-${s.roomId ?? "auto"}`}
@@ -1968,10 +2047,17 @@ const CreateBookingScreen = () => {
                               >
                                 {formatTime(s.startTime)}
                               </Text>
-                              {/* Live seats left in this slot — red when sold
-                                  out, amber at 3 or fewer, else emerald
-                                  (web OnsiteBooking). */}
-                              {s.remainingTickets != null && (
+                              {isWalkIn ? (
+                                <View className="ml-auto rounded-full bg-amber-100 px-1.5 py-0.5 dark:bg-amber-900/40">
+                                  <Text className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                                    Walk-in
+                                  </Text>
+                                </View>
+                              ) : (
+                              /* Live seats left in this slot — red when sold
+                                 out, amber at 3 or fewer, else emerald
+                                 (web OnsiteBooking). */
+                              s.remainingTickets != null && (
                                 <View
                                   className={`ml-auto rounded-full px-1.5 py-0.5 ${
                                     soldOut
@@ -1995,7 +2081,7 @@ const CreateBookingScreen = () => {
                                       : `${s.remainingTickets} left`}
                                   </Text>
                                 </View>
-                              )}
+                              ))}
                             </View>
                             {/* Indented past the radio so it lines up under the
                                 start time, like the web's `ml-6`. */}

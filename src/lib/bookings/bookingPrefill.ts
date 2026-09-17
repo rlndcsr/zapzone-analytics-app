@@ -7,6 +7,10 @@ export type SlotPrefill = {
   roomId?: number | null;
   packageId?: number | null;
   packageIds?: number[];
+  /** How long the space stays free from `minute` — lets the form check a
+   *  walk-in package actually fits before offering it. */
+  freeUntilMinute?: number | null;
+  walkIn?: boolean;
 };
 
 export type BookingPrefill = {
@@ -16,6 +20,9 @@ export type BookingPrefill = {
   roomId: number | null;
   packageId: number | null;
   packageIds: number[];
+  freeUntilMinutes: number | null;
+  freeUntilKnown: boolean;
+  walkIn: boolean;
   hasAny: boolean;
 };
 
@@ -51,6 +58,11 @@ export function buildBookingParams(
   if (candidates.length > 1)
     params.package_ids = Array.from(new Set(candidates)).join(",");
 
+  if (prefill.freeUntilMinute != null && Number.isFinite(prefill.freeUntilMinute)) {
+    params.free_until_minutes = String(Math.round(prefill.freeUntilMinute));
+  }
+  if (prefill.walkIn) params.walk_in = "1";
+
   return params;
 }
 
@@ -85,6 +97,12 @@ const toDate = (value: string | string[] | undefined): string | null => {
 
 export function readBookingPrefill(params: RawParams): BookingPrefill {
   const minute = clockToMinutes(first(params.time));
+  const freeUntilRaw = first(params.free_until_minutes);
+  const freeUntilParsed = freeUntilRaw === null ? NaN : Number(freeUntilRaw);
+  const freeUntilMinutes =
+    Number.isFinite(freeUntilParsed) && freeUntilParsed >= 0
+      ? Math.round(freeUntilParsed)
+      : null;
   const prefill: BookingPrefill = {
     locationId: toId(params.location_id),
     date: toDate(params.date),
@@ -92,6 +110,9 @@ export function readBookingPrefill(params: RawParams): BookingPrefill {
     roomId: toId(params.room_id),
     packageId: toId(params.package_id),
     packageIds: toIdList(params.package_ids),
+    freeUntilMinutes,
+    freeUntilKnown: freeUntilMinutes !== null,
+    walkIn: first(params.walk_in) === "1",
     hasAny: false,
   };
 

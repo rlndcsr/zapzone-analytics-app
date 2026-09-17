@@ -25,9 +25,12 @@ import {
 import {
   bandGeometry,
   freeState,
+  freeUntilMinute,
   minuteAtOffset,
   nextFreeMinute,
   snapToInterval,
+  snapToOfferedStart,
+  WALK_IN_SNAP_MINUTES,
   type FreeState,
   type TimeRange,
 } from "../../lib/bookings/freeTime";
@@ -1291,6 +1294,7 @@ const SpaceScheduleScreen = () => {
         closedAllDay: boolean;
         bookable: boolean;
         reason: string | null;
+        interval: number | null;
       }
     >();
     for (const entry of dayWindow?.rooms ?? []) {
@@ -1300,6 +1304,7 @@ const SpaceScheduleScreen = () => {
         closedAllDay: entry.closed_all_day,
         bookable: entry.bookable !== false,
         reason: entry.reason,
+        interval: entry.interval_minutes ?? null,
       });
     }
     return map;
@@ -1519,6 +1524,104 @@ const SpaceScheduleScreen = () => {
     [dayWindow],
   );
 
+  /** The room's own turnaround, else the package's, else the day default. */
+  const intervalForColumn = useCallback(
+    (column: ScheduleColumn): number => {
+      if (column.roomId != null) {
+        const interval = roomWindows.get(column.roomId)?.interval;
+        if (interval) return interval;
+      }
+      if (column.virtual) {
+        const packageId = Number(column.key.replace("pkg-", ""));
+        const entry = dayWindow?.packages.find((p) => p.package_id === packageId);
+        if (entry?.interval_minutes) return entry.interval_minutes;
+      }
+      return dayWindow?.interval_minutes ?? 15;
+    },
+    [roomWindows, dayWindow],
+  );
+
+  /** Every real start time (from the packages valid here) at or after `minute`. */
+  const offeredStartsFor = useCallback(
+    (column: ScheduleColumn, minute: number): number[] => {
+      const ids = packagesForColumnSlot(column, minute);
+      if (ids.length === 0) return [];
+      const starts = new Set<number>();
+      for (const id of ids) {
+        const entry = dayWindow?.packages.find((p) => p.package_id === id);
+        for (const start of entry?.start_minutes ?? []) starts.add(start);
+      }
+      return [...starts].sort((a, b) => a - b);
+    },
+    [packagesForColumnSlot, dayWindow],
+  );
+
+  /**
+   * Auto-select only a package that really has a start at this minute —
+   * otherwise the booking form refuses the prefilled time. The full list is
+   * still narrowed and carried so staff can choose among the rest.
+   */
+  const resolvePackageOffer = useCallback(
+    (column: ScheduleColumn, minute: number): { ids: number[]; autoSelect: number | null } => {
+      const ids = packagesForColumnSlot(column, minute);
+      const offering = ids.filter((id) => {
+        const entry = dayWindow?.packages.find((p) => p.package_id === id);
+        return entry?.start_minutes ? entry.start_minutes.includes(minute) : true;
+      });
+      return { ids, autoSelect: offering.length === 1 ? offering[0] : null };
+    },
+    [packagesForColumnSlot, dayWindow],
+  );
+
+  /**
+   * Future dates snap to a real offered start so the booking form accepts it.
+   * Today snaps only to the nearest 5 minutes (a walk-in), never to the
+   * package's own — often much coarser — interval, so the arrival stays real.
+   */
+  const resolveClickMinute = useCallback(
+    (
+      column: ScheduleColumn,
+      meta: { open: number | null; close: number | null },
+      rawMinute: number,
+    ): number => {
+      const interval = intervalForColumn(column);
+      const columnOpen = meta.open ?? timeWindow.start;
+      const columnClose = meta.close ?? timeWindow.end;
+      const offered = offeredStartsFor(column, rawMinute).filter((s) => s < columnClose);
+      const floor = isVenueToday ? nowMinutes : undefined;
+      const onGrid =
+        !isVenueToday && offered.length > 0
+          ? snapToOfferedStart(offered, rawMinute, floor)
+          : null;
+
+      const snapped =
+        onGrid ??
+        (isVenueToday
+          ? Math.max(
+              snapToInterval(rawMinute, WALK_IN_SNAP_MINUTES),
+              snapToInterval(nowMinutes, WALK_IN_SNAP_MINUTES),
+            )
+          : snapToInterval(rawMinute, interval, floor));
+
+      const blocked = blockedRangesFor(column, meta);
+      const free = nextFreeMinute(columnOpen, columnClose, blocked, snapped);
+      if (free === null || free === snapped) return snapped;
+
+      const fromFree = snapToInterval(
+        free,
+        interval,
+        isVenueToday ? Math.max(free, nowMinutes) : undefined,
+      );
+      if (onGrid === null) return fromFree;
+
+      const freeOffered = offered.find(
+        (s) => s >= free && nextFreeMinute(columnOpen, columnClose, blocked, s) === s,
+      );
+      return freeOffered ?? fromFree;
+    },
+    [intervalForColumn, offeredStartsFor, isVenueToday, nowMinutes, blockedRangesFor, timeWindow],
+  );
+
   /**
    * A tap on the free band: `locationY` is React Native's `nativeEvent.locationY`
    * — inherently relative to the Pressable it fired on, which IS the band, so
@@ -1530,28 +1633,12 @@ const SpaceScheduleScreen = () => {
     (column: ScheduleColumn, bandOrigin: number, locationY: number) => {
       const meta = scheduleMetaByColumn.get(column.key);
       if (!meta || meta.open == null || meta.close == null) return;
-      const interval = dayWindow?.interval_minutes ?? 15;
-      const raw = snapToInterval(
-        minuteAtOffset(bandOrigin, locationY, pxPerMinute),
-        interval,
-        isVenueToday ? nowMinutes : undefined,
-      );
-      const free = nextFreeMinute(
-        meta.open,
-        meta.close,
-        blockedRangesFor(column, meta),
-        raw,
-      );
-      const minute =
-        free === null || free === raw
-          ? raw
-          : snapToInterval(
-              free,
-              interval,
-              isVenueToday ? Math.max(free, nowMinutes) : undefined,
-            );
 
-      const candidates = packagesForColumnSlot(column, minute);
+      const rawMinute = minuteAtOffset(bandOrigin, locationY, pxPerMinute);
+      const minute = resolveClickMinute(column, meta, rawMinute);
+
+      const blocked = blockedRangesFor(column, meta);
+      const { ids: candidates, autoSelect } = resolvePackageOffer(column, minute);
       const locationId =
         (column.roomId != null ? roomLocationById.get(column.roomId) : null) ??
         effectiveLocationId ??
@@ -1565,22 +1652,24 @@ const SpaceScheduleScreen = () => {
           date: selectedKey,
           minute,
           roomId: column.roomId ?? null,
-          packageId: candidates.length === 1 ? candidates[0] : null,
+          packageId: autoSelect,
           packageIds: candidates,
+          freeUntilMinute: freeUntilMinute(meta.open, meta.close, blocked, minute),
+          walkIn: isVenueToday,
         }),
       });
     },
     [
       dayWindow,
       pxPerMinute,
-      isVenueToday,
-      nowMinutes,
+      resolveClickMinute,
       blockedRangesFor,
-      packagesForColumnSlot,
+      resolvePackageOffer,
       roomLocationById,
       effectiveLocationId,
       selectedKey,
       scheduleMetaByColumn,
+      isVenueToday,
     ],
   );
 

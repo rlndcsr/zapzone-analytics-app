@@ -19,6 +19,10 @@ function finite(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
 
+// Same-day walk-in clicks round to the nearest 5 minutes, not the package's
+// own (often coarser) interval, so the recorded arrival stays real.
+export const WALK_IN_SNAP_MINUTES = 5;
+
 export function snapToInterval(
   minute: number,
   intervalMinutes: number,
@@ -35,6 +39,25 @@ export function snapToInterval(
     snapped = Math.ceil(floorMinute / interval) * interval;
   }
   return Math.max(0, snapped);
+}
+
+// Snaps to whichever real offered start is closest to `minute` — interval
+// arithmetic drifts off the package's own grid whenever duration+cleanup
+// isn't a whole number of intervals, and the booking form then refuses it.
+export function snapToOfferedStart(
+  starts: number[],
+  minute: number,
+  floorMinute?: number,
+): number | null {
+  const usable =
+    floorMinute === undefined
+      ? starts
+      : starts.filter((start) => start >= floorMinute);
+  if (usable.length === 0) return null;
+
+  return usable.reduce((best, start) =>
+    Math.abs(start - minute) < Math.abs(best - minute) ? start : best,
+  );
 }
 
 export function minuteAtOffset(
@@ -89,6 +112,35 @@ export function nextFreeMinute(
     cursor = Math.max(cursor, range.endMinutes);
   }
   return cursor < closeMinutes ? cursor : null;
+}
+
+// Assumes `from` is itself free; answers how long that stays true — the
+// gap length a walk-in package has to fit inside, not just whether `from`
+// is free at all.
+export function freeUntilMinute(
+  openMinutes: number | null,
+  closeMinutes: number | null,
+  busy: TimeRange[],
+  from: number,
+): number | null {
+  if (
+    openMinutes == null ||
+    closeMinutes == null ||
+    !Number.isFinite(from) ||
+    closeMinutes <= openMinutes
+  ) {
+    return null;
+  }
+
+  let end = closeMinutes;
+  for (const range of busy) {
+    if (!Number.isFinite(range.startMinutes) || !Number.isFinite(range.endMinutes)) continue;
+    if (range.endMinutes <= range.startMinutes) continue;
+    if (range.endMinutes <= from) continue;
+    if (range.startMinutes <= from) return from;
+    if (range.startMinutes < end) end = range.startMinutes;
+  }
+  return end;
 }
 
 export function freeState(

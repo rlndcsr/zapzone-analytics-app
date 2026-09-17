@@ -88,4 +88,26 @@ describe("buildBookingParams / readBookingPrefill round trip", () => {
     const prefill = readBookingPrefill({ date: "not-a-date" });
     assert.equal(prefill.date, null);
   });
+
+  it("carries the free-until gap and the walk-in flag through unchanged", () => {
+    const params = buildBookingParams({
+      date: "2026-09-20",
+      minute: 18 * 60,
+      freeUntilMinute: 19 * 60 + 30,
+      walkIn: true,
+    });
+    const prefill = readBookingPrefill(params);
+    assert.equal(prefill.freeUntilMinutes, 19 * 60 + 30);
+    assert.equal(prefill.freeUntilKnown, true);
+    assert.equal(prefill.walkIn, true);
+  });
+
+  it("reports the gap as unknown, not zero, when none was carried", () => {
+    const prefill = readBookingPrefill(
+      buildBookingParams({ date: "2026-09-20", minute: 600 }),
+    );
+    assert.equal(prefill.freeUntilMinutes, null);
+    assert.equal(prefill.freeUntilKnown, false);
+    assert.equal(prefill.walkIn, false);
+  });
 });

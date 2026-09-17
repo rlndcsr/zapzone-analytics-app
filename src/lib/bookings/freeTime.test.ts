@@ -4,9 +4,11 @@ import { describe, it } from "node:test";
 import {
   bandGeometry,
   freeState,
+  freeUntilMinute,
   minuteAtOffset,
   nextFreeMinute,
   snapToInterval,
+  snapToOfferedStart,
   type TimeRange,
 } from "./freeTime.ts";
 
@@ -128,5 +130,47 @@ describe("freeState", () => {
 
   it("reports day-over once past close for today", () => {
     assert.deepEqual(freeState(600, 1320, [], 1350), { kind: "day-over" });
+  });
+});
+
+describe("snapToOfferedStart", () => {
+  it("picks the closest real offered start to the raw minute", () => {
+    assert.equal(snapToOfferedStart([600, 645, 690], 620), 600);
+    assert.equal(snapToOfferedStart([600, 645, 690], 660), 645);
+  });
+
+  it("ignores offered starts before floorMinute — the walk-in guard", () => {
+    assert.equal(snapToOfferedStart([600, 645, 690], 610, 640), 645);
+  });
+
+  it("returns null when nothing is offered at or after the floor", () => {
+    assert.equal(snapToOfferedStart([600, 615], 610, 700), null);
+    assert.equal(snapToOfferedStart([], 610), null);
+  });
+});
+
+describe("freeUntilMinute", () => {
+  it("runs to close when nothing is booked after `from`", () => {
+    assert.equal(freeUntilMinute(600, 1320, [], 700), 1320);
+  });
+
+  it("stops at the next booking after `from`", () => {
+    const busy: TimeRange[] = [{ startMinutes: 780, endMinutes: 840 }];
+    assert.equal(freeUntilMinute(600, 1320, busy, 700), 780);
+  });
+
+  it("returns `from` itself when already inside a busy range", () => {
+    const busy: TimeRange[] = [{ startMinutes: 690, endMinutes: 750 }];
+    assert.equal(freeUntilMinute(600, 1320, busy, 700), 700);
+  });
+
+  it("ignores a busy range that already ended before `from`", () => {
+    const busy: TimeRange[] = [{ startMinutes: 600, endMinutes: 660 }];
+    assert.equal(freeUntilMinute(600, 1320, busy, 700), 1320);
+  });
+
+  it("is null for an unknown or inverted window", () => {
+    assert.equal(freeUntilMinute(null, 1320, [], 700), null);
+    assert.equal(freeUntilMinute(600, 500, [], 700), null);
   });
 });

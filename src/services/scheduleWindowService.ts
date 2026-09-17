@@ -9,6 +9,8 @@ export type ScheduleClosedRange = {
 export type ScheduleRoomWindow = {
   room_id: number;
   location_id: number;
+  /** The room's own turnaround/interval — a deliberate 0 means no gap. */
+  interval_minutes?: number | null;
   open_minutes: number | null;
   close_minutes: number | null;
   closed_all_day: boolean;
@@ -24,6 +26,15 @@ export type SchedulePackageWindow = {
   open_minutes: number;
   close_minutes: number;
   interval_minutes: number;
+  /** How long a booking of this package actually runs — used to check whether
+   *  it fits in a free stretch before offering it for a walk-in. */
+  duration_minutes?: number;
+  /** Real start times the booking page will accept — snapping a click to one
+   *  of these (rather than raw interval arithmetic) is what keeps the two in
+   *  sync when duration+cleanup isn't a whole number of intervals. */
+  start_minutes?: number[];
+  /** Offered starts already in the past today — shown, but never snapped to. */
+  past_start_minutes?: number[];
   closed_ranges?: ScheduleClosedRange[];
   room_ids: number[];
 };
