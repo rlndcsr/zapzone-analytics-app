@@ -1038,7 +1038,8 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-              Minutes between bookings. Set to 0 to allow simultaneous bookings.
+              The gap after a booking ends before this room can be booked
+              again. Set to 0 to allow simultaneous bookings.
             </Text>
           </View>
 
@@ -1316,7 +1317,7 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-              Minutes between bookings in group.
+              The gap kept between this room and its other group members.
             </Text>
           </View>
 
