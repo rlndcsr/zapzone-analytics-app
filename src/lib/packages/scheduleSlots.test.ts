@@ -65,6 +65,19 @@ describe("generating a schedule's slots", () => {
     assert.deepEqual(slots.map(label), ["12:00-13:30"]);
   });
 
+  it("stops the preview where the venue closes, not where the interval lands", () => {
+    // Arcade Party: two hours, hourly starts, closing at 21:30. A 9:00 PM
+    // start would run to 11:00 PM, so the server never offers it and neither
+    // may the preview.
+    const slots = generateScheduleSlots({
+      start: "18:00",
+      end: "21:30",
+      intervalMinutes: 60,
+      durationMinutes: 120,
+    });
+    assert.deepEqual(slots.map(label), ["18:00-20:00", "19:00-21:00"]);
+  });
+
   it("treats an end at or before the start as running past midnight", () => {
     const slots = generateScheduleSlots({
       start: "22:00",

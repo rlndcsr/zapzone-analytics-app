@@ -45,6 +45,22 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
+/** The gap a space keeps between bookings when the field is left blank. */
+const DEFAULT_BOOKING_INTERVAL = 15;
+
+/**
+ * The staggering value a form field carries. A typed 0 is a real setting — it
+ * means the next booking may start the moment the last one ends — so it has to
+ * survive; only a blank or unusable field falls back to the default gap. Web
+ * parity: Rooms.tsx's `booking_interval ? parseInt(…) : 15`.
+ */
+const readIntervalInput = (value: string): number => {
+  const minutes = Number.parseInt(value.trim(), 10);
+  return Number.isFinite(minutes) && minutes >= 0
+    ? minutes
+    : DEFAULT_BOOKING_INTERVAL;
+};
+
 type StatusFilter = "all" | "available" | "inactive";
 type SortBy = "name" | "capacity" | "created";
 type SortOrder = "asc" | "desc";
@@ -349,18 +365,27 @@ const SpaceCard = ({
       </Text>
     </View>
 
-    {!!space.areaGroup && (
+    {(!!space.areaGroup || space.bookingInterval != null) && (
       <View className="flex-row items-center gap-1.5 mb-1.5">
         <Feather name="layers" size={14} color="#9CA3AF" />
-        <Text
-          className="text-sm text-gray-600 dark:text-gray-300 flex-1"
-          numberOfLines={1}
-        >
-          {space.areaGroup}
-          {space.bookingInterval != null
-            ? ` (${space.bookingInterval}min interval)`
-            : ""}
-        </Text>
+        {!!space.areaGroup && (
+          <Text
+            className="text-sm font-medium text-gray-600 dark:text-gray-300"
+            numberOfLines={1}
+          >
+            {space.areaGroup}
+          </Text>
+        )}
+        {space.bookingInterval != null && (
+          <Text
+            className="text-xs text-gray-400 dark:text-gray-500 flex-1"
+            numberOfLines={1}
+          >
+            {space.bookingInterval > 0
+              ? `${space.bookingInterval} min between bookings`
+              : "back-to-back bookings"}
+          </Text>
+        )}
       </View>
     )}
 
@@ -566,7 +591,7 @@ const Space = () => {
       capacity: fCapacity.trim() ? Number(fCapacity) : null,
       is_active: fAvailable,
       area_group: fAreaGroup.trim() || null,
-      booking_interval: fInterval.trim() ? Number(fInterval) : null,
+      booking_interval: readIntervalInput(fInterval),
       location_id: editTarget.locationId ?? undefined,
       break_time: breaksToPayload(fBreaks),
     };
@@ -599,7 +624,7 @@ const Space = () => {
       capacity: cCapacity.trim() ? Number(cCapacity) : null,
       is_active: cAvailable,
       area_group: cAreaGroup.trim() || null,
-      booking_interval: cInterval.trim() ? Number(cInterval) : null,
+      booking_interval: readIntervalInput(cInterval),
       location_id: cLocationId,
       break_time: breaksToPayload(cBreaks),
     };
@@ -684,9 +709,19 @@ const Space = () => {
     if (!token || !agGroup) return;
     const rooms = areaGroups.get(agGroup) ?? [];
     if (rooms.length === 0) return;
+    // Never guess here: a blank field silently becoming 0 would set the whole
+    // group to no gap at all. Web parity: Rooms.tsx rejects it outright.
+    const minutes = Number.parseInt(agInterval.trim(), 10);
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      Alert.alert(
+        "Invalid interval",
+        "Enter the minutes between bookings — 0 or more.",
+      );
+      return;
+    }
     setAgSaving(true);
     try {
-      await updateAreaGroupInterval(token, rooms, Number(agInterval) || 0);
+      await updateAreaGroupInterval(token, rooms, minutes);
       setShowAreaGroup(false);
       await refetch();
     } catch (err) {
@@ -1038,8 +1073,9 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-              The gap after a booking ends before this room can be booked
-              again. Set to 0 to allow simultaneous bookings.
+              Minutes between bookings — the gap after one booking ends before
+              the next can start in this space. 0 is a real setting: the next
+              booking may start the moment the last one ends.
             </Text>
           </View>
 
@@ -1317,7 +1353,8 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-              The gap kept between this room and its other group members.
+              Minutes between bookings — the gap after one booking ends before
+              the next can start. 0 means back-to-back.
             </Text>
           </View>
 
@@ -1444,8 +1481,8 @@ const Space = () => {
                 className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
               />
               <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-4">
-                Time gap required between bookings in this area group. Set to 0
-                to allow simultaneous bookings.
+                Minutes between bookings for spaces in this group. 0 means the
+                next booking may start the moment the last one ends.
               </Text>
 
               <View className="flex-row gap-3">

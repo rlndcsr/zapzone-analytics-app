@@ -27,10 +27,6 @@ import {
   freeState,
   freeUntilMinute,
   minuteAtOffset,
-  nextFreeMinute,
-  snapToInterval,
-  snapToOfferedStart,
-  WALK_IN_SNAP_MINUTES,
   type FreeState,
   type TimeRange,
 } from "../../lib/bookings/freeTime";
@@ -57,6 +53,10 @@ import {
   type SpaceClosure,
   type TimeWindow,
 } from "../../lib/bookings/spaceScheduleGrid";
+import {
+  packageIntervalFor,
+  resolveSlotMinute,
+} from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
@@ -1637,38 +1637,16 @@ const SpaceScheduleScreen = () => {
     [dayWindow],
   );
 
-  /** The room's own turnaround, else the package's, else the day default. */
+  /**
+   * The grid a tap snaps to — the packages' own, never the space's turnaround.
+   * A space set to no gap sends a real 0, and reading that as a grid made it
+   * look unset: the fifteen-minute default took its place and snapped taps past
+   * starts the booking form would have taken. Shared with the Calendar tab's
+   * day grid so the two can never answer this differently.
+   */
   const intervalForColumn = useCallback(
-    (column: ScheduleColumn): number => {
-      if (column.roomId != null) {
-        const interval = roomWindows.get(column.roomId)?.interval;
-        if (interval) return interval;
-      }
-      if (column.virtual) {
-        const packageId = Number(column.key.replace("pkg-", ""));
-        const entry = dayWindow?.packages.find(
-          (p) => p.package_id === packageId,
-        );
-        if (entry?.interval_minutes) return entry.interval_minutes;
-      }
-      return dayWindow?.interval_minutes ?? 15;
-    },
-    [roomWindows, dayWindow],
-  );
-
-  /** Every real start time (from the packages valid here) at or after `minute`. */
-  const offeredStartsFor = useCallback(
-    (column: ScheduleColumn, minute: number): number[] => {
-      const ids = packagesForColumnSlot(column, minute);
-      if (ids.length === 0) return [];
-      const starts = new Set<number>();
-      for (const id of ids) {
-        const entry = dayWindow?.packages.find((p) => p.package_id === id);
-        for (const start of entry?.start_minutes ?? []) starts.add(start);
-      }
-      return [...starts].sort((a, b) => a - b);
-    },
-    [packagesForColumnSlot, dayWindow],
+    (column: ScheduleColumn): number => packageIntervalFor(column, dayWindow),
+    [dayWindow],
   );
 
   const resolvePackageOffer = useCallback(
@@ -1693,54 +1671,34 @@ const SpaceScheduleScreen = () => {
     [packagesForColumnSlot, dayWindow],
   );
 
+  /**
+   * The minute a tap means, resolved by the very function the Calendar tab's
+   * day grid uses — the two screens drawing the same day must never send the
+   * booking form to different minutes for the same tap. Null when no start is
+   * left here at all: booked out to closing, or too late for anything to fit.
+   */
   const resolveClickMinute = useCallback(
     (
       column: ScheduleColumn,
       meta: { open: number | null; close: number | null },
       rawMinute: number,
-    ): number => {
-      const interval = intervalForColumn(column);
-      const columnOpen = meta.open ?? timeWindow.start;
-      const columnClose = meta.close ?? timeWindow.end;
-      const offered = offeredStartsFor(column, rawMinute).filter(
-        (s) => s < columnClose,
-      );
-      const floor = isVenueToday ? nowMinutes : undefined;
-      const onGrid =
-        !isVenueToday && offered.length > 0
-          ? snapToOfferedStart(offered, rawMinute, floor)
-          : null;
-
-      const snapped =
-        onGrid ??
-        (isVenueToday
-          ? Math.max(
-              snapToInterval(rawMinute, WALK_IN_SNAP_MINUTES),
-              snapToInterval(nowMinutes, WALK_IN_SNAP_MINUTES),
-            )
-          : snapToInterval(rawMinute, interval, floor));
-
-      const blocked = blockedRangesFor(column, meta);
-      const free = nextFreeMinute(columnOpen, columnClose, blocked, snapped);
-      if (free === null || free === snapped) return snapped;
-
-      const fromFree = snapToInterval(
-        free,
-        interval,
-        isVenueToday ? Math.max(free, nowMinutes) : undefined,
-      );
-      if (onGrid === null) return fromFree;
-
-      const freeOffered = offered.find(
-        (s) =>
-          s >= free &&
-          nextFreeMinute(columnOpen, columnClose, blocked, s) === s,
-      );
-      return freeOffered ?? fromFree;
-    },
+    ): number | null =>
+      resolveSlotMinute({
+        column,
+        schedule: {
+          open: meta.open ?? timeWindow.start,
+          close: meta.close ?? timeWindow.end,
+          interval: intervalForColumn(column),
+        },
+        dayWindow,
+        blocked: blockedRangesFor(column, meta),
+        rawMinute,
+        isToday: isVenueToday,
+        nowMinutes,
+      }),
     [
       intervalForColumn,
-      offeredStartsFor,
+      dayWindow,
       isVenueToday,
       nowMinutes,
       blockedRangesFor,
@@ -1755,6 +1713,9 @@ const SpaceScheduleScreen = () => {
 
       const rawMinute = minuteAtOffset(bandOrigin, locationY, pxPerMinute);
       const minute = resolveClickMinute(column, meta, rawMinute);
+      // Nothing free between here and closing — never hand the booking form a
+      // minute this grid already knows it would refuse.
+      if (minute === null) return;
 
       const { ids: candidates, autoSelect } = resolvePackageOffer(
         column,

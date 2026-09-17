@@ -12,6 +12,7 @@ import {
   buildOccupancy,
   columnStatusFor,
   hardBlocksFor,
+  packageIntervalFor,
   resolveSlotTap,
   usableFreeUntil,
 } from "./dayGridSlots.ts";
@@ -121,6 +122,28 @@ describe("resolving a space column's operating window", () => {
     assert.equal(schedule.interval, 60);
   });
 
+  it("keeps a space set to no gap at zero, never the default", () => {
+    const { schedule } = setup(
+      window({ rooms: [room({ interval_minutes: 0 })] }),
+    );
+    assert.equal(schedule.turnaround, 0);
+    // The turnaround is not a grid: a zero there must not pull the snapping
+    // interval down with it, nor be mistaken for an unset one.
+    assert.equal(schedule.interval, 60);
+  });
+
+  it("frees the space the moment a no-gap booking ends", () => {
+    const occupancy = buildOccupancy({
+      bookings: [booking("16:00", 60)],
+      schedules: buildColumnSchedules({
+        columns: [airlock],
+        dayWindow: window({ rooms: [room({ interval_minutes: 0 })] }),
+      }),
+      knownRoomIds: new Set([1]),
+    }).get("room-1");
+    assert.deepEqual(occupancy, [{ startMinutes: AT(16), endMinutes: AT(17) }]);
+  });
+
   it("is never bookable while the day window is unknown", () => {
     const { schedule } = setup(null);
     assert.equal(schedule.windowKnown, false);
@@ -159,11 +182,51 @@ describe("resolving a space column's operating window", () => {
   });
 });
 
+describe("the grid a tap snaps to", () => {
+  it("takes the smallest interval among the packages serving the space", () => {
+    const dayWindow = window({
+      packages: [
+        pkg({ package_id: 7, interval_minutes: 60 }),
+        pkg({ package_id: 8, interval_minutes: 30 }),
+      ],
+    });
+    assert.equal(packageIntervalFor(airlock, dayWindow), 30);
+  });
+
+  it("ignores the space's turnaround entirely, zero or not", () => {
+    const noGap = window({ rooms: [room({ interval_minutes: 0 })] });
+    const bigGap = window({ rooms: [room({ interval_minutes: 45 })] });
+    assert.equal(packageIntervalFor(airlock, noGap), 60);
+    assert.equal(packageIntervalFor(airlock, bigGap), 60);
+  });
+
+  it("falls back to the day's interval, then to fifteen", () => {
+    assert.equal(
+      packageIntervalFor(
+        airlock,
+        window({ packages: [], interval_minutes: 20 }),
+      ),
+      20,
+    );
+    assert.equal(
+      packageIntervalFor(
+        airlock,
+        window({ packages: [], interval_minutes: 0 }),
+      ),
+      15,
+    );
+    assert.equal(packageIntervalFor(airlock, null), 15);
+  });
+});
+
 describe("how long a booked space stays booked", () => {
   it("holds the space for its turnaround after the booking ends", () => {
     const occupancy = buildOccupancy({
       bookings: [booking("16:00", 60)],
-      schedules: buildColumnSchedules({ columns: [airlock], dayWindow: window() }),
+      schedules: buildColumnSchedules({
+        columns: [airlock],
+        dayWindow: window(),
+      }),
       knownRoomIds: new Set([1]),
     }).get("room-1");
     assert.deepEqual(occupancy, [
