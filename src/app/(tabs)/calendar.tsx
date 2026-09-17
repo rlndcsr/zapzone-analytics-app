@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   RefreshControl,
@@ -26,8 +26,18 @@ import {
   useCategoryFilter,
 } from "../../lib/calendar/categoryFilter";
 import {
+  buildBookingParams,
+  CREATE_BOOKING_PATH,
+} from "../../lib/bookings/bookingPrefill";
+import {
+  bandGeometry,
+  minuteAtOffset,
+  type TimeRange,
+} from "../../lib/bookings/freeTime";
+import {
   buildColumns,
   timeToMinutes,
+  type ScheduleColumn,
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
   computeSlotWindow,
@@ -36,21 +46,35 @@ import {
   SLOT_MINUTES,
   type SlotPlacement,
 } from "../../lib/calendar/dayGrid";
+import {
+  buildColumnSchedules,
+  buildOccupancy,
+  columnStatusFor,
+  hardBlocksFor,
+  OCCUPYING_STATUSES,
+  resolveSlotTap,
+  type ColumnSchedule,
+  type ColumnStatus,
+} from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
+import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import { useAttractionPurchases } from "../../lib/hooks/useAttractionPurchases";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
 import { useSpaces } from "../../lib/hooks/useSpaceSchedule";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
 import {
   AlertTriangle,
+  Ban,
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
   Eye,
   EyeOff,
+  Plus,
   Search,
   Users,
   MapPin,
@@ -110,15 +134,28 @@ const WEEKDAY_FULL = [
 
 const WEEKDAY_ABBR = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
+/** How a space's break days arrive from the API. */
+const WEEKDAY_KEYS = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
+
 // Geometry of the day / week grids. Both put a fixed time gutter on the left
 // and scroll their columns sideways, so the widths below are what one column
 // costs the reader in horizontal scrolling.
 const TIME_COL_WIDTH = 72;
 const DAY_COL_WIDTH = 148;
 const WEEK_COL_WIDTH = 200;
-const GRID_HEADER_HEIGHT = 48;
+/** Tall enough for the space's name, its location and its schedule status. */
+const GRID_HEADER_HEIGHT = 66;
 /** One 15-minute row of the day grid. */
 const SLOT_HEIGHT = 44;
+const PX_PER_MINUTE = SLOT_HEIGHT / SLOT_MINUTES;
 /** A week card is a fixed height so every column's rows stay aligned. */
 const WEEK_CARD_HEIGHT = 104;
 const WEEK_ROW_MIN_HEIGHT = 64;
@@ -458,6 +495,88 @@ const AttractionCard = ({
  * A booking laid over its space column, sized by its duration and narrowed to
  * a lane when it clashes with another booking in the same space.
  */
+/** The grey "nothing more to say" line under a column's name. */
+const DayStatusText = ({ children }: { children: React.ReactNode }) => (
+  <Text
+    className="mt-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400"
+    numberOfLines={1}
+  >
+    {children}
+  </Text>
+);
+
+/**
+ * What a space's column header says about the rest of its day — the web
+ * admin's day grid header, line for line: when it is next free, whether a
+ * walk-in fits right now, or why it is shut.
+ */
+const DayColumnStatus = ({
+  status,
+  onWalkIn,
+}: {
+  status: ColumnStatus | undefined;
+  onWalkIn: () => void;
+}) => {
+  if (!status) return null;
+
+  switch (status.kind) {
+    case "closed":
+      return (
+        <View className="flex-row items-center gap-1 mt-0.5">
+          <Ban size={10} color="#9ca3af" />
+          <Text
+            className="text-[10px] font-medium text-gray-500 dark:text-gray-400 flex-shrink"
+            numberOfLines={1}
+          >
+            {status.reason}
+          </Text>
+        </View>
+      );
+    case "booked":
+      return <DayStatusText>Booked until close</DayStatusText>;
+    case "blocked":
+      return <DayStatusText>{status.reason}</DayStatusText>;
+    case "day-over":
+      return <DayStatusText>Closed for the day</DayStatusText>;
+    case "no-starts":
+      return <DayStatusText>No more starts today</DayStatusText>;
+    case "free":
+      return (
+        <Text
+          className="mt-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300"
+          numberOfLines={1}
+        >
+          Free {slotLabel(status.atMinute)}
+        </Text>
+      );
+    case "walk-in":
+      // A walk-in that would run past the next booking still opens the form —
+      // it travels with the free stretch, so the form is the one that refuses
+      // a package too long to fit.
+      return (
+        <Pressable
+          onPress={onWalkIn}
+          accessibilityRole="button"
+          accessibilityLabel="Start a walk-in booking"
+          className="mt-0.5 px-1 py-0.5 rounded active:opacity-60"
+        >
+          <Text
+            className={`text-[10px] font-semibold ${
+              status.fits
+                ? "text-green-700 dark:text-green-400"
+                : "text-amber-700 dark:text-amber-400"
+            }`}
+            numberOfLines={1}
+          >
+            {status.fits
+              ? "Free now · walk-in"
+              : `Free ${status.freeFor} min · walk-in`}
+          </Text>
+        </Pressable>
+      );
+  }
+};
+
 const DayBookingBlock = ({
   placement,
   onPress,
@@ -688,7 +807,9 @@ const Calendar = () => {
   const today = useMemo(() => new Date(), []);
   const todayKey = dateKey(today);
 
-  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  // The Day grid is what staff open the calendar for — it is the one view that
+  // shows the spaces, what is free and where a booking can still go.
+  const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [anchor, setAnchor] = useState<Date>(today);
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(
     null,
@@ -898,9 +1019,132 @@ const Calendar = () => {
       }),
     [spaces, dayBookings, hideEmptySpaces, knownRoomIds],
   );
+  // The day's operating window, from the same server truth the web admin's day
+  // grid reads. Only fetched in Day view, and left null on failure rather than
+  // guessed — a failed request can make the grid inert, never wrong.
+  const { dayWindow: scheduleWindow } = useScheduleDayWindow(
+    viewMode === "day" ? startDate : null,
+  );
+
+  // The venue's own clock, ticked while Day view is open, so "Free now" and the
+  // walk-in fit stay true without leaving and re-entering the tab.
+  const [nowTick, setNowTick] = useState(() => venueNow());
+  useEffect(() => {
+    if (viewMode !== "day") return;
+    setNowTick(venueNow());
+    const timer = setInterval(() => setNowTick(venueNow()), 60_000);
+    return () => clearInterval(timer);
+  }, [viewMode]);
+  const nowMinutes = nowTick.hour * 60 + nowTick.minute;
+  const venueTodayKey = dateKey(venueToday());
+  const isVenueToday = startDate === venueTodayKey;
+  const isPastDate = startDate < venueTodayKey;
+
+  const daySchedules = useMemo(
+    () =>
+      buildColumnSchedules({ columns: dayColumns, dayWindow: scheduleWindow }),
+    [dayColumns, scheduleWindow],
+  );
+
+  /** Each space's breaks for this weekday, in minutes. */
+  const dayBreaks = useMemo(() => {
+    const weekday = WEEKDAY_KEYS[new Date(`${startDate}T00:00:00`).getDay()];
+    const map = new Map<number, { start: number; end: number }[]>();
+    for (const space of spaces) {
+      const ranges = space.breaks
+        .filter((b) => b.days.includes(weekday))
+        .map((b) => ({
+          start: timeToMinutes(b.startTime),
+          end: timeToMinutes(b.endTime),
+        }))
+        .filter((r) => r.end > r.start);
+      if (ranges.length) map.set(space.id, ranges);
+    }
+    return map;
+  }, [spaces, startDate]);
+
+  // Deliberately built from every occupying booking on the day, not the
+  // searched/filtered list: a booking hidden by a filter must not make its own
+  // space look free.
+  const dayOccupancy = useMemo(
+    () =>
+      buildOccupancy({
+        bookings: bookings.filter(
+          (b) => b.date === startDate && OCCUPYING_STATUSES.has(b.status),
+        ),
+        schedules: daySchedules,
+        knownRoomIds,
+      }),
+    [bookings, startDate, daySchedules, knownRoomIds],
+  );
+
+  const dayHardBlocks = useMemo(() => {
+    const map = new Map<string, TimeRange[]>();
+    for (const column of dayColumns) {
+      const schedule = daySchedules.get(column.key);
+      if (!schedule) continue;
+      map.set(
+        column.key,
+        hardBlocksFor(
+          schedule,
+          column.roomId != null ? (dayBreaks.get(column.roomId) ?? []) : [],
+        ),
+      );
+    }
+    return map;
+  }, [dayColumns, daySchedules, dayBreaks]);
+
+  const dayStatuses = useMemo(() => {
+    const map = new Map<string, ColumnStatus>();
+    // Nothing to say until the window lands — an empty map keeps the header on
+    // its name alone rather than flashing "Schedule unavailable".
+    if (!scheduleWindow) return map;
+    for (const column of dayColumns) {
+      const schedule = daySchedules.get(column.key);
+      if (!schedule) continue;
+      map.set(
+        column.key,
+        columnStatusFor({
+          column,
+          schedule,
+          dayWindow: scheduleWindow,
+          occupancy: dayOccupancy.get(column.key) ?? [],
+          hardBlocks: dayHardBlocks.get(column.key) ?? [],
+          isToday: isVenueToday,
+          nowMinutes,
+        }),
+      );
+    }
+    return map;
+  }, [
+    dayColumns,
+    daySchedules,
+    scheduleWindow,
+    dayOccupancy,
+    dayHardBlocks,
+    isVenueToday,
+    nowMinutes,
+  ]);
+
+  /** The widest open→close across the day's columns, so a space that is open
+   *  but unbooked still draws the hours it is free. */
+  const dayBounds = useMemo(() => {
+    let start: number | null = null;
+    let end: number | null = null;
+    for (const schedule of daySchedules.values()) {
+      if (schedule.open != null && (start === null || schedule.open < start)) {
+        start = schedule.open;
+      }
+      if (schedule.close != null && (end === null || schedule.close > end)) {
+        end = schedule.close;
+      }
+    }
+    return { start, end };
+  }, [daySchedules]);
+
   const dayWindow = useMemo(
-    () => computeSlotWindow(dayBookings),
-    [dayBookings],
+    () => computeSlotWindow(dayBookings, dayBounds),
+    [dayBookings, dayBounds],
   );
   const daySlots = useMemo(
     () =>
@@ -908,6 +1152,15 @@ const Calendar = () => {
         { length: dayWindow.slots },
         (_, i) => dayWindow.start + i * SLOT_MINUTES,
       ),
+    [dayWindow],
+  );
+  /** The same window in the shape the band geometry expects. */
+  const dayTimeWindow = useMemo(
+    () => ({
+      start: dayWindow.start,
+      end: dayWindow.end,
+      total: dayWindow.end - dayWindow.start,
+    }),
     [dayWindow],
   );
   const dayPlacements = useMemo(
@@ -924,6 +1177,73 @@ const Calendar = () => {
   const hiddenSpaceCount = hideEmptySpaces
     ? spaces.length - dayColumns.filter((c) => !c.virtual).length
     : 0;
+
+  /** Where a column's free band starts on screen, in minutes past midnight. */
+  const bandOriginFor = useCallback(
+    (schedule: ColumnSchedule) =>
+      Math.max(schedule.open ?? dayWindow.start, dayWindow.start),
+    [dayWindow],
+  );
+
+  /**
+   * A tap on a space's free band opens the booking form already filled in for
+   * that space and minute — the web grid's "click to start a booking", with
+   * the same numbers behind it. A tap that can find no real start (booked out
+   * to closing, or too late for anything to fit) does nothing.
+   */
+  const openSlot = useCallback(
+    (column: ScheduleColumn, rawMinute: number) => {
+      const schedule = daySchedules.get(column.key);
+      if (!schedule || isPastDate) return;
+
+      const tap = resolveSlotTap({
+        column,
+        schedule,
+        dayWindow: scheduleWindow,
+        occupancy: dayOccupancy.get(column.key) ?? [],
+        hardBlocks: dayHardBlocks.get(column.key) ?? [],
+        rawMinute,
+        isToday: isVenueToday,
+        nowMinutes,
+      });
+      if (!tap) return;
+
+      // Without a location the booking form lands company-wide, and the same
+      // space name exists at every venue.
+      const locationId =
+        tap.locationId ??
+        (column.roomId != null
+          ? spaceById.get(column.roomId)?.locationId
+          : null) ??
+        scheduleWindow?.location_id ??
+        null;
+
+      router.push({
+        pathname: CREATE_BOOKING_PATH,
+        params: buildBookingParams({
+          locationId,
+          date: startDate,
+          minute: tap.minute,
+          roomId: column.roomId,
+          packageId: tap.packageId,
+          packageIds: tap.packageIds,
+          freeUntilMinute: tap.freeUntilMinute,
+          walkIn: tap.walkIn,
+        }),
+      });
+    },
+    [
+      daySchedules,
+      isPastDate,
+      scheduleWindow,
+      dayOccupancy,
+      dayHardBlocks,
+      isVenueToday,
+      nowMinutes,
+      spaceById,
+      startDate,
+    ],
+  );
 
   /* --------------------------------------------------------- week grid --- */
 
@@ -1096,12 +1416,8 @@ const Calendar = () => {
           />
         }
       >
-        <View className="px-5 pt-0">
+        <View className="px-5 pt-5">
           {/* Welcome Section */}
-          <ScreenTitleCard
-            title="Calendar"
-            subtitle="Bookings and attraction purchases at a glance"
-          />
 
           {/* View-mode filter */}
           <View className="flex-row bg-white dark:bg-neutral-900 rounded-xl p-1.5 mb-4 shadow-sm border border-gray-100 dark:border-neutral-800">
@@ -1565,73 +1881,223 @@ const Calendar = () => {
                       showsHorizontalScrollIndicator={false}
                     >
                       <View className="flex-row">
-                        {dayColumns.map((column) => (
-                          <View
-                            key={column.key}
-                            style={{ width: DAY_COL_WIDTH }}
-                            className="border-r border-gray-100 dark:border-neutral-800"
-                          >
+                        {dayColumns.map((column) => {
+                          const schedule = daySchedules.get(column.key);
+                          const band = schedule
+                            ? bandGeometry(
+                                schedule.open,
+                                schedule.close,
+                                dayTimeWindow,
+                                PX_PER_MINUTE,
+                              )
+                            : null;
+                          // A past day is read-only, and a space with no window
+                          // yet is drawn but never tappable.
+                          const bookable =
+                            !!band && !!schedule?.bookable && !isPastDate;
+
+                          return (
                             <View
-                              style={{ height: GRID_HEADER_HEIGHT }}
-                              className="px-2 items-center justify-center border-b border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50"
+                              key={column.key}
+                              style={{ width: DAY_COL_WIDTH }}
+                              className="border-r border-gray-100 dark:border-neutral-800"
                             >
-                              <Text
-                                className="text-xs font-bold text-gray-900 dark:text-white"
-                                numberOfLines={1}
+                              <View
+                                style={{ height: GRID_HEADER_HEIGHT }}
+                                className="px-2 items-center justify-center border-b border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50"
                               >
-                                {column.name}
-                              </Text>
-                              {column.virtual ? (
-                                <View className="flex-row items-center gap-1 mt-0.5">
-                                  <AlertTriangle size={10} color="#F59E0B" />
-                                  <Text className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                                    No room
-                                  </Text>
-                                </View>
-                              ) : (
-                                !!spaceLocationLabel(column.roomId) && (
+                                <Text
+                                  className="text-xs font-bold text-gray-900 dark:text-white"
+                                  numberOfLines={1}
+                                >
+                                  {column.name}
+                                </Text>
+                                {column.virtual ? (
                                   <View className="flex-row items-center gap-1 mt-0.5">
-                                    <MapPin size={10} color="#9ca3af" />
-                                    <Text
-                                      className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink"
-                                      numberOfLines={1}
-                                    >
-                                      {spaceLocationLabel(column.roomId)}
+                                    <AlertTriangle size={10} color="#F59E0B" />
+                                    <Text className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                      No room
                                     </Text>
                                   </View>
-                                )
-                              )}
-                            </View>
+                                ) : (
+                                  !!spaceLocationLabel(column.roomId) && (
+                                    <View className="flex-row items-center gap-1 mt-0.5">
+                                      <MapPin size={10} color="#9ca3af" />
+                                      <Text
+                                        className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink"
+                                        numberOfLines={1}
+                                      >
+                                        {spaceLocationLabel(column.roomId)}
+                                      </Text>
+                                    </View>
+                                  )
+                                )}
+                                <DayColumnStatus
+                                  status={dayStatuses.get(column.key)}
+                                  onWalkIn={() => openSlot(column, nowMinutes)}
+                                />
+                              </View>
 
-                            <View
-                              style={{ height: daySlots.length * SLOT_HEIGHT }}
-                            >
-                              {daySlots.map((minutes) => (
-                                <View
-                                  key={minutes}
-                                  style={{ height: SLOT_HEIGHT }}
-                                  className="items-center justify-center border-b border-gray-100 dark:border-neutral-800"
-                                >
-                                  <Text className="text-gray-300 dark:text-neutral-700 text-xs">
-                                    –
-                                  </Text>
-                                </View>
-                              ))}
-
-                              {(dayPlacements.get(column.key) ?? []).map(
-                                (placement) => (
-                                  <DayBookingBlock
-                                    key={placement.item.id}
-                                    placement={placement}
-                                    onPress={() =>
-                                      openBooking(placement.item.id)
-                                    }
+                              <View
+                                style={{
+                                  height: daySlots.length * SLOT_HEIGHT,
+                                }}
+                              >
+                                {daySlots.map((minutes) => (
+                                  <View
+                                    key={minutes}
+                                    style={{ height: SLOT_HEIGHT }}
+                                    className="border-b border-gray-100 dark:border-neutral-800"
                                   />
-                                ),
-                              )}
+                                ))}
+
+                                {/* The hours this space is open. Tapping one
+                                    starts a booking there; breaks, closures and
+                                    bookings sit on top and the tap is walked
+                                    forward to the next minute that is free. */}
+                                {band &&
+                                  (bookable ? (
+                                    <Pressable
+                                      onPress={(e) =>
+                                        openSlot(
+                                          column,
+                                          minuteAtOffset(
+                                            schedule
+                                              ? bandOriginFor(schedule)
+                                              : dayWindow.start,
+                                            e.nativeEvent.locationY,
+                                            PX_PER_MINUTE,
+                                          ),
+                                        )
+                                      }
+                                      accessibilityRole="button"
+                                      accessibilityLabel={`Start a booking in ${column.name}`}
+                                      style={{
+                                        position: "absolute",
+                                        left: 0,
+                                        right: 0,
+                                        top: band.top,
+                                        height: band.height,
+                                      }}
+                                      className="overflow-hidden bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
+                                    >
+                                      <View className="flex-row items-center gap-1 px-1 pt-1">
+                                        <Plus size={10} color="#9ca3af" />
+                                        <Text className="text-[9px] font-semibold text-gray-400 dark:text-gray-500">
+                                          Tap to book
+                                        </Text>
+                                      </View>
+                                    </Pressable>
+                                  ) : (
+                                    <View
+                                      pointerEvents="none"
+                                      style={{
+                                        position: "absolute",
+                                        left: 0,
+                                        right: 0,
+                                        top: band.top,
+                                        height: band.height,
+                                      }}
+                                      className="bg-gray-50 dark:bg-neutral-900/40"
+                                    />
+                                  ))}
+
+                                {(schedule?.closedRanges ?? []).map(
+                                  (closure, index) => {
+                                    const geometry = bandGeometry(
+                                      closure.startMinutes,
+                                      closure.endMinutes,
+                                      dayTimeWindow,
+                                      PX_PER_MINUTE,
+                                    );
+                                    if (!geometry) return null;
+                                    return (
+                                      <View
+                                        key={`closed-${index}`}
+                                        pointerEvents="none"
+                                        style={{
+                                          position: "absolute",
+                                          left: 2,
+                                          right: 2,
+                                          top: geometry.top,
+                                          height: geometry.height,
+                                        }}
+                                        className="rounded border border-dashed border-red-200 bg-red-50/90 dark:border-red-900/40 dark:bg-red-950/50 px-1 pt-0.5"
+                                      >
+                                        <Text
+                                          className="text-[10px] font-medium text-red-500"
+                                          numberOfLines={1}
+                                        >
+                                          {closure.reason ?? "Closed"}
+                                        </Text>
+                                      </View>
+                                    );
+                                  },
+                                )}
+
+                                {(column.roomId != null
+                                  ? (dayBreaks.get(column.roomId) ?? [])
+                                  : []
+                                ).map((brk, index) => {
+                                  const geometry = bandGeometry(
+                                    brk.start,
+                                    brk.end,
+                                    dayTimeWindow,
+                                    PX_PER_MINUTE,
+                                  );
+                                  if (!geometry) return null;
+                                  return (
+                                    <View
+                                      key={`break-${index}`}
+                                      pointerEvents="none"
+                                      style={{
+                                        position: "absolute",
+                                        left: 2,
+                                        right: 2,
+                                        top: geometry.top,
+                                        height: geometry.height,
+                                      }}
+                                      className="rounded border border-dashed border-gray-300 bg-gray-200/80 dark:border-neutral-600 dark:bg-neutral-800 px-1 pt-0.5"
+                                    >
+                                      <Text
+                                        className="text-[10px] font-medium text-gray-500 dark:text-gray-400"
+                                        numberOfLines={1}
+                                      >
+                                        Break
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+
+                                {schedule?.closedAllDay && (
+                                  <View
+                                    pointerEvents="none"
+                                    className="absolute inset-0 items-center pt-3 bg-gray-200/60 dark:bg-neutral-900/60"
+                                  >
+                                    <Text
+                                      className="rounded-full border border-gray-200 bg-white/90 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/50 dark:text-gray-400"
+                                      numberOfLines={1}
+                                    >
+                                      {schedule.reason ?? "Closed"}
+                                    </Text>
+                                  </View>
+                                )}
+
+                                {(dayPlacements.get(column.key) ?? []).map(
+                                  (placement) => (
+                                    <DayBookingBlock
+                                      key={placement.item.id}
+                                      placement={placement}
+                                      onPress={() =>
+                                        openBooking(placement.item.id)
+                                      }
+                                    />
+                                  ),
+                                )}
+                              </View>
                             </View>
-                          </View>
-                        ))}
+                          );
+                        })}
                       </View>
                     </ScrollView>
                   </View>

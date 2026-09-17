@@ -57,6 +57,30 @@ describe("the slot window a day's grid is drawn in", () => {
     assert.equal(window.slots, 48);
   });
 
+  it("spans the day's operating hours even when nothing is booked", () => {
+    const window = computeSlotWindow([], { start: 16 * 60, end: 20 * 60 });
+    assert.equal(window.start, 16 * 60);
+    assert.equal(window.end, 20 * 60);
+  });
+
+  it("covers the operating hours and the bookings together", () => {
+    const window = computeSlotWindow(
+      [booking({ time: "21:00", durationMinutes: 120 })],
+      { start: 16 * 60, end: 20 * 60 },
+    );
+    assert.equal(window.start, 16 * 60);
+    assert.equal(window.end, 23 * 60);
+  });
+
+  it("ignores operating hours it was not given", () => {
+    const window = computeSlotWindow([booking({ time: "17:00" })], {
+      start: null,
+      end: null,
+    });
+    assert.equal(window.start, 17 * 60);
+    assert.equal(window.end, 18 * 60);
+  });
+
   it("never gives a zero-height window to a booking with no duration", () => {
     const window = computeSlotWindow([booking({ time: "17:00", durationMinutes: 0 })]);
     assert.equal(window.end - window.start, SLOT_MINUTES);

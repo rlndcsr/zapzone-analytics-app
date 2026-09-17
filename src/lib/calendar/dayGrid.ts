@@ -38,10 +38,23 @@ const ceilSlot = (mins: number) => Math.ceil(mins / SLOT_MINUTES) * SLOT_MINUTES
  * The slot window that just contains `items` — snapped outwards to whole slots
  * and clamped to the day. An empty day falls back to a plain 10am–10pm frame so
  * the grid still has a shape to draw.
+ *
+ * `bounds` widens it to the day's operating window as well, so a space that is
+ * open but unbooked still draws — and can be tapped — across the hours it is
+ * actually free, rather than only around whatever happens to be booked.
  */
-export function computeSlotWindow(items: TimedItem[]): SlotWindow {
+export function computeSlotWindow(
+  items: TimedItem[],
+  bounds?: { start: number | null; end: number | null },
+): SlotWindow {
   let earliest = Infinity;
   let latest = -Infinity;
+  if (bounds?.start != null && Number.isFinite(bounds.start)) {
+    earliest = bounds.start;
+  }
+  if (bounds?.end != null && Number.isFinite(bounds.end)) {
+    latest = bounds.end;
+  }
   for (const item of items) {
     const start = timeToMinutes(item.time);
     const end = start + Math.max(SLOT_MINUTES, item.durationMinutes);

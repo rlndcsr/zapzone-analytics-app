@@ -200,40 +200,85 @@ const BookingCard = ({
   );
 };
 
-const EmptyDay = ({ label }: { label: string }) => (
-  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-6 items-center border border-gray-100 dark:border-neutral-800">
-    <Text className="text-sm text-gray-400 dark:text-gray-500">{label}</Text>
-  </View>
-);
-
 /**
- * One activity chip inside a month-grid day cell — icon + count, tinted per
- * activity type (bookings blue, attraction tickets purple, events amber), the
- * same breakdown the web calendar draws.
+ * One activity chip on a day — icon + count, tinted per activity type. The
+ * month grid takes the compact form its cells have room for; the week list
+ * takes the roomier one, the way the web calendar sizes the same breakdown.
  */
 const DayChip = ({
   icon,
   tint,
   className,
   label,
+  compact = true,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   tint: string;
   className: string;
   label: string;
+  compact?: boolean;
 }) => (
   <View
-    className={`flex-row items-center gap-1 rounded px-1 py-0.5 mb-0.5 ${className}`}
+    className={`flex-row items-center rounded ${
+      compact ? "gap-1 px-1 py-0.5 mb-0.5" : "gap-1.5 px-2 py-1 mb-1"
+    } ${className}`}
   >
-    <Feather name={icon} size={8} color={tint} />
+    <Feather name={icon} size={compact ? 8 : 12} color={tint} />
     <Text
       numberOfLines={1}
-      className="flex-1 text-[9px] font-medium"
+      className={`flex-1 font-medium ${compact ? "text-[9px]" : "text-[11px]"}`}
       style={{ color: tint }}
     >
       {label}
     </Text>
   </View>
+);
+
+/**
+ * A day's whole breakdown — the web's `renderDateBreakdown`, in its order and
+ * its colours. The month grid and the week list share it, so the two can never
+ * drift apart.
+ */
+const DayActivityChips = ({
+  bookings,
+  tickets,
+  registrations,
+  compact = true,
+}: {
+  bookings: number;
+  tickets: number;
+  registrations: number;
+  compact?: boolean;
+}) => (
+  <>
+    {bookings > 0 && (
+      <DayChip
+        icon="package"
+        tint="#1E40AF"
+        className="bg-blue-100 dark:bg-blue-900/40"
+        label={`${bookings} Booking${bookings === 1 ? "" : "s"}`}
+        compact={compact}
+      />
+    )}
+    {tickets > 0 && (
+      <DayChip
+        icon="tag"
+        tint="#6B21A8"
+        className="bg-purple-100 dark:bg-purple-900/40"
+        label={`${tickets} Attraction Ticket${tickets === 1 ? "" : "s"}`}
+        compact={compact}
+      />
+    )}
+    {registrations > 0 && (
+      <DayChip
+        icon="star"
+        tint="#92400E"
+        className="bg-amber-100 dark:bg-amber-900/40"
+        label={`${registrations} Event Registration${registrations === 1 ? "" : "s"}`}
+        compact={compact}
+      />
+    )}
+  </>
 );
 
 const BookingCalendar = () => {
@@ -743,31 +788,11 @@ const BookingCalendar = () => {
                                 {cell.day}
                               </Text>
 
-                              {/* Activity chips, in the web's order and colours. */}
-                              {hasBookings && (
-                                <DayChip
-                                  icon="package"
-                                  tint="#1E40AF"
-                                  className="bg-blue-100 dark:bg-blue-900/40"
-                                  label={`${dayBookings.length} Booking${dayBookings.length === 1 ? "" : "s"}`}
-                                />
-                              )}
-                              {tickets > 0 && (
-                                <DayChip
-                                  icon="tag"
-                                  tint="#6B21A8"
-                                  className="bg-purple-100 dark:bg-purple-900/40"
-                                  label={`${tickets} Attraction Ticket${tickets === 1 ? "" : "s"}`}
-                                />
-                              )}
-                              {registrations > 0 && (
-                                <DayChip
-                                  icon="star"
-                                  tint="#92400E"
-                                  className="bg-amber-100 dark:bg-amber-900/40"
-                                  label={`${registrations} Event Registration${registrations === 1 ? "" : "s"}`}
-                                />
-                              )}
+                              <DayActivityChips
+                                bookings={dayBookings.length}
+                                tickets={tickets}
+                                registrations={registrations}
+                              />
                             </>
                           )}
                         </Pressable>
@@ -782,65 +807,71 @@ const BookingCalendar = () => {
           {viewMode === "week" && loading && <CalendarWeekSkeleton />}
           {viewMode === "day" && loading && <CalendarDaySkeleton />}
 
-          {/* ---- WEEK ---- */}
-          {viewMode === "week" &&
-            !loading &&
-            weekDays.map((d) => {
-              const key = dateKey(d);
-              const group = byDate[key];
-              const isToday = key === todayKey;
-              return (
-                <View key={key} className="mb-4">
-                  <View className="flex-row items-center gap-3 mb-3">
-                    <View
-                      className={`w-10 h-10 rounded-full items-center justify-center ${
-                        isToday
-                          ? "bg-[#0644C7]"
-                          : "bg-gray-100 dark:bg-neutral-800"
-                      }`}
-                    >
-                      <Text
-                        className={`text-sm font-bold ${
-                          isToday
-                            ? "text-white"
-                            : "text-gray-700 dark:text-gray-300"
-                        }`}
-                      >
-                        {d.getDate()}
-                      </Text>
-                    </View>
-                    <View>
+          {/* ---- WEEK ----
+              One summary card per day, tapping through to that day's detail —
+              the web calendar's week view. It deliberately does not list the
+              bookings themselves: the week is for seeing where the volume is,
+              and the day sheet is where the bookings live. */}
+          {viewMode === "week" && !loading && (
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-3 border border-gray-100 dark:border-neutral-800">
+              {weekDays.map((d) => {
+                const key = dateKey(d);
+                const dayBookings = byDate[key]?.bookings ?? [];
+                const extra = visibleExtras[key];
+                const tickets = extra?.attractionTickets ?? 0;
+                const registrations = extra?.eventRegistrations ?? 0;
+                const hasAny =
+                  dayBookings.length > 0 || tickets > 0 || registrations > 0;
+                const isToday = key === todayKey;
+
+                return (
+                  <Pressable
+                    key={key}
+                    disabled={!hasAny}
+                    onPress={() => openDay(key)}
+                    className={`rounded-xl border p-3 mb-2 ${
+                      isToday
+                        ? "border-[#0644C7]/40 bg-blue-50/60 dark:border-blue-500/40 dark:bg-blue-900/20"
+                        : "border-gray-200 dark:border-neutral-800"
+                    } ${hasAny ? "active:bg-blue-50 dark:active:bg-blue-900/30" : ""}`}
+                  >
+                    <View className="flex-row items-center justify-between mb-1.5">
                       <Text
                         className={`text-sm font-semibold ${
                           isToday
-                            ? "text-[#0644C7]"
+                            ? "text-[#0644C7] dark:text-blue-300"
                             : "text-gray-900 dark:text-white"
                         }`}
                       >
-                        {WEEKDAY_FULL[d.getDay()]}
+                        {WEEKDAY_FULL[d.getDay()]}, {MONTH_SHORT[d.getMonth()]}{" "}
+                        {d.getDate()}
                       </Text>
-                      {!!group && (
-                        <Text className="text-xs text-gray-400 dark:text-gray-500">
-                          {group.bookings.length} booking
-                          {group.bookings.length === 1 ? "" : "s"}
+                      {isToday && (
+                        <Text className="text-[10px] font-bold tracking-wide text-[#0644C7] dark:text-blue-300">
+                          TODAY
                         </Text>
                       )}
                     </View>
-                  </View>
-                  {group ? (
-                    group.bookings.map((b) => (
-                      <BookingCard
-                        key={b.id}
-                        booking={b}
-                        onPress={() => openBooking(b.id)}
+
+                    {hasAny ? (
+                      <DayActivityChips
+                        bookings={dayBookings.length}
+                        tickets={tickets}
+                        registrations={registrations}
+                        compact={false}
                       />
-                    ))
-                  ) : (
-                    <EmptyDay label="No bookings for this day" />
-                  )}
-                </View>
-              );
-            })}
+                    ) : (
+                      <Text className="text-xs text-gray-400 dark:text-gray-500">
+                        {categoryFilter.isAll
+                          ? "No activity"
+                          : "Nothing in the selected categories"}
+                      </Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
 
           {/* ---- DAY ---- */}
           {viewMode === "day" &&
