@@ -38,6 +38,7 @@ import {
   clockToMinutes,
   minutesToClock,
   readBookingPrefill,
+  resolveClickedSlot,
 } from "../../lib/bookings/bookingPrefill";
 import { packageServesRoom } from "../../lib/bookings/packageCandidates";
 import {
@@ -1012,38 +1013,31 @@ const CreateBookingScreen = () => {
     [slots, walkInSlot],
   );
 
-  /**
-   * Re-selects the carried-over room/time once real slots have come back for
-   * THIS package/date — never before. `slotsAnsweredForRef` is what actually
-   * guarantees that: `loadingSlots` alone still let this run against last
-   * render's empty `slots`, since the fetch effect above only flips it true on
-   * its own next render, one commit after this effect's stale pass. Runs once
-   * per landed prefill (`prefillTimeCheckedRef`), and waits for a package to
-   * actually be selected — the narrowed-list case has nothing to check
-   * against until staff picks one.
-   */
   useEffect(() => {
     if (!prefillLandedRef.current || prefillTimeCheckedRef.current) return;
     if (!pkg || loadingSlots) return;
     if (scheduledDate !== slotPrefill.date) return;
-    // loadingSlots only flips true on the fetch effect's NEXT render, so without
-    // this a same-commit run above still sees last render's empty `slots`
     if (slotsAnsweredForRef.current !== `${pkg.id}|${scheduledDate}`) return;
 
     prefillTimeCheckedRef.current = true;
     if (!slotPrefill.time && slotPrefill.roomId == null) return;
 
-    // matched by time alone — the server's own room for a real slot overrides
-    // whatever was clicked, so an unchecked room is never saved
-    const matched =
-      (slotPrefill.time != null
-        ? slots.find((s) => s.startTime === slotPrefill.time)
-        : slotPrefill.roomId != null
-          ? slots.find((s) => s.roomId === slotPrefill.roomId)
-          : undefined) ?? null;
+    // Keeps the space actually clicked when it is still free at this time;
+    // only trades it for another offered slot when it is not, and says so.
+    const { slot: matched, roomChanged } = resolveClickedSlot(
+      slots,
+      slotPrefill.time,
+      slotPrefill.roomId,
+    );
 
     if (matched) {
       setSlot(matched);
+      if (roomChanged) {
+        Alert.alert(
+          "Space changed",
+          "That space is taken at this time — the booking moved to the next free one.",
+        );
+      }
       return;
     }
 
@@ -1064,12 +1058,6 @@ const CreateBookingScreen = () => {
     }
   }, [slots, loadingSlots, pkg, scheduledDate, slotPrefill, walkInSlot]);
 
-  /**
-   * Call to Book: whether the selected package has any usable schedule at all.
-   * The package list this screen browses is the slim one, which carries no
-   * schedules, so they are read from the same endpoint manual-booking uses.
-   * `null` means "not known yet" — the booking UI is left alone until it is.
-   */
   const [pkgSchedules, setPkgSchedules] = useState<
     PackageAvailabilitySchedule[] | null
   >(null);

@@ -23,6 +23,11 @@ function finite(value: number, fallback: number): number {
 // own (often coarser) interval, so the recorded arrival stays real.
 export const WALK_IN_SNAP_MINUTES = 5;
 
+// How far past "now" a click still counts as a walk-in starting on the spot.
+// Further ahead on today's grid is a planned booking and must land on one of
+// the package's real offered starts, or the booking form goes on to refuse it.
+export const WALK_IN_REACH_MINUTES = 30;
+
 export function snapToInterval(
   minute: number,
   intervalMinutes: number,

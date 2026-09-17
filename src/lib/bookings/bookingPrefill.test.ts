@@ -6,6 +6,7 @@ import {
   clockToMinutes,
   minutesToClock,
   readBookingPrefill,
+  resolveClickedSlot,
 } from "./bookingPrefill.ts";
 
 describe("minutesToClock / clockToMinutes", () => {
@@ -139,5 +140,38 @@ describe("buildBookingParams / readBookingPrefill round trip", () => {
   it("falls back to the wrapped minute when start_minutes is missing", () => {
     const prefill = readBookingPrefill({ time: "01:30" });
     assert.equal(prefill.startMinutes, 90);
+  });
+});
+
+describe("resolving the space a click carries into the booking form", () => {
+  const slots = [
+    { startTime: "16:00", roomId: 1 },
+    { startTime: "16:00", roomId: 2 },
+    { startTime: "17:00", roomId: 2 },
+  ];
+
+  it("keeps the clicked space when it is still offered at that time", () => {
+    const { slot, roomChanged } = resolveClickedSlot(slots, "16:00", 2);
+    assert.deepEqual(slot, { startTime: "16:00", roomId: 2 });
+    assert.equal(roomChanged, false);
+  });
+
+  it("falls back to another offered space and flags the change when the clicked one is taken", () => {
+    // room 1 has nothing offered at 17:00 — only room 2 does
+    const { slot, roomChanged } = resolveClickedSlot(slots, "17:00", 1);
+    assert.deepEqual(slot, { startTime: "17:00", roomId: 2 });
+    assert.equal(roomChanged, true);
+  });
+
+  it("never flags a change when no particular space was clicked", () => {
+    const { slot, roomChanged } = resolveClickedSlot(slots, "16:00", null);
+    assert.deepEqual(slot, { startTime: "16:00", roomId: 1 });
+    assert.equal(roomChanged, false);
+  });
+
+  it("gives nothing back once the offered time itself is gone", () => {
+    const { slot, roomChanged } = resolveClickedSlot(slots, "18:00", 1);
+    assert.equal(slot, null);
+    assert.equal(roomChanged, false);
   });
 });

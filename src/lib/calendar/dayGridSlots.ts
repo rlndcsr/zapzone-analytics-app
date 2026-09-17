@@ -1,17 +1,3 @@
-// Schedule-aware slot math for the Calendar tab's Day grid.
-//
-// The Day grid draws one column per space. This module answers, for each of
-// them, the two questions the web admin's DayScheduleGrid answers: what the
-// column header should say about the next start ("Free 4:00 PM", "Booked until
-// close", "No package scheduled", …), and what minute a tap on the empty
-// availability band actually means.
-//
-// The Space Schedule screen carries most of this reasoning inline, because it
-// folds in day-offs it fetches from /day-offs for one concrete location, which
-// the company-wide Calendar tab never loads — here the closures come straight
-// off the day window, exactly as the web grid reads them. What the two grids
-// must never answer differently, `packageIntervalFor` below, they share.
-
 import type {
   ScheduleDayWindow,
   SchedulePackageWindow,
@@ -22,6 +8,7 @@ import {
   nextFreeMinute,
   snapToInterval,
   snapToOfferedStart,
+  WALK_IN_REACH_MINUTES,
   WALK_IN_SNAP_MINUTES,
   type TimeRange,
 } from "../bookings/freeTime.ts";
@@ -33,36 +20,22 @@ import {
 } from "../bookings/spaceScheduleGrid.ts";
 import { SLOT_MINUTES } from "./dayGrid.ts";
 
-/** Only these statuses hold a space — the rest leave it free to rebook. */
 export const OCCUPYING_STATUSES = new Set([
   "confirmed",
   "checked-in",
   "pending",
 ]);
 
-/** Fallback snapping grid when the day window says nothing about intervals. */
 const FALLBACK_INTERVAL = 15;
 
-/**
- * One column's operating window, resolved once so the header label, the
- * availability band and the tap handler can never disagree.
- *
- * A column whose room is missing from the day window (the request failed, or
- * hasn't landed) stays `windowKnown: false`: drawn if there is anything to
- * draw, but never bookable, so a slow request can only make the grid inert,
- * never wrong.
- */
 export type ColumnSchedule = {
   open: number | null;
   close: number | null;
   closedAllDay: boolean;
   bookable: boolean;
   windowKnown: boolean;
-  /** Why it is shut, when the server says so ("No package scheduled", …). */
   reason: string | null;
-  /** The space's turnaround — owed to the next BOOKING, never to a closure. */
   turnaround: number;
-  /** The customer-facing grid, used to snap a tap that matches no real start. */
   interval: number;
   closedRanges: TimeRange[];
   locationId: number | null;
@@ -96,15 +69,6 @@ const toRanges = (
     reason: r.reason ?? "Closed",
   }));
 
-/**
- * The customer-facing grid a tap snaps to: the smallest interval any package
- * serving this column runs on, else the day's own.
- *
- * Never the space's turnaround. That is the gap AFTER a booking, and a space
- * set to no gap sends a real 0 — read as a grid it would look unset and be
- * replaced by a fifteen-minute default, which snaps taps past starts the
- * booking form would have taken.
- */
 export const packageIntervalFor = (
   column: ScheduleColumn,
   dayWindow: ScheduleDayWindow | null,
@@ -155,8 +119,6 @@ export function buildColumnSchedules({
       continue;
     }
 
-    // A roomless column stands for one package, so its window is that
-    // package's own — and it is bookable only while the location is open.
     const entry = packagesForColumn(column, dayWindow)[0];
     map.set(column.key, {
       open: entry?.open_minutes ?? null,
@@ -176,12 +138,6 @@ export function buildColumnSchedules({
   return map;
 }
 
-/**
- * Booked ranges per column, each extended by the space's turnaround — a space
- * stays shut while it is reset, and the server's conflict check agrees. Built
- * from every occupying booking, never the filtered list, so a booking hidden
- * by a search or a category tab cannot make its own space look free.
- */
 export function buildOccupancy({
   bookings,
   schedules,
@@ -200,7 +156,7 @@ export function buildOccupancy({
   for (const booking of bookings) {
     const key = columnKeyFor(booking, knownRoomIds);
     const schedule = schedules.get(key);
-    if (!schedule) continue; // Its column is hidden, so it blocks nothing here.
+    if (!schedule) continue;
     const startMinutes = timeToMinutes(booking.time);
     const range: TimeRange = {
       startMinutes,
@@ -216,7 +172,6 @@ export function buildOccupancy({
   return map;
 }
 
-/** Closures and breaks: blocked, but owed no turnaround of their own. */
 export function hardBlocksFor(
   schedule: ColumnSchedule,
   breaks: { start: number; end: number }[],
@@ -239,12 +194,6 @@ export function blockedRangesFor(
   return [...occupancy, ...hardBlocks];
 }
 
-/**
- * How long this column is really bookable from `minute`: a booking has to
- * clear the turnaround before the NEXT booking starts, but needs no such gap
- * ahead of a break or a closure — buffering there would hide starts the
- * booking form still accepts.
- */
 export function usableFreeUntil({
   schedule,
   occupancy,
@@ -270,7 +219,6 @@ export function usableFreeUntil({
   return Math.min(bookingCap, untilHard);
 }
 
-/** Package ids the booking form will accept for this column at this minute. */
 export function packageIdsForSlot({
   column,
   dayWindow,
@@ -297,7 +245,6 @@ export function packageIdsForSlot({
   return packagesValidForSlot(candidates, column.roomId, minute);
 }
 
-/** Every start time offered anywhere in this column today, ascending. */
 export function columnStarts(
   column: ScheduleColumn,
   dayWindow: ScheduleDayWindow | null,
@@ -309,7 +256,6 @@ export function columnStarts(
   return [...starts].sort((a, b) => a - b);
 }
 
-/** The starts of just the packages bookable at `minute`. */
 function startsForSlot({
   column,
   dayWindow,
@@ -328,7 +274,6 @@ function startsForSlot({
   return [...starts].sort((a, b) => a - b);
 }
 
-/** The shortest package that can start at `minute` here, in minutes. */
 function shortestDurationAt({
   column,
   dayWindow,
@@ -350,11 +295,6 @@ function shortestDurationAt({
   };
 }
 
-/**
- * Auto-select a package only when one really starts at this minute — anything
- * else arrives at the booking form as a time it goes on to refuse. The wider
- * list still travels, so staff can pick.
- */
 function packageOfferFor({
   column,
   dayWindow,
@@ -377,16 +317,6 @@ function packageOfferFor({
   };
 }
 
-/**
- * The minute a tap means. A future day snaps to a real offered start, because
- * that is the grid the customer is sold; today snaps to five minutes instead —
- * a walk-in starts when the guests actually walk in, and 4:05 is a perfectly
- * good start for staff even when no package offers it.
- *
- * Returns null when the tap can find no start at all: the column is booked out
- * from here to closing, or nothing short enough is left to fit before it
- * closes. Never a minute the grid already knows is blocked.
- */
 export function resolveSlotMinute({
   column,
   schedule,
@@ -397,8 +327,6 @@ export function resolveSlotMinute({
   nowMinutes,
 }: {
   column: ScheduleColumn;
-  /** Only the window and the grid — the Space Schedule keeps its own wider
-   *  column meta, and both screens must resolve a tap identically. */
   schedule: Pick<ColumnSchedule, "open" | "close" | "interval">;
   dayWindow: ScheduleDayWindow | null;
   blocked: TimeRange[];
@@ -412,9 +340,6 @@ export function resolveSlotMinute({
   const floor = isToday
     ? snapToInterval(Math.max(open, nowMinutes), WALK_IN_SNAP_MINUTES, open)
     : open;
-
-  // A booking still has to finish before the space closes, so the last start
-  // is a whole package back from closing — not one snapping step back.
   const probe = Math.min(Math.max(rawMinute, open), close - 1);
   const shortest = shortestDurationAt({
     column,
@@ -430,8 +355,11 @@ export function resolveSlotMinute({
   const offered = startsForSlot({ column, dayWindow, minute: probe }).filter(
     (start) => start >= floor && start <= latestStart,
   );
+
+  const isWalkInNow =
+    isToday && rawMinute <= nowMinutes + WALK_IN_REACH_MINUTES;
   const onGrid =
-    !isToday && offered.length > 0
+    !isWalkInNow && offered.length > 0
       ? snapToOfferedStart(offered, rawMinute, floor)
       : null;
 
@@ -449,8 +377,6 @@ export function resolveSlotMinute({
   if (free === null) return null;
   if (free === clamped) return clamped;
 
-  // The tap landed on a booking, a break or a closure — walk forward to the
-  // first start that is genuinely free rather than handing back a blocked one.
   const freeOffered =
     onGrid === null
       ? undefined
@@ -466,7 +392,6 @@ export function resolveSlotMinute({
   return fromFree > latestStart ? null : fromFree;
 }
 
-/** Everything the booking form needs to open on the tapped slot. */
 export type SlotTap = {
   minute: number;
   packageId: number | null;
@@ -521,19 +446,12 @@ export function resolveSlotTap({
       hardBlocks,
       minute,
     }),
-    // A start off the customer's own grid is staff's call, so the form has to
-    // be told to keep it rather than round it away.
+
     walkIn: isToday || !columnStarts(column, dayWindow).includes(minute),
     locationId: schedule.locationId,
   };
 }
 
-/**
- * The next minute staff can actually START a booking here — not merely the
- * next unoccupied minute. A start counts only when the space is free at it and
- * a package that runs then still fits before the next booking; otherwise the
- * header would advertise a time the booking form goes on to refuse.
- */
 export function nextBookableFrom({
   column,
   schedule,

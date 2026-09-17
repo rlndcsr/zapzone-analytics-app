@@ -101,6 +101,32 @@ const toDate = (value: string | string[] | undefined): string | null => {
   return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
 };
 
+export function resolveClickedSlot<
+  T extends { startTime: string; roomId: number | null },
+>(
+  slots: T[],
+  time: string | null,
+  roomId: number | null,
+): { slot: T | null; roomChanged: boolean } {
+  const clickedRoomSlot =
+    time != null && roomId != null
+      ? (slots.find((s) => s.startTime === time && s.roomId === roomId) ?? null)
+      : null;
+
+  const fallback =
+    time != null
+      ? (slots.find((s) => s.startTime === time) ?? null)
+      : roomId != null
+        ? (slots.find((s) => s.roomId === roomId) ?? null)
+        : null;
+
+  const slot = clickedRoomSlot ?? fallback;
+  return {
+    slot,
+    roomChanged: slot != null && roomId != null && slot.roomId !== roomId,
+  };
+}
+
 export function readBookingPrefill(params: RawParams): BookingPrefill {
   const minute = clockToMinutes(first(params.time));
   const freeUntilRaw = first(params.free_until_minutes);

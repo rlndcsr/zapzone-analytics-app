@@ -391,6 +391,16 @@ describe("what a tap on the free band means", () => {
     assert.equal(tap?.packageId, 7);
   });
 
+  it("resolves a tap well ahead of now on today to a real offered start, not the five-minute grid", () => {
+    const tap = resolveSlotTap({
+      ...setup(window()),
+      rawMinute: AT(17, 40),
+      isToday: true,
+      nowMinutes: AT(17, 2),
+    });
+    assert.equal(tap?.minute, AT(18));
+  });
+
   it("never hands back a minute earlier than now", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
