@@ -2083,6 +2083,45 @@ const Calendar = () => {
                                   </View>
                                 )}
 
+                                {/* The space is still being reset here, so the
+                                    gap after a booking must not read as free.
+                                    Blocks are drawn snapped to whole slots, so
+                                    only the part of the reset that sticks out
+                                    below one needs its own strip. */}
+                                {(dayPlacements.get(column.key) ?? []).map(
+                                  (placement) => {
+                                    const turnaround =
+                                      schedule?.turnaround ?? 0;
+                                    if (turnaround <= 0) return null;
+                                    const top =
+                                      (placement.slotIndex +
+                                        placement.slotSpan) *
+                                      SLOT_HEIGHT;
+                                    const bottom =
+                                      (Math.min(
+                                        dayWindow.end,
+                                        placement.endMin + turnaround,
+                                      ) -
+                                        dayWindow.start) *
+                                      PX_PER_MINUTE;
+                                    if (bottom <= top) return null;
+                                    return (
+                                      <View
+                                        key={`reset-${placement.item.id}`}
+                                        pointerEvents="none"
+                                        style={{
+                                          position: "absolute",
+                                          left: 0,
+                                          right: 0,
+                                          top,
+                                          height: bottom - top,
+                                        }}
+                                        className="border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
+                                      />
+                                    );
+                                  },
+                                )}
+
                                 {(dayPlacements.get(column.key) ?? []).map(
                                   (placement) => (
                                     <DayBookingBlock

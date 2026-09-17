@@ -673,6 +673,7 @@ const ScheduleGrid = ({
   scrollRef,
   metaByColumn,
   freeStateByColumn,
+  turnaroundByColumn,
   isPastDate,
   onOpenSlot,
 }: {
@@ -703,6 +704,8 @@ const ScheduleGrid = ({
     }
   >;
   freeStateByColumn: Map<string, FreeState>;
+  /** Minutes each space stays shut after a booking, for the reset strip. */
+  turnaroundByColumn: Map<string, number>;
   isPastDate: boolean;
   onOpenSlot: (
     column: ScheduleColumn,
@@ -967,6 +970,31 @@ const ScheduleGrid = ({
                         onOpenSlot(column, bandOrigin, locationY)
                       }
                     />
+                    {/* The space is still being reset here — drawn so the gap
+                        after a booking doesn't read as free. */}
+                    {(positionedByColumn.get(column.key) ?? []).map((item) => {
+                      const turnaround =
+                        turnaroundByColumn.get(column.key) ?? 0;
+                      const to = Math.min(
+                        timeWindow.end,
+                        item.endMin + turnaround,
+                      );
+                      if (turnaround <= 0 || to <= item.endMin) return null;
+                      return (
+                        <View
+                          key={`reset-${item.booking.id}`}
+                          pointerEvents="none"
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            right: 0,
+                            top: (item.endMin - timeWindow.start) * pxPerMinute,
+                            height: (to - item.endMin) * pxPerMinute,
+                          }}
+                          className="border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
+                        />
+                      );
+                    })}
                     {(positionedByColumn.get(column.key) ?? []).map((item) => (
                       <GridBookingBlock
                         key={`b-${item.booking.id}`}
@@ -1416,26 +1444,46 @@ const SpaceScheduleScreen = () => {
     return map;
   }, [columns, roomWindows, dayWindow]);
 
+  /**
+   * How long a space stays shut after a booking ends — the same gap the
+   * server's conflict check enforces. A package with no space attached is
+   * never conflict-checked and gets no turnaround, so the grid must not invent
+   * one: that would hide starts the booking form still offers.
+   */
+  const turnaroundFor = useCallback(
+    (column: ScheduleColumn): number =>
+      column.roomId == null
+        ? 0
+        : Math.max(0, roomWindows.get(column.roomId)?.interval ?? 0),
+    [roomWindows],
+  );
+
   // Raw, unclipped booking ranges per column — used for the free-time math,
   // never the filtered/searched list, so a booking hidden by a UI filter can't
-  // make its own room look free.
+  // make its own room look free. Each one runs on past its end for the space's
+  // turnaround, so the free band is the band that can actually be booked.
   const occupancyByColumn = useMemo(() => {
     const map = new Map<string, TimeRange[]>();
     for (const b of activeBookings) {
       const key = columnKeyFor(b, knownRoomIds);
       const start = timeToMinutes(b.time);
+      const turnaround =
+        b.roomId != null && knownRoomIds.has(b.roomId)
+          ? Math.max(0, roomWindows.get(b.roomId)?.interval ?? 0)
+          : 0;
       const range: TimeRange = {
         startMinutes: start,
-        endMinutes: start + Math.max(15, b.durationMinutes),
+        endMinutes: start + Math.max(15, b.durationMinutes) + turnaround,
       };
       const list = map.get(key);
       if (list) list.push(range);
       else map.set(key, [range]);
     }
     return map;
-  }, [activeBookings, knownRoomIds]);
+  }, [activeBookings, knownRoomIds, roomWindows]);
 
-  const blockedRangesFor = useCallback(
+  /** Breaks and closures. The server buffers neither, so neither may the grid. */
+  const hardRangesFor = useCallback(
     (
       column: ScheduleColumn,
       meta: { open: number | null; close: number | null },
@@ -1443,7 +1491,6 @@ const SpaceScheduleScreen = () => {
       const closure =
         column.roomId != null ? spaceClosures.get(column.roomId) : undefined;
       return [
-        ...(occupancyByColumn.get(column.key) ?? []),
         ...(column.roomId != null
           ? (roomBreaks.get(column.roomId) ?? []).map((b) => ({
               startMinutes: b.start,
@@ -1464,7 +1511,55 @@ const SpaceScheduleScreen = () => {
           : []),
       ];
     },
-    [occupancyByColumn, roomBreaks, spaceClosures, timeWindow],
+    [roomBreaks, spaceClosures, timeWindow],
+  );
+
+  const blockedRangesFor = useCallback(
+    (
+      column: ScheduleColumn,
+      meta: { open: number | null; close: number | null },
+    ): TimeRange[] => [
+      ...(occupancyByColumn.get(column.key) ?? []),
+      ...hardRangesFor(column, meta),
+    ],
+    [occupancyByColumn, hardRangesFor],
+  );
+
+  /**
+   * How long this space is really bookable from a minute: a booking must clear
+   * the turnaround before the NEXT booking starts. A break or a closure is owed
+   * no such gap, so buffering it there would hide starts the booking form still
+   * accepts.
+   */
+  const usableFreeUntil = useCallback(
+    (
+      column: ScheduleColumn,
+      meta: { open: number | null; close: number | null },
+      minute: number,
+    ): number | null => {
+      const open = meta.open ?? timeWindow.start;
+      const close = meta.close ?? timeWindow.end;
+      const untilBooking = freeUntilMinute(
+        open,
+        close,
+        occupancyByColumn.get(column.key) ?? [],
+        minute,
+      );
+      const untilHard = freeUntilMinute(
+        open,
+        close,
+        hardRangesFor(column, meta),
+        minute,
+      );
+      if (untilBooking === null || untilHard === null) return null;
+
+      const bookingCap =
+        untilBooking >= close
+          ? untilBooking
+          : Math.max(minute, untilBooking - turnaroundFor(column));
+      return Math.min(bookingCap, untilHard);
+    },
+    [occupancyByColumn, hardRangesFor, turnaroundFor, timeWindow],
   );
 
   const freeFromByColumn = useMemo(() => {
@@ -1499,6 +1594,24 @@ const SpaceScheduleScreen = () => {
     for (const s of allSpaces) map.set(s.id, s.locationId);
     return map;
   }, [allSpaces]);
+
+  /**
+   * The location of the space that was clicked, never the sidebar's. A company
+   * admin looking at every location at once has none selected, and the same
+   * package name exists at all ten venues — so the booking form would have
+   * nothing to go on.
+   */
+  const columnLocationId = useCallback(
+    (column: ScheduleColumn): number | null => {
+      if (column.roomId != null) {
+        return roomLocationById.get(column.roomId) ?? null;
+      }
+      const packageId = Number(column.key.replace("pkg-", ""));
+      const entry = dayWindow?.packages.find((p) => p.package_id === packageId);
+      return entry?.location_id ?? null;
+    },
+    [roomLocationById, dayWindow],
+  );
 
   /** Every package valid for this room at this minute — auto-selectable when
    *  there's exactly one, narrowed-list material when there's more. */
@@ -1643,13 +1756,12 @@ const SpaceScheduleScreen = () => {
       const rawMinute = minuteAtOffset(bandOrigin, locationY, pxPerMinute);
       const minute = resolveClickMinute(column, meta, rawMinute);
 
-      const blocked = blockedRangesFor(column, meta);
       const { ids: candidates, autoSelect } = resolvePackageOffer(
         column,
         minute,
       );
       const locationId =
-        (column.roomId != null ? roomLocationById.get(column.roomId) : null) ??
+        columnLocationId(column) ??
         effectiveLocationId ??
         dayWindow?.location_id ??
         null;
@@ -1663,12 +1775,7 @@ const SpaceScheduleScreen = () => {
           roomId: column.roomId ?? null,
           packageId: autoSelect,
           packageIds: candidates,
-          freeUntilMinute: freeUntilMinute(
-            meta.open,
-            meta.close,
-            blocked,
-            minute,
-          ),
+          freeUntilMinute: usableFreeUntil(column, meta, minute),
           walkIn: isVenueToday,
         }),
       });
@@ -1677,15 +1784,21 @@ const SpaceScheduleScreen = () => {
       dayWindow,
       pxPerMinute,
       resolveClickMinute,
-      blockedRangesFor,
       resolvePackageOffer,
-      roomLocationById,
+      columnLocationId,
+      usableFreeUntil,
       effectiveLocationId,
       selectedKey,
       scheduleMetaByColumn,
       isVenueToday,
     ],
   );
+
+  const turnaroundByColumn = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const column of columns) map.set(column.key, turnaroundFor(column));
+    return map;
+  }, [columns, turnaroundFor]);
 
   const nowTop = useMemo(
     () => nowLineTop(nowMinutes, timeWindow, pxPerMinute, isVenueToday),
@@ -2222,6 +2335,7 @@ const SpaceScheduleScreen = () => {
               scrollRef={scrollRef}
               metaByColumn={scheduleMetaByColumn}
               freeStateByColumn={freeFromByColumn}
+              turnaroundByColumn={turnaroundByColumn}
               isPastDate={isPastDate}
               onOpenSlot={openBookingForSlot}
             />
