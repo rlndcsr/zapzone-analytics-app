@@ -15,6 +15,7 @@ import {
   nextBookableFrom,
   packageIntervalFor,
   resolveSlotTap,
+  resolveWalkInTap,
   usableFreeUntil,
 } from "./dayGridSlots.ts";
 
@@ -571,5 +572,71 @@ describe("what a tap on the free band means", () => {
       nowMinutes: 0,
     });
     assert.equal(tap, null);
+  });
+});
+
+describe("what the header's walk-in action means", () => {
+  it("keeps the minute the guests arrived instead of snapping to a package start", () => {
+    const tap = resolveWalkInTap({
+      ...setup(window()),
+      minute: AT(17, 23),
+    });
+    assert.equal(tap?.minute, AT(17, 23));
+    assert.equal(tap?.walkIn, true);
+    assert.equal(tap?.packageId, 7);
+    assert.deepEqual(tap?.packageIds, [7]);
+    assert.equal(tap?.locationId, 3);
+  });
+
+  it("carries how long the space stays free, turnaround already taken off", () => {
+    const tap = resolveWalkInTap({
+      ...setup(window(), [booking("19:00", 60)]),
+      minute: AT(17, 23),
+    });
+    // 19:00 booked, and the space needs its 15-minute turnaround before it.
+    assert.equal(tap?.freeUntilMinute, AT(18, 45));
+  });
+
+  it("still opens the form when the gap is too short for anything, and says so with the gap", () => {
+    const tap = resolveWalkInTap({
+      ...setup(window(), [booking("18:00", 60)]),
+      minute: AT(17, 30),
+    });
+    assert.equal(tap?.minute, AT(17, 30));
+    // 30 minutes short of the shortest package here — the form refuses it,
+    // never this grid in silence.
+    assert.equal(tap?.freeUntilMinute, AT(17, 45));
+  });
+
+  it("gives nothing back once the space has closed", () => {
+    assert.equal(
+      resolveWalkInTap({ ...setup(window()), minute: AT(20) }),
+      null,
+    );
+  });
+
+  it("gives nothing back before the space opens", () => {
+    assert.equal(
+      resolveWalkInTap({ ...setup(window()), minute: AT(15, 30) }),
+      null,
+    );
+  });
+
+  it("gives nothing back for a space the day window says is shut", () => {
+    const tap = resolveWalkInTap({
+      ...setup(
+        window({
+          rooms: [
+            room({ closed_all_day: true, bookable: false, reason: "Closed" }),
+          ],
+        }),
+      ),
+      minute: AT(17, 23),
+    });
+    assert.equal(tap, null);
+  });
+
+  it("gives nothing back while the day window is still unknown", () => {
+    assert.equal(resolveWalkInTap({ ...setup(null), minute: AT(17) }), null);
   });
 });

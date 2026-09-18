@@ -53,8 +53,10 @@ import {
   hardBlocksFor,
   OCCUPYING_STATUSES,
   resolveSlotTap,
+  resolveWalkInTap,
   type ColumnSchedule,
   type ColumnStatus,
+  type SlotTap,
 } from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
@@ -1195,28 +1197,12 @@ const Calendar = () => {
   );
 
   /**
-   * A tap on a space's free band opens the booking form already filled in for
-   * that space and minute — the web grid's "click to start a booking", with
-   * the same numbers behind it. A tap that can find no real start (booked out
-   * to closing, or too late for anything to fit) does nothing.
+   * The booking form, already filled in for a column and a resolved tap.
+   * Shared by the band tap and the header's walk-in so the two can never send
+   * the form different numbers for the same space.
    */
-  const openSlot = useCallback(
-    (column: ScheduleColumn, rawMinute: number) => {
-      const schedule = daySchedules.get(column.key);
-      if (!schedule || isPastDate) return;
-
-      const tap = resolveSlotTap({
-        column,
-        schedule,
-        dayWindow: scheduleWindow,
-        occupancy: dayOccupancy.get(column.key) ?? [],
-        hardBlocks: dayHardBlocks.get(column.key) ?? [],
-        rawMinute,
-        isToday: isVenueToday,
-        nowMinutes,
-      });
-      if (!tap) return;
-
+  const openBookingForTap = useCallback(
+    (column: ScheduleColumn, tap: SlotTap) => {
       // Without a location the booking form lands company-wide, and the same
       // space name exists at every venue.
       const locationId =
@@ -1241,6 +1227,34 @@ const Calendar = () => {
         }),
       });
     },
+    [spaceById, scheduleWindow, startDate],
+  );
+
+  /**
+   * A tap on a space's free band opens the booking form already filled in for
+   * that space and minute — the web grid's "click to start a booking", with
+   * the same numbers behind it. A tap that can find no real start (booked out
+   * to closing, or too late for anything to fit) does nothing.
+   */
+  const openSlot = useCallback(
+    (column: ScheduleColumn, rawMinute: number) => {
+      const schedule = daySchedules.get(column.key);
+      if (!schedule || isPastDate) return;
+
+      const tap = resolveSlotTap({
+        column,
+        schedule,
+        dayWindow: scheduleWindow,
+        occupancy: dayOccupancy.get(column.key) ?? [],
+        hardBlocks: dayHardBlocks.get(column.key) ?? [],
+        rawMinute,
+        isToday: isVenueToday,
+        nowMinutes,
+      });
+      if (!tap) return;
+
+      openBookingForTap(column, tap);
+    },
     [
       daySchedules,
       isPastDate,
@@ -1249,8 +1263,43 @@ const Calendar = () => {
       dayHardBlocks,
       isVenueToday,
       nowMinutes,
-      spaceById,
-      startDate,
+      openBookingForTap,
+    ],
+  );
+
+  /**
+   * The header's walk-in carries the minute the guests are actually standing
+   * there, deliberately not one of the package's own start times — so it goes
+   * around the snapping a band tap does. A walk-in whose gap is too short for
+   * anything still opens the form: the grid says so on the header, and the
+   * form is where the package that will not fit is refused.
+   */
+  const startWalkIn = useCallback(
+    (column: ScheduleColumn) => {
+      const schedule = daySchedules.get(column.key);
+      if (!schedule || isPastDate || !isVenueToday) return;
+
+      const tap = resolveWalkInTap({
+        column,
+        schedule,
+        dayWindow: scheduleWindow,
+        occupancy: dayOccupancy.get(column.key) ?? [],
+        hardBlocks: dayHardBlocks.get(column.key) ?? [],
+        minute: nowMinutes,
+      });
+      if (!tap) return;
+
+      openBookingForTap(column, tap);
+    },
+    [
+      daySchedules,
+      isPastDate,
+      isVenueToday,
+      scheduleWindow,
+      dayOccupancy,
+      dayHardBlocks,
+      nowMinutes,
+      openBookingForTap,
     ],
   );
 
@@ -1943,7 +1992,7 @@ const Calendar = () => {
                                 )}
                                 <DayColumnStatus
                                   status={dayStatuses.get(column.key)}
-                                  onWalkIn={() => openSlot(column, nowMinutes)}
+                                  onWalkIn={() => startWalkIn(column)}
                                 />
                               </View>
 

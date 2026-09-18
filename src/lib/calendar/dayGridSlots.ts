@@ -420,6 +420,53 @@ export function resolveSlotTap({
   };
 }
 
+/**
+ * A walk-in starts at the minute the guests are actually standing there, not
+ * at one of the package's own start times — so it deliberately skips the
+ * snapping every other tap goes through. The header only offers it while the
+ * space is free now; how long that lasts travels with `freeUntilMinute`, and
+ * the booking form is the one that refuses a package too long to fit it.
+ */
+export function resolveWalkInTap({
+  column,
+  schedule,
+  dayWindow,
+  occupancy,
+  hardBlocks,
+  minute,
+}: {
+  column: ScheduleColumn;
+  schedule: ColumnSchedule;
+  dayWindow: ScheduleDayWindow | null;
+  occupancy: TimeRange[];
+  hardBlocks: TimeRange[];
+  minute: number;
+}): SlotTap | null {
+  if (!schedule.bookable) return null;
+
+  const { open, close } = schedule;
+  if (open == null || close == null) return null;
+  // Past closing there is no walk-in left to start, and before opening the
+  // space is not this screen's to hand out.
+  if (minute < open || minute >= close) return null;
+
+  const { ids, autoSelect } = packageOfferFor({ column, dayWindow, minute });
+
+  return {
+    minute,
+    packageId: autoSelect,
+    packageIds: ids,
+    freeUntilMinute: usableFreeUntil({
+      schedule,
+      occupancy,
+      hardBlocks,
+      minute,
+    }),
+    walkIn: true,
+    locationId: schedule.locationId,
+  };
+}
+
 export function nextBookableFrom({
   column,
   schedule,
