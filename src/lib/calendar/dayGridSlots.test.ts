@@ -220,6 +220,59 @@ describe("the grid a tap snaps to", () => {
   });
 });
 
+describe("offering starts from every package a space serves, not just whichever is active at the click", () => {
+  const morning = pkg({
+    package_id: 20,
+    open_minutes: AT(16),
+    close_minutes: AT(17, 30),
+    interval_minutes: 30,
+    duration_minutes: 30,
+    start_minutes: [AT(16), AT(16, 30), AT(17)],
+  });
+  const afternoon = pkg({
+    package_id: 21,
+    open_minutes: AT(18),
+    close_minutes: AT(20),
+    interval_minutes: 60,
+    duration_minutes: 60,
+    start_minutes: [AT(18), AT(19)],
+  });
+  const twoPackageWindow = window({ packages: [morning, afternoon] });
+
+  it("lands on the nearest real start even when the click falls in the gap between two packages' windows", () => {
+    const tap = resolveSlotTap({
+      ...setup(twoPackageWindow),
+      rawMinute: AT(17, 45),
+      isToday: false,
+      nowMinutes: 0,
+    });
+    // 17:45 is after the morning package closes and before the afternoon one
+    // opens; the old per-minute lookup found neither and fell back to a
+    // generic interval guess. The real answer is 18:00.
+    assert.equal(tap?.minute, AT(18));
+  });
+
+  it("still resolves inside the first package's own window", () => {
+    const tap = resolveSlotTap({
+      ...setup(twoPackageWindow),
+      rawMinute: AT(16, 40),
+      isToday: false,
+      nowMinutes: 0,
+    });
+    assert.equal(tap?.minute, AT(16, 30));
+  });
+
+  it("still resolves inside the second package's own window", () => {
+    const tap = resolveSlotTap({
+      ...setup(twoPackageWindow),
+      rawMinute: AT(18, 20),
+      isToday: false,
+      nowMinutes: 0,
+    });
+    assert.equal(tap?.minute, AT(18));
+  });
+});
+
 describe("how long a booked space stays booked", () => {
   it("holds the space for its turnaround after the booking ends", () => {
     const occupancy = buildOccupancy({
@@ -344,8 +397,6 @@ describe("what a column header says about the rest of the day", () => {
 });
 
 describe("naming a Free-header time staff can actually book", () => {
-  // Space Schedule calls this directly with just open/close/turnaround, not a
-  // full column schedule, so these exercise that exact narrower shape.
   it("skips the raw free minute for the next start a package here really offers", () => {
     const { column, dayWindow, occupancy, hardBlocks } = setup(window(), [
       booking("16:00", 60),
@@ -386,7 +437,11 @@ describe("naming a Free-header time staff can actually book", () => {
       window({
         packages: [
           pkg({ package_id: 7, start_minutes: [AT(16), AT(18, 30)] }),
-          pkg({ package_id: 8, start_minutes: [AT(17), AT(18)], room_ids: [1] }),
+          pkg({
+            package_id: 8,
+            start_minutes: [AT(17), AT(18)],
+            room_ids: [1],
+          }),
         ],
       }),
     );

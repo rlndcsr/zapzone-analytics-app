@@ -255,24 +255,6 @@ export function columnStarts(
   return [...starts].sort((a, b) => a - b);
 }
 
-function startsForSlot({
-  column,
-  dayWindow,
-  minute,
-}: {
-  column: ScheduleColumn;
-  dayWindow: ScheduleDayWindow | null;
-  minute: number;
-}): number[] {
-  const ids = new Set(packageIdsForSlot({ column, dayWindow, minute }));
-  const starts = new Set<number>();
-  for (const entry of dayWindow?.packages ?? []) {
-    if (!ids.has(entry.package_id)) continue;
-    for (const start of entry.start_minutes ?? []) starts.add(start);
-  }
-  return [...starts].sort((a, b) => a - b);
-}
-
 function shortestDurationAt({
   column,
   dayWindow,
@@ -351,7 +333,9 @@ export function resolveSlotMinute({
   );
   if (floor > latestStart) return null;
 
-  const offered = startsForSlot({ column, dayWindow, minute: probe }).filter(
+  // Every start the space's own packages offer today, not just whichever
+  // package happens to be active at this one minute.
+  const offered = columnStarts(column, dayWindow).filter(
     (start) => start >= floor && start <= latestStart,
   );
   const onGrid =
