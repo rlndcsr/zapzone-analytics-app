@@ -54,6 +54,7 @@ import {
   type TimeWindow,
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
+  nextBookableFrom,
   packageIntervalFor,
   resolveSlotMinute,
 } from "../../lib/calendar/dayGridSlots";
@@ -680,6 +681,7 @@ const ScheduleGrid = ({
   scrollRef,
   metaByColumn,
   freeStateByColumn,
+  nextBookableByColumn,
   turnaroundByColumn,
   isPastDate,
   onOpenSlot,
@@ -711,6 +713,8 @@ const ScheduleGrid = ({
     }
   >;
   freeStateByColumn: Map<string, FreeState>;
+  /** The next minute a package here actually starts, for the "Free" header. */
+  nextBookableByColumn: Map<string, number>;
   /** Minutes each space stays shut after a booking, for the reset strip. */
   turnaroundByColumn: Map<string, number>;
   isPastDate: boolean;
@@ -867,7 +871,10 @@ const ScheduleGrid = ({
                       className="mt-0.5 text-[9px] font-medium text-gray-600 dark:text-gray-300"
                       numberOfLines={1}
                     >
-                      Free {minutesToLabel(state.atMinute)}
+                      Free{" "}
+                      {minutesToLabel(
+                        nextBookableByColumn.get(column.key) ?? state.atMinute,
+                      )}
                     </Text>
                   );
                 })()}
@@ -1596,6 +1603,43 @@ const SpaceScheduleScreen = () => {
     timeWindow,
   ]);
 
+  // The header says "Free" at the first unoccupied minute, but staff can only
+  // actually start a booking at one of the space's real package starts.
+  const nextBookableByColumn = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const column of columns) {
+      const state = freeFromByColumn.get(column.key);
+      const meta = scheduleMetaByColumn.get(column.key);
+      if (!state || !meta || state.kind !== "free") continue;
+      const next = nextBookableFrom({
+        column,
+        schedule: {
+          open: meta.open,
+          close: meta.close,
+          turnaround: turnaroundFor(column),
+        },
+        dayWindow,
+        occupancy: occupancyByColumn.get(column.key) ?? [],
+        hardBlocks: hardRangesFor(column, meta),
+        atMinute: state.atMinute,
+        isToday: isVenueToday,
+        nowMinutes,
+      });
+      map.set(column.key, next ?? state.atMinute);
+    }
+    return map;
+  }, [
+    columns,
+    freeFromByColumn,
+    scheduleMetaByColumn,
+    turnaroundFor,
+    dayWindow,
+    occupancyByColumn,
+    hardRangesFor,
+    isVenueToday,
+    nowMinutes,
+  ]);
+
   const roomLocationById = useMemo(() => {
     const map = new Map<number, number | null>();
     for (const s of allSpaces) map.set(s.id, s.locationId);
@@ -2303,6 +2347,7 @@ const SpaceScheduleScreen = () => {
               scrollRef={scrollRef}
               metaByColumn={scheduleMetaByColumn}
               freeStateByColumn={freeFromByColumn}
+              nextBookableByColumn={nextBookableByColumn}
               turnaroundByColumn={turnaroundByColumn}
               isPastDate={isPastDate}
               onOpenSlot={openBookingForSlot}

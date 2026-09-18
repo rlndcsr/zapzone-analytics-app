@@ -12,6 +12,7 @@ import {
   buildOccupancy,
   columnStatusFor,
   hardBlocksFor,
+  nextBookableFrom,
   packageIntervalFor,
   resolveSlotTap,
   usableFreeUntil,
@@ -342,6 +343,67 @@ describe("what a column header says about the rest of the day", () => {
   });
 });
 
+describe("naming a Free-header time staff can actually book", () => {
+  // Space Schedule calls this directly with just open/close/turnaround, not a
+  // full column schedule, so these exercise that exact narrower shape.
+  it("skips the raw free minute for the next start a package here really offers", () => {
+    const { column, dayWindow, occupancy, hardBlocks } = setup(window(), [
+      booking("16:00", 60),
+    ]);
+    const next = nextBookableFrom({
+      column,
+      schedule: { open: AT(16), close: AT(20), turnaround: 15 },
+      dayWindow,
+      occupancy,
+      hardBlocks,
+      atMinute: AT(17, 15),
+      isToday: false,
+      nowMinutes: 0,
+    });
+    assert.equal(next, AT(18));
+  });
+
+  it("gives nothing back once every later start is already taken", () => {
+    const { column, dayWindow, occupancy, hardBlocks } = setup(
+      window({ packages: [pkg({ start_minutes: [AT(16), AT(19)] })] }),
+      [booking("16:00", 60), booking("19:00", 60)],
+    );
+    const next = nextBookableFrom({
+      column,
+      schedule: { open: AT(16), close: AT(20), turnaround: 15 },
+      dayWindow,
+      occupancy,
+      hardBlocks,
+      atMinute: AT(17, 15),
+      isToday: false,
+      nowMinutes: 0,
+    });
+    assert.equal(next, null);
+  });
+
+  it("picks the earliest of several package start times, not just any later one", () => {
+    const { column, dayWindow, occupancy, hardBlocks } = setup(
+      window({
+        packages: [
+          pkg({ package_id: 7, start_minutes: [AT(16), AT(18, 30)] }),
+          pkg({ package_id: 8, start_minutes: [AT(17), AT(18)], room_ids: [1] }),
+        ],
+      }),
+    );
+    const next = nextBookableFrom({
+      column,
+      schedule: { open: AT(16), close: AT(20), turnaround: 15 },
+      dayWindow,
+      occupancy,
+      hardBlocks,
+      atMinute: AT(16, 40),
+      isToday: false,
+      nowMinutes: 0,
+    });
+    assert.equal(next, AT(17));
+  });
+});
+
 describe("what a tap on the free band means", () => {
   it("snaps a future day to the nearest start the booking form offers", () => {
     const tap = resolveSlotTap({
@@ -385,8 +447,6 @@ describe("what a tap on the free band means", () => {
       isToday: true,
       nowMinutes: AT(17, 2),
     });
-    // This package only starts on the hour, so the real answer is 17:00, not
-    // an arbitrary five-minute-grid guess like 17:10.
     assert.equal(tap?.minute, AT(17));
     assert.equal(tap?.walkIn, true);
     assert.equal(tap?.packageId, 7);

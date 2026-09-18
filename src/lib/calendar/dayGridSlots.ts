@@ -199,7 +199,7 @@ export function usableFreeUntil({
   hardBlocks,
   minute,
 }: {
-  schedule: ColumnSchedule;
+  schedule: Pick<ColumnSchedule, "open" | "close" | "turnaround">;
   occupancy: TimeRange[];
   hardBlocks: TimeRange[];
   minute: number;
@@ -354,8 +354,6 @@ export function resolveSlotMinute({
   const offered = startsForSlot({ column, dayWindow, minute: probe }).filter(
     (start) => start >= floor && start <= latestStart,
   );
-  // Always land on a start the packages here actually offer, today included —
-  // the interval is only a fallback for a stretch no package covers.
   const onGrid =
     offered.length > 0 ? snapToOfferedStart(offered, rawMinute, floor) : null;
   const snapped = onGrid ?? snapToInterval(rawMinute, interval, floor);
@@ -449,7 +447,7 @@ export function nextBookableFrom({
   nowMinutes,
 }: {
   column: ScheduleColumn;
-  schedule: ColumnSchedule;
+  schedule: Pick<ColumnSchedule, "open" | "close" | "turnaround">;
   dayWindow: ScheduleDayWindow | null;
   occupancy: TimeRange[];
   hardBlocks: TimeRange[];
