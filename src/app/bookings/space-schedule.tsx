@@ -4,6 +4,7 @@ import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Pressable,
   RefreshControl,
@@ -56,6 +57,7 @@ import {
 import {
   nextBookableFrom,
   packageIntervalFor,
+  packagesForColumn,
   resolveSlotMinute,
 } from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
@@ -686,6 +688,7 @@ const ScheduleGrid = ({
   isPastDate,
   onOpenSlot,
   onStartWalkIn,
+  walkInFit,
 }: {
   columns: ScheduleColumn[];
   positionedByColumn: Map<string, PositionedBooking[]>;
@@ -725,6 +728,11 @@ const ScheduleGrid = ({
     locationY: number,
   ) => void;
   onStartWalkIn: (column: ScheduleColumn) => void;
+  walkInFit: (column: ScheduleColumn) => {
+    fits: boolean;
+    freeFor: number;
+    shortest: number | null;
+  };
 }) => {
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyHeight = timeWindow.total * pxPerMinute;
@@ -859,18 +867,29 @@ const ScheduleGrid = ({
                     );
                   }
                   if (isVenueToday && state.atMinute <= nowMinutes) {
+                    const fit = walkInFit(column);
                     return (
                       <Pressable
                         hitSlop={6}
                         onPress={() => onStartWalkIn(column)}
                         accessibilityRole="button"
-                        accessibilityLabel={`Start a walk-in in ${column.name} now`}
+                        accessibilityLabel={
+                          fit.fits
+                            ? `Start a walk-in in ${column.name} now`
+                            : `Only ${fit.freeFor} min free in ${column.name} before the next booking`
+                        }
                       >
                         <Text
-                          className="mt-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400"
+                          className={`mt-0.5 text-[9px] font-semibold ${
+                            fit.fits
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-amber-600 dark:text-amber-400"
+                          }`}
                           numberOfLines={1}
                         >
-                          Free now · start walk-in
+                          {fit.fits
+                            ? "Free now · start walk-in"
+                            : `Free ${fit.freeFor} min · walk-in`}
                         </Text>
                       </Pressable>
                     );
@@ -1823,11 +1842,91 @@ const SpaceScheduleScreen = () => {
     [pxPerMinute, resolveClickMinute, scheduleMetaByColumn, navigateToMinute],
   );
 
-  // A walk-in starts at the actual current minute, deliberately not one of
-  // the package's own start times — hence its own action on the header.
-  const startWalkInNow = useCallback(
-    (column: ScheduleColumn) => navigateToMinute(column, nowMinutes),
-    [navigateToMinute, nowMinutes],
+  // A walk-in runs for the package's duration, so it only really fits if the
+  // shortest package here clears before the next booking starts.
+  const walkInFit = useCallback(
+    (
+      column: ScheduleColumn,
+    ): {
+      fits: boolean;
+      freeFor: number;
+      shortest: number | null;
+    } => {
+      const meta = scheduleMetaByColumn.get(column.key);
+      const open = meta?.open ?? timeWindow.start;
+      const close = meta?.close ?? timeWindow.end;
+      const until = freeUntilMinute(
+        open,
+        close,
+        blockedRangesFor(column, meta ?? { open: null, close: null }),
+        nowMinutes,
+      );
+      const freeFor = Math.max(0, (until ?? close) - nowMinutes);
+      const durations = packagesForColumn(column, dayWindow)
+        .map((p) => p.duration_minutes ?? 0)
+        .filter((n) => n > 0);
+      const shortest = durations.length > 0 ? Math.min(...durations) : null;
+      return {
+        fits: shortest !== null && shortest <= freeFor,
+        freeFor,
+        shortest,
+      };
+    },
+    [scheduleMetaByColumn, timeWindow, blockedRangesFor, nowMinutes, dayWindow],
+  );
+
+  const startWalkIn = useCallback(
+    (column: ScheduleColumn) => {
+      const fit = walkInFit(column);
+      if (fit.fits || fit.shortest === null) {
+        navigateToMinute(column, nowMinutes);
+        return;
+      }
+
+      const endMinute = nowMinutes + fit.shortest;
+      const packageName =
+        packagesForColumn(column, dayWindow).find(
+          (p) => (p.duration_minutes ?? 0) === fit.shortest,
+        )?.name ?? "the shortest package here";
+
+      const clash =
+        activeBookings
+          .filter((b) => columnKeyFor(b, knownRoomIds) === column.key)
+          .map((b) => ({ booking: b, start: timeToMinutes(b.time) }))
+          .filter(({ start }) => start >= nowMinutes && start < endMinute)
+          .sort((a, b) => a.start - b.start)[0]?.booking ?? null;
+
+      const lines = [
+        `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
+        "",
+        `Walk-in would run ${minutesToLabel(nowMinutes)} – ${minutesToLabel(endMinute)}`,
+        `Space is free for ${fit.freeFor} min`,
+        `Overlap: ${fit.shortest - fit.freeFor} min`,
+      ];
+      if (clash) {
+        lines.push(
+          "",
+          `Clashes with ${clash.customerName || "Walk-in"}`,
+          `Their booking: ${minutesToLabel(timeToMinutes(clash.time))} · ${clash.packageName || "No package"}`,
+        );
+      }
+
+      Alert.alert("This walk-in runs past the next booking", lines.join("\n"), [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Start anyway",
+          onPress: () => navigateToMinute(column, nowMinutes),
+        },
+      ]);
+    },
+    [
+      walkInFit,
+      navigateToMinute,
+      nowMinutes,
+      dayWindow,
+      activeBookings,
+      knownRoomIds,
+    ],
   );
 
   const turnaroundByColumn = useMemo(() => {
@@ -2375,7 +2474,8 @@ const SpaceScheduleScreen = () => {
               turnaroundByColumn={turnaroundByColumn}
               isPastDate={isPastDate}
               onOpenSlot={openBookingForSlot}
-              onStartWalkIn={startWalkInNow}
+              onStartWalkIn={startWalkIn}
+              walkInFit={walkInFit}
             />
           ) : (
             <ScrollView

@@ -40,7 +40,7 @@ export type ColumnSchedule = {
   locationId: number | null;
 };
 
-const packagesForColumn = (
+export const packagesForColumn = (
   column: ScheduleColumn,
   dayWindow: ScheduleDayWindow | null,
 ): SchedulePackageWindow[] => {
