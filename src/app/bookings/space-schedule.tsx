@@ -685,6 +685,7 @@ const ScheduleGrid = ({
   turnaroundByColumn,
   isPastDate,
   onOpenSlot,
+  onStartWalkIn,
 }: {
   columns: ScheduleColumn[];
   positionedByColumn: Map<string, PositionedBooking[]>;
@@ -723,6 +724,7 @@ const ScheduleGrid = ({
     bandOrigin: number,
     locationY: number,
   ) => void;
+  onStartWalkIn: (column: ScheduleColumn) => void;
 }) => {
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyHeight = timeWindow.total * pxPerMinute;
@@ -858,12 +860,19 @@ const ScheduleGrid = ({
                   }
                   if (isVenueToday && state.atMinute <= nowMinutes) {
                     return (
-                      <Text
-                        className="mt-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400"
-                        numberOfLines={1}
+                      <Pressable
+                        hitSlop={6}
+                        onPress={() => onStartWalkIn(column)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Start a walk-in in ${column.name} now`}
                       >
-                        Free now
-                      </Text>
+                        <Text
+                          className="mt-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400"
+                          numberOfLines={1}
+                        >
+                          Free now · start walk-in
+                        </Text>
+                      </Pressable>
                     );
                   }
                   return (
@@ -1757,16 +1766,10 @@ const SpaceScheduleScreen = () => {
     ],
   );
 
-  const openBookingForSlot = useCallback(
-    (column: ScheduleColumn, bandOrigin: number, locationY: number) => {
+  const navigateToMinute = useCallback(
+    (column: ScheduleColumn, minute: number) => {
       const meta = scheduleMetaByColumn.get(column.key);
       if (!meta || meta.open == null || meta.close == null) return;
-
-      const rawMinute = minuteAtOffset(bandOrigin, locationY, pxPerMinute);
-      const minute = resolveClickMinute(column, meta, rawMinute);
-      // Nothing free between here and closing — never hand the booking form a
-      // minute this grid already knows it would refuse.
-      if (minute === null) return;
 
       const { ids: candidates, autoSelect } = resolvePackageOffer(
         column,
@@ -1794,8 +1797,6 @@ const SpaceScheduleScreen = () => {
     },
     [
       dayWindow,
-      pxPerMinute,
-      resolveClickMinute,
       resolvePackageOffer,
       columnLocationId,
       usableFreeUntil,
@@ -1804,6 +1805,29 @@ const SpaceScheduleScreen = () => {
       scheduleMetaByColumn,
       isVenueToday,
     ],
+  );
+
+  const openBookingForSlot = useCallback(
+    (column: ScheduleColumn, bandOrigin: number, locationY: number) => {
+      const meta = scheduleMetaByColumn.get(column.key);
+      if (!meta || meta.open == null || meta.close == null) return;
+
+      const rawMinute = minuteAtOffset(bandOrigin, locationY, pxPerMinute);
+      const minute = resolveClickMinute(column, meta, rawMinute);
+      // Nothing free between here and closing — never hand the booking form a
+      // minute this grid already knows it would refuse.
+      if (minute === null) return;
+
+      navigateToMinute(column, minute);
+    },
+    [pxPerMinute, resolveClickMinute, scheduleMetaByColumn, navigateToMinute],
+  );
+
+  // A walk-in starts at the actual current minute, deliberately not one of
+  // the package's own start times — hence its own action on the header.
+  const startWalkInNow = useCallback(
+    (column: ScheduleColumn) => navigateToMinute(column, nowMinutes),
+    [navigateToMinute, nowMinutes],
   );
 
   const turnaroundByColumn = useMemo(() => {
@@ -2351,6 +2375,7 @@ const SpaceScheduleScreen = () => {
               turnaroundByColumn={turnaroundByColumn}
               isPastDate={isPastDate}
               onOpenSlot={openBookingForSlot}
+              onStartWalkIn={startWalkInNow}
             />
           ) : (
             <ScrollView
