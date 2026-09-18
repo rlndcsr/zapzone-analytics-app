@@ -378,20 +378,21 @@ describe("what a tap on the free band means", () => {
     assert.equal(tap?.minute, AT(18));
   });
 
-  it("records today's tap on a five-minute grid, as a walk-in", () => {
+  it("resolves today's tap to a real offered start even moments after now, never a five-minute grid", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
-      rawMinute: AT(17, 32),
+      rawMinute: AT(17, 10),
       isToday: true,
       nowMinutes: AT(17, 2),
     });
-    // 17:30 is no package's start, so the form is told to keep it anyway.
-    assert.equal(tap?.minute, AT(17, 30));
+    // This package only starts on the hour, so the real answer is 17:00, not
+    // an arbitrary five-minute-grid guess like 17:10.
+    assert.equal(tap?.minute, AT(17));
     assert.equal(tap?.walkIn, true);
     assert.equal(tap?.packageId, 7);
   });
 
-  it("resolves a tap well ahead of now on today to a real offered start, not the five-minute grid", () => {
+  it("resolves a click between offered starts on today to the nearest one, not an arbitrary five-minute time", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(17, 40),

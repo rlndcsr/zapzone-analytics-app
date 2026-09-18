@@ -19,14 +19,7 @@ function finite(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
 
-// Same-day walk-in clicks round to the nearest 5 minutes, not the package's
-// own (often coarser) interval, so the recorded arrival stays real.
 export const WALK_IN_SNAP_MINUTES = 5;
-
-// How far past "now" a click still counts as a walk-in starting on the spot.
-// Further ahead on today's grid is a planned booking and must land on one of
-// the package's real offered starts, or the booking form goes on to refuse it.
-export const WALK_IN_REACH_MINUTES = 30;
 
 export function snapToInterval(
   minute: number,
@@ -46,9 +39,6 @@ export function snapToInterval(
   return Math.max(0, snapped);
 }
 
-// Snaps to whichever real offered start is closest to `minute` — interval
-// arithmetic drifts off the package's own grid whenever duration+cleanup
-// isn't a whole number of intervals, and the booking form then refuses it.
 export function snapToOfferedStart(
   starts: number[],
   minute: number,
@@ -139,7 +129,11 @@ export function freeUntilMinute(
 
   let end = closeMinutes;
   for (const range of busy) {
-    if (!Number.isFinite(range.startMinutes) || !Number.isFinite(range.endMinutes)) continue;
+    if (
+      !Number.isFinite(range.startMinutes) ||
+      !Number.isFinite(range.endMinutes)
+    )
+      continue;
     if (range.endMinutes <= range.startMinutes) continue;
     if (range.endMinutes <= from) continue;
     if (range.startMinutes <= from) return from;

@@ -381,7 +381,9 @@ const GridBookingBlock = ({
   const b = item.booking;
   const pkg = packageColor(b.packageName);
   const pay = paymentTone(b);
-  const compact = item.height < 56;
+  const tiny = item.height < 24;
+  const compact = !tiny && item.height < 60;
+  const medium = item.height >= 60 && item.height < 140;
   const laneWidth = 100 / item.laneCount;
   const needsCheckIn = inProgress && b.status !== "checked-in";
   return (
@@ -404,9 +406,9 @@ const GridBookingBlock = ({
       }`}
     >
       <View
-        className={`h-full ${compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
+        className={`h-full ${tiny ? "" : compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
       >
-        {compact ? (
+        {tiny ? null : compact ? (
           <View className="flex-row items-center gap-1.5">
             <View
               style={{ backgroundColor: statusColor(b.status) }}
@@ -427,47 +429,52 @@ const GridBookingBlock = ({
           </View>
         ) : (
           <>
-            <View className="flex-row items-center justify-between gap-1 mb-1">
-              <View
-                style={{ backgroundColor: statusColor(b.status) }}
-                className="px-1.5 py-0.5 rounded-full"
-              >
-                <Text className="text-[9px] font-bold uppercase text-white">
-                  {b.status}
-                </Text>
-              </View>
-              {needsCheckIn ? (
-                <View className="flex-row items-center gap-0.5 px-1.5 py-px rounded-full bg-red-500">
-                  <Feather name="alert-circle" size={9} color="#FFFFFF" />
+            {!medium && (
+              <View className="flex-row items-center justify-between gap-1 mb-1">
+                <View
+                  style={{ backgroundColor: statusColor(b.status) }}
+                  className="px-1.5 py-0.5 rounded-full"
+                >
                   <Text className="text-[9px] font-bold uppercase text-white">
-                    Check in
+                    {b.status}
                   </Text>
                 </View>
-              ) : inProgress ? (
-                <View className="px-1.5 py-px rounded-full bg-emerald-500">
-                  <Text className="text-[9px] font-bold uppercase text-white">
-                    Now
-                  </Text>
-                </View>
-              ) : (
-                !!b.referenceNumber && (
+                {!!b.referenceNumber && (
                   <Text
                     style={{ color: pkg.text }}
                     className="text-[10px] font-medium opacity-70"
                   >
                     #{b.referenceNumber.slice(-6)}
                   </Text>
+                )}
+              </View>
+            )}
+            <View className="flex-row items-center gap-1.5">
+              <Text
+                style={{ color: pkg.text }}
+                className="text-[11px] font-bold flex-shrink"
+                numberOfLines={1}
+              >
+                {minutesToLabel(item.startMin)} –{" "}
+                {minutesToLabel(item.startMin + b.durationMinutes)}
+              </Text>
+              {needsCheckIn ? (
+                <View className="flex-row items-center gap-0.5 px-1.5 py-px rounded-full bg-red-500 flex-shrink-0">
+                  <Feather name="alert-circle" size={9} color="#FFFFFF" />
+                  <Text className="text-[9px] font-bold uppercase text-white">
+                    Check in
+                  </Text>
+                </View>
+              ) : (
+                inProgress && (
+                  <View className="px-1.5 py-px rounded-full bg-emerald-500 flex-shrink-0">
+                    <Text className="text-[9px] font-bold uppercase text-white">
+                      Now
+                    </Text>
+                  </View>
                 )
               )}
             </View>
-            <Text
-              style={{ color: pkg.text }}
-              className="text-[11px] font-bold"
-              numberOfLines={1}
-            >
-              {minutesToLabel(item.startMin)} –{" "}
-              {minutesToLabel(item.startMin + b.durationMinutes)}
-            </Text>
             <Text
               style={{ color: pkg.text }}
               className="text-[11px] font-semibold"
@@ -475,7 +482,7 @@ const GridBookingBlock = ({
             >
               {b.customerName || "Walk-in"}
             </Text>
-            {item.height >= 100 && (
+            {!medium && (
               <>
                 <Text
                   style={{ color: pkg.text }}

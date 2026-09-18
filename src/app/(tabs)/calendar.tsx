@@ -587,13 +587,14 @@ const DayBookingBlock = ({
   const booking = placement.item;
   const tone = packageColor(booking.packageName);
   const status = statusStyle(booking.status);
+  const height = placement.slotSpan * SLOT_HEIGHT - 4;
   return (
     <Pressable
       onPress={onPress}
       style={{
         position: "absolute",
         top: placement.slotIndex * SLOT_HEIGHT + 2,
-        height: placement.slotSpan * SLOT_HEIGHT - 4,
+        height,
         left: `${(100 / placement.laneCount) * placement.lane}%`,
         width: `${100 / placement.laneCount}%`,
         backgroundColor: tone.bg,
@@ -603,31 +604,39 @@ const DayBookingBlock = ({
       accessibilityRole="button"
       accessibilityLabel={`${booking.customerName}, ${booking.packageName}, ${formatTime(booking.time)}`}
     >
-      <Text
-        className="text-[10px] font-semibold"
-        style={{ color: tone.text }}
-        numberOfLines={1}
-      >
-        {slotLabel(placement.startMin)}–{slotLabel(placement.endMin)}
-        {placement.clipped ? "+" : ""}
-      </Text>
-      <Text className="text-xs font-bold text-gray-900" numberOfLines={1}>
-        {booking.customerName}
-      </Text>
-      <Text
-        className="text-[10px]"
-        style={{ color: tone.text }}
-        numberOfLines={1}
-      >
-        {booking.roomName || booking.packageName}
-      </Text>
-      <Text
-        className="text-[10px] font-semibold mt-auto"
-        style={{ color: status.color }}
-        numberOfLines={1}
-      >
-        {status.label}
-      </Text>
+      {height >= 34 && (
+        <Text
+          className="text-[10px] font-semibold"
+          style={{ color: tone.text }}
+          numberOfLines={1}
+        >
+          {slotLabel(placement.startMin)}–{slotLabel(placement.endMin)}
+          {placement.clipped ? "+" : ""}
+        </Text>
+      )}
+      {height >= 18 && (
+        <Text className="text-xs font-bold text-gray-900" numberOfLines={1}>
+          {booking.customerName}
+        </Text>
+      )}
+      {height > 52 && (
+        <Text
+          className="text-[10px]"
+          style={{ color: tone.text }}
+          numberOfLines={1}
+        >
+          {booking.roomName || booking.packageName}
+        </Text>
+      )}
+      {height > 72 && (
+        <Text
+          className="text-[10px] font-semibold mt-auto"
+          style={{ color: status.color }}
+          numberOfLines={1}
+        >
+          {status.label}
+        </Text>
+      )}
     </Pressable>
   );
 };

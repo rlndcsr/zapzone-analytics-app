@@ -8,7 +8,6 @@ import {
   nextFreeMinute,
   snapToInterval,
   snapToOfferedStart,
-  WALK_IN_REACH_MINUTES,
   WALK_IN_SNAP_MINUTES,
   type TimeRange,
 } from "../bookings/freeTime.ts";
@@ -355,22 +354,11 @@ export function resolveSlotMinute({
   const offered = startsForSlot({ column, dayWindow, minute: probe }).filter(
     (start) => start >= floor && start <= latestStart,
   );
-
-  const isWalkInNow =
-    isToday && rawMinute <= nowMinutes + WALK_IN_REACH_MINUTES;
+  // Always land on a start the packages here actually offer, today included —
+  // the interval is only a fallback for a stretch no package covers.
   const onGrid =
-    !isWalkInNow && offered.length > 0
-      ? snapToOfferedStart(offered, rawMinute, floor)
-      : null;
-
-  const snapped =
-    onGrid ??
-    (isToday
-      ? Math.max(
-          snapToInterval(rawMinute, WALK_IN_SNAP_MINUTES),
-          snapToInterval(nowMinutes, WALK_IN_SNAP_MINUTES),
-        )
-      : snapToInterval(rawMinute, interval, floor));
+    offered.length > 0 ? snapToOfferedStart(offered, rawMinute, floor) : null;
+  const snapped = onGrid ?? snapToInterval(rawMinute, interval, floor);
 
   const clamped = Math.min(Math.max(snapped, floor), latestStart);
   const free = nextFreeMinute(open, close, blocked, clamped);
@@ -385,9 +373,7 @@ export function resolveSlotMinute({
             start >= free &&
             nextFreeMinute(open, close, blocked, start) === start,
         );
-  const fromFree =
-    freeOffered ??
-    snapToInterval(free, isToday ? WALK_IN_SNAP_MINUTES : interval, free);
+  const fromFree = freeOffered ?? snapToInterval(free, interval, free);
 
   return fromFree > latestStart ? null : fromFree;
 }
