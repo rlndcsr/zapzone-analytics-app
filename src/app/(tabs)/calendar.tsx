@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -36,6 +37,7 @@ import {
 } from "../../lib/bookings/freeTime";
 import {
   buildColumns,
+  columnKeyFor,
   timeToMinutes,
   type ScheduleColumn,
 } from "../../lib/bookings/spaceScheduleGrid";
@@ -54,6 +56,7 @@ import {
   OCCUPYING_STATUSES,
   resolveSlotTap,
   resolveWalkInTap,
+  walkInFit,
   type ColumnSchedule,
   type ColumnStatus,
   type SlotTap,
@@ -590,6 +593,7 @@ const DayBookingBlock = ({
   const tone = packageColor(booking.packageName);
   const status = statusStyle(booking.status);
   const height = placement.slotSpan * SLOT_HEIGHT - 4;
+  const overlapping = placement.conflicts.length > 0;
   return (
     <Pressable
       onPress={onPress}
@@ -600,12 +604,26 @@ const DayBookingBlock = ({
         left: `${(100 / placement.laneCount) * placement.lane}%`,
         width: `${100 / placement.laneCount}%`,
         backgroundColor: tone.bg,
-        borderLeftColor: status.color,
+        borderLeftColor: overlapping ? "#f43f5e" : status.color,
       }}
-      className="rounded-md border-l-4 px-1.5 py-1 overflow-hidden active:opacity-80"
+      className={`rounded-md border-l-4 px-1.5 py-1 overflow-hidden active:opacity-80 ${
+        overlapping ? "ring-2 ring-rose-500" : ""
+      }`}
       accessibilityRole="button"
-      accessibilityLabel={`${booking.customerName}, ${booking.packageName}, ${formatTime(booking.time)}`}
+      accessibilityLabel={`${booking.customerName}, ${booking.packageName}, ${formatTime(booking.time)}${
+        overlapping ? ", overlaps another booking" : ""
+      }`}
     >
+      {overlapping && (
+        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-bl bg-rose-500 px-1 py-px">
+          <AlertTriangle size={7} color="#FFFFFF" />
+          {height >= 18 && (
+            <Text className="text-[7px] font-bold uppercase text-white">
+              Overlap
+            </Text>
+          )}
+        </View>
+      )}
       {height >= 34 && (
         <Text
           className="text-[10px] font-semibold"
@@ -1181,9 +1199,28 @@ const Calendar = () => {
         items: dayBookings,
         window: dayWindow,
         knownRoomIds,
+        turnaroundFor: (column) => daySchedules.get(column.key)?.turnaround ?? 0,
       }),
-    [dayColumns, dayBookings, dayWindow, knownRoomIds],
+    [dayColumns, dayBookings, dayWindow, knownRoomIds, daySchedules],
   );
+
+  // Every clashing pair today, so staff see it without opening a single block.
+  const dayOverlapSummary = useMemo(() => {
+    const rows: { columnName: string; a: CalendarBooking; b: CalendarBooking }[] =
+      [];
+    const seen = new Set<string>();
+    for (const column of dayColumns) {
+      for (const placement of dayPlacements.get(column.key) ?? []) {
+        for (const other of placement.conflicts) {
+          const key = [placement.item.id, other.id].sort((x, y) => x - y).join("-");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          rows.push({ columnName: column.name, a: placement.item, b: other });
+        }
+      }
+    }
+    return rows;
+  }, [dayColumns, dayPlacements]);
   /** Room columns the "hide empty spaces" toggle is currently holding back. */
   const hiddenSpaceCount = hideEmptySpaces
     ? spaces.length - dayColumns.filter((c) => !c.virtual).length
@@ -1202,7 +1239,11 @@ const Calendar = () => {
    * the form different numbers for the same space.
    */
   const openBookingForTap = useCallback(
-    (column: ScheduleColumn, tap: SlotTap) => {
+    (
+      column: ScheduleColumn,
+      tap: SlotTap,
+      options?: { walkInOverride?: boolean },
+    ) => {
       // Without a location the booking form lands company-wide, and the same
       // space name exists at every venue.
       const locationId =
@@ -1224,6 +1265,7 @@ const Calendar = () => {
           packageIds: tap.packageIds,
           freeUntilMinute: tap.freeUntilMinute,
           walkIn: tap.walkIn,
+          walkInOverride: options?.walkInOverride ?? false,
         }),
       });
     },
@@ -1289,7 +1331,51 @@ const Calendar = () => {
       });
       if (!tap) return;
 
-      openBookingForTap(column, tap);
+      const fit = walkInFit({
+        column,
+        schedule,
+        dayWindow: scheduleWindow,
+        occupancy: dayOccupancy.get(column.key) ?? [],
+        hardBlocks: dayHardBlocks.get(column.key) ?? [],
+        nowMinutes,
+      });
+      if (fit.fits || fit.shortest === null) {
+        openBookingForTap(column, tap);
+        return;
+      }
+
+      const endMinute = nowMinutes + fit.shortest;
+      const packageName = fit.packageName ?? "the shortest package here";
+      const clash =
+        dayBookings
+          .filter((b) => columnKeyFor(b, knownRoomIds) === column.key)
+          .map((b) => ({ booking: b, start: timeToMinutes(b.time) }))
+          .filter(({ start }) => start >= nowMinutes && start < endMinute)
+          .sort((a, b) => a.start - b.start)[0]?.booking ?? null;
+
+      const lines = [
+        `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
+        "",
+        `Walk-in would run ${slotLabel(nowMinutes)} – ${slotLabel(endMinute)}`,
+        `Space is free for ${fit.freeFor} min`,
+        `Overlap: ${fit.shortest - fit.freeFor} min`,
+      ];
+      if (clash) {
+        lines.push(
+          "",
+          `Clashes with ${clash.customerName}`,
+          `Their booking: ${slotLabel(timeToMinutes(clash.time))} · ${clash.packageName}`,
+        );
+      }
+
+      Alert.alert("This walk-in runs past the next booking", lines.join("\n"), [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Start anyway",
+          onPress: () =>
+            openBookingForTap(column, tap, { walkInOverride: true }),
+        },
+      ]);
     },
     [
       daySchedules,
@@ -1299,6 +1385,8 @@ const Calendar = () => {
       dayOccupancy,
       dayHardBlocks,
       nowMinutes,
+      dayBookings,
+      knownRoomIds,
       openBookingForTap,
     ],
   );
@@ -1894,6 +1982,34 @@ const Calendar = () => {
                     {dayBookings.length === 1 ? "booking" : "bookings"}
                   </Text>
                 </View>
+
+                {dayOverlapSummary.length > 0 && (
+                  <View className="flex-row items-start gap-2 border-b border-rose-200 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-900/10 px-4 py-2.5">
+                    <AlertTriangle
+                      size={14}
+                      color="#e11d48"
+                      style={{ marginTop: 2 }}
+                    />
+                    <View className="flex-1">
+                      <Text className="text-sm font-semibold text-rose-900 dark:text-rose-300">
+                        {dayOverlapSummary.length} overlapping{" "}
+                        {dayOverlapSummary.length === 1 ? "booking" : "bookings"}{" "}
+                        — these spaces are double-booked
+                      </Text>
+                      {dayOverlapSummary.map((row) => (
+                        <Text
+                          key={`${row.a.id}-${row.b.id}`}
+                          className="mt-0.5 text-xs text-rose-800 dark:text-rose-400"
+                        >
+                          {row.columnName}: {row.a.customerName} at{" "}
+                          {slotLabel(timeToMinutes(row.a.time))} runs into{" "}
+                          {row.b.customerName} at{" "}
+                          {slotLabel(timeToMinutes(row.b.time))}
+                        </Text>
+                      ))}
+                    </View>
+                  </View>
+                )}
 
                 {dayColumns.length === 0 ? (
                   <View className="p-8 items-center">

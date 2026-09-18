@@ -171,6 +171,53 @@ describe("placing a day's bookings into their space columns", () => {
     assert.equal(entry.clipped, true);
     assert.equal(entry.endMin, 24 * 60);
   });
+
+  it("flags two directly overlapping bookings as each other's conflict", () => {
+    const items = [
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      booking({ id: 2, roomId: 1, time: "10:30", durationMinutes: 60 }),
+    ];
+    const placed = placeByColumn({
+      columns: buildColumns({ spaces, bookings: items, hideEmptySpaces: false, knownRoomIds }),
+      items,
+      window: computeSlotWindow(items),
+      knownRoomIds,
+    });
+    const [a, b] = placed.get("room-1")!;
+    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
+    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+  });
+
+  it("flags a clash that only exists inside the turnaround gap", () => {
+    const items = [
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      booking({ id: 2, roomId: 1, time: "11:10", durationMinutes: 60 }),
+    ];
+    const placed = placeByColumn({
+      columns: buildColumns({ spaces, bookings: items, hideEmptySpaces: false, knownRoomIds }),
+      items,
+      window: computeSlotWindow(items),
+      knownRoomIds,
+      turnaroundFor: () => 15,
+    });
+    const [a, b] = placed.get("room-1")!;
+    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
+    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+  });
+
+  it("still finds a conflict against a booking a display filter has hidden", () => {
+    const shown = booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 });
+    const hidden = booking({ id: 2, roomId: 1, time: "10:30", durationMinutes: 60 });
+    const placed = placeByColumn({
+      columns: buildColumns({ spaces, bookings: [shown], hideEmptySpaces: false, knownRoomIds }),
+      items: [shown],
+      activeItems: [shown, hidden],
+      window: computeSlotWindow([shown]),
+      knownRoomIds,
+    });
+    const [a] = placed.get("room-1")!;
+    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
+  });
 });
 
 describe("laning bookings that clash in one column", () => {
@@ -182,11 +229,13 @@ describe("laning bookings that clash in one column", () => {
     item: { id },
     startMin,
     endMin,
+    endMinRaw: endMin,
     slotIndex: 0,
     slotSpan: 1,
     lane: 0,
     laneCount: 1,
     clipped: false,
+    conflicts: [],
   });
 
   it("splits two overlapping bookings into two lanes", () => {

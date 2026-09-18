@@ -177,3 +177,24 @@ export function freeState(
     ? { kind: "blocked", reason: lastReason }
     : { kind: "booked" };
 }
+
+export type Occupant = {
+  id: number;
+  startMinutes: number;
+  endMinutes: number;
+  turnaroundMinutes: number;
+};
+
+// Two bookings clash when either one starts before the other's turnaround has
+// cleared — the same test the server's own conflict check applies.
+export function conflictsWith<T extends Occupant>(
+  target: T,
+  candidates: T[],
+): T[] {
+  return candidates.filter(
+    (other) =>
+      other.id !== target.id &&
+      target.startMinutes < other.endMinutes + other.turnaroundMinutes &&
+      target.endMinutes + target.turnaroundMinutes > other.startMinutes,
+  );
+}

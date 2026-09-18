@@ -57,7 +57,6 @@ import {
 import {
   nextBookableFrom,
   packageIntervalFor,
-  packagesForColumn,
   resolveSlotMinute,
 } from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
@@ -389,9 +388,18 @@ const GridBookingBlock = ({
   const medium = item.height >= 60 && item.height < 140;
   const laneWidth = 100 / item.laneCount;
   const needsCheckIn = inProgress && b.status !== "checked-in";
+  const overlapping = item.conflicts.length > 0;
+  const overlapLabel = item.conflicts
+    .map((other) => `${other.customerName || "Walk-in"} at ${minutesToLabel(timeToMinutes(other.time))}`)
+    .join(", ");
   return (
     <Pressable
       onPress={onPress}
+      accessibilityLabel={
+        overlapping
+          ? `${b.customerName || "Walk-in"}, overlaps ${overlapLabel}`
+          : undefined
+      }
       style={{
         position: "absolute",
         top: item.top,
@@ -401,13 +409,25 @@ const GridBookingBlock = ({
         backgroundColor: pkg.bg,
       }}
       className={`rounded-xl overflow-hidden active:opacity-80 ${
-        needsCheckIn
-          ? "border-2 border-red-400"
-          : inProgress
-            ? "border-2 border-emerald-400"
-            : ""
+        overlapping
+          ? "border-2 border-rose-500"
+          : needsCheckIn
+            ? "border-2 border-red-400"
+            : inProgress
+              ? "border-2 border-emerald-400"
+              : ""
       }`}
     >
+      {overlapping && (
+        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-tr-lg rounded-bl bg-rose-500 px-1 py-px">
+          <Feather name="alert-triangle" size={8} color="#FFFFFF" />
+          {!tiny && (
+            <Text className="text-[8px] font-bold uppercase text-white">
+              Overlap
+            </Text>
+          )}
+        </View>
+      )}
       <View
         className={`h-full ${tiny ? "" : compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
       >
@@ -717,8 +737,8 @@ const ScheduleGrid = ({
     }
   >;
   freeStateByColumn: Map<string, FreeState>;
-  /** The next minute a package here actually starts, for the "Free" header. */
-  nextBookableByColumn: Map<string, number>;
+  /** The next minute a package here actually starts, null if none is left. */
+  nextBookableByColumn: Map<string, number | null>;
   /** Minutes each space stays shut after a booking, for the reset strip. */
   turnaroundByColumn: Map<string, number>;
   isPastDate: boolean;
@@ -894,15 +914,20 @@ const ScheduleGrid = ({
                       </Pressable>
                     );
                   }
-                  return (
+                  const nextStart = nextBookableByColumn.get(column.key);
+                  return nextStart == null ? (
+                    <Text
+                      className="mt-0.5 text-[9px] font-medium text-gray-500 dark:text-gray-400"
+                      numberOfLines={1}
+                    >
+                      No more starts today
+                    </Text>
+                  ) : (
                     <Text
                       className="mt-0.5 text-[9px] font-medium text-gray-600 dark:text-gray-300"
                       numberOfLines={1}
                     >
-                      Free{" "}
-                      {minutesToLabel(
-                        nextBookableByColumn.get(column.key) ?? state.atMinute,
-                      )}
+                      Free {minutesToLabel(nextStart)}
                     </Text>
                   );
                 })()}
@@ -1432,6 +1457,20 @@ const SpaceScheduleScreen = () => {
     effectiveLocationId,
   ]);
 
+  /**
+   * How long a space stays shut after a booking ends — the same gap the
+   * server's conflict check enforces. A package with no space attached is
+   * never conflict-checked and gets no turnaround, so the grid must not invent
+   * one: that would hide starts the booking form still offers.
+   */
+  const turnaroundFor = useCallback(
+    (column: ScheduleColumn): number =>
+      column.roomId == null
+        ? 0
+        : Math.max(0, roomWindows.get(column.roomId)?.interval ?? 0),
+    [roomWindows],
+  );
+
   const positionedByColumn = useMemo(
     () =>
       positionBookingsByColumn({
@@ -1440,9 +1479,38 @@ const SpaceScheduleScreen = () => {
         timeWindow,
         pxPerMinute,
         knownRoomIds,
+        // clashes are measured against every live booking, so a filter can't hide one
+        activeBookings,
+        turnaroundFor,
       }),
-    [columns, filteredBookings, timeWindow, pxPerMinute, knownRoomIds],
+    [
+      columns,
+      filteredBookings,
+      timeWindow,
+      pxPerMinute,
+      knownRoomIds,
+      activeBookings,
+      turnaroundFor,
+    ],
   );
+
+  // Every clashing pair today, so staff see it without opening a single block.
+  const overlapSummary = useMemo(() => {
+    const rows: { columnName: string; a: ScheduleBooking; b: ScheduleBooking }[] =
+      [];
+    const seen = new Set<string>();
+    for (const column of columns) {
+      for (const item of positionedByColumn.get(column.key) ?? []) {
+        for (const other of item.conflicts) {
+          const key = [item.booking.id, other.id].sort((x, y) => x - y).join("-");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          rows.push({ columnName: column.name, a: item.booking, b: other });
+        }
+      }
+    }
+    return rows;
+  }, [columns, positionedByColumn]);
 
   // Per-column open/close/bookable, resolved once so the header label, the
   // free band, and the click handler all agree on the same numbers. A room
@@ -1485,20 +1553,6 @@ const SpaceScheduleScreen = () => {
     }
     return map;
   }, [columns, roomWindows, dayWindow]);
-
-  /**
-   * How long a space stays shut after a booking ends — the same gap the
-   * server's conflict check enforces. A package with no space attached is
-   * never conflict-checked and gets no turnaround, so the grid must not invent
-   * one: that would hide starts the booking form still offers.
-   */
-  const turnaroundFor = useCallback(
-    (column: ScheduleColumn): number =>
-      column.roomId == null
-        ? 0
-        : Math.max(0, roomWindows.get(column.roomId)?.interval ?? 0),
-    [roomWindows],
-  );
 
   // Raw, unclipped booking ranges per column — used for the free-time math,
   // never the filtered/searched list, so a booking hidden by a UI filter can't
@@ -1633,27 +1687,31 @@ const SpaceScheduleScreen = () => {
 
   // The header says "Free" at the first unoccupied minute, but staff can only
   // actually start a booking at one of the space's real package starts.
+  // null means no start is left today — the header must say so, never fall
+  // back to naming a time nothing can actually start at.
   const nextBookableByColumn = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, number | null>();
     for (const column of columns) {
       const state = freeFromByColumn.get(column.key);
       const meta = scheduleMetaByColumn.get(column.key);
       if (!state || !meta || state.kind !== "free") continue;
-      const next = nextBookableFrom({
-        column,
-        schedule: {
-          open: meta.open,
-          close: meta.close,
-          turnaround: turnaroundFor(column),
-        },
-        dayWindow,
-        occupancy: occupancyByColumn.get(column.key) ?? [],
-        hardBlocks: hardRangesFor(column, meta),
-        atMinute: state.atMinute,
-        isToday: isVenueToday,
-        nowMinutes,
-      });
-      map.set(column.key, next ?? state.atMinute);
+      map.set(
+        column.key,
+        nextBookableFrom({
+          column,
+          schedule: {
+            open: meta.open,
+            close: meta.close,
+            turnaround: turnaroundFor(column),
+          },
+          dayWindow,
+          occupancy: occupancyByColumn.get(column.key) ?? [],
+          hardBlocks: hardRangesFor(column, meta),
+          atMinute: state.atMinute,
+          isToday: isVenueToday,
+          nowMinutes,
+        }),
+      );
     }
     return map;
   }, [
@@ -1786,7 +1844,11 @@ const SpaceScheduleScreen = () => {
   );
 
   const navigateToMinute = useCallback(
-    (column: ScheduleColumn, minute: number) => {
+    (
+      column: ScheduleColumn,
+      minute: number,
+      options?: { walkInOverride?: boolean },
+    ) => {
       const meta = scheduleMetaByColumn.get(column.key);
       if (!meta || meta.open == null || meta.close == null) return;
 
@@ -1811,6 +1873,7 @@ const SpaceScheduleScreen = () => {
           packageIds: candidates,
           freeUntilMinute: usableFreeUntil(column, meta, minute),
           walkIn: isVenueToday,
+          walkInOverride: options?.walkInOverride ?? false,
         }),
       });
     },
@@ -1842,8 +1905,8 @@ const SpaceScheduleScreen = () => {
     [pxPerMinute, resolveClickMinute, scheduleMetaByColumn, navigateToMinute],
   );
 
-  // A walk-in runs for the package's duration, so it only really fits if the
-  // shortest package here clears before the next booking starts.
+  // A walk-in runs for the package's duration, so it only really fits if a
+  // package that can actually start now clears before the next booking.
   const walkInFit = useCallback(
     (
       column: ScheduleColumn,
@@ -1851,28 +1914,32 @@ const SpaceScheduleScreen = () => {
       fits: boolean;
       freeFor: number;
       shortest: number | null;
+      packageName: string | null;
     } => {
       const meta = scheduleMetaByColumn.get(column.key);
-      const open = meta?.open ?? timeWindow.start;
       const close = meta?.close ?? timeWindow.end;
-      const until = freeUntilMinute(
-        open,
-        close,
-        blockedRangesFor(column, meta ?? { open: null, close: null }),
-        nowMinutes,
-      );
+      const until = meta
+        ? usableFreeUntil(column, meta, nowMinutes)
+        : null;
       const freeFor = Math.max(0, (until ?? close) - nowMinutes);
-      const durations = packagesForColumn(column, dayWindow)
-        .map((p) => p.duration_minutes ?? 0)
-        .filter((n) => n > 0);
-      const shortest = durations.length > 0 ? Math.min(...durations) : null;
+
+      const startable = new Set(packagesForColumnSlot(column, nowMinutes));
+      const candidates = (dayWindow?.packages ?? [])
+        .filter(
+          (p) => startable.has(p.package_id) && (p.duration_minutes ?? 0) > 0,
+        )
+        .sort((a, b) => (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0));
+      const shortestEntry = candidates[0] ?? null;
+      const shortest = shortestEntry?.duration_minutes ?? null;
+
       return {
         fits: shortest !== null && shortest <= freeFor,
         freeFor,
         shortest,
+        packageName: shortestEntry?.name ?? null,
       };
     },
-    [scheduleMetaByColumn, timeWindow, blockedRangesFor, nowMinutes, dayWindow],
+    [scheduleMetaByColumn, timeWindow, usableFreeUntil, nowMinutes, packagesForColumnSlot, dayWindow],
   );
 
   const startWalkIn = useCallback(
@@ -1884,10 +1951,7 @@ const SpaceScheduleScreen = () => {
       }
 
       const endMinute = nowMinutes + fit.shortest;
-      const packageName =
-        packagesForColumn(column, dayWindow).find(
-          (p) => (p.duration_minutes ?? 0) === fit.shortest,
-        )?.name ?? "the shortest package here";
+      const packageName = fit.packageName ?? "the shortest package here";
 
       const clash =
         activeBookings
@@ -1915,7 +1979,8 @@ const SpaceScheduleScreen = () => {
         { text: "Cancel", style: "cancel" },
         {
           text: "Start anyway",
-          onPress: () => navigateToMinute(column, nowMinutes),
+          onPress: () =>
+            navigateToMinute(column, nowMinutes, { walkInOverride: true }),
         },
       ]);
     },
@@ -1923,7 +1988,6 @@ const SpaceScheduleScreen = () => {
       walkInFit,
       navigateToMinute,
       nowMinutes,
-      dayWindow,
       activeBookings,
       knownRoomIds,
     ],
@@ -2450,6 +2514,34 @@ const SpaceScheduleScreen = () => {
                   Clear filters
                 </Text>
               </Pressable>
+            </View>
+          )}
+          {overlapSummary.length > 0 && (
+            <View className="flex-row items-start gap-2 border-b border-rose-200 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-900/10 px-4 py-2.5">
+              <Feather
+                name="alert-triangle"
+                size={14}
+                color="#e11d48"
+                style={{ marginTop: 2 }}
+              />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-rose-900 dark:text-rose-300">
+                  {overlapSummary.length} overlapping{" "}
+                  {overlapSummary.length === 1 ? "booking" : "bookings"} — these
+                  spaces are double-booked
+                </Text>
+                {overlapSummary.map((row) => (
+                  <Text
+                    key={`${row.a.id}-${row.b.id}`}
+                    className="mt-0.5 text-xs text-rose-800 dark:text-rose-400"
+                  >
+                    {row.columnName}: {row.a.customerName || "Walk-in"} at{" "}
+                    {minutesToLabel(timeToMinutes(row.a.time))} runs into{" "}
+                    {row.b.customerName || "Walk-in"} at{" "}
+                    {minutesToLabel(timeToMinutes(row.b.time))}
+                  </Text>
+                ))}
+              </View>
             </View>
           )}
           {viewMode === "grid" ? (

@@ -11,6 +11,8 @@ export type SlotPrefill = {
    *  walk-in package actually fits before offering it. */
   freeUntilMinute?: number | null;
   walkIn?: boolean;
+  /** Staff saw the overlap warning and chose to start anyway. */
+  walkInOverride?: boolean;
 };
 
 export type BookingPrefill = {
@@ -24,6 +26,7 @@ export type BookingPrefill = {
   freeUntilKnown: boolean;
   startMinutes: number | null;
   walkIn: boolean;
+  walkInOverride: boolean;
   hasAny: boolean;
 };
 
@@ -68,6 +71,7 @@ export function buildBookingParams(
     params.free_until_minutes = String(Math.round(prefill.freeUntilMinute));
   }
   if (prefill.walkIn) params.walk_in = "1";
+  if (prefill.walkInOverride) params.walk_in_override = "1";
 
   return params;
 }
@@ -150,6 +154,7 @@ export function readBookingPrefill(params: RawParams): BookingPrefill {
       return Number.isFinite(n) && n >= 0 ? Math.round(n) : minute;
     })(),
     walkIn: first(params.walk_in) === "1",
+    walkInOverride: first(params.walk_in_override) === "1",
     hasAny: false,
   };
 

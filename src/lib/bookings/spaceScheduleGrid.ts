@@ -1,5 +1,6 @@
 import type { ScheduleBooking } from "../../services/bookingsService";
 import type { DayOff } from "../../services/dayOffsService";
+import { conflictsWith } from "./freeTime.ts";
 
 export const ZOOM_LEVELS = [1, 1.6, 2.4] as const;
 export const DEFAULT_ZOOM_INDEX = 1;
@@ -96,11 +97,14 @@ export type PositionedBooking = {
   booking: ScheduleBooking;
   startMin: number;
   endMin: number;
+  /** Unclamped end — the visible-window clip must never shrink a conflict. */
+  endMinRaw: number;
   top: number;
   height: number;
   lane: number;
   laneCount: number;
   clipped: boolean;
+  conflicts: ScheduleBooking[];
 };
 
 export function assignLanes(items: PositionedBooking[]): PositionedBooking[] {
@@ -141,12 +145,17 @@ export function positionBookingsByColumn({
   timeWindow,
   pxPerMinute,
   knownRoomIds,
+  activeBookings = bookings,
+  turnaroundFor = () => 0,
 }: {
   columns: ScheduleColumn[];
   bookings: ScheduleBooking[];
   timeWindow: TimeWindow;
   pxPerMinute: number;
   knownRoomIds: ReadonlySet<number>;
+  /** Every live booking, unfiltered — a booking a filter hides can still clash. */
+  activeBookings?: ScheduleBooking[];
+  turnaroundFor?: (column: ScheduleColumn) => number;
 }): Map<string, PositionedBooking[]> {
   const map = new Map<string, PositionedBooking[]>();
   for (const c of columns) map.set(c.key, []);
@@ -161,15 +170,46 @@ export function positionBookingsByColumn({
       booking: b,
       startMin,
       endMin,
+      endMinRaw: rawEnd,
       top: (startMin - timeWindow.start) * pxPerMinute,
       height: Math.max(24, (endMin - startMin) * pxPerMinute - 2),
       lane: 0,
       laneCount: 1,
       clipped: rawEnd > timeWindow.end,
+      conflicts: [],
     });
   }
-  for (const [key, list] of map) {
-    map.set(key, assignLanes(list));
+  for (const column of columns) {
+    const list = map.get(column.key);
+    if (!list) continue;
+    map.set(column.key, assignLanes(list));
+
+    const turnaround = turnaroundFor(column);
+    const neighbours = activeBookings
+      .filter((b) => columnKeyFor(b, knownRoomIds) === column.key)
+      .map((b) => {
+        const start = timeToMinutes(b.time);
+        return {
+          id: b.id,
+          startMinutes: start,
+          endMinutes: start + Math.max(15, b.durationMinutes),
+          turnaroundMinutes: turnaround,
+          booking: b,
+        };
+      });
+
+    for (const item of map.get(column.key)!) {
+      item.conflicts = conflictsWith(
+        {
+          id: item.booking.id,
+          startMinutes: item.startMin,
+          endMinutes: item.endMinRaw,
+          turnaroundMinutes: turnaround,
+          booking: item.booking,
+        },
+        neighbours,
+      ).map((n) => n.booking);
+    }
   }
   return map;
 }

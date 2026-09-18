@@ -40,7 +40,7 @@ export type ColumnSchedule = {
   locationId: number | null;
 };
 
-export const packagesForColumn = (
+const packagesForColumn = (
   column: ScheduleColumn,
   dayWindow: ScheduleDayWindow | null,
 ): SchedulePackageWindow[] => {
@@ -532,7 +532,12 @@ export function walkInFit({
   occupancy: TimeRange[];
   hardBlocks: TimeRange[];
   nowMinutes: number;
-}): { fits: boolean; freeFor: number; shortest: number | null } {
+}): {
+  fits: boolean;
+  freeFor: number;
+  shortest: number | null;
+  packageName: string | null;
+} {
   const until = usableFreeUntil({
     schedule,
     occupancy,
@@ -543,13 +548,19 @@ export function walkInFit({
     0,
     (until ?? schedule.close ?? nowMinutes) - nowMinutes,
   );
-  const shortest = shortestDurationAt({
+  const shortestEntry = shortestDurationAt({
     column,
     dayWindow,
     minute: nowMinutes,
-  }).minutes;
+  });
+  const shortest = shortestEntry.minutes;
 
-  return { fits: shortest !== null && shortest <= freeFor, freeFor, shortest };
+  return {
+    fits: shortest !== null && shortest <= freeFor,
+    freeFor,
+    shortest,
+    packageName: shortestEntry.name,
+  };
 }
 
 /** What one column header says under the space's name. */

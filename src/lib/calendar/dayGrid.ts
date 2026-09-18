@@ -7,6 +7,7 @@
 // distinct start time in the week.
 
 import { columnKeyFor, timeToMinutes, type ScheduleColumn } from "../bookings/spaceScheduleGrid.ts";
+import { conflictsWith } from "../bookings/freeTime.ts";
 
 /** Height of one row, in minutes. */
 export const SLOT_MINUTES = 15;
@@ -78,6 +79,8 @@ export type SlotPlacement<T> = {
   item: T;
   startMin: number;
   endMin: number;
+  /** Unclamped end — the visible-window clip must never shrink a conflict. */
+  endMinRaw: number;
   /** Rows from the top of the window. */
   slotIndex: number;
   /** How many rows tall, at least one. */
@@ -87,6 +90,7 @@ export type SlotPlacement<T> = {
   laneCount: number;
   /** True when the item runs past the bottom of the window. */
   clipped: boolean;
+  conflicts: T[];
 };
 
 /**
@@ -131,17 +135,26 @@ export function assignSlotLanes<T>(items: SlotPlacement<T>[]): SlotPlacement<T>[
  * Every column in `columns` gets an entry, so an empty space still draws.
  */
 export function placeByColumn<
-  T extends TimedItem & { roomId: number | null; packageId: number | null },
+  T extends TimedItem & {
+    id: number;
+    roomId: number | null;
+    packageId: number | null;
+  },
 >({
   columns,
   items,
   window,
   knownRoomIds,
+  activeItems = items,
+  turnaroundFor = () => 0,
 }: {
   columns: ScheduleColumn[];
   items: T[];
   window: SlotWindow;
   knownRoomIds: ReadonlySet<number>;
+  /** Every live item, unfiltered — one a filter hides can still clash. */
+  activeItems?: T[];
+  turnaroundFor?: (column: ScheduleColumn) => number;
 }): Map<string, SlotPlacement<T>[]> {
   const map = new Map<string, SlotPlacement<T>[]>();
   for (const column of columns) map.set(column.key, []);
@@ -157,15 +170,48 @@ export function placeByColumn<
       item,
       startMin,
       endMin,
+      endMinRaw: rawEnd,
       slotIndex,
       slotSpan: Math.max(1, (ceilSlot(endMin) - floorSlot(startMin)) / SLOT_MINUTES),
       lane: 0,
       laneCount: 1,
       clipped: rawEnd > window.end,
+      conflicts: [],
     });
   }
 
-  for (const [key, list] of map) map.set(key, assignSlotLanes(list));
+  for (const column of columns) {
+    const list = map.get(column.key);
+    if (!list) continue;
+    map.set(column.key, assignSlotLanes(list));
+
+    const turnaround = turnaroundFor(column);
+    const neighbours = activeItems
+      .filter((it) => columnKeyFor(it, knownRoomIds) === column.key)
+      .map((it) => {
+        const start = timeToMinutes(it.time);
+        return {
+          id: it.id,
+          startMinutes: start,
+          endMinutes: start + Math.max(SLOT_MINUTES, it.durationMinutes),
+          turnaroundMinutes: turnaround,
+          item: it,
+        };
+      });
+
+    for (const placement of map.get(column.key)!) {
+      placement.conflicts = conflictsWith(
+        {
+          id: placement.item.id,
+          startMinutes: placement.startMin,
+          endMinutes: placement.endMinRaw,
+          turnaroundMinutes: turnaround,
+          item: placement.item,
+        },
+        neighbours,
+      ).map((n) => n.item);
+    }
+  }
   return map;
 }
 

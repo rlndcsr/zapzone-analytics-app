@@ -197,11 +197,13 @@ describe("assignLanes — overlap handling", () => {
     booking: makeBooking({ id }),
     startMin: 0,
     endMin: 0,
+    endMinRaw: 0,
     top,
     height,
     lane: 0,
     laneCount: 1,
     clipped: false,
+    conflicts: [],
   });
 
   it("gives non-overlapping bookings their own single lane each", () => {
@@ -336,6 +338,82 @@ describe("positionBookingsByColumn", () => {
       knownRoomIds,
     });
     assert.equal(map.get("room-1")!.length, 0);
+  });
+
+  it("flags two directly overlapping bookings as each other's conflict", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      makeBooking({ id: 2, roomId: 1, time: "10:30", durationMinutes: 60 }),
+    ];
+    const map = positionBookingsByColumn({
+      columns,
+      bookings,
+      timeWindow: window,
+      pxPerMinute: 1,
+      knownRoomIds,
+    });
+    const [a, b] = map.get("room-1")!;
+    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
+    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+  });
+
+  it("does not flag two bookings that are genuinely back to back", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      makeBooking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 60 }),
+    ];
+    const map = positionBookingsByColumn({
+      columns,
+      bookings,
+      timeWindow: window,
+      pxPerMinute: 1,
+      knownRoomIds,
+    });
+    const [a, b] = map.get("room-1")!;
+    assert.deepEqual(a.conflicts, []);
+    assert.deepEqual(b.conflicts, []);
+  });
+
+  it("flags a clash that only exists inside the turnaround gap", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      // Starts 10 minutes after the first ends — fine on its own, but this
+      // space needs 15 minutes to reset first.
+      makeBooking({ id: 2, roomId: 1, time: "11:10", durationMinutes: 60 }),
+    ];
+    const map = positionBookingsByColumn({
+      columns,
+      bookings,
+      timeWindow: window,
+      pxPerMinute: 1,
+      knownRoomIds,
+      turnaroundFor: () => 15,
+    });
+    const [a, b] = map.get("room-1")!;
+    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
+    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+  });
+
+  it("still finds a conflict against a booking a display filter has hidden", () => {
+    const hidden = makeBooking({
+      id: 2,
+      roomId: 1,
+      time: "10:30",
+      durationMinutes: 60,
+    });
+    const map = positionBookingsByColumn({
+      columns,
+      bookings: [makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 })],
+      activeBookings: [
+        makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+        hidden,
+      ],
+      timeWindow: window,
+      pxPerMinute: 1,
+      knownRoomIds,
+    });
+    const [a] = map.get("room-1")!;
+    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
   });
 });
 
