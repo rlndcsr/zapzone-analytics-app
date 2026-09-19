@@ -340,7 +340,7 @@ describe("positionBookingsByColumn", () => {
     assert.equal(map.get("room-1")!.length, 0);
   });
 
-  it("flags two directly overlapping bookings as each other's conflict", () => {
+  it("flags two directly overlapping bookings as a true double booking, with the overlap minutes", () => {
     const bookings = [
       makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
       makeBooking({ id: 2, roomId: 1, time: "10:30", durationMinutes: 60 }),
@@ -353,8 +353,10 @@ describe("positionBookingsByColumn", () => {
       knownRoomIds,
     });
     const [a, b] = map.get("room-1")!;
-    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
-    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+    assert.deepEqual(a.conflicts.map((c) => c.booking.id), [2]);
+    assert.equal(a.conflicts[0].overlapMinutes, 30);
+    assert.deepEqual(b.conflicts.map((c) => c.booking.id), [1]);
+    assert.equal(b.conflicts[0].overlapMinutes, 30);
   });
 
   it("does not flag two bookings that are genuinely back to back", () => {
@@ -374,7 +376,7 @@ describe("positionBookingsByColumn", () => {
     assert.deepEqual(b.conflicts, []);
   });
 
-  it("flags a clash that only exists inside the turnaround gap", () => {
+  it("flags a clash that only exists inside the turnaround gap as zero-minute — a missing reset, not a double booking", () => {
     const bookings = [
       makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
       // Starts 10 minutes after the first ends — fine on its own, but this
@@ -390,8 +392,30 @@ describe("positionBookingsByColumn", () => {
       turnaroundFor: () => 15,
     });
     const [a, b] = map.get("room-1")!;
-    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
-    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+    assert.deepEqual(a.conflicts.map((c) => c.booking.id), [2]);
+    assert.equal(a.conflicts[0].overlapMinutes, 0);
+    assert.deepEqual(b.conflicts.map((c) => c.booking.id), [1]);
+    assert.equal(b.conflicts[0].overlapMinutes, 0);
+  });
+
+  it("does not invent a clash for back-to-back bookings when the space needs no turnaround at all", () => {
+    // An escape room with no space attached gets no turnaround from the
+    // server, so consecutive games must never be flagged as double-booked.
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      makeBooking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 60 }),
+    ];
+    const map = positionBookingsByColumn({
+      columns,
+      bookings,
+      timeWindow: window,
+      pxPerMinute: 1,
+      knownRoomIds,
+      turnaroundFor: () => 0,
+    });
+    const [a, b] = map.get("room-1")!;
+    assert.deepEqual(a.conflicts, []);
+    assert.deepEqual(b.conflicts, []);
   });
 
   it("still finds a conflict against a booking a display filter has hidden", () => {
@@ -413,7 +437,7 @@ describe("positionBookingsByColumn", () => {
       knownRoomIds,
     });
     const [a] = map.get("room-1")!;
-    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
+    assert.deepEqual(a.conflicts.map((c) => c.booking.id), [2]);
   });
 });
 

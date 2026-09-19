@@ -3,12 +3,14 @@ import { describe, it } from "node:test";
 
 import {
   bandGeometry,
+  conflictsWith,
   freeState,
   freeUntilMinute,
   minuteAtOffset,
   nextFreeMinute,
   snapToInterval,
   snapToOfferedStart,
+  type Occupant,
   type TimeRange,
 } from "./freeTime.ts";
 
@@ -172,5 +174,57 @@ describe("freeUntilMinute", () => {
   it("is null for an unknown or inverted window", () => {
     assert.equal(freeUntilMinute(null, 1320, [], 700), null);
     assert.equal(freeUntilMinute(600, 500, [], 700), null);
+  });
+});
+
+describe("conflictsWith", () => {
+  const occupant = (over: Partial<Occupant> & { id: number }): Occupant => ({
+    startMinutes: 600,
+    endMinutes: 660,
+    turnaroundMinutes: 0,
+    ...over,
+  });
+
+  it("reports a real time overlap with the actual overlap minutes", () => {
+    const target = occupant({ id: 1, startMinutes: 600, endMinutes: 660 });
+    const other = occupant({ id: 2, startMinutes: 630, endMinutes: 690 });
+    const clashes = conflictsWith(target, [other]);
+    assert.equal(clashes.length, 1);
+    assert.equal(clashes[0].occupant.id, 2);
+    assert.equal(clashes[0].overlapMinutes, 30);
+  });
+
+  it("flags a back-to-back pair with a missing turnaround as zero overlap minutes", () => {
+    const target = occupant({
+      id: 1,
+      startMinutes: 600,
+      endMinutes: 660,
+      turnaroundMinutes: 15,
+    });
+    const other = occupant({ id: 2, startMinutes: 670, endMinutes: 730 });
+    const clashes = conflictsWith(target, [other]);
+    assert.equal(clashes.length, 1);
+    assert.equal(clashes[0].overlapMinutes, 0);
+  });
+
+  it("does not flag a back-to-back pair at all once no turnaround is required — the escape-room case", () => {
+    const target = occupant({
+      id: 1,
+      startMinutes: 600,
+      endMinutes: 660,
+      turnaroundMinutes: 0,
+    });
+    const other = occupant({
+      id: 2,
+      startMinutes: 660,
+      endMinutes: 720,
+      turnaroundMinutes: 0,
+    });
+    assert.deepEqual(conflictsWith(target, [other]), []);
+  });
+
+  it("never matches itself", () => {
+    const target = occupant({ id: 1 });
+    assert.deepEqual(conflictsWith(target, [target]), []);
   });
 });

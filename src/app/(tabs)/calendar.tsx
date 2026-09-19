@@ -33,6 +33,7 @@ import {
 import {
   bandGeometry,
   minuteAtOffset,
+  WALK_IN_SNAP_MINUTES,
   type TimeRange,
 } from "../../lib/bookings/freeTime";
 import {
@@ -593,7 +594,8 @@ const DayBookingBlock = ({
   const tone = packageColor(booking.packageName);
   const status = statusStyle(booking.status);
   const height = placement.slotSpan * SLOT_HEIGHT - 4;
-  const overlapping = placement.conflicts.length > 0;
+  const doubleBooked = placement.conflicts.some((c) => c.overlapMinutes > 0);
+  const clashing = placement.conflicts.length > 0;
   return (
     <Pressable
       onPress={onPress}
@@ -604,22 +606,26 @@ const DayBookingBlock = ({
         left: `${(100 / placement.laneCount) * placement.lane}%`,
         width: `${100 / placement.laneCount}%`,
         backgroundColor: tone.bg,
-        borderLeftColor: overlapping ? "#f43f5e" : status.color,
+        borderLeftColor: doubleBooked ? "#f43f5e" : clashing ? "#fbbf24" : status.color,
       }}
       className={`rounded-md border-l-4 px-1.5 py-1 overflow-hidden active:opacity-80 ${
-        overlapping ? "ring-2 ring-rose-500" : ""
+        doubleBooked ? "ring-2 ring-rose-500" : clashing ? "ring-2 ring-amber-400" : ""
       }`}
       accessibilityRole="button"
       accessibilityLabel={`${booking.customerName}, ${booking.packageName}, ${formatTime(booking.time)}${
-        overlapping ? ", overlaps another booking" : ""
+        clashing ? (doubleBooked ? ", overlaps another booking" : ", no turnaround before the next booking") : ""
       }`}
     >
-      {overlapping && (
-        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-bl bg-rose-500 px-1 py-px">
+      {clashing && (
+        <View
+          className={`absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-bl px-1 py-px ${
+            doubleBooked ? "bg-rose-500" : "bg-amber-500"
+          }`}
+        >
           <AlertTriangle size={7} color="#FFFFFF" />
           {height >= 18 && (
             <Text className="text-[7px] font-bold uppercase text-white">
-              Overlap
+              {doubleBooked ? "Overlap" : "No gap"}
             </Text>
           )}
         </View>
@@ -1206,20 +1212,31 @@ const Calendar = () => {
 
   // Every clashing pair today, so staff see it without opening a single block.
   const dayOverlapSummary = useMemo(() => {
-    const rows: { columnName: string; a: CalendarBooking; b: CalendarBooking }[] =
-      [];
+    const rows: {
+      columnName: string;
+      a: CalendarBooking;
+      b: CalendarBooking;
+      overlapMinutes: number;
+    }[] = [];
     const seen = new Set<string>();
     for (const column of dayColumns) {
       for (const placement of dayPlacements.get(column.key) ?? []) {
-        for (const other of placement.conflicts) {
-          const key = [placement.item.id, other.id].sort((x, y) => x - y).join("-");
+        for (const clash of placement.conflicts) {
+          const key = [placement.item.id, clash.item.id]
+            .sort((x, y) => x - y)
+            .join("-");
           if (seen.has(key)) continue;
           seen.add(key);
-          rows.push({ columnName: column.name, a: placement.item, b: other });
+          rows.push({
+            columnName: column.name,
+            a: placement.item,
+            b: clash.item,
+            overlapMinutes: clash.overlapMinutes,
+          });
         }
       }
     }
-    return rows;
+    return rows.sort((x, y) => y.overlapMinutes - x.overlapMinutes);
   }, [dayColumns, dayPlacements]);
   /** Room columns the "hide empty spaces" toggle is currently holding back. */
   const hiddenSpaceCount = hideEmptySpaces
@@ -1319,13 +1336,18 @@ const Calendar = () => {
       const schedule = daySchedules.get(column.key);
       if (!schedule || isPastDate || !isVenueToday) return;
 
+      // A walk-in records when the guests actually went in, on a 5-minute
+      // grid — never one of the package's own scheduled start times.
+      const walkInMinute =
+        Math.floor(nowMinutes / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
+
       const tap = resolveWalkInTap({
         column,
         schedule,
         dayWindow: scheduleWindow,
         occupancy: dayOccupancy.get(column.key) ?? [],
         hardBlocks: dayHardBlocks.get(column.key) ?? [],
-        minute: nowMinutes,
+        minute: walkInMinute,
       });
       if (!tap) return;
 
@@ -1342,19 +1364,19 @@ const Calendar = () => {
         return;
       }
 
-      const endMinute = nowMinutes + fit.shortest;
+      const endMinute = walkInMinute + fit.shortest;
       const packageName = fit.packageName ?? "the shortest package here";
       const clash =
         dayBookings
           .filter((b) => columnKeyFor(b, knownRoomIds) === column.key)
           .map((b) => ({ booking: b, start: timeToMinutes(b.time) }))
-          .filter(({ start }) => start >= nowMinutes && start < endMinute)
+          .filter(({ start }) => start >= walkInMinute && start < endMinute)
           .sort((a, b) => a.start - b.start)[0]?.booking ?? null;
 
       const lines = [
         `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
         "",
-        `Walk-in would run ${slotLabel(nowMinutes)} – ${slotLabel(endMinute)}`,
+        `Walk-in would run ${slotLabel(walkInMinute)} – ${slotLabel(endMinute)}`,
         `Space is free for ${fit.freeFor} min`,
         `Overlap: ${fit.shortest - fit.freeFor} min`,
       ];
@@ -1981,33 +2003,57 @@ const Calendar = () => {
                   </Text>
                 </View>
 
-                {dayOverlapSummary.length > 0 && (
-                  <View className="flex-row items-start gap-2 border-b border-rose-200 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-900/10 px-4 py-2.5">
+                {dayOverlapSummary.length > 0 && (() => {
+                  const doubleBooked = dayOverlapSummary.filter((r) => r.overlapMinutes > 0);
+                  const backToBack = dayOverlapSummary.filter((r) => r.overlapMinutes === 0);
+                  const tone = doubleBooked.length > 0;
+                  return (
+                  <View
+                    className={`flex-row items-start gap-2 border-b px-4 py-2.5 ${
+                      tone
+                        ? "border-rose-200 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-900/10"
+                        : "border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10"
+                    }`}
+                  >
                     <AlertTriangle
                       size={14}
-                      color="#e11d48"
+                      color={tone ? "#e11d48" : "#d97706"}
                       style={{ marginTop: 2 }}
                     />
                     <View className="flex-1">
-                      <Text className="text-sm font-semibold text-rose-900 dark:text-rose-300">
-                        {dayOverlapSummary.length} overlapping{" "}
-                        {dayOverlapSummary.length === 1 ? "booking" : "bookings"}{" "}
-                        — these spaces are double-booked
+                      <Text
+                        className={`text-sm font-semibold ${
+                          tone
+                            ? "text-rose-900 dark:text-rose-300"
+                            : "text-amber-900 dark:text-amber-300"
+                        }`}
+                      >
+                        {doubleBooked.length > 0 &&
+                          `${doubleBooked.length} double-booked ${doubleBooked.length === 1 ? "space" : "spaces"}`}
+                        {doubleBooked.length > 0 && backToBack.length > 0 && " · "}
+                        {backToBack.length > 0 &&
+                          `${backToBack.length} back-to-back with no turnaround`}
                       </Text>
                       {dayOverlapSummary.map((row) => (
                         <Text
                           key={`${row.a.id}-${row.b.id}`}
-                          className="mt-0.5 text-xs text-rose-800 dark:text-rose-400"
+                          className={`mt-0.5 text-xs ${
+                            tone
+                              ? "text-rose-800 dark:text-rose-400"
+                              : "text-amber-800 dark:text-amber-400"
+                          }`}
                         >
                           {row.columnName}: {row.a.customerName} at{" "}
-                          {slotLabel(timeToMinutes(row.a.time))} runs into{" "}
-                          {row.b.customerName} at{" "}
-                          {slotLabel(timeToMinutes(row.b.time))}
+                          {slotLabel(timeToMinutes(row.a.time))}{" "}
+                          {row.overlapMinutes > 0
+                            ? `overlaps ${row.b.customerName} at ${slotLabel(timeToMinutes(row.b.time))} by ${row.overlapMinutes} min`
+                            : `ends as ${row.b.customerName} starts at ${slotLabel(timeToMinutes(row.b.time))} — no time to reset the space`}
                         </Text>
                       ))}
                     </View>
                   </View>
-                )}
+                  );
+                })()}
 
                 {dayColumns.length === 0 ? (
                   <View className="p-8 items-center">

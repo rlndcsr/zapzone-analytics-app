@@ -93,6 +93,9 @@ export function buildColumns({
 
 /* ------------------------------------------------------------- placement -- */
 
+/** A real overlap is a double booking; zero minutes means only the turnaround is missing. */
+export type BookingClash = { booking: ScheduleBooking; overlapMinutes: number };
+
 export type PositionedBooking = {
   booking: ScheduleBooking;
   startMin: number;
@@ -104,7 +107,7 @@ export type PositionedBooking = {
   lane: number;
   laneCount: number;
   clipped: boolean;
-  conflicts: ScheduleBooking[];
+  conflicts: BookingClash[];
 };
 
 export function assignLanes(items: PositionedBooking[]): PositionedBooking[] {
@@ -208,7 +211,10 @@ export function positionBookingsByColumn({
           booking: item.booking,
         },
         neighbours,
-      ).map((n) => n.booking);
+      ).map((clash) => ({
+        booking: clash.occupant.booking,
+        overlapMinutes: clash.overlapMinutes,
+      }));
     }
   }
   return map;

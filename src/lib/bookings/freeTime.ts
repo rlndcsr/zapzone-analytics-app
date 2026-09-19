@@ -185,16 +185,30 @@ export type Occupant = {
   turnaroundMinutes: number;
 };
 
+/** A real overlap is a double booking; zero minutes means only the turnaround is missing. */
+export type Clash<T> = { occupant: T; overlapMinutes: number };
+
 // Two bookings clash when either one starts before the other's turnaround has
-// cleared — the same test the server's own conflict check applies.
+// cleared — the same test the server's own conflict check applies. The actual
+// (turnaround-free) overlap tells the caller whether that's a true double
+// booking or merely back-to-back with no time to reset the space.
 export function conflictsWith<T extends Occupant>(
   target: T,
   candidates: T[],
-): T[] {
-  return candidates.filter(
-    (other) =>
-      other.id !== target.id &&
-      target.startMinutes < other.endMinutes + other.turnaroundMinutes &&
-      target.endMinutes + target.turnaroundMinutes > other.startMinutes,
-  );
+): Clash<T>[] {
+  return candidates
+    .filter(
+      (other) =>
+        other.id !== target.id &&
+        target.startMinutes < other.endMinutes + other.turnaroundMinutes &&
+        target.endMinutes + target.turnaroundMinutes > other.startMinutes,
+    )
+    .map((other) => ({
+      occupant: other,
+      overlapMinutes: Math.max(
+        0,
+        Math.min(target.endMinutes, other.endMinutes) -
+          Math.max(target.startMinutes, other.startMinutes),
+      ),
+    }));
 }

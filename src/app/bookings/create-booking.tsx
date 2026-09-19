@@ -40,6 +40,7 @@ import {
   readBookingPrefill,
   resolveClickedSlot,
 } from "../../lib/bookings/bookingPrefill";
+import { WALK_IN_SNAP_MINUTES } from "../../lib/bookings/freeTime";
 import { packageServesRoom } from "../../lib/bookings/packageCandidates";
 import {
   isBlankOrValidEmail,
@@ -1035,12 +1036,47 @@ const CreateBookingScreen = () => {
     return startMinutes != null && startMinutes < now.hour * 60 + now.minute;
   }, [walkInSlot, slotPrefill.date, slotPrefill.startMinutes]);
 
+  /**
+   * A scheduled booking must land on one of the package's start times, but a
+   * walk-in records when the guests actually go in — never on that grid. So
+   * offer a 5-minute grid around the moment staff clicked, a little before it
+   * too, for a group that was already inside.
+   */
+  const walkInSlots = useMemo<AvailableSlot[]>(() => {
+    if (!walkInSlot) return [];
+
+    const anchor =
+      slotPrefill.startMinutes ?? clockToMinutes(walkInSlot.startTime) ?? 0;
+    const offered = new Set(slots.map((s) => s.startTime));
+    const generated: AvailableSlot[] = [];
+
+    for (
+      let minute = anchor - 15;
+      minute <= anchor + 45;
+      minute += WALK_IN_SNAP_MINUTES
+    ) {
+      if (minute < 0 || minute >= 24 * 60) continue;
+      const startTime = minutesToClock(minute);
+      if (offered.has(startTime)) continue;
+      generated.push({
+        ...walkInSlot,
+        startTime,
+        endTime: minutesToClock(minute + packageDurationMinutes),
+      });
+    }
+
+    return generated.length > 0 ? generated : [walkInSlot];
+  }, [walkInSlot, slotPrefill.startMinutes, slots, packageDurationMinutes]);
+
+  const isWalkInStart = (startTime: string) =>
+    walkInSlots.some((s) => s.startTime === startTime);
+
   const displayedSlots = useMemo(
     () =>
-      (walkInSlot ? [...slots, walkInSlot] : slots)
+      (walkInSlots.length > 0 ? [...slots, ...walkInSlots] : slots)
         .slice()
         .sort((a, b) => a.startTime.localeCompare(b.startTime)),
-    [slots, walkInSlot],
+    [slots, walkInSlots],
   );
 
   useEffect(() => {
@@ -2150,8 +2186,9 @@ const CreateBookingScreen = () => {
                     </View>
 
                     {walkInSlot &&
-                      slot?.startTime === walkInSlot.startTime &&
-                      slot?.roomId === walkInSlot.roomId && (
+                      slot &&
+                      isWalkInStart(slot.startTime) &&
+                      slot.roomId === walkInSlot.roomId && (
                         <View
                           className={`mb-3 flex-row flex-wrap items-center gap-2 rounded-lg border px-3 py-2 ${
                             walkInOverlapMinutes > 0
@@ -2185,8 +2222,8 @@ const CreateBookingScreen = () => {
                                   : "text-amber-800 dark:text-amber-300"
                             }`}
                           >
-                            Starting at {formatTime(walkInSlot.startTime)} today
-                            — this is the time that will be recorded.
+                            Starting at {formatTime(slot.startTime)} today —
+                            this is the time that will be recorded.
                             {walkInOverlapMinutes > 0
                               ? ` It runs ${walkInOverlapMinutes} min past the next booking in this space — the schedule will flag both bookings as overlapping.`
                               : walkInAlreadyStarted
@@ -2219,7 +2256,7 @@ const CreateBookingScreen = () => {
                           const active =
                             slot?.startTime === s.startTime &&
                             slot?.roomId === s.roomId;
-                          const isWalkIn = s === walkInSlot;
+                          const isWalkIn = isWalkInStart(s.startTime);
                           const soldOut =
                             !isWalkIn && isSoldOut(s.remainingTickets);
                           return (

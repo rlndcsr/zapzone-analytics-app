@@ -28,6 +28,7 @@ import {
   freeState,
   freeUntilMinute,
   minuteAtOffset,
+  WALK_IN_SNAP_MINUTES,
   type FreeState,
   type TimeRange,
 } from "../../lib/bookings/freeTime";
@@ -383,21 +384,26 @@ const GridBookingBlock = ({
   const b = item.booking;
   const pkg = packageColor(b.packageName);
   const pay = paymentTone(b);
-  const tiny = item.height < 24;
+  const tiny = item.height < 30;
   const compact = !tiny && item.height < 60;
   const medium = item.height >= 60 && item.height < 140;
   const laneWidth = 100 / item.laneCount;
   const needsCheckIn = inProgress && b.status !== "checked-in";
-  const overlapping = item.conflicts.length > 0;
+  const doubleBooked = item.conflicts.some((c) => c.overlapMinutes > 0);
+  const clashing = item.conflicts.length > 0;
   const overlapLabel = item.conflicts
-    .map((other) => `${other.customerName || "Walk-in"} at ${minutesToLabel(timeToMinutes(other.time))}`)
+    .map(
+      (clash) =>
+        `${clash.booking.customerName || "Walk-in"} at ${minutesToLabel(timeToMinutes(clash.booking.time))}` +
+        (clash.overlapMinutes > 0 ? ` (${clash.overlapMinutes} min over)` : " (no gap between them)"),
+    )
     .join(", ");
   return (
     <Pressable
       onPress={onPress}
       accessibilityLabel={
-        overlapping
-          ? `${b.customerName || "Walk-in"}, overlaps ${overlapLabel}`
+        clashing
+          ? `${b.customerName || "Walk-in"}, ${doubleBooked ? "overlaps" : "no turnaround before"} ${overlapLabel}`
           : undefined
       }
       style={{
@@ -408,35 +414,61 @@ const GridBookingBlock = ({
         width: `${laneWidth}%`,
         backgroundColor: pkg.bg,
       }}
-      className={`rounded-xl overflow-hidden active:opacity-80 ${
-        overlapping
+      className={`z-10 rounded-xl overflow-hidden active:opacity-80 ${
+        doubleBooked
           ? "border-2 border-rose-500"
-          : needsCheckIn
-            ? "border-2 border-red-400"
-            : inProgress
-              ? "border-2 border-emerald-400"
-              : ""
+          : clashing
+            ? "border-2 border-amber-400"
+            : needsCheckIn
+              ? "border-2 border-red-400"
+              : inProgress
+                ? "border-2 border-emerald-400"
+                : ""
       }`}
     >
-      {overlapping && (
-        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-tr-lg rounded-bl bg-rose-500 px-1 py-px">
+      {clashing && (
+        <View
+          className={`absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-tr-lg rounded-bl px-1 py-px ${
+            doubleBooked ? "bg-rose-500" : "bg-amber-500"
+          }`}
+        >
           <Feather name="alert-triangle" size={8} color="#FFFFFF" />
           {!tiny && (
             <Text className="text-[8px] font-bold uppercase text-white">
-              Overlap
+              {doubleBooked ? "Overlap" : "No gap"}
             </Text>
           )}
         </View>
       )}
       <View
-        className={`h-full ${tiny ? "" : compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
+        className={`h-full ${tiny ? "px-1.5 justify-center" : compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
       >
-        {tiny ? null : compact ? (
+        {tiny ? (
+          // One line only fits — spend it on the time AND the name.
+          <View className="flex-row items-baseline gap-1">
+            <Text
+              style={{ color: pkg.text }}
+              className="text-[10px] font-bold flex-shrink-0"
+            >
+              {minutesToLabel(item.startMin)}
+            </Text>
+            <Text
+              style={{ color: pkg.text }}
+              className="text-[10px] font-semibold flex-shrink"
+              numberOfLines={1}
+            >
+              {b.customerName || "Walk-in"}
+            </Text>
+          </View>
+        ) : compact ? (
           <View className="flex-row items-center gap-1.5">
             <View
               style={{ backgroundColor: statusColor(b.status) }}
               className="w-1.5 h-1.5 rounded-full"
             />
+            <Text style={{ color: pkg.text }} className="text-xs opacity-70">
+              {minutesToLabel(item.startMin)}
+            </Text>
             <Text
               style={{ color: pkg.text }}
               className="text-xs font-semibold flex-shrink"
@@ -444,11 +476,6 @@ const GridBookingBlock = ({
             >
               {b.customerName || "Walk-in"}
             </Text>
-            {item.laneCount === 1 && (
-              <Text style={{ color: pkg.text }} className="text-xs opacity-70">
-                {minutesToLabel(item.startMin)}
-              </Text>
-            )}
           </View>
         ) : (
           <>
@@ -606,21 +633,21 @@ const GridColumnBackground = ({
           }}
           className={
             clickable
-              ? "bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
-              : "bg-gray-50 dark:bg-neutral-900/40"
+              ? "z-[1] bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
+              : "z-[1] bg-gray-200/70 dark:bg-neutral-800/50"
           }
         />
       )}
       {!band && !closure?.fullDay && meta.reason && (
-        <View className="absolute inset-0 z-[1] items-center pt-8">
-          <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
+        <View className="absolute inset-0 z-[1] items-center bg-gray-200/70 pt-8 dark:bg-neutral-800/50">
+          <Text className="rounded-full border border-gray-300 bg-white/90 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
             {meta.reason}
           </Text>
         </View>
       )}
       {!band && !closure?.fullDay && !meta.windowKnown && !meta.reason && (
-        <View className="absolute inset-0 z-[1] items-center pt-8">
-          <Text className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
+        <View className="absolute inset-0 z-[1] items-center bg-gray-200/70 pt-8 dark:bg-neutral-800/50">
+          <Text className="rounded-full border border-gray-300 bg-white/90 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:border-neutral-700 dark:bg-black/40 dark:text-gray-400">
             Schedule unavailable
           </Text>
         </View>
@@ -671,10 +698,10 @@ const GridColumnBackground = ({
             top: (brk.start - timeWindow.start) * pxPerMinute,
             height: (brk.end - brk.start) * pxPerMinute,
           }}
-          className="bg-gray-100 dark:bg-neutral-800 border-2 border-dashed border-gray-300 dark:border-neutral-600 rounded items-center justify-center"
+          className="z-[4] bg-gray-300/70 dark:bg-neutral-700 border-2 border-dashed border-gray-400 dark:border-neutral-600 rounded items-center justify-center"
         >
-          <Feather name="coffee" size={14} color="#9CA3AF" />
-          <Text className="text-[9px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">
+          <Feather name="coffee" size={14} color="#4B5563" />
+          <Text className="text-[9px] font-semibold text-gray-700 dark:text-gray-300 mt-0.5">
             Break
           </Text>
         </View>
@@ -1006,7 +1033,7 @@ const ScheduleGrid = ({
                           left: 0,
                           right: 0,
                         }}
-                        className="border-t border-gray-100 dark:border-neutral-800"
+                        className="z-[2] border-t border-gray-100 dark:border-neutral-800"
                       />
                     ))}
                     <GridColumnBackground
@@ -1058,7 +1085,7 @@ const ScheduleGrid = ({
                             top: (item.endMin - timeWindow.start) * pxPerMinute,
                             height: (to - item.endMin) * pxPerMinute,
                           }}
-                          className="border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
+                          className="z-[3] border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
                         />
                       );
                     })}
@@ -1496,20 +1523,31 @@ const SpaceScheduleScreen = () => {
 
   // Every clashing pair today, so staff see it without opening a single block.
   const overlapSummary = useMemo(() => {
-    const rows: { columnName: string; a: ScheduleBooking; b: ScheduleBooking }[] =
-      [];
+    const rows: {
+      columnName: string;
+      a: ScheduleBooking;
+      b: ScheduleBooking;
+      overlapMinutes: number;
+    }[] = [];
     const seen = new Set<string>();
     for (const column of columns) {
       for (const item of positionedByColumn.get(column.key) ?? []) {
-        for (const other of item.conflicts) {
-          const key = [item.booking.id, other.id].sort((x, y) => x - y).join("-");
+        for (const clash of item.conflicts) {
+          const key = [item.booking.id, clash.booking.id]
+            .sort((x, y) => x - y)
+            .join("-");
           if (seen.has(key)) continue;
           seen.add(key);
-          rows.push({ columnName: column.name, a: item.booking, b: other });
+          rows.push({
+            columnName: column.name,
+            a: item.booking,
+            b: clash.booking,
+            overlapMinutes: clash.overlapMinutes,
+          });
         }
       }
     }
-    return rows;
+    return rows.sort((x, y) => y.overlapMinutes - x.overlapMinutes);
   }, [columns, positionedByColumn]);
 
   // Per-column open/close/bookable, resolved once so the header label, the
@@ -1936,25 +1974,30 @@ const SpaceScheduleScreen = () => {
   const startWalkIn = useCallback(
     (column: ScheduleColumn) => {
       const fit = walkInFit(column);
+      // A walk-in records when the guests actually went in, on a 5-minute
+      // grid — never one of the package's own scheduled start times.
+      const walkInMinute =
+        Math.floor(nowMinutes / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
+
       if (fit.fits || fit.shortest === null) {
-        navigateToMinute(column, nowMinutes);
+        navigateToMinute(column, walkInMinute);
         return;
       }
 
-      const endMinute = nowMinutes + fit.shortest;
+      const endMinute = walkInMinute + fit.shortest;
       const packageName = fit.packageName ?? "the shortest package here";
 
       const clash =
         activeBookings
           .filter((b) => columnKeyFor(b, knownRoomIds) === column.key)
           .map((b) => ({ booking: b, start: timeToMinutes(b.time) }))
-          .filter(({ start }) => start >= nowMinutes && start < endMinute)
+          .filter(({ start }) => start >= walkInMinute && start < endMinute)
           .sort((a, b) => a.start - b.start)[0]?.booking ?? null;
 
       const lines = [
         `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
         "",
-        `Walk-in would run ${minutesToLabel(nowMinutes)} – ${minutesToLabel(endMinute)}`,
+        `Walk-in would run ${minutesToLabel(walkInMinute)} – ${minutesToLabel(endMinute)}`,
         `Space is free for ${fit.freeFor} min`,
         `Overlap: ${fit.shortest - fit.freeFor} min`,
       ];
@@ -1971,7 +2014,7 @@ const SpaceScheduleScreen = () => {
         {
           text: "Start anyway",
           onPress: () =>
-            navigateToMinute(column, nowMinutes, { walkInOverride: true }),
+            navigateToMinute(column, walkInMinute, { walkInOverride: true }),
         },
       ]);
     },
@@ -2507,34 +2550,58 @@ const SpaceScheduleScreen = () => {
               </Pressable>
             </View>
           )}
-          {overlapSummary.length > 0 && (
-            <View className="flex-row items-start gap-2 border-b border-rose-200 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-900/10 px-4 py-2.5">
-              <Feather
-                name="alert-triangle"
-                size={14}
-                color="#e11d48"
-                style={{ marginTop: 2 }}
-              />
-              <View className="flex-1">
-                <Text className="text-sm font-semibold text-rose-900 dark:text-rose-300">
-                  {overlapSummary.length} overlapping{" "}
-                  {overlapSummary.length === 1 ? "booking" : "bookings"} — these
-                  spaces are double-booked
-                </Text>
-                {overlapSummary.map((row) => (
+          {overlapSummary.length > 0 && (() => {
+            const doubleBooked = overlapSummary.filter((r) => r.overlapMinutes > 0);
+            const backToBack = overlapSummary.filter((r) => r.overlapMinutes === 0);
+            const tone = doubleBooked.length > 0;
+            return (
+              <View
+                className={`flex-row items-start gap-2 border-b px-4 py-2.5 ${
+                  tone
+                    ? "border-rose-200 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-900/10"
+                    : "border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10"
+                }`}
+              >
+                <Feather
+                  name="alert-triangle"
+                  size={14}
+                  color={tone ? "#e11d48" : "#d97706"}
+                  style={{ marginTop: 2 }}
+                />
+                <View className="flex-1">
                   <Text
-                    key={`${row.a.id}-${row.b.id}`}
-                    className="mt-0.5 text-xs text-rose-800 dark:text-rose-400"
+                    className={`text-sm font-semibold ${
+                      tone
+                        ? "text-rose-900 dark:text-rose-300"
+                        : "text-amber-900 dark:text-amber-300"
+                    }`}
                   >
-                    {row.columnName}: {row.a.customerName || "Walk-in"} at{" "}
-                    {minutesToLabel(timeToMinutes(row.a.time))} runs into{" "}
-                    {row.b.customerName || "Walk-in"} at{" "}
-                    {minutesToLabel(timeToMinutes(row.b.time))}
+                    {doubleBooked.length > 0 &&
+                      `${doubleBooked.length} double-booked ${doubleBooked.length === 1 ? "space" : "spaces"}`}
+                    {doubleBooked.length > 0 && backToBack.length > 0 && " · "}
+                    {backToBack.length > 0 &&
+                      `${backToBack.length} back-to-back with no turnaround`}
                   </Text>
-                ))}
+                  {overlapSummary.map((row) => (
+                    <Text
+                      key={`${row.a.id}-${row.b.id}`}
+                      className={`mt-0.5 text-xs ${
+                        tone
+                          ? "text-rose-800 dark:text-rose-400"
+                          : "text-amber-800 dark:text-amber-400"
+                      }`}
+                    >
+                      {row.columnName}: {row.a.customerName || "Walk-in"} at{" "}
+                      {minutesToLabel(timeToMinutes(row.a.time))}{" "}
+                      {row.overlapMinutes > 0
+                        ? `overlaps ${row.b.customerName || "Walk-in"} at ${minutesToLabel(timeToMinutes(row.b.time))} by ${row.overlapMinutes} min`
+                        : `ends as ${row.b.customerName || "Walk-in"} starts at ${minutesToLabel(timeToMinutes(row.b.time))} — no time to reset the space`}
+                    </Text>
+                  ))}
+                </View>
               </View>
-            </View>
-          )}
+            );
+          })()}
           {viewMode === "grid" ? (
             <ScheduleGrid
               columns={columns}

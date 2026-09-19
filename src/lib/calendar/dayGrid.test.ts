@@ -172,7 +172,7 @@ describe("placing a day's bookings into their space columns", () => {
     assert.equal(entry.endMin, 24 * 60);
   });
 
-  it("flags two directly overlapping bookings as each other's conflict", () => {
+  it("flags two directly overlapping bookings as a true double booking, with the overlap minutes", () => {
     const items = [
       booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
       booking({ id: 2, roomId: 1, time: "10:30", durationMinutes: 60 }),
@@ -184,11 +184,13 @@ describe("placing a day's bookings into their space columns", () => {
       knownRoomIds,
     });
     const [a, b] = placed.get("room-1")!;
-    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
-    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+    assert.deepEqual(a.conflicts.map((c) => c.item.id), [2]);
+    assert.equal(a.conflicts[0].overlapMinutes, 30);
+    assert.deepEqual(b.conflicts.map((c) => c.item.id), [1]);
+    assert.equal(b.conflicts[0].overlapMinutes, 30);
   });
 
-  it("flags a clash that only exists inside the turnaround gap", () => {
+  it("flags a clash that only exists inside the turnaround gap as zero-minute — a missing reset, not a double booking", () => {
     const items = [
       booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
       booking({ id: 2, roomId: 1, time: "11:10", durationMinutes: 60 }),
@@ -201,8 +203,29 @@ describe("placing a day's bookings into their space columns", () => {
       turnaroundFor: () => 15,
     });
     const [a, b] = placed.get("room-1")!;
-    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
-    assert.deepEqual(b.conflicts.map((c) => c.id), [1]);
+    assert.deepEqual(a.conflicts.map((c) => c.item.id), [2]);
+    assert.equal(a.conflicts[0].overlapMinutes, 0);
+    assert.deepEqual(b.conflicts.map((c) => c.item.id), [1]);
+    assert.equal(b.conflicts[0].overlapMinutes, 0);
+  });
+
+  it("does not invent a clash for back-to-back bookings when the space needs no turnaround at all", () => {
+    // A roomless package gets no turnaround from the server, so consecutive
+    // games must never be flagged as double-booked.
+    const items = [
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      booking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 60 }),
+    ];
+    const placed = placeByColumn({
+      columns: buildColumns({ spaces, bookings: items, hideEmptySpaces: false, knownRoomIds }),
+      items,
+      window: computeSlotWindow(items),
+      knownRoomIds,
+      turnaroundFor: () => 0,
+    });
+    const [a, b] = placed.get("room-1")!;
+    assert.deepEqual(a.conflicts, []);
+    assert.deepEqual(b.conflicts, []);
   });
 
   it("still finds a conflict against a booking a display filter has hidden", () => {
@@ -216,7 +239,7 @@ describe("placing a day's bookings into their space columns", () => {
       knownRoomIds,
     });
     const [a] = placed.get("room-1")!;
-    assert.deepEqual(a.conflicts.map((c) => c.id), [2]);
+    assert.deepEqual(a.conflicts.map((c) => c.item.id), [2]);
   });
 });
 

@@ -6,8 +6,12 @@
 // need. The Week grid is the transpose: one column per weekday, one row per
 // distinct start time in the week.
 
-import { columnKeyFor, timeToMinutes, type ScheduleColumn } from "../bookings/spaceScheduleGrid.ts";
 import { conflictsWith } from "../bookings/freeTime.ts";
+import {
+  columnKeyFor,
+  timeToMinutes,
+  type ScheduleColumn,
+} from "../bookings/spaceScheduleGrid.ts";
 
 /** Height of one row, in minutes. */
 export const SLOT_MINUTES = 15;
@@ -32,8 +36,10 @@ export type TimedItem = {
 };
 
 /** Snap a minute-of-day down / up to a slot boundary. */
-const floorSlot = (mins: number) => Math.floor(mins / SLOT_MINUTES) * SLOT_MINUTES;
-const ceilSlot = (mins: number) => Math.ceil(mins / SLOT_MINUTES) * SLOT_MINUTES;
+const floorSlot = (mins: number) =>
+  Math.floor(mins / SLOT_MINUTES) * SLOT_MINUTES;
+const ceilSlot = (mins: number) =>
+  Math.ceil(mins / SLOT_MINUTES) * SLOT_MINUTES;
 
 /**
  * The slot window that just contains `items` — snapped outwards to whole slots
@@ -70,35 +76,31 @@ export function computeSlotWindow(
     };
   }
   const start = Math.max(0, floorSlot(earliest));
-  const end = Math.min(24 * 60, Math.max(ceilSlot(latest), start + SLOT_MINUTES));
+  const end = Math.min(
+    24 * 60,
+    Math.max(ceilSlot(latest), start + SLOT_MINUTES),
+  );
   return { start, end, slots: (end - start) / SLOT_MINUTES };
 }
 
-/** Where one item sits in its column, measured in slots rather than pixels. */
+export type ItemClash<T> = { item: T; overlapMinutes: number };
+
 export type SlotPlacement<T> = {
   item: T;
   startMin: number;
   endMin: number;
-  /** Unclamped end — the visible-window clip must never shrink a conflict. */
   endMinRaw: number;
-  /** Rows from the top of the window. */
   slotIndex: number;
-  /** How many rows tall, at least one. */
   slotSpan: number;
-  /** Side-by-side position among items that overlap it. */
   lane: number;
   laneCount: number;
-  /** True when the item runs past the bottom of the window. */
   clipped: boolean;
-  conflicts: T[];
+  conflicts: ItemClash<T>[];
 };
 
-/**
- * Spread overlapping placements across lanes so none hides another, then give
- * every member of an overlapping cluster the same `laneCount` — so a column
- * with two clashing bookings splits in half only where they actually clash.
- */
-export function assignSlotLanes<T>(items: SlotPlacement<T>[]): SlotPlacement<T>[] {
+export function assignSlotLanes<T>(
+  items: SlotPlacement<T>[],
+): SlotPlacement<T>[] {
   const list = [...items].sort(
     (a, b) => a.startMin - b.startMin || b.endMin - a.endMin,
   );
@@ -108,7 +110,8 @@ export function assignSlotLanes<T>(items: SlotPlacement<T>[]): SlotPlacement<T>[
 
   const finishCluster = (end: number) => {
     const laneCount = Math.max(1, laneEnds.length);
-    for (let i = clusterStart; i < end; i++) list[i] = { ...list[i], laneCount };
+    for (let i = clusterStart; i < end; i++)
+      list[i] = { ...list[i], laneCount };
   };
 
   list.forEach((item, index) => {
@@ -130,10 +133,6 @@ export function assignSlotLanes<T>(items: SlotPlacement<T>[]): SlotPlacement<T>[
   return list;
 }
 
-/**
- * Bucket `items` into their space column and place each one on the slot grid.
- * Every column in `columns` gets an entry, so an empty space still draws.
- */
 export function placeByColumn<
   T extends TimedItem & {
     id: number;
@@ -152,7 +151,6 @@ export function placeByColumn<
   items: T[];
   window: SlotWindow;
   knownRoomIds: ReadonlySet<number>;
-  /** Every live item, unfiltered — one a filter hides can still clash. */
   activeItems?: T[];
   turnaroundFor?: (column: ScheduleColumn) => number;
 }): Map<string, SlotPlacement<T>[]> {
@@ -165,14 +163,20 @@ export function placeByColumn<
     const startMin = timeToMinutes(item.time);
     const rawEnd = startMin + Math.max(SLOT_MINUTES, item.durationMinutes);
     const endMin = Math.min(window.end, rawEnd);
-    const slotIndex = Math.max(0, (floorSlot(startMin) - window.start) / SLOT_MINUTES);
+    const slotIndex = Math.max(
+      0,
+      (floorSlot(startMin) - window.start) / SLOT_MINUTES,
+    );
     list.push({
       item,
       startMin,
       endMin,
       endMinRaw: rawEnd,
       slotIndex,
-      slotSpan: Math.max(1, (ceilSlot(endMin) - floorSlot(startMin)) / SLOT_MINUTES),
+      slotSpan: Math.max(
+        1,
+        (ceilSlot(endMin) - floorSlot(startMin)) / SLOT_MINUTES,
+      ),
       lane: 0,
       laneCount: 1,
       clipped: rawEnd > window.end,
@@ -209,17 +213,15 @@ export function placeByColumn<
           item: placement.item,
         },
         neighbours,
-      ).map((n) => n.item);
+      ).map((clash) => ({
+        item: clash.occupant.item,
+        overlapMinutes: clash.overlapMinutes,
+      }));
     }
   }
   return map;
 }
 
-/**
- * The week grid's rows: every distinct start time across the week, ascending.
- * Rows follow the bookings rather than a fixed hourly ruler, so a quiet week
- * stays a handful of rows instead of a wall of empty ones.
- */
 export function distinctStartMinutes(
   items: readonly Pick<TimedItem, "time">[],
 ): number[] {
