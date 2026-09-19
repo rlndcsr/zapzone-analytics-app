@@ -105,6 +105,21 @@ const toDate = (value: string | string[] | undefined): string | null => {
   return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
 };
 
+/**
+ * Whether the server's own availability list already offers this exact room
+ * at this exact time. Availability is per package, not per space — a minute
+ * offered because some OTHER room is free must not read as "this room too".
+ */
+export function slotsOfferRoom<T extends { startTime: string; roomId: number | null }>(
+  slots: T[],
+  time: string,
+  roomId: number | null,
+): boolean {
+  return slots.some(
+    (s) => s.startTime === time && (roomId == null || s.roomId === roomId),
+  );
+}
+
 export function resolveClickedSlot<
   T extends { startTime: string; roomId: number | null },
 >(

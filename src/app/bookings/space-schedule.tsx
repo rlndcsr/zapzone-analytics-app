@@ -1521,7 +1521,39 @@ const SpaceScheduleScreen = () => {
     ],
   );
 
-  // Every clashing pair today, so staff see it without opening a single block.
+  // Every clashing pair today, derived from every live booking rather than
+  // from the currently drawn/filtered blocks — a filter hiding both sides of
+  // a clash must not hide the clash itself.
+  const columnsForConflicts = useMemo(
+    () =>
+      buildColumns({
+        spaces: sortedSpaces,
+        bookings: activeBookings,
+        hideEmptySpaces: false,
+        knownRoomIds,
+      }),
+    [sortedSpaces, activeBookings, knownRoomIds],
+  );
+  const positionedForConflicts = useMemo(
+    () =>
+      positionBookingsByColumn({
+        columns: columnsForConflicts,
+        bookings: activeBookings,
+        timeWindow,
+        pxPerMinute,
+        knownRoomIds,
+        activeBookings,
+        turnaroundFor,
+      }),
+    [
+      columnsForConflicts,
+      activeBookings,
+      timeWindow,
+      pxPerMinute,
+      knownRoomIds,
+      turnaroundFor,
+    ],
+  );
   const overlapSummary = useMemo(() => {
     const rows: {
       columnName: string;
@@ -1530,8 +1562,8 @@ const SpaceScheduleScreen = () => {
       overlapMinutes: number;
     }[] = [];
     const seen = new Set<string>();
-    for (const column of columns) {
-      for (const item of positionedByColumn.get(column.key) ?? []) {
+    for (const column of columnsForConflicts) {
+      for (const item of positionedForConflicts.get(column.key) ?? []) {
         for (const clash of item.conflicts) {
           const key = [item.booking.id, clash.booking.id]
             .sort((x, y) => x - y)
@@ -1548,7 +1580,7 @@ const SpaceScheduleScreen = () => {
       }
     }
     return rows.sort((x, y) => y.overlapMinutes - x.overlapMinutes);
-  }, [columns, positionedByColumn]);
+  }, [columnsForConflicts, positionedForConflicts]);
 
   // Per-column open/close/bookable, resolved once so the header label, the
   // free band, and the click handler all agree on the same numbers. A room
