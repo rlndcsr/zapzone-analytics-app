@@ -39,6 +39,7 @@ import {
   minutesToClock,
   readBookingPrefill,
   resolveClickedSlot,
+  slotsOfferRoom,
 } from "../../lib/bookings/bookingPrefill";
 import { WALK_IN_SNAP_MINUTES } from "../../lib/bookings/freeTime";
 import { packageServesRoom } from "../../lib/bookings/packageCandidates";
@@ -977,7 +978,7 @@ const CreateBookingScreen = () => {
   const walkInSlot = useMemo<AvailableSlot | null>(() => {
     if (!slotPrefill.walkIn || !slotPrefill.time || !pkg) return null;
     if (!scheduledDate || scheduledDate !== slotPrefill.date) return null;
-    if (slots.some((s) => s.startTime === slotPrefill.time)) return null;
+    if (slotsOfferRoom(slots, slotPrefill.time, slotPrefill.roomId)) return null;
     // a package picked after the click may not even run in the clicked space
     if (
       slotPrefill.roomId != null &&
@@ -1047,7 +1048,6 @@ const CreateBookingScreen = () => {
 
     const anchor =
       slotPrefill.startMinutes ?? clockToMinutes(walkInSlot.startTime) ?? 0;
-    const offered = new Set(slots.map((s) => s.startTime));
     const generated: AvailableSlot[] = [];
 
     for (
@@ -1057,7 +1057,7 @@ const CreateBookingScreen = () => {
     ) {
       if (minute < 0 || minute >= 24 * 60) continue;
       const startTime = minutesToClock(minute);
-      if (offered.has(startTime)) continue;
+      if (slotsOfferRoom(slots, startTime, walkInSlot.roomId)) continue;
       generated.push({
         ...walkInSlot,
         startTime,
@@ -1090,11 +1090,20 @@ const CreateBookingScreen = () => {
 
     // Keeps the space actually clicked when it is still free at this time;
     // only trades it for another offered slot when it is not, and says so.
-    const { slot: matched, roomChanged } = resolveClickedSlot(
+    const { slot: rawMatched, roomChanged } = resolveClickedSlot(
       slots,
       slotPrefill.time,
       slotPrefill.roomId,
     );
+    // Staff already chose "Start anyway" for THIS space — a different room
+    // being free at the same minute must never override that choice.
+    const matched =
+      slotPrefill.walkInOverride &&
+      rawMatched &&
+      slotPrefill.roomId != null &&
+      rawMatched.roomId !== slotPrefill.roomId
+        ? null
+        : rawMatched;
 
     if (matched) {
       setSlot(matched);

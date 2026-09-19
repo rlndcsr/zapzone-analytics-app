@@ -1044,6 +1044,17 @@ const Calendar = () => {
     [byDate, startDate],
   );
 
+  // Every occupying booking for the day, not the category/search-filtered
+  // list — a booking (or a clash between two of them) hidden by a filter
+  // must not disappear from occupancy or conflict detection.
+  const dayActiveBookings = useMemo(
+    () =>
+      bookings.filter(
+        (b) => b.date === startDate && OCCUPYING_STATUSES.has(b.status),
+      ),
+    [bookings, startDate],
+  );
+
   const dayColumns = useMemo(
     () =>
       buildColumns({
@@ -1104,13 +1115,11 @@ const Calendar = () => {
   const dayOccupancy = useMemo(
     () =>
       buildOccupancy({
-        bookings: bookings.filter(
-          (b) => b.date === startDate && OCCUPYING_STATUSES.has(b.status),
-        ),
+        bookings: dayActiveBookings,
         schedules: daySchedules,
         knownRoomIds,
       }),
-    [bookings, startDate, daySchedules, knownRoomIds],
+    [dayActiveBookings, daySchedules, knownRoomIds],
   );
 
   const dayHardBlocks = useMemo(() => {
@@ -1203,14 +1212,60 @@ const Calendar = () => {
       placeByColumn({
         columns: dayColumns,
         items: dayBookings,
+        // clashes are measured against every live booking, so a filter can't hide one
+        activeItems: dayActiveBookings,
         window: dayWindow,
         knownRoomIds,
         turnaroundFor: (column) => daySchedules.get(column.key)?.turnaround ?? 0,
       }),
-    [dayColumns, dayBookings, dayWindow, knownRoomIds, daySchedules],
+    [
+      dayColumns,
+      dayBookings,
+      dayActiveBookings,
+      dayWindow,
+      knownRoomIds,
+      daySchedules,
+    ],
   );
 
-  // Every clashing pair today, so staff see it without opening a single block.
+  const dayColumnsForConflicts = useMemo(
+    () =>
+      buildColumns({
+        spaces,
+        bookings: dayActiveBookings,
+        hideEmptySpaces: false,
+        knownRoomIds,
+      }),
+    [spaces, dayActiveBookings, knownRoomIds],
+  );
+  // Its own schedules, not `daySchedules` — a room hidden by "hide empty
+  // spaces" once its filtered bookings vanish must still get its real turnaround.
+  const daySchedulesForConflicts = useMemo(
+    () =>
+      buildColumnSchedules({
+        columns: dayColumnsForConflicts,
+        dayWindow: scheduleWindow,
+      }),
+    [dayColumnsForConflicts, scheduleWindow],
+  );
+  const dayPlacementsForConflicts = useMemo(
+    () =>
+      placeByColumn({
+        columns: dayColumnsForConflicts,
+        items: dayActiveBookings,
+        window: dayWindow,
+        knownRoomIds,
+        turnaroundFor: (column) =>
+          daySchedulesForConflicts.get(column.key)?.turnaround ?? 0,
+      }),
+    [
+      dayColumnsForConflicts,
+      dayActiveBookings,
+      dayWindow,
+      knownRoomIds,
+      daySchedulesForConflicts,
+    ],
+  );
   const dayOverlapSummary = useMemo(() => {
     const rows: {
       columnName: string;
@@ -1219,8 +1274,8 @@ const Calendar = () => {
       overlapMinutes: number;
     }[] = [];
     const seen = new Set<string>();
-    for (const column of dayColumns) {
-      for (const placement of dayPlacements.get(column.key) ?? []) {
+    for (const column of dayColumnsForConflicts) {
+      for (const placement of dayPlacementsForConflicts.get(column.key) ?? []) {
         for (const clash of placement.conflicts) {
           const key = [placement.item.id, clash.item.id]
             .sort((x, y) => x - y)
@@ -1237,7 +1292,7 @@ const Calendar = () => {
       }
     }
     return rows.sort((x, y) => y.overlapMinutes - x.overlapMinutes);
-  }, [dayColumns, dayPlacements]);
+  }, [dayColumnsForConflicts, dayPlacementsForConflicts]);
   /** Room columns the "hide empty spaces" toggle is currently holding back. */
   const hiddenSpaceCount = hideEmptySpaces
     ? spaces.length - dayColumns.filter((c) => !c.virtual).length

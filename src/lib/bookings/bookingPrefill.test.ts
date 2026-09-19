@@ -7,6 +7,7 @@ import {
   minutesToClock,
   readBookingPrefill,
   resolveClickedSlot,
+  slotsOfferRoom,
 } from "./bookingPrefill.ts";
 
 describe("minutesToClock / clockToMinutes", () => {
@@ -173,5 +174,27 @@ describe("resolving the space a click carries into the booking form", () => {
     const { slot, roomChanged } = resolveClickedSlot(slots, "18:00", 1);
     assert.equal(slot, null);
     assert.equal(roomChanged, false);
+  });
+});
+
+describe("slotsOfferRoom", () => {
+  // Availability is per package: 16:00 is offered because room 2 is free,
+  // not because room 1 is.
+  const slots = [
+    { startTime: "16:00", roomId: 2 },
+    { startTime: "17:00", roomId: 1 },
+  ];
+
+  it("is true only when the clicked room itself has that start", () => {
+    assert.equal(slotsOfferRoom(slots, "16:00", 2), true);
+    assert.equal(slotsOfferRoom(slots, "16:00", 1), false);
+  });
+
+  it("is false when no room offers that start at all", () => {
+    assert.equal(slotsOfferRoom(slots, "18:00", 1), false);
+  });
+
+  it("falls back to any room when none was clicked", () => {
+    assert.equal(slotsOfferRoom(slots, "16:00", null), true);
   });
 });
