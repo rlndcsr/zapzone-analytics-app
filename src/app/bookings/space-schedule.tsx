@@ -1830,17 +1830,8 @@ const SpaceScheduleScreen = () => {
         dayWindow,
         blocked: blockedRangesFor(column, meta),
         rawMinute,
-        isToday: isVenueToday,
-        nowMinutes,
       }),
-    [
-      intervalForColumn,
-      dayWindow,
-      isVenueToday,
-      nowMinutes,
-      blockedRangesFor,
-      timeWindow,
-    ],
+    [intervalForColumn, dayWindow, blockedRangesFor, timeWindow],
   );
 
   const navigateToMinute = useCallback(

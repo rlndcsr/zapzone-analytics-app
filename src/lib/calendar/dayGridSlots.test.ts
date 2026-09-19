@@ -245,7 +245,6 @@ describe("offering starts from every package a space serves, not just whichever 
       ...setup(twoPackageWindow),
       rawMinute: AT(17, 45),
       isToday: false,
-      nowMinutes: 0,
     });
     // 17:45 is after the morning package closes and before the afternoon one
     // opens; the old per-minute lookup found neither and fell back to a
@@ -258,7 +257,6 @@ describe("offering starts from every package a space serves, not just whichever 
       ...setup(twoPackageWindow),
       rawMinute: AT(16, 40),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap?.minute, AT(16, 30));
   });
@@ -268,7 +266,6 @@ describe("offering starts from every package a space serves, not just whichever 
       ...setup(twoPackageWindow),
       rawMinute: AT(18, 20),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap?.minute, AT(18));
   });
@@ -466,7 +463,6 @@ describe("what a tap on the free band means", () => {
       ...setup(window()),
       rawMinute: AT(17, 10),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap?.minute, AT(17));
     assert.equal(tap?.packageId, 7);
@@ -481,7 +477,6 @@ describe("what a tap on the free band means", () => {
       ...setup(window(), [], [{ start: AT(16), end: AT(17) }]),
       rawMinute: AT(16, 20),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap?.minute, AT(17));
   });
@@ -491,7 +486,6 @@ describe("what a tap on the free band means", () => {
       ...setup(window(), [booking("16:00", 60)]),
       rawMinute: AT(16, 30),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap?.minute, AT(18));
   });
@@ -501,7 +495,6 @@ describe("what a tap on the free band means", () => {
       ...setup(window()),
       rawMinute: AT(17, 10),
       isToday: true,
-      nowMinutes: AT(17, 2),
     });
     assert.equal(tap?.minute, AT(17));
     assert.equal(tap?.walkIn, true);
@@ -513,19 +506,27 @@ describe("what a tap on the free band means", () => {
       ...setup(window()),
       rawMinute: AT(17, 40),
       isToday: true,
-      nowMinutes: AT(17, 2),
     });
     assert.equal(tap?.minute, AT(18));
   });
 
-  it("never hands back a minute earlier than now", () => {
+  it("lets a click land on a start earlier than now instead of snapping forward — recording a group that already went in", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(16, 10),
       isToday: true,
-      nowMinutes: AT(18, 3),
     });
-    assert.equal(tap?.minute, AT(18));
+    assert.equal(tap?.minute, AT(16));
+    assert.equal(tap?.walkIn, true);
+  });
+
+  it("still finds the nearest offered start when the click falls between an earlier-today and a later one", () => {
+    const tap = resolveSlotTap({
+      ...setup(window()),
+      rawMinute: AT(16, 40),
+      isToday: true,
+    });
+    assert.equal(tap?.minute, AT(17));
   });
 
   it("gives nothing back when the space is booked out to closing", () => {
@@ -533,19 +534,19 @@ describe("what a tap on the free band means", () => {
       ...setup(window(), [booking("16:00", 240)]),
       rawMinute: AT(17),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap, null);
   });
 
-  it("gives nothing back once nothing would still fit before closing", () => {
+  it("still finds the last fitting start even when the click lands late in the day", () => {
+    // 19:40 is past every start this package offers, but 19:00 still leaves
+    // room for its hour before closing — the click is never simply refused.
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(19, 40),
       isToday: true,
-      nowMinutes: AT(19, 40),
     });
-    assert.equal(tap, null);
+    assert.equal(tap?.minute, AT(19));
   });
 
   it("gives nothing back for a space the day window says is shut", () => {
@@ -559,7 +560,6 @@ describe("what a tap on the free band means", () => {
       ),
       rawMinute: AT(17),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap, null);
   });
@@ -569,7 +569,6 @@ describe("what a tap on the free band means", () => {
       ...setup(null),
       rawMinute: AT(17),
       isToday: false,
-      nowMinutes: 0,
     });
     assert.equal(tap, null);
   });

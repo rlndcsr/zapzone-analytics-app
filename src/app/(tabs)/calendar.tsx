@@ -1291,7 +1291,6 @@ const Calendar = () => {
         hardBlocks: dayHardBlocks.get(column.key) ?? [],
         rawMinute,
         isToday: isVenueToday,
-        nowMinutes,
       });
       if (!tap) return;
 
@@ -1304,7 +1303,6 @@ const Calendar = () => {
       dayOccupancy,
       dayHardBlocks,
       isVenueToday,
-      nowMinutes,
       openBookingForTap,
     ],
   );

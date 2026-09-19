@@ -304,23 +304,16 @@ export function resolveSlotMinute({
   dayWindow,
   blocked,
   rawMinute,
-  isToday,
-  nowMinutes,
 }: {
   column: ScheduleColumn;
   schedule: Pick<ColumnSchedule, "open" | "close" | "interval">;
   dayWindow: ScheduleDayWindow | null;
   blocked: TimeRange[];
   rawMinute: number;
-  isToday: boolean;
-  nowMinutes: number;
 }): number | null {
   const { open, close, interval } = schedule;
   if (open == null || close == null || close <= open) return null;
 
-  const floor = isToday
-    ? snapToInterval(Math.max(open, nowMinutes), WALK_IN_SNAP_MINUTES, open)
-    : open;
   const probe = Math.min(Math.max(rawMinute, open), close - 1);
   const shortest = shortestDurationAt({
     column,
@@ -331,18 +324,19 @@ export function resolveSlotMinute({
     open,
     close - (shortest ?? WALK_IN_SNAP_MINUTES),
   );
-  if (floor > latestStart) return null;
 
   // Every start the space's own packages offer today, not just whichever
-  // package happens to be active at this one minute.
+  // package happens to be active at this one minute — including ones earlier
+  // than now, so clicking an already-passed start records it rather than
+  // snapping forward to the next one.
   const offered = columnStarts(column, dayWindow).filter(
-    (start) => start >= floor && start <= latestStart,
+    (start) => start >= open && start <= latestStart,
   );
   const onGrid =
-    offered.length > 0 ? snapToOfferedStart(offered, rawMinute, floor) : null;
-  const snapped = onGrid ?? snapToInterval(rawMinute, interval, floor);
+    offered.length > 0 ? snapToOfferedStart(offered, rawMinute, open) : null;
+  const snapped = onGrid ?? snapToInterval(rawMinute, interval, open);
 
-  const clamped = Math.min(Math.max(snapped, floor), latestStart);
+  const clamped = Math.min(Math.max(snapped, open), latestStart);
   const free = nextFreeMinute(open, close, blocked, clamped);
   if (free === null) return null;
   if (free === clamped) return clamped;
@@ -377,7 +371,6 @@ export function resolveSlotTap({
   hardBlocks,
   rawMinute,
   isToday,
-  nowMinutes,
 }: {
   column: ScheduleColumn;
   schedule: ColumnSchedule;
@@ -386,7 +379,6 @@ export function resolveSlotTap({
   hardBlocks: TimeRange[];
   rawMinute: number;
   isToday: boolean;
-  nowMinutes: number;
 }): SlotTap | null {
   if (!schedule.bookable) return null;
 
@@ -397,8 +389,6 @@ export function resolveSlotTap({
     dayWindow,
     blocked,
     rawMinute,
-    isToday,
-    nowMinutes,
   });
   if (minute === null) return null;
 

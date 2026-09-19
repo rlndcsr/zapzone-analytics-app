@@ -53,6 +53,7 @@ import {
   parseKey,
   toKey,
 } from "../../lib/date/calendar";
+import { venueNow } from "../../lib/date/venueTime";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
@@ -1022,6 +1023,18 @@ const CreateBookingScreen = () => {
     packageDurationMinutes,
   ]);
 
+  // Distinct from an overlap: this walk-in slot isn't offered because its
+  // start has already gone by today, not because it clashes with a booking.
+  const walkInAlreadyStarted = useMemo(() => {
+    if (!walkInSlot || !slotPrefill.date) return false;
+    const now = venueNow();
+    const todayKeyAtVenue = `${now.year}-${String(now.month).padStart(2, "0")}-${String(now.day).padStart(2, "0")}`;
+    if (todayKeyAtVenue !== slotPrefill.date) return false;
+    const startMinutes =
+      slotPrefill.startMinutes ?? clockToMinutes(walkInSlot.startTime);
+    return startMinutes != null && startMinutes < now.hour * 60 + now.minute;
+  }, [walkInSlot, slotPrefill.date, slotPrefill.startMinutes]);
+
   const displayedSlots = useMemo(
     () =>
       (walkInSlot ? [...slots, walkInSlot] : slots)
@@ -1061,10 +1074,16 @@ const CreateBookingScreen = () => {
     if (walkInSlot) {
       setSlot(walkInSlot);
       Alert.alert(
-        walkInOverlapMinutes > 0 ? "Walk-in overlaps the next booking" : "Walk-in start kept",
+        walkInOverlapMinutes > 0
+          ? "Walk-in overlaps the next booking"
+          : walkInAlreadyStarted
+            ? "Start time already passed"
+            : "Walk-in start kept",
         walkInOverlapMinutes > 0
           ? `Starting at ${formatTime(slotPrefill.time ?? "")} today — it runs ${walkInOverlapMinutes} min past the next booking in this space.`
-          : `Starting at ${formatTime(slotPrefill.time ?? "")} today — outside this package's usual start times.`,
+          : walkInAlreadyStarted
+            ? `Starting at ${formatTime(slotPrefill.time ?? "")} today — that start time has already gone by, so it is no longer offered to customers.`
+            : `Starting at ${formatTime(slotPrefill.time ?? "")} today — outside this package's usual start times.`,
       );
       return;
     }
@@ -1083,6 +1102,7 @@ const CreateBookingScreen = () => {
     slotPrefill,
     walkInSlot,
     walkInOverlapMinutes,
+    walkInAlreadyStarted,
   ]);
 
   const [pkgSchedules, setPkgSchedules] = useState<
@@ -2136,30 +2156,42 @@ const CreateBookingScreen = () => {
                           className={`mb-3 flex-row flex-wrap items-center gap-2 rounded-lg border px-3 py-2 ${
                             walkInOverlapMinutes > 0
                               ? "border-rose-300 bg-rose-50 dark:border-rose-900/40 dark:bg-rose-900/10"
-                              : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10"
+                              : walkInAlreadyStarted
+                                ? "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/10"
+                                : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10"
                           }`}
                         >
                           <Text
                             className={`rounded-full px-1.5 py-0.5 text-xs font-semibold ${
                               walkInOverlapMinutes > 0
                                 ? "bg-rose-200 text-rose-900 dark:bg-rose-900/40 dark:text-rose-300"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                                : walkInAlreadyStarted
+                                  ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+                                  : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                             }`}
                           >
-                            {walkInOverlapMinutes > 0 ? "Overlap" : "Walk-in"}
+                            {walkInOverlapMinutes > 0
+                              ? "Overlap"
+                              : walkInAlreadyStarted
+                                ? "Already started"
+                                : "Walk-in"}
                           </Text>
                           <Text
                             className={`flex-1 text-xs ${
                               walkInOverlapMinutes > 0
                                 ? "text-rose-800 dark:text-rose-300"
-                                : "text-amber-800 dark:text-amber-300"
+                                : walkInAlreadyStarted
+                                  ? "text-blue-800 dark:text-blue-300"
+                                  : "text-amber-800 dark:text-amber-300"
                             }`}
                           >
                             Starting at {formatTime(walkInSlot.startTime)} today
                             — this is the time that will be recorded.
                             {walkInOverlapMinutes > 0
                               ? ` It runs ${walkInOverlapMinutes} min past the next booking in this space — the schedule will flag both bookings as overlapping.`
-                              : ""}
+                              : walkInAlreadyStarted
+                                ? " That start time has already gone by, so it is no longer offered to customers."
+                                : ""}
                           </Text>
                         </View>
                       )}
@@ -2241,17 +2273,25 @@ const CreateBookingScreen = () => {
                                       className={`ml-auto rounded-full px-1.5 py-0.5 ${
                                         walkInOverlapMinutes > 0
                                           ? "bg-rose-200 dark:bg-rose-900/40"
-                                          : "bg-amber-100 dark:bg-amber-900/40"
+                                          : walkInAlreadyStarted
+                                            ? "bg-blue-100 dark:bg-blue-900/40"
+                                            : "bg-amber-100 dark:bg-amber-900/40"
                                       }`}
                                     >
                                       <Text
                                         className={`text-[11px] font-semibold ${
                                           walkInOverlapMinutes > 0
                                             ? "text-rose-900 dark:text-rose-300"
-                                            : "text-amber-800 dark:text-amber-300"
+                                            : walkInAlreadyStarted
+                                              ? "text-blue-800 dark:text-blue-300"
+                                              : "text-amber-800 dark:text-amber-300"
                                         }`}
                                       >
-                                        {walkInOverlapMinutes > 0 ? "Overlap" : "Walk-in"}
+                                        {walkInOverlapMinutes > 0
+                                          ? "Overlap"
+                                          : walkInAlreadyStarted
+                                            ? "Already started"
+                                            : "Walk-in"}
                                       </Text>
                                     </View>
                                   ) : (
