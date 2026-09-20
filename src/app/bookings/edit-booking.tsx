@@ -582,6 +582,9 @@ const EditBookingScreen = () => {
     setTime("");
   };
 
+  // Only the package's booking-day rules close a date off. A package's advance
+  // booking notice is a rule for CUSTOMERS booking online — staff at the desk
+  // are not held to it, so it never removes a date or a time here.
   const cells = useMemo(() => {
     const y = anchor.getFullYear();
     const m = anchor.getMonth();

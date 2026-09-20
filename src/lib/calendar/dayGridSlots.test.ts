@@ -13,7 +13,6 @@ import {
   columnStatusFor,
   hardBlocksFor,
   nextBookableFrom,
-  packageIntervalFor,
   resolveSlotTap,
   resolveWalkInTap,
   usableFreeUntil,
@@ -119,19 +118,11 @@ describe("resolving a space column's operating window", () => {
     assert.equal(schedule.locationId, 3);
   });
 
-  it("snaps to the package interval, not the space's turnaround", () => {
-    const { schedule } = setup(window());
-    assert.equal(schedule.interval, 60);
-  });
-
   it("keeps a space set to no gap at zero, never the default", () => {
     const { schedule } = setup(
       window({ rooms: [room({ interval_minutes: 0 })] }),
     );
     assert.equal(schedule.turnaround, 0);
-    // The turnaround is not a grid: a zero there must not pull the snapping
-    // interval down with it, nor be mistaken for an unset one.
-    assert.equal(schedule.interval, 60);
   });
 
   it("frees the space the moment a no-gap booking ends", () => {
@@ -184,44 +175,7 @@ describe("resolving a space column's operating window", () => {
   });
 });
 
-describe("the grid a tap snaps to", () => {
-  it("takes the smallest interval among the packages serving the space", () => {
-    const dayWindow = window({
-      packages: [
-        pkg({ package_id: 7, interval_minutes: 60 }),
-        pkg({ package_id: 8, interval_minutes: 30 }),
-      ],
-    });
-    assert.equal(packageIntervalFor(airlock, dayWindow), 30);
-  });
-
-  it("ignores the space's turnaround entirely, zero or not", () => {
-    const noGap = window({ rooms: [room({ interval_minutes: 0 })] });
-    const bigGap = window({ rooms: [room({ interval_minutes: 45 })] });
-    assert.equal(packageIntervalFor(airlock, noGap), 60);
-    assert.equal(packageIntervalFor(airlock, bigGap), 60);
-  });
-
-  it("falls back to the day's interval, then to fifteen", () => {
-    assert.equal(
-      packageIntervalFor(
-        airlock,
-        window({ packages: [], interval_minutes: 20 }),
-      ),
-      20,
-    );
-    assert.equal(
-      packageIntervalFor(
-        airlock,
-        window({ packages: [], interval_minutes: 0 }),
-      ),
-      15,
-    );
-    assert.equal(packageIntervalFor(airlock, null), 15);
-  });
-});
-
-describe("offering starts from every package a space serves, not just whichever is active at the click", () => {
+describe("offering the packages a space serves, not just whichever is active at the tap", () => {
   const morning = pkg({
     package_id: 20,
     open_minutes: AT(16),
@@ -240,34 +194,38 @@ describe("offering starts from every package a space serves, not just whichever 
   });
   const twoPackageWindow = window({ packages: [morning, afternoon] });
 
-  it("lands on the nearest real start even when the click falls in the gap between two packages' windows", () => {
+  it("keeps the tapped minute inside the first package's own window and offers that package", () => {
+    const tap = resolveSlotTap({
+      ...setup(twoPackageWindow),
+      rawMinute: AT(16, 40),
+      isToday: false,
+    });
+    assert.equal(tap?.minute, AT(16, 40));
+    assert.deepEqual(tap?.packageIds, [20]);
+  });
+
+  it("keeps the tapped minute inside the second package's own window and offers that package", () => {
+    const tap = resolveSlotTap({
+      ...setup(twoPackageWindow),
+      rawMinute: AT(18, 20),
+      isToday: false,
+    });
+    assert.equal(tap?.minute, AT(18, 20));
+    assert.deepEqual(tap?.packageIds, [21]);
+  });
+
+  it("still hands back the tapped minute in the gap between two packages' windows, with no package to offer", () => {
     const tap = resolveSlotTap({
       ...setup(twoPackageWindow),
       rawMinute: AT(17, 45),
       isToday: false,
     });
     // 17:45 is after the morning package closes and before the afternoon one
-    // opens; the old per-minute lookup found neither and fell back to a
-    // generic interval guess. The real answer is 18:00.
-    assert.equal(tap?.minute, AT(18));
-  });
-
-  it("still resolves inside the first package's own window", () => {
-    const tap = resolveSlotTap({
-      ...setup(twoPackageWindow),
-      rawMinute: AT(16, 40),
-      isToday: false,
-    });
-    assert.equal(tap?.minute, AT(16, 30));
-  });
-
-  it("still resolves inside the second package's own window", () => {
-    const tap = resolveSlotTap({
-      ...setup(twoPackageWindow),
-      rawMinute: AT(18, 20),
-      isToday: false,
-    });
-    assert.equal(tap?.minute, AT(18));
+    // opens. Staff are not held to either package's grid, so the tap stands and
+    // the booking form is where a package gets picked.
+    assert.equal(tap?.minute, AT(17, 45));
+    assert.deepEqual(tap?.packageIds, []);
+    assert.equal(tap?.packageId, null);
   });
 });
 
@@ -458,18 +416,30 @@ describe("naming a Free-header time staff can actually book", () => {
 });
 
 describe("what a tap on the free band means", () => {
-  it("snaps a future day to the nearest start the booking form offers", () => {
+  it("keeps the minute tapped on a future day, on a 5-minute grid, and marks it off the customer grid", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(17, 10),
       isToday: false,
     });
-    assert.equal(tap?.minute, AT(17));
+    assert.equal(tap?.minute, AT(17, 10));
     assert.equal(tap?.packageId, 7);
     assert.deepEqual(tap?.packageIds, [7]);
     assert.equal(tap?.freeUntilMinute, AT(20));
-    assert.equal(tap?.walkIn, false);
+    // 17:10 is not one of this package's own start times, so the booking form
+    // has to be told to keep it rather than hunt for an offered start.
+    assert.equal(tap?.walkIn, true);
     assert.equal(tap?.locationId, 3);
+  });
+
+  it("lands on the customer's own start when the tap is on one, and says so", () => {
+    const tap = resolveSlotTap({
+      ...setup(window()),
+      rawMinute: AT(17, 2),
+      isToday: false,
+    });
+    assert.equal(tap?.minute, AT(17));
+    assert.equal(tap?.walkIn, false);
   });
 
   it("walks a tap that lands on a break forward to the next free start", () => {
@@ -481,52 +451,54 @@ describe("what a tap on the free band means", () => {
     assert.equal(tap?.minute, AT(17));
   });
 
-  it("walks a tap that lands on a booking past its turnaround", () => {
+  it("walks a tap that lands on a booking to the first free 5-minute mark past its turnaround", () => {
     const tap = resolveSlotTap({
       ...setup(window(), [booking("16:00", 60)]),
       rawMinute: AT(16, 30),
       isToday: false,
     });
-    assert.equal(tap?.minute, AT(18));
+    // 16:00 + an hour + the 15-minute reset. Staff start there, not at the
+    // customer's next scheduled 18:00.
+    assert.equal(tap?.minute, AT(17, 15));
   });
 
-  it("resolves today's tap to a real offered start even moments after now, never a five-minute grid", () => {
+  it("keeps a tap moments after a scheduled start instead of pulling it back to one", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(17, 10),
       isToday: true,
     });
-    assert.equal(tap?.minute, AT(17));
+    assert.equal(tap?.minute, AT(17, 10));
     assert.equal(tap?.walkIn, true);
     assert.equal(tap?.packageId, 7);
   });
 
-  it("resolves a click between offered starts on today to the nearest one, not an arbitrary five-minute time", () => {
+  it("keeps a tap between two scheduled starts instead of rounding to the nearer one", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(17, 40),
       isToday: true,
     });
-    assert.equal(tap?.minute, AT(18));
+    assert.equal(tap?.minute, AT(17, 40));
   });
 
-  it("lets a click land on a start earlier than now instead of snapping forward — recording a group that already went in", () => {
+  it("rounds to the nearest 5 minutes, never to the customer's interval", () => {
+    const tap = resolveSlotTap({
+      ...setup(window()),
+      rawMinute: AT(17, 43),
+      isToday: true,
+    });
+    assert.equal(tap?.minute, AT(17, 45));
+  });
+
+  it("lets a tap land earlier than now instead of snapping forward — recording a group that already went in", () => {
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(16, 10),
       isToday: true,
     });
-    assert.equal(tap?.minute, AT(16));
+    assert.equal(tap?.minute, AT(16, 10));
     assert.equal(tap?.walkIn, true);
-  });
-
-  it("still finds the nearest offered start when the click falls between an earlier-today and a later one", () => {
-    const tap = resolveSlotTap({
-      ...setup(window()),
-      rawMinute: AT(16, 40),
-      isToday: true,
-    });
-    assert.equal(tap?.minute, AT(17));
   });
 
   it("gives nothing back when the space is booked out to closing", () => {
@@ -538,9 +510,9 @@ describe("what a tap on the free band means", () => {
     assert.equal(tap, null);
   });
 
-  it("still finds the last fitting start even when the click lands late in the day", () => {
-    // 19:40 is past every start this package offers, but 19:00 still leaves
-    // room for its hour before closing — the click is never simply refused.
+  it("still finds the last fitting start even when the tap lands late in the day", () => {
+    // 19:40 leaves no room for this package's hour before closing, so the tap
+    // falls back to 19:00, the last start that still fits — never refused.
     const tap = resolveSlotTap({
       ...setup(window()),
       rawMinute: AT(19, 40),

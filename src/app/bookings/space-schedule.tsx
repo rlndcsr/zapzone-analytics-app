@@ -56,8 +56,8 @@ import {
   type TimeWindow,
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
+  columnStarts,
   nextBookableFrom,
-  packageIntervalFor,
   resolveSlotMinute,
 } from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
@@ -1844,18 +1844,6 @@ const SpaceScheduleScreen = () => {
     [dayWindow],
   );
 
-  /**
-   * The grid a tap snaps to — the packages' own, never the space's turnaround.
-   * A space set to no gap sends a real 0, and reading that as a grid made it
-   * look unset: the fifteen-minute default took its place and snapped taps past
-   * starts the booking form would have taken. Shared with the Calendar tab's
-   * day grid so the two can never answer this differently.
-   */
-  const intervalForColumn = useCallback(
-    (column: ScheduleColumn): number => packageIntervalFor(column, dayWindow),
-    [dayWindow],
-  );
-
   const resolvePackageOffer = useCallback(
     (
       column: ScheduleColumn,
@@ -1881,7 +1869,8 @@ const SpaceScheduleScreen = () => {
   /**
    * The minute a tap means, resolved by the very function the Calendar tab's
    * day grid uses — the two screens drawing the same day must never send the
-   * booking form to different minutes for the same tap. Null when no start is
+   * booking form to different minutes for the same tap. It lands on a 5-minute
+   * grid, not on the customer's package start times. Null when no start is
    * left here at all: booked out to closing, or too late for anything to fit.
    */
   const resolveClickMinute = useCallback(
@@ -1895,13 +1884,12 @@ const SpaceScheduleScreen = () => {
         schedule: {
           open: meta.open ?? timeWindow.start,
           close: meta.close ?? timeWindow.end,
-          interval: intervalForColumn(column),
         },
         dayWindow,
         blocked: blockedRangesFor(column, meta),
         rawMinute,
       }),
-    [intervalForColumn, dayWindow, blockedRangesFor, timeWindow],
+    [dayWindow, blockedRangesFor, timeWindow],
   );
 
   const navigateToMinute = useCallback(
@@ -1922,6 +1910,9 @@ const SpaceScheduleScreen = () => {
         effectiveLocationId ??
         dayWindow?.location_id ??
         null;
+      // the customer grid does not contain 4:05, so the booking form has to be
+      // told to keep the minute instead of hunting for an offered start
+      const offCustomerGrid = !columnStarts(column, dayWindow).includes(minute);
 
       router.push({
         pathname: CREATE_BOOKING_PATH,
@@ -1933,7 +1924,7 @@ const SpaceScheduleScreen = () => {
           packageId: autoSelect,
           packageIds: candidates,
           freeUntilMinute: usableFreeUntil(column, meta, minute),
-          walkIn: isVenueToday,
+          walkIn: isVenueToday || offCustomerGrid,
           walkInOverride: options?.walkInOverride ?? false,
         }),
       });

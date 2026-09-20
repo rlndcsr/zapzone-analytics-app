@@ -6,8 +6,6 @@ import {
   freeState,
   freeUntilMinute,
   nextFreeMinute,
-  snapToInterval,
-  snapToOfferedStart,
   WALK_IN_SNAP_MINUTES,
   type TimeRange,
 } from "../bookings/freeTime.ts";
@@ -25,8 +23,6 @@ export const OCCUPYING_STATUSES = new Set([
   "pending",
 ]);
 
-const FALLBACK_INTERVAL = 15;
-
 export type ColumnSchedule = {
   open: number | null;
   close: number | null;
@@ -35,7 +31,6 @@ export type ColumnSchedule = {
   windowKnown: boolean;
   reason: string | null;
   turnaround: number;
-  interval: number;
   closedRanges: TimeRange[];
   locationId: number | null;
 };
@@ -68,18 +63,6 @@ const toRanges = (
     reason: r.reason ?? "Closed",
   }));
 
-export const packageIntervalFor = (
-  column: ScheduleColumn,
-  dayWindow: ScheduleDayWindow | null,
-): number => {
-  const intervals = packagesForColumn(column, dayWindow)
-    .map((p) => p.interval_minutes)
-    .filter((n) => Number.isFinite(n) && n > 0);
-  if (intervals.length > 0) return Math.min(...intervals);
-  const dayInterval = dayWindow?.interval_minutes ?? 0;
-  return dayInterval > 0 ? dayInterval : FALLBACK_INTERVAL;
-};
-
 export function buildColumnSchedules({
   columns,
   dayWindow,
@@ -93,8 +76,6 @@ export function buildColumnSchedules({
   const map = new Map<string, ColumnSchedule>();
 
   for (const column of columns) {
-    const interval = packageIntervalFor(column, dayWindow);
-
     if (column.roomId != null) {
       const entry = rooms.get(column.roomId);
       const windowKnown = dayWindow != null && entry !== undefined;
@@ -111,7 +92,6 @@ export function buildColumnSchedules({
         windowKnown,
         reason: entry?.reason ?? null,
         turnaround: Math.max(0, entry?.interval_minutes ?? 0),
-        interval,
         closedRanges: toRanges(entry?.closed_ranges),
         locationId: entry?.location_id ?? null,
       });
@@ -128,7 +108,6 @@ export function buildColumnSchedules({
       windowKnown: dayWindow != null,
       reason: dayWindow?.location_closed ? "Location closed" : null,
       turnaround: 0,
-      interval,
       closedRanges: toRanges(entry?.closed_ranges),
       locationId: entry?.location_id ?? null,
     });
@@ -298,6 +277,18 @@ function packageOfferFor({
   };
 }
 
+/**
+ * The minute a tap on the schedule means.
+ *
+ * A package's interval is the CUSTOMER's grid — 4:00, 5:00, 6:00 for an hourly
+ * package. Staff are not held to it: a walk-in starts when the guests actually
+ * walk in, so a tap here lands on a 5-minute grid and 4:05 or 4:10 is an
+ * ordinary start. The minute travels to the booking form as tapped, never
+ * snapped forward to the next start a customer would have been offered.
+ *
+ * Null when there is no start left here at all: booked out to closing, or too
+ * late for the shortest package to finish before the space shuts.
+ */
 export function resolveSlotMinute({
   column,
   schedule,
@@ -306,12 +297,12 @@ export function resolveSlotMinute({
   rawMinute,
 }: {
   column: ScheduleColumn;
-  schedule: Pick<ColumnSchedule, "open" | "close" | "interval">;
+  schedule: Pick<ColumnSchedule, "open" | "close">;
   dayWindow: ScheduleDayWindow | null;
   blocked: TimeRange[];
   rawMinute: number;
 }): number | null {
-  const { open, close, interval } = schedule;
+  const { open, close } = schedule;
   if (open == null || close == null || close <= open) return null;
 
   const probe = Math.min(Math.max(rawMinute, open), close - 1);
@@ -325,31 +316,21 @@ export function resolveSlotMinute({
     close - (shortest ?? WALK_IN_SNAP_MINUTES),
   );
 
-  // Every start the space's own packages offer today, not just whichever
-  // package happens to be active at this one minute — including ones earlier
-  // than now, so clicking an already-passed start records it rather than
-  // snapping forward to the next one.
-  const offered = columnStarts(column, dayWindow).filter(
-    (start) => start >= open && start <= latestStart,
+  const onFive = (minute: number) =>
+    Math.round(minute / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
+  const earliest = Math.ceil(open / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
+  const latest = Math.max(
+    earliest,
+    Math.floor(latestStart / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES,
   );
-  const onGrid =
-    offered.length > 0 ? snapToOfferedStart(offered, rawMinute, open) : null;
-  const snapped = onGrid ?? snapToInterval(rawMinute, interval, open);
+  const snapped = Math.min(Math.max(onFive(rawMinute), earliest), latest);
 
-  const clamped = Math.min(Math.max(snapped, open), latestStart);
-  const free = nextFreeMinute(open, close, blocked, clamped);
+  // only move off the tapped minute if it landed inside something already booked
+  const free = nextFreeMinute(open, close, blocked, snapped);
   if (free === null) return null;
-  if (free === clamped) return clamped;
+  if (free === snapped) return snapped;
 
-  const freeOffered =
-    onGrid === null
-      ? undefined
-      : offered.find(
-          (start) =>
-            start >= free &&
-            nextFreeMinute(open, close, blocked, start) === start,
-        );
-  const fromFree = freeOffered ?? snapToInterval(free, interval, free);
+  const fromFree = Math.ceil(free / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
 
   return fromFree > latestStart ? null : fromFree;
 }
@@ -405,6 +386,8 @@ export function resolveSlotTap({
       minute,
     }),
 
+    // the customer grid does not contain 4:05, so the booking form has to be
+    // told to keep the minute instead of hunting for an offered start
     walkIn: isToday || !columnStarts(column, dayWindow).includes(minute),
     locationId: schedule.locationId,
   };

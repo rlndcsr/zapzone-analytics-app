@@ -41,7 +41,6 @@ import {
   resolveClickedSlot,
   slotsOfferRoom,
 } from "../../lib/bookings/bookingPrefill";
-import { WALK_IN_SNAP_MINUTES } from "../../lib/bookings/freeTime";
 import { packageServesRoom } from "../../lib/bookings/packageCandidates";
 import {
   isBlankOrValidEmail,
@@ -970,9 +969,10 @@ const CreateBookingScreen = () => {
   }, [pkg]);
 
   /**
-   * A synthetic slot for a same-day click that isn't one of the package's own
-   * offered starts — a real walk-in. Only constructed when the package's own
-   * duration actually fits before the space books up again (the carried
+   * A synthetic slot for a schedule tap that isn't one of the package's own
+   * offered starts — a walk-in, or any start staff picked off the customer's
+   * grid, on today's date or a later one. Only constructed when the package's
+   * own duration actually fits before the space books up again (the carried
    * `freeUntilMinutes`), so a package that wouldn't fit is never offered.
    */
   const walkInSlot = useMemo<AvailableSlot | null>(() => {
@@ -1038,35 +1038,14 @@ const CreateBookingScreen = () => {
   }, [walkInSlot, slotPrefill.date, slotPrefill.startMinutes]);
 
   /**
-   * A scheduled booking must land on one of the package's start times, but a
-   * walk-in records when the guests actually go in — never on that grid. So
-   * offer a 5-minute grid around the moment staff clicked, a little before it
-   * too, for a group that was already inside.
+   * Only the start staff actually picked on the schedule. The 5-minute freedom
+   * belongs to the schedule tap, not to this list — offering every 5-minute
+   * option here buried the package's real start times.
    */
-  const walkInSlots = useMemo<AvailableSlot[]>(() => {
-    if (!walkInSlot) return [];
-
-    const anchor =
-      slotPrefill.startMinutes ?? clockToMinutes(walkInSlot.startTime) ?? 0;
-    const generated: AvailableSlot[] = [];
-
-    for (
-      let minute = anchor - 15;
-      minute <= anchor + 45;
-      minute += WALK_IN_SNAP_MINUTES
-    ) {
-      if (minute < 0 || minute >= 24 * 60) continue;
-      const startTime = minutesToClock(minute);
-      if (slotsOfferRoom(slots, startTime, walkInSlot.roomId)) continue;
-      generated.push({
-        ...walkInSlot,
-        startTime,
-        endTime: minutesToClock(minute + packageDurationMinutes),
-      });
-    }
-
-    return generated.length > 0 ? generated : [walkInSlot];
-  }, [walkInSlot, slotPrefill.startMinutes, slots, packageDurationMinutes]);
+  const walkInSlots = useMemo<AvailableSlot[]>(
+    () => (walkInSlot ? [walkInSlot] : []),
+    [walkInSlot],
+  );
 
   const isWalkInStart = (startTime: string) =>
     walkInSlots.some((s) => s.startTime === startTime);
@@ -1125,10 +1104,10 @@ const CreateBookingScreen = () => {
             ? "Start time already passed"
             : "Walk-in start kept",
         walkInOverlapMinutes > 0
-          ? `Starting at ${formatTime(slotPrefill.time ?? "")} today — it runs ${walkInOverlapMinutes} min past the next booking in this space.`
+          ? `Starting at ${formatTime(slotPrefill.time ?? "")} — it runs ${walkInOverlapMinutes} min past the next booking in this space.`
           : walkInAlreadyStarted
-            ? `Starting at ${formatTime(slotPrefill.time ?? "")} today — that start time has already gone by, so it is no longer offered to customers.`
-            : `Starting at ${formatTime(slotPrefill.time ?? "")} today — outside this package's usual start times.`,
+            ? `Starting at ${formatTime(slotPrefill.time ?? "")} — that start time has already gone by, so it is no longer offered to customers.`
+            : `Starting at ${formatTime(slotPrefill.time ?? "")} — outside this package's usual start times.`,
       );
       return;
     }
@@ -2220,7 +2199,7 @@ const CreateBookingScreen = () => {
                               ? "Overlap"
                               : walkInAlreadyStarted
                                 ? "Already started"
-                                : "Walk-in"}
+                                : "Off the customer grid"}
                           </Text>
                           <Text
                             className={`flex-1 text-xs ${
@@ -2231,8 +2210,10 @@ const CreateBookingScreen = () => {
                                   : "text-amber-800 dark:text-amber-300"
                             }`}
                           >
-                            Starting at {formatTime(slot.startTime)} today —
-                            this is the time that will be recorded.
+                            Starting at {formatTime(slot.startTime)} — this is
+                            the time that will be recorded. Customers only see
+                            this package&apos;s scheduled start times; staff are
+                            not limited to them.
                             {walkInOverlapMinutes > 0
                               ? ` It runs ${walkInOverlapMinutes} min past the next booking in this space — the schedule will flag both bookings as overlapping.`
                               : walkInAlreadyStarted
