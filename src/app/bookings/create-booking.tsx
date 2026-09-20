@@ -1007,6 +1007,9 @@ const CreateBookingScreen = () => {
       roomId: slotPrefill.roomId ?? null,
       roomName: null,
       remainingTickets: null,
+      // Synthesised here, not offered by the server, so it carries no per-date
+      // minimum of its own — the package's own limits still apply.
+      minParticipants: null,
     };
   }, [slotPrefill, pkg, scheduledDate, slots, packageDurationMinutes]);
 

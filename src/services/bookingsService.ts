@@ -1542,6 +1542,12 @@ export type AvailableSlot = {
   roomId: number | null;
   roomName: string | null;
   remainingTickets: number | null;
+  /**
+   * The smallest party the package accepts on THIS date — special pricing can
+   * raise a package's own minimum for a given day, which is why it rides on the
+   * slot rather than on the package. Null for a slot the client synthesised.
+   */
+  minParticipants: number | null;
 };
 
 const WEEKDAY_NAMES = [
@@ -1635,12 +1641,14 @@ export async function fetchAvailableTimeSlots(
   return (Array.isArray(slots) ? slots : []).map((s: any) => {
     const left =
       s.remaining_tickets == null ? null : Number(s.remaining_tickets);
+    const min = s.min_participants == null ? null : Number(s.min_participants);
     return {
       startTime: toTime(s.start_time) ?? String(s.start_time ?? ""),
       endTime: toTime(s.end_time) ?? String(s.end_time ?? ""),
       roomId: s.room_id ?? null,
       roomName: s.room_name ?? null,
       remainingTickets: left != null && !Number.isNaN(left) ? left : null,
+      minParticipants: min != null && !Number.isNaN(min) ? min : null,
     };
   });
 }

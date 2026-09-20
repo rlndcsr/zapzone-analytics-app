@@ -3,6 +3,7 @@ import { ApiError, apiRequest } from "../lib/api";
 /*
  * Location change requests — staff asking to move a booking to another location.
  * Mirrors the web `LocationChangeRequestService` against the same endpoints:
+ *   POST  /api/bookings/{booking}/location-change-requests  (body: { to_location_id, reason })
  *   GET   /api/location-change-requests[?status=]
  *   PATCH /api/location-change-requests/{id}/approve   (body: { force })
  *   PATCH /api/location-change-requests/{id}/reject    (body: { review_notes })
@@ -119,6 +120,31 @@ export async function fetchLocationChangeRequests({
     { token, signal },
   );
   return (res?.data ?? []).map(mapRequest);
+}
+
+/**
+ * POST /api/bookings/{id}/location-change-requests — ask for a booking to be
+ * moved to another venue.
+ *
+ * This is the non-admin half of the web Edit Booking screen: a location manager
+ * cannot move a booking themselves, so they raise a request and the booking
+ * stays put until the destination (or an admin) approves it. The backend
+ * refuses a destination equal to the booking's current location (422), and a
+ * second request while one is still pending.
+ */
+export async function createLocationChangeRequest(
+  token: string,
+  bookingId: number,
+  { toLocationId, reason }: { toLocationId: number; reason?: string },
+): Promise<void> {
+  await apiRequest(`/api/bookings/${bookingId}/location-change-requests`, {
+    method: "POST",
+    token,
+    body: {
+      to_location_id: toLocationId,
+      ...(reason ? { reason } : {}),
+    },
+  });
 }
 
 /** Thrown when approving hits destination conflicts (HTTP 409). */
