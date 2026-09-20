@@ -32,10 +32,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingChangeHistory } from "../../components/ui/BookingChangeHistory";
-import {
-  BookingSummaryPanel,
-  type SummaryLine,
-} from "../../components/ui/BookingSummaryPanel";
+import { BookingPricePanel } from "../../components/ui/BookingPricePanel";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { mediaUrl } from "../../lib/api";
@@ -50,13 +47,12 @@ import {
 import {
   bookingDurationMinutes,
   bookingWindowEndKey,
-  EMPTY_CLOSURES,
   isDateSelectable,
   isSlotClosed,
   packageClosures,
   withCurrentTimeSlot,
 } from "../../lib/bookings/editBookingAvailability";
-import { formatFullDate, toKey } from "../../lib/date/calendar";
+import { toKey } from "../../lib/date/calendar";
 import { venueToday } from "../../lib/date/venueTime";
 import {
   packagePriceForParticipants,
@@ -567,6 +563,23 @@ const EditBookingScreen = () => {
     };
   }, [date, packageId]);
 
+  // Load closures for the location.
+  useEffect(() => {
+    if (locationId == null) {
+      setDayOffs([]);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    let alive = true;
+    fetchDayOffsByLocation(token, locationId)
+      .then((data) => alive && setDayOffs(data))
+      .catch(() => alive && setDayOffs([]));
+    return () => {
+      alive = false;
+    };
+  }, [locationId]);
+
   // Existing bookings at this location on the chosen date — reuses the web
   // admin's dedicated /bookings/location-date endpoint (location-scoped).
   useEffect(() => {
@@ -617,7 +630,7 @@ const EditBookingScreen = () => {
   }, [rooms, detail]);
 
   const locationSelectOptions: Option[] = useMemo(() => {
-    const opts = locationOptions.map((l) => ({ label: l.name, value: l.id }));
+    const opts = locations.map((l) => ({ label: l.name, value: l.id }));
     if (locationId != null && !opts.some((o) => o.value === locationId)) {
       opts.unshift({
         label: detail?.locationName || "Current location",
@@ -625,7 +638,7 @@ const EditBookingScreen = () => {
       });
     }
     return opts;
-  }, [locationOptions, locationId, detail]);
+  }, [locations, locationId, detail]);
 
   // Changing the location resets the package, space, date, and time — exactly
   // like the web admin, since those are all location-scoped.
@@ -642,6 +655,10 @@ const EditBookingScreen = () => {
   // Only the package's booking-day rules close a date off. A package's advance
   // booking notice is a rule for CUSTOMERS booking online — staff at the desk
   // are not held to it, so it never removes a date or a time here.
+  const { fullDayKeys, closuresByDate } = useMemo(() => {
+    return packageClosures(dayOffs, packageId, toKey(venueToday()));
+  }, [dayOffs, packageId]);
+
   const cells = useMemo(() => {
     const y = anchor.getFullYear();
     const m = anchor.getMonth();
@@ -650,14 +667,27 @@ const EditBookingScreen = () => {
     const out: { key: string | null; day: number; bookable: boolean }[] = [];
     for (let i = 0; i < firstWeekday; i++)
       out.push({ key: null, day: 0, bookable: false });
+      
+    const todayKey = toKey(venueToday());
+    const windowEndKey = bookingWindowEndKey(todayKey, packageDetail?.bookingWindowDays ?? null);
+
     for (let d = 1; d <= daysInMonth; d++) {
-      const bookable = isDateBookable(schedules, new Date(y, m, d));
-      out.push({ key: `${y}-${pad2(m + 1)}-${pad2(d)}`, day: d, bookable });
+      const dateKey = `${y}-${pad2(m + 1)}-${pad2(d)}`;
+      const runsOnDate = isDateBookable(schedules, new Date(y, m, d));
+      const bookable = isDateSelectable({
+        dateKey,
+        todayKey,
+        windowEndKey,
+        runsOnDate,
+        fullDayKeys,
+        currentDateKey: originalDate || null,
+      });
+      out.push({ key: dateKey, day: d, bookable });
     }
     while (out.length % 7 !== 0)
       out.push({ key: null, day: 0, bookable: false });
     return out;
-  }, [anchor, schedules]);
+  }, [anchor, schedules, fullDayKeys, packageDetail?.bookingWindowDays, originalDate]);
 
   const stepMonth = (dir: number) => {
     const next = new Date(anchor);
@@ -679,6 +709,20 @@ const EditBookingScreen = () => {
     setDate(key);
     setTime(key === originalDate ? (originalTime ?? "") : "");
   };
+
+  const displayedSlots = useMemo(() => {
+    if (!date) return [];
+    const closures = closuresByDate[date] ?? [];
+    const filtered = availableSlots.filter(
+      (s) => !isSlotClosed(closures, s.startTime, s.endTime)
+    );
+    const current = detail ? {
+      time: originalTime,
+      durationMinutes: bookingDurationMinutes(detail.duration, detail.durationUnit),
+      roomId: detail.roomId,
+    } : null;
+    return withCurrentTimeSlot(filtered, time, current);
+  }, [availableSlots, closuresByDate, date, time, originalTime, detail]);
 
   // Package catalog plus any add-on the booking already carries that the package
   // no longer offers (kept selectable, flat-priced) — the web's availableAddOns.
@@ -980,18 +1024,91 @@ const EditBookingScreen = () => {
             contentContainerStyle={{ paddingBottom: 24 }}
           >
             {/* Location */}
-            <SectionHeader icon={MapPin} title="Location" />
-            <SelectField
-              label="Location"
-              value={locationId}
-              placeholder="Select a location"
-              options={locationSelectOptions}
-              onSelect={handleLocationChange}
-              onOpen={setActiveSelect}
-            />
-            <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5">
-              Changing the location resets the package, space, date, and time.
-            </Text>
+            {isCompanyAdmin ? (
+              <>
+                <SectionHeader icon={MapPin} title="Location" />
+                <SelectField
+                  label="Location"
+                  value={locationId}
+                  placeholder="Select a location"
+                  options={locationSelectOptions}
+                  onSelect={handleLocationChange}
+                  onOpen={setActiveSelect}
+                />
+                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5">
+                  Changing the location resets the package, space, date, and time.
+                </Text>
+              </>
+            ) : detail && (
+              <>
+                <SectionHeader icon={MapPin} title="Request Location Change" />
+                {requestSubmitted ? (
+                  <View className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-900/30 rounded-xl p-4">
+                    <Text className="text-sm text-green-700 dark:text-green-300">
+                      Your location change request has been submitted. The booking stays at its current location until a manager at the destination or an admin approves it.
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="gap-3">
+                    <Text className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                      Request moving this booking to another location. It stays here until the destination location or an admin approves it.
+                    </Text>
+                    <SelectField
+                      label="Destination"
+                      value={requestToLocation}
+                      placeholder="Select destination location"
+                      options={locations
+                        .filter((l) => l.id !== detail.locationId)
+                        .map((l) => ({ label: l.name, value: l.id }))}
+                      onSelect={(v) => { setRequestToLocation(Number(v)); setRequestError(null); }}
+                      onOpen={setActiveSelect}
+                    />
+                    <TextInput
+                      value={requestReason}
+                      onChangeText={setRequestReason}
+                      placeholder="Reason for the change (optional)"
+                      placeholderTextColor="#9ca3af"
+                      multiline
+                      textAlignVertical="top"
+                      className={`${inputClass} min-h-[80px]`}
+                    />
+                    {!!requestError && (
+                      <Text className="text-sm text-red-600 dark:text-red-400">{requestError}</Text>
+                    )}
+                    <Pressable
+                      onPress={async () => {
+                        if (!requestToLocation) return;
+                        setSubmittingRequest(true);
+                        setRequestError(null);
+                        try {
+                          await createLocationChangeRequest(getToken()!, detail.id, {
+                            toLocationId: requestToLocation,
+                            reason: requestReason.trim() || undefined,
+                          });
+                          setRequestSubmitted(true);
+                        } catch (err: any) {
+                          setRequestError(err?.message || "Failed to submit request.");
+                        } finally {
+                          setSubmittingRequest(false);
+                        }
+                      }}
+                      disabled={submittingRequest || !requestToLocation}
+                      className={`py-3 rounded-xl items-center justify-center ${
+                        submittingRequest || !requestToLocation ? 'bg-gray-200 dark:bg-neutral-800' : 'bg-[#0644C7]'
+                      }`}
+                    >
+                      {submittingRequest ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <Text className={`text-sm font-semibold ${submittingRequest || !requestToLocation ? 'text-gray-400 dark:text-gray-500' : 'text-white'}`}>
+                          Submit Request
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                )}
+              </>
+            )}
 
             {/* Existing bookings */}
             {!!date && (
@@ -1179,10 +1296,10 @@ const EditBookingScreen = () => {
                   Loading available times…
                 </Text>
               </View>
-            ) : availableSlots.length > 0 ? (
+            ) : displayedSlots.length > 0 ? (
               <>
                 <View className="flex-row flex-wrap -mx-1">
-                  {availableSlots.map((slot) => {
+                  {displayedSlots.map((slot) => {
                     const active = slot.startTime === time;
                     return (
                       <View
