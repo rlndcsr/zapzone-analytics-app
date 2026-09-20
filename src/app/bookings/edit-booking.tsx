@@ -1,12 +1,15 @@
 import { router, useLocalSearchParams } from "expo-router";
 import {
+  AlertCircle,
   Bell,
+  BellOff,
   Calendar as CalendarIcon,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Gift,
+  Home,
   MapPin,
   Minus,
   Package as PackageIcon,
@@ -29,12 +32,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingChangeHistory } from "../../components/ui/BookingChangeHistory";
-import { BookingPricePanel } from "../../components/ui/BookingPricePanel";
+import {
+  BookingSummaryPanel,
+  type SummaryLine,
+} from "../../components/ui/BookingSummaryPanel";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { mediaUrl } from "../../lib/api";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
@@ -43,11 +48,35 @@ import {
   seedForcedAddOns,
 } from "../../lib/addOnQuantity";
 import {
+  bookingDurationMinutes,
+  bookingWindowEndKey,
+  EMPTY_CLOSURES,
+  isDateSelectable,
+  isSlotClosed,
+  packageClosures,
+  withCurrentTimeSlot,
+} from "../../lib/bookings/editBookingAvailability";
+import { formatFullDate, toKey } from "../../lib/date/calendar";
+import { venueToday } from "../../lib/date/venueTime";
+import {
+  packagePriceForParticipants,
+  participantLabelFor,
+} from "../../lib/packages/packagePricing";
+import {
   clampParticipants,
   participantLimitsLabel,
 } from "../../lib/participants";
 import { useBookingQuote } from "../../lib/hooks/useBookingQuote";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  fetchDayOffsByLocation,
+  type DayOff,
+} from "../../services/dayOffsService";
+import { createLocationChangeRequest } from "../../services/locationChangeRequestsService";
+import {
+  fetchLocations,
+  type LocationOption,
+} from "../../services/locationsService";
 import {
   fetchAvailableTimeSlots,
   fetchBookingDetail,
@@ -153,15 +182,21 @@ const FieldLabel = ({ children }: { children: React.ReactNode }) => (
 const SectionHeader = ({
   icon: Icon,
   title,
+  iconColor = PRIMARY,
+  badge,
 }: {
-  icon: React.ComponentType<{ size?: number; color?: string }>;
+  /** Omitted for the headings the web prints without one. */
+  icon?: React.ComponentType<{ size?: number; color?: string }>;
   title: string;
+  iconColor?: string;
+  badge?: React.ReactNode;
 }) => (
   <View className="flex-row items-center gap-2 mt-7 mb-3">
-    <Icon size={18} color={PRIMARY} />
+    {!!Icon && <Icon size={18} color={iconColor} />}
     <Text className="text-base font-bold text-gray-900 dark:text-white">
       {title}
     </Text>
+    {badge}
   </View>
 );
 
@@ -359,18 +394,40 @@ const EditBookingScreen = () => {
   const [gohGender, setGohGender] = useState<string | null>(null);
   const [customerNotes, setCustomerNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
-  const [sendEmail, setSendEmail] = useState(false);
+  // The web defaults the update email ON — an edit a guest would notice is
+  // told to them unless staff deliberately silence it.
+  const [sendEmail, setSendEmail] = useState(true);
   const [anchor, setAnchor] = useState<Date>(new Date());
 
-  // Company-admin location options (same source as create-booking; the heavy
-  // /api/locations endpoint is avoided in favour of dashboard metrics).
-  const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
-  const locationOptions = useMemo(() => {
-    if (!metrics?.locationStats) return [];
-    return Object.entries(metrics.locationStats)
-      .map(([id, s]) => ({ id: Number(id), name: s.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics]);
+  // Closures at the booking's location, which take dates off the calendar and
+  // start times off the list.
+  const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
+
+  // Only a company admin may move a booking outright. Everyone else asks, and
+  // the booking stays where it is until the destination approves.
+  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [requestToLocation, setRequestToLocation] = useState<number | null>(
+    null,
+  );
+  const [requestReason, setRequestReason] = useState("");
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [requestSubmitted, setRequestSubmitted] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
+
+  // Every venue the admin can send this booking to — the same list the web
+  // loads, off the light mobile endpoint rather than the heavy /api/locations.
+  // It serves both jobs: the admin's location picker and, for everyone else,
+  // the destination of a location-change request.
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchLocations(token, controller.signal)
+      .then(setLocations)
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   // Load + seed the booking.
   useEffect(() => {

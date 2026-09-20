@@ -1,4 +1,4 @@
-import { pad, toKey } from "../date/calendar";
+import { pad, toKey } from "../date/calendar.ts";
 
 import type { AvailableSlot } from "../../services/bookingsService";
 import type { DayOff } from "../../services/dayOffsService";
