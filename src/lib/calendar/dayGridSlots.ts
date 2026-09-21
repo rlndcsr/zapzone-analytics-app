@@ -197,6 +197,24 @@ export function usableFreeUntil({
   return Math.min(bookingCap, untilHard);
 }
 
+/**
+ * The next booking's own start after `minute`, never reduced by turnaround —
+ * a walk-in overlap is measured against when the next group actually shows
+ * up, not against the space's own reset buffer.
+ */
+export function nextBookingMinuteFrom({
+  occupancy,
+  minute,
+}: {
+  occupancy: TimeRange[];
+  minute: number;
+}): number | null {
+  const starts = occupancy
+    .filter((range) => range.endMinutes > minute)
+    .map((range) => range.startMinutes);
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
 export function packageIdsForSlot({
   column,
   dayWindow,
@@ -340,6 +358,7 @@ export type SlotTap = {
   packageId: number | null;
   packageIds: number[];
   freeUntilMinute: number | null;
+  nextBookingMinute: number | null;
   walkIn: boolean;
   locationId: number | null;
 };
@@ -385,6 +404,7 @@ export function resolveSlotTap({
       hardBlocks,
       minute,
     }),
+    nextBookingMinute: nextBookingMinuteFrom({ occupancy, minute }),
 
     // the customer grid does not contain 4:05, so the booking form has to be
     // told to keep the minute instead of hunting for an offered start
@@ -435,6 +455,7 @@ export function resolveWalkInTap({
       hardBlocks,
       minute,
     }),
+    nextBookingMinute: nextBookingMinuteFrom({ occupancy, minute }),
     walkIn: true,
     locationId: schedule.locationId,
   };

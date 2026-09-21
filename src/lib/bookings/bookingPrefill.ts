@@ -10,6 +10,9 @@ export type SlotPrefill = {
   /** How long the space stays free from `minute` — lets the form check a
    *  walk-in package actually fits before offering it. */
   freeUntilMinute?: number | null;
+  /** The next booking's own start, never reduced by turnaround — an overlap
+   *  warning is measured against this, not against the reset buffer. */
+  nextBookingMinute?: number | null;
   walkIn?: boolean;
   /** Staff saw the overlap warning and chose to start anyway. */
   walkInOverride?: boolean;
@@ -24,6 +27,7 @@ export type BookingPrefill = {
   packageIds: number[];
   freeUntilMinutes: number | null;
   freeUntilKnown: boolean;
+  nextBookingMinutes: number | null;
   startMinutes: number | null;
   walkIn: boolean;
   walkInOverride: boolean;
@@ -69,6 +73,12 @@ export function buildBookingParams(
     Number.isFinite(prefill.freeUntilMinute)
   ) {
     params.free_until_minutes = String(Math.round(prefill.freeUntilMinute));
+  }
+  if (
+    prefill.nextBookingMinute != null &&
+    Number.isFinite(prefill.nextBookingMinute)
+  ) {
+    params.next_booking_minutes = String(Math.round(prefill.nextBookingMinute));
   }
   if (prefill.walkIn) params.walk_in = "1";
   if (prefill.walkInOverride) params.walk_in_override = "1";
@@ -163,6 +173,11 @@ export function readBookingPrefill(params: RawParams): BookingPrefill {
     packageIds: toIdList(params.package_ids),
     freeUntilMinutes,
     freeUntilKnown: freeUntilMinutes !== null,
+    nextBookingMinutes: (() => {
+      const raw = first(params.next_booking_minutes);
+      const n = raw === null ? NaN : Number(raw);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+    })(),
     startMinutes: (() => {
       const raw = first(params.start_minutes);
       const n = raw === null ? NaN : Number(raw);

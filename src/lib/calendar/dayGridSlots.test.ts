@@ -13,6 +13,7 @@ import {
   columnStatusFor,
   hardBlocksFor,
   nextBookableFrom,
+  nextBookingMinuteFrom,
   resolveSlotTap,
   resolveWalkInTap,
   usableFreeUntil,
@@ -253,6 +254,31 @@ describe("how long a booked space stays booked", () => {
 
     const onBreak = setup(window(), [], [{ start: AT(18), end: AT(19) }]);
     assert.equal(usableFreeUntil({ ...onBreak, minute: AT(17) }), AT(18));
+  });
+});
+
+describe("nextBookingMinuteFrom", () => {
+  it("names the next booking's own raw start, not the turnaround-reduced cap", () => {
+    const { occupancy } = setup(window(), [booking("18:00", 60)]);
+    // usableFreeUntil would say 17:45 (turnaround already taken off); this
+    // must still say 18:00 — the minute the next group actually arrives.
+    assert.equal(nextBookingMinuteFrom({ occupancy, minute: AT(17) }), AT(18));
+  });
+
+  it("is null once nothing else is booked after the minute", () => {
+    const { occupancy } = setup(window(), [booking("16:00", 60)]);
+    assert.equal(
+      nextBookingMinuteFrom({ occupancy, minute: AT(17, 30) }),
+      null,
+    );
+  });
+
+  it("picks the earliest of several later bookings", () => {
+    const { occupancy } = setup(window(), [
+      booking("19:00", 30),
+      booking("18:00", 30),
+    ]);
+    assert.equal(nextBookingMinuteFrom({ occupancy, minute: AT(17) }), AT(18));
   });
 });
 
@@ -566,6 +592,8 @@ describe("what the header's walk-in action means", () => {
     });
     // 19:00 booked, and the space needs its 15-minute turnaround before it.
     assert.equal(tap?.freeUntilMinute, AT(18, 45));
+    // the overlap warning needs the booking's own start, not the reduced cap
+    assert.equal(tap?.nextBookingMinute, AT(19));
   });
 
   it("still opens the form when the gap is too short for anything, and says so with the gap", () => {

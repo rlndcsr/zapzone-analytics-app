@@ -58,6 +58,7 @@ import {
 import {
   columnStarts,
   nextBookableFrom,
+  nextBookingMinuteFrom,
   resolveSlotMinute,
 } from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
@@ -1924,6 +1925,10 @@ const SpaceScheduleScreen = () => {
           packageId: autoSelect,
           packageIds: candidates,
           freeUntilMinute: usableFreeUntil(column, meta, minute),
+          nextBookingMinute: nextBookingMinuteFrom({
+            occupancy: occupancyByColumn.get(column.key) ?? [],
+            minute,
+          }),
           walkIn: isVenueToday || offCustomerGrid,
           walkInOverride: options?.walkInOverride ?? false,
         }),
@@ -1938,6 +1943,7 @@ const SpaceScheduleScreen = () => {
       selectedKey,
       scheduleMetaByColumn,
       isVenueToday,
+      occupancyByColumn,
     ],
   );
 

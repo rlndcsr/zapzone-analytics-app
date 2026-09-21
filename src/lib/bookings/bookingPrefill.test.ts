@@ -127,6 +127,25 @@ describe("buildBookingParams / readBookingPrefill round trip", () => {
     assert.equal(prefill.walkIn, false);
   });
 
+  it("carries the next booking's raw start through, separately from the free-until gap", () => {
+    const params = buildBookingParams({
+      date: "2026-09-20",
+      minute: 18 * 60,
+      freeUntilMinute: 18 * 60 + 45,
+      nextBookingMinute: 19 * 60,
+    });
+    const prefill = readBookingPrefill(params);
+    assert.equal(prefill.nextBookingMinutes, 19 * 60);
+    assert.equal(prefill.freeUntilMinutes, 18 * 60 + 45);
+  });
+
+  it("is null, not zero, when no next booking was carried", () => {
+    const prefill = readBookingPrefill(
+      buildBookingParams({ date: "2026-09-20", minute: 600 }),
+    );
+    assert.equal(prefill.nextBookingMinutes, null);
+  });
+
   it("carries the click as an unwrapped absolute minute past midnight", () => {
     const params = buildBookingParams({
       date: "2026-09-20",

@@ -1336,6 +1336,7 @@ const Calendar = () => {
           packageId: tap.packageId,
           packageIds: tap.packageIds,
           freeUntilMinute: tap.freeUntilMinute,
+          nextBookingMinute: tap.nextBookingMinute,
           walkIn: tap.walkIn,
           walkInOverride: options?.walkInOverride ?? false,
         }),

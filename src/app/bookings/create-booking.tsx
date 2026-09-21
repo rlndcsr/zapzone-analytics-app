@@ -835,11 +835,17 @@ const CreateBookingScreen = () => {
   };
 
   /** The Step 1 list's own tap handler — a deliberate package choice, so it
-   *  always jumps to Step 2. Never re-applies a landed prefill's date/room
-   *  (`prefillAppliedRef` is already true by the time a user can tap here for
-   *  a second package, so `pickPackageById`'s own reset is all that runs). */
+   *  always jumps to Step 2. A schedule prefill must survive switching
+   *  packages, however many times staff go back and forth, so its date is
+   *  reapplied and the room/time resolution re-armed to run again once this
+   *  package's own slots have loaded. */
   const pickPackage = async (item: PackageListItem) => {
     await pickPackageById(item.id);
+    if (slotPrefill.hasAny) {
+      setScheduledDate((prev) => slotPrefill.date ?? prev);
+      prefillLandedRef.current = true;
+      prefillTimeCheckedRef.current = false;
+    }
     setStep(2);
   };
 
@@ -1013,18 +1019,20 @@ const CreateBookingScreen = () => {
     };
   }, [slotPrefill, pkg, scheduledDate, slots, packageDurationMinutes]);
 
+  // Measured against the next booking's own start, never the free-until cap —
+  // that cap is already pulled back by the space's reset time, so subtracting
+  // from it reported an overlap on walk-ins that had none.
   const walkInOverlapMinutes = useMemo(() => {
-    if (!walkInSlot || !slotPrefill.freeUntilKnown) return 0;
+    if (!walkInSlot || slotPrefill.nextBookingMinutes == null) return 0;
     const startMinutes = slotPrefill.startMinutes ?? 0;
     return Math.max(
       0,
-      startMinutes + packageDurationMinutes - (slotPrefill.freeUntilMinutes ?? 0),
+      startMinutes + packageDurationMinutes - slotPrefill.nextBookingMinutes,
     );
   }, [
     walkInSlot,
-    slotPrefill.freeUntilKnown,
+    slotPrefill.nextBookingMinutes,
     slotPrefill.startMinutes,
-    slotPrefill.freeUntilMinutes,
     packageDurationMinutes,
   ]);
 
@@ -1045,10 +1053,12 @@ const CreateBookingScreen = () => {
    * belongs to the schedule tap, not to this list — offering every 5-minute
    * option here buried the package's real start times.
    */
-  const walkInSlots = useMemo<AvailableSlot[]>(
-    () => (walkInSlot ? [walkInSlot] : []),
-    [walkInSlot],
-  );
+  const walkInSlots = useMemo<AvailableSlot[]>(() => {
+    if (!walkInSlot) return [];
+    // the server may already list this minute for a different room; one tile per start time
+    if (slots.some((s) => s.startTime === walkInSlot.startTime)) return [];
+    return [walkInSlot];
+  }, [walkInSlot, slots]);
 
   const isWalkInStart = (startTime: string) =>
     walkInSlots.some((s) => s.startTime === startTime);
@@ -1107,7 +1117,7 @@ const CreateBookingScreen = () => {
             ? "Start time already passed"
             : "Walk-in start kept",
         walkInOverlapMinutes > 0
-          ? `Starting at ${formatTime(slotPrefill.time ?? "")} — it runs ${walkInOverlapMinutes} min past the next booking in this space.`
+          ? `Starting at ${formatTime(slotPrefill.time ?? "")} — it runs ${walkInOverlapMinutes} min into the next booking in this space, which starts at ${formatTime(minutesToClock(slotPrefill.nextBookingMinutes ?? 0))}.`
           : walkInAlreadyStarted
             ? `Starting at ${formatTime(slotPrefill.time ?? "")} — that start time has already gone by, so it is no longer offered to customers.`
             : `Starting at ${formatTime(slotPrefill.time ?? "")} — outside this package's usual start times.`,
@@ -2218,7 +2228,7 @@ const CreateBookingScreen = () => {
                             this package&apos;s scheduled start times; staff are
                             not limited to them.
                             {walkInOverlapMinutes > 0
-                              ? ` It runs ${walkInOverlapMinutes} min past the next booking in this space — the schedule will flag both bookings as overlapping.`
+                              ? ` It runs ${walkInOverlapMinutes} min into the next booking in this space, which starts at ${formatTime(minutesToClock(slotPrefill.nextBookingMinutes ?? 0))} — the schedule will flag both bookings as overlapping.`
                               : walkInAlreadyStarted
                                 ? " That start time has already gone by, so it is no longer offered to customers."
                                 : ""}
