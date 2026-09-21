@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   buildBookingParams,
   clockToMinutes,
+  isRoomTakenAtTime,
   minutesToClock,
   readBookingPrefill,
   resolveClickedSlot,
@@ -215,5 +216,29 @@ describe("slotsOfferRoom", () => {
 
   it("falls back to any room when none was clicked", () => {
     assert.equal(slotsOfferRoom(slots, "16:00", null), true);
+  });
+});
+
+describe("isRoomTakenAtTime", () => {
+  // 16:00 is offered because room 2 is free, not because room 1 is.
+  const slots = [
+    { startTime: "16:00", roomId: 2 },
+    { startTime: "17:00", roomId: 1 },
+  ];
+
+  it("is true when another room already has this exact start but the picked one does not", () => {
+    assert.equal(isRoomTakenAtTime(slots, "16:00", 1), true);
+  });
+
+  it("is false when the picked room itself is the one offering it", () => {
+    assert.equal(isRoomTakenAtTime(slots, "17:00", 1), false);
+  });
+
+  it("is false when no room offers that start at all — not a room conflict", () => {
+    assert.equal(isRoomTakenAtTime(slots, "18:00", 1), false);
+  });
+
+  it("is false when no particular room was picked", () => {
+    assert.equal(isRoomTakenAtTime(slots, "16:00", null), false);
   });
 });

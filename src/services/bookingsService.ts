@@ -2363,6 +2363,8 @@ export type CreateBookingInput = {
   payment_status?: "paid" | "partial" | "pending";
   is_manual_entry?: boolean;
   skip_date_validation?: boolean;
+  /** proof a manager approved saving this on top of a detected overlap */
+  overlap_override_token?: string;
   notes?: string;
   internal_notes?: string;
   additional_attractions?: BookingAttractionInput[];

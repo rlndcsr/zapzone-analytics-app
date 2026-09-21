@@ -27,6 +27,7 @@ import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
+import { OverlapOverrideModal } from "../../components/ui/OverlapOverrideModal";
 import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
@@ -36,6 +37,7 @@ import {
 } from "../../lib/addOnQuantity";
 import {
   clockToMinutes,
+  isRoomTakenAtTime,
   minutesToClock,
   readBookingPrefill,
   resolveClickedSlot,
@@ -719,6 +721,11 @@ const CreateBookingScreen = () => {
   const submitLockRef = useRef(false);
   const lastSubmitAtRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
+  // held in a ref so the re-submit right after approval sees it without waiting for a render
+  const overrideTokenRef = useRef<string | null>(null);
+  const [overrideGate, setOverrideGate] = useState<{
+    conflicts: string[];
+  } | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -1035,6 +1042,29 @@ const CreateBookingScreen = () => {
     slotPrefill.startMinutes,
     packageDurationMinutes,
   ]);
+
+  /**
+   * What this booking would run into, in plain words. Staff must see the
+   * reason and confirm before an overlapping booking is saved — a manager's
+   * PIN is what lets it through.
+   */
+  const bookingConflicts = useMemo<string[]>(() => {
+    if (!slot || !pkg) return [];
+    const reasons: string[] = [];
+
+    if (walkInOverlapMinutes > 0) {
+      reasons.push(
+        `It runs ${walkInOverlapMinutes} min into the next booking in this space.`,
+      );
+    }
+
+    // the server lists a start only while a space is still free for it
+    if (isRoomTakenAtTime(slots, slot.startTime, slot.roomId)) {
+      reasons.push("The space you picked is already taken at this time.");
+    }
+
+    return reasons;
+  }, [slot, pkg, walkInOverlapMinutes, slots]);
 
   // Distinct from an overlap: this walk-in slot isn't offered because its
   // start has already gone by today, not because it clashes with a booking.
@@ -1495,6 +1525,14 @@ const CreateBookingScreen = () => {
   const handleSubmit = async () => {
     if (submitLockRef.current) return;
     if (!pkg) return;
+
+    // an overlapping booking is never saved on a single tap: the reason is
+    // shown and a manager has to approve it with their PIN
+    if (bookingConflicts.length > 0 && !overrideTokenRef.current) {
+      setOverrideGate({ conflicts: bookingConflicts });
+      return;
+    }
+
     if (
       !customerName.trim() ||
       !customerPhone.trim() ||
@@ -1629,6 +1667,7 @@ const CreateBookingScreen = () => {
         location_id: effectiveLocationId,
         package_id: pkg.id,
         room_id: slot.roomId ?? undefined,
+        overlap_override_token: overrideTokenRef.current ?? undefined,
         type: "package",
         booking_date: scheduledDate,
         booking_time: slot.startTime,
@@ -3784,6 +3823,19 @@ const CreateBookingScreen = () => {
         initialName={customerName}
         initialPhone={customerPhone}
         initialEmail={customerEmail}
+      />
+
+      <OverlapOverrideModal
+        visible={!!overrideGate}
+        conflicts={overrideGate?.conflicts ?? []}
+        locationId={effectiveLocationId}
+        onCancel={() => setOverrideGate(null)}
+        onApproved={(token) => {
+          overrideTokenRef.current = token;
+          setOverrideGate(null);
+          // the gate is satisfied; run the same submit path again
+          void handleSubmit();
+        }}
       />
     </View>
   );

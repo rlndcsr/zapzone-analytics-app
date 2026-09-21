@@ -130,6 +130,20 @@ export function slotsOfferRoom<T extends { startTime: string; roomId: number | n
   );
 }
 
+/**
+ * True once some OTHER room already has this exact start officially listed
+ * but the one picked does not — the selected space is already taken then.
+ */
+export function isRoomTakenAtTime<
+  T extends { startTime: string; roomId: number | null },
+>(slots: T[], time: string, roomId: number | null): boolean {
+  return (
+    roomId != null &&
+    slots.some((s) => s.startTime === time) &&
+    !slotsOfferRoom(slots, time, roomId)
+  );
+}
+
 export function resolveClickedSlot<
   T extends { startTime: string; roomId: number | null },
 >(
