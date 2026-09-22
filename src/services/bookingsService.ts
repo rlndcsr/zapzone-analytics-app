@@ -1496,6 +1496,11 @@ export type ScheduleBooking = {
   paymentStatus: string;
   packageName: string;
   customerName: string;
+  /** Guest-written note (folds in the legacy special_requests field), for the day-view badge. */
+  customerNotes: string | null;
+  specialRequests: string | null;
+  /** Staff-only note, for the day-view badge. Never shown to the guest. */
+  internalNotes: string | null;
 };
 
 type RawScheduleBooking = {
@@ -1512,6 +1517,9 @@ type RawScheduleBooking = {
   amount_paid?: number | string | null;
   payment_status?: string | null;
   guest_name?: string | null;
+  notes?: string | null;
+  special_requests?: string | null;
+  internal_notes?: string | null;
   package?: {
     id?: number | null;
     name?: string | null;
@@ -1554,6 +1562,9 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
     paymentStatus: raw.payment_status ?? "pending",
     packageName: raw.package?.name?.trim() || "Booking",
     customerName: customerName(raw.customer, raw.guest_name),
+    customerNotes: raw.notes?.trim() || null,
+    specialRequests: raw.special_requests?.trim() || null,
+    internalNotes: raw.internal_notes?.trim() || null,
   };
 }
 

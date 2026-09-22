@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { noteFlagsOf, noteSummaryOf } from "../../lib/bookings/bookingNotes";
 import { CalendarDaySkeleton } from "../../components/ui/skeleton/CalendarSkeleton";
 import {
   buildBookingParams,
@@ -392,6 +393,12 @@ const GridBookingBlock = ({
   const needsCheckIn = inProgress && b.status !== "checked-in";
   const doubleBooked = item.conflicts.some((c) => c.overlapMinutes > 0);
   const clashing = item.conflicts.length > 0;
+  const noteFlags = noteFlagsOf(b);
+  const noteSummary = noteSummaryOf(b);
+  // below this the block's own text is already clipped, so an icon would only steal from it
+  const showNotes = (noteFlags.guest || noteFlags.staff) && item.height >= 20;
+  // a tiny block has room for one badge: the staff note wins, being rarer and written for staff
+  const tightNotes = tiny && noteFlags.guest && noteFlags.staff;
   const overlapLabel = item.conflicts
     .map(
       (clash) =>
@@ -403,8 +410,14 @@ const GridBookingBlock = ({
     <Pressable
       onPress={onPress}
       accessibilityLabel={
-        clashing
-          ? `${b.customerName || "Walk-in"}, ${doubleBooked ? "overlaps" : "no turnaround before"} ${overlapLabel}`
+        clashing || noteSummary
+          ? [
+              `${b.customerName || "Walk-in"}`,
+              clashing ? `${doubleBooked ? "overlaps" : "no turnaround before"} ${overlapLabel}` : null,
+              noteSummary,
+            ]
+              .filter(Boolean)
+              .join(", ")
           : undefined
       }
       style={{
@@ -427,17 +440,32 @@ const GridBookingBlock = ({
                 : ""
       }`}
     >
-      {clashing && (
-        <View
-          className={`absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-tr-lg rounded-bl px-1 py-px ${
-            doubleBooked ? "bg-rose-500" : "bg-amber-500"
-          }`}
-        >
-          <Feather name="alert-triangle" size={8} color="#FFFFFF" />
-          {!tiny && (
-            <Text className="text-[8px] font-bold uppercase text-white">
-              {doubleBooked ? "Overlap" : "No gap"}
-            </Text>
+      {/* one rail in the corner: siblings, so notes and the clash badge can never cover each other */}
+      {(clashing || showNotes) && (
+        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-tr-lg rounded-bl bg-white/80 pl-px">
+          {showNotes && noteFlags.staff && (
+            <View className="rounded bg-amber-100 px-0.5 py-px">
+              <Feather name="file-text" size={8} color="#b45309" />
+            </View>
+          )}
+          {showNotes && noteFlags.guest && !tightNotes && (
+            <View className="rounded bg-blue-100 px-0.5 py-px">
+              <Feather name="message-square" size={8} color="#1d4ed8" />
+            </View>
+          )}
+          {clashing && (
+            <View
+              className={`flex-row items-center gap-0.5 rounded-bl px-1 py-px ${
+                doubleBooked ? "bg-rose-500" : "bg-amber-500"
+              }`}
+            >
+              <Feather name="alert-triangle" size={8} color="#FFFFFF" />
+              {!tiny && !showNotes && (
+                <Text className="text-[8px] font-bold uppercase text-white">
+                  {doubleBooked ? "Overlap" : "No gap"}
+                </Text>
+              )}
+            </View>
           )}
         </View>
       )}

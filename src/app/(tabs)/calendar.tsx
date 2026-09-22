@@ -62,6 +62,7 @@ import {
   type ColumnStatus,
   type SlotTap,
 } from "../../lib/calendar/dayGridSlots";
+import { noteFlagsOf, noteSummaryOf } from "../../lib/bookings/bookingNotes";
 import { packageColor } from "../../lib/calendar/packageColors";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
@@ -95,6 +96,8 @@ import {
   BadgeCheck,
   Package,
   Ticket,
+  MessageSquare,
+  StickyNote,
 } from "lucide-react-native";
 
 type ViewMode = "month" | "week" | "day";
@@ -596,6 +599,12 @@ const DayBookingBlock = ({
   const height = placement.slotSpan * SLOT_HEIGHT - 4;
   const doubleBooked = placement.conflicts.some((c) => c.overlapMinutes > 0);
   const clashing = placement.conflicts.length > 0;
+  const noteFlags = noteFlagsOf(booking);
+  const noteSummary = noteSummaryOf(booking);
+  // below this the block's own text is already clipped, so an icon would only steal from it
+  const showNotes = (noteFlags.guest || noteFlags.staff) && height >= 20;
+  // a tiny block has room for one badge: the staff note wins, being rarer and written for staff
+  const tightNotes = height < 30 && noteFlags.guest && noteFlags.staff;
   return (
     <Pressable
       onPress={onPress}
@@ -614,19 +623,34 @@ const DayBookingBlock = ({
       accessibilityRole="button"
       accessibilityLabel={`${booking.customerName}, ${booking.packageName}, ${formatTime(booking.time)}${
         clashing ? (doubleBooked ? ", overlaps another booking" : ", no turnaround before the next booking") : ""
-      }`}
+      }${noteSummary ? `, ${noteSummary}` : ""}`}
     >
-      {clashing && (
-        <View
-          className={`absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-bl px-1 py-px ${
-            doubleBooked ? "bg-rose-500" : "bg-amber-500"
-          }`}
-        >
-          <AlertTriangle size={7} color="#FFFFFF" />
-          {height >= 18 && (
-            <Text className="text-[7px] font-bold uppercase text-white">
-              {doubleBooked ? "Overlap" : "No gap"}
-            </Text>
+      {/* one rail in the corner: siblings, so notes and the clash badge can never cover each other */}
+      {(clashing || showNotes) && (
+        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-bl bg-white/70 pl-px">
+          {showNotes && noteFlags.staff && (
+            <View className="rounded bg-amber-100 px-0.5 py-px">
+              <StickyNote size={7} color="#b45309" strokeWidth={2.5} />
+            </View>
+          )}
+          {showNotes && noteFlags.guest && !tightNotes && (
+            <View className="rounded bg-blue-100 px-0.5 py-px">
+              <MessageSquare size={7} color="#1d4ed8" strokeWidth={2.5} />
+            </View>
+          )}
+          {clashing && (
+            <View
+              className={`flex-row items-center gap-0.5 rounded-bl px-1 py-px ${
+                doubleBooked ? "bg-rose-500" : "bg-amber-500"
+              }`}
+            >
+              <AlertTriangle size={7} color="#FFFFFF" />
+              {height >= 18 && !showNotes && (
+                <Text className="text-[7px] font-bold uppercase text-white">
+                  {doubleBooked ? "Overlap" : "No gap"}
+                </Text>
+              )}
+            </View>
           )}
         </View>
       )}

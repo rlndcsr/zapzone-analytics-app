@@ -41,6 +41,9 @@ function makeBooking(
     paymentStatus: "paid",
     packageName: "Test Package",
     customerName: "Jane Doe",
+    customerNotes: null,
+    specialRequests: null,
+    internalNotes: null,
     ...overrides,
   };
 }
