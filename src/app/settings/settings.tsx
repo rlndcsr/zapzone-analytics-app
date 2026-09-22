@@ -1,23 +1,24 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
-import {
-  Pressable,
-  ScrollView,
-  Switch,
-  Text,
-  View,
-} from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GoogleCalendarCard } from "../../components/settings/GoogleCalendarCard";
 import { PaymentIntegrationCard } from "../../components/settings/PaymentIntegrationCard";
+import { OverridePinModal } from "../../components/ui/OverridePinModal";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { SettingsAccountSkeleton } from "../../components/ui/skeleton/SettingsAccountSkeleton";
 import { reopenUpdatePrompt } from "../../lib/appUpdatePrompt";
 import { useAppUpdateStatus } from "../../lib/hooks/useAppUpdateCheck";
 import { useProfile } from "../../lib/hooks/useProfile";
+import { getToken } from "../../lib/session";
 import { saveTheme } from "../../lib/theme";
 import { getInstalledAppVersion } from "../../services/appUpdateService";
+import {
+  getOverridePinStatus,
+  type OverridePinStatus,
+} from "../../services/overridePinService";
 
 const SettingRow = ({
   icon,
@@ -42,7 +43,10 @@ const SettingRow = ({
           {label}
         </Text>
         {value ? (
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5" numberOfLines={1}>
+          <Text
+            className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+            numberOfLines={1}
+          >
             {value}
           </Text>
         ) : null}
@@ -87,6 +91,26 @@ const Settings = () => {
   const installedVersion = getInstalledAppVersion();
   const updateStatus = useAppUpdateStatus();
 
+  const [overridePinStatus, setOverridePinStatus] =
+    useState<OverridePinStatus | null>(null);
+  const [showPinModal, setShowPinModal] = useState(false);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    let cancelled = false;
+    getOverridePinStatus(token)
+      .then((status) => {
+        if (!cancelled) setOverridePinStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setOverridePinStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const toggleDarkMode = (enabled: boolean) => {
     const next = enabled ? "dark" : "light";
     setColorScheme(next);
@@ -107,7 +131,10 @@ const Settings = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingTop: 0 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + 96,
+          paddingTop: 0,
+        }}
       >
         <View className="px-5 pt-0">
           {/* Account Section */}
@@ -145,6 +172,31 @@ const Settings = () => {
                       icon="map-pin"
                       label="Locations"
                       value={`${stats.total_locations} locations • ${stats.total_users} employees`}
+                    />
+                  </>
+                ) : null}
+                {overridePinStatus?.canHoldPin ? (
+                  <>
+                    <Divider />
+                    <SettingRow
+                      icon="lock"
+                      label="Overlap override PIN"
+                      value={
+                        overridePinStatus.hasPin
+                          ? "Set — staff can ask you to approve an overlapping booking"
+                          : "Not set — no one can ask you to approve one yet"
+                      }
+                      onPress={() => setShowPinModal(true)}
+                      right={
+                        <View
+                          className="rounded-xl bg-[#0644C7]/10 px-3 py-1.5"
+                          pointerEvents="none"
+                        >
+                          <Text className="text-xs font-semibold text-[#0644C7]">
+                            {overridePinStatus.hasPin ? "Change" : "Set"}
+                          </Text>
+                        </View>
+                      }
                     />
                   </>
                 ) : null}
@@ -195,14 +247,6 @@ const Settings = () => {
               }
             />
 
-            {/* Only rendered while an update is actually pending and
-                downloadable — the same condition AppUpdateGate uses before it
-                offers anything. This is the one permanent way back to the
-                prompt: the launch dialog can be waved off with "Later" and the
-                reminder notice behind it can be closed, but this row stays for
-                as long as the installed build is behind. It starts nothing
-                itself; reopening the gate's dialog keeps a single download
-                flow in one place (lib/appUpdatePrompt.ts). */}
             {updateStatus?.hasUpdate && updateStatus.apkUrl ? (
               <>
                 <Divider />
@@ -230,13 +274,11 @@ const Settings = () => {
             ) : null}
           </View>
 
-          {/* Version Info — the installed build, read from the binary itself so
-              it tracks every update instead of drifting from a literal. When
-              the backend publishes a newer build, its version is named here
-              too; the download prompt itself stays with AppUpdateGate. */}
           <View className="mt-8 items-center">
             <Text className="text-xs text-gray-400 dark:text-gray-500">
-              {installedVersion ? `Version ${installedVersion}` : "Version unavailable"}
+              {installedVersion
+                ? `Version ${installedVersion}`
+                : "Version unavailable"}
             </Text>
             {updateStatus?.hasUpdate && updateStatus.latestVersion ? (
               <Text className="text-xs font-medium text-[#0644C7] mt-1">
@@ -253,6 +295,17 @@ const Settings = () => {
           </View>
         </View>
       </ScrollView>
+
+      <OverridePinModal
+        visible={showPinModal}
+        hasPin={overridePinStatus?.hasPin ?? false}
+        onCancel={() => setShowPinModal(false)}
+        onSaved={() => {
+          setShowPinModal(false);
+          const token = getToken();
+          if (token) getOverridePinStatus(token).then(setOverridePinStatus);
+        }}
+      />
     </View>
   );
 };
