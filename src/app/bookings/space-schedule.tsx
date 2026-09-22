@@ -2014,6 +2014,8 @@ const SpaceScheduleScreen = () => {
         .filter(
           (p) => startable.has(p.package_id) && (p.duration_minutes ?? 0) > 0,
         )
+        // it must finish inside its OWN schedule — a room closes when its latest package does
+        .filter((p) => nowMinutes + (p.duration_minutes as number) <= p.close_minutes)
         .sort((a, b) => (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0));
       const shortestEntry = candidates[0] ?? null;
       const shortest = shortestEntry?.duration_minutes ?? null;

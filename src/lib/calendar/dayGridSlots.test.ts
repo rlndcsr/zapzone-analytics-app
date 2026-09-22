@@ -17,6 +17,7 @@ import {
   resolveSlotTap,
   resolveWalkInTap,
   usableFreeUntil,
+  walkInFit,
 } from "./dayGridSlots.ts";
 
 const AT = (hour: number, minute = 0) => hour * 60 + minute;
@@ -227,6 +228,42 @@ describe("offering the packages a space serves, not just whichever is active at 
     assert.equal(tap?.minute, AT(17, 45));
     assert.deepEqual(tap?.packageIds, []);
     assert.equal(tap?.packageId, null);
+  });
+});
+
+describe("keeping a walk-in inside its own package's hours", () => {
+  const early = pkg({
+    package_id: 30,
+    name: "Early Slot",
+    open_minutes: AT(16),
+    close_minutes: AT(18),
+    duration_minutes: 30,
+    start_minutes: [AT(16), AT(17)],
+  });
+  const late = pkg({
+    package_id: 31,
+    name: "Late Slot",
+    open_minutes: AT(16),
+    close_minutes: AT(22),
+    duration_minutes: 90,
+    start_minutes: [AT(16), AT(17), AT(18), AT(19), AT(20)],
+  });
+  const twoPackageWindow = window({
+    rooms: [room({ close_minutes: AT(22) })],
+    packages: [early, late],
+  });
+
+  it("skips a short package that would finish after its own close, even though the room stays open for a neighbour", () => {
+    const fit = walkInFit({ ...setup(twoPackageWindow), nowMinutes: AT(17, 50) });
+    // Early Slot (30 min) would run to 18:20, past its own 18:00 close — Late Slot is what's actually offered.
+    assert.equal(fit.shortest, 90);
+    assert.equal(fit.packageName, "Late Slot");
+  });
+
+  it("still offers the short package once it actually finishes before its own close", () => {
+    const fit = walkInFit({ ...setup(twoPackageWindow), nowMinutes: AT(17) });
+    assert.equal(fit.shortest, 30);
+    assert.equal(fit.packageName, "Early Slot");
   });
 });
 

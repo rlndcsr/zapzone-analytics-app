@@ -314,8 +314,7 @@ type RawAddOn = {
   is_force_add_on?: boolean | number | null;
   /** Per-package override price for a forced add-on (web reads this first). */
   price_each_packages?:
-    | { package_id?: number | null; price?: number | string | null }[]
-    | null;
+    { package_id?: number | null; price?: number | string | null }[] | null;
   pivot?: {
     add_on_id?: number | null;
     quantity?: number | string | null;
@@ -691,7 +690,6 @@ export function mapBookingDetail(b: RawBookingDetail): BookingDetail {
   };
 }
 
-
 export type BookingChangeValue = {
   from?: unknown;
   to?: unknown;
@@ -1053,7 +1051,8 @@ function mapSaved(res: { data?: RawInternalNote | null }): InternalNoteSaved {
   const data = res?.data ?? {};
   return {
     note: mapInternalNote(data),
-    summary: "internal_notes" in data ? (data.internal_notes ?? null) : undefined,
+    summary:
+      "internal_notes" in data ? (data.internal_notes ?? null) : undefined,
   };
 }
 
@@ -1064,7 +1063,10 @@ export async function fetchInternalNotes(
   signal?: AbortSignal,
 ): Promise<{ notes: InternalNote[]; categories: Record<string, string> }> {
   const res = await apiRequest<{
-    data?: { notes?: RawInternalNote[] | null; categories?: Record<string, string> | null };
+    data?: {
+      notes?: RawInternalNote[] | null;
+      categories?: Record<string, string> | null;
+    };
   }>(`/api/bookings/${bookingId}/internal-notes`, { token, signal });
 
   return {
@@ -1496,10 +1498,8 @@ export type ScheduleBooking = {
   paymentStatus: string;
   packageName: string;
   customerName: string;
-  /** Guest-written note (folds in the legacy special_requests field), for the day-view badge. */
   customerNotes: string | null;
   specialRequests: string | null;
-  /** Staff-only note, for the day-view badge. Never shown to the guest. */
   internalNotes: string | null;
 };
 
@@ -1653,7 +1653,10 @@ export async function fetchBookingCountsByDate({
           continue;
         keys.push(key);
       }
-      return { items: keys, lastPage: res?.data?.pagination?.last_page ?? page };
+      return {
+        items: keys,
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
     },
     { maxPages: SYNC_MAX_PAGES },
   );

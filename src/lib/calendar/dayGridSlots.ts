@@ -542,18 +542,19 @@ export function walkInFit({
     0,
     (until ?? schedule.close ?? nowMinutes) - nowMinutes,
   );
-  const shortestEntry = shortestDurationAt({
-    column,
-    dayWindow,
-    minute: nowMinutes,
-  });
-  const shortest = shortestEntry.minutes;
+
+  const ids = new Set(packageIdsForSlot({ column, dayWindow, minute: nowMinutes }));
+  const shortestEntry = (dayWindow?.packages ?? [])
+    .filter((entry) => ids.has(entry.package_id) && (entry.duration_minutes ?? 0) > 0)
+    // it must finish inside its OWN schedule — a room stays "open" only because a later package is
+    .filter((entry) => nowMinutes + (entry.duration_minutes as number) <= entry.close_minutes)
+    .sort((a, b) => (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0))[0];
 
   return {
-    fits: shortest !== null && shortest <= freeFor,
+    fits: shortestEntry !== undefined && (shortestEntry.duration_minutes as number) <= freeFor,
     freeFor,
-    shortest,
-    packageName: shortestEntry.name,
+    shortest: shortestEntry?.duration_minutes ?? null,
+    packageName: shortestEntry?.name ?? null,
   };
 }
 

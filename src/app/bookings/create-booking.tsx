@@ -36,6 +36,7 @@ import {
   isForceAddOn,
   seedForcedAddOns,
 } from "../../lib/addOnQuantity";
+import { ApiError } from "../../lib/api";
 import {
   clockToMinutes,
   isRoomTakenAtTime,
@@ -1033,6 +1034,39 @@ const CreateBookingScreen = () => {
     };
   }, [slotPrefill, pkg, scheduledDate, slots, packageDurationMinutes]);
 
+  /**
+   * Why the start carried over from the schedule could not be kept. walkInSlot bails for several
+   * different reasons above and staff were told the same generic thing for all of them.
+   */
+  const walkInBlockedReason = useMemo<string | null>(() => {
+    if (!slotPrefill.walkIn || !slotPrefill.time || !pkg) return null;
+    if (walkInSlot) return null;
+    if (!scheduledDate || scheduledDate !== slotPrefill.date) return null;
+    if (slotsOfferRoom(slots, slotPrefill.time, slotPrefill.roomId)) return null;
+
+    if (slotPrefill.roomId != null && !packageServesRoom(pkg, slotPrefill.roomId)) {
+      return `${pkg.name} does not run in the space you picked, so its start time could not be kept.`;
+    }
+
+    const startMinutes =
+      slotPrefill.startMinutes ?? clockToMinutes(slotPrefill.time);
+    if (startMinutes == null) return null;
+    const endMinutes = startMinutes + packageDurationMinutes;
+
+    // same order as walkInSlot, or staff are told the wrong cause when two guards both hold
+    if (!slotPrefill.walkInOverride) {
+      if (!slotPrefill.freeUntilKnown) {
+        return `How long the space is free was not carried over, so ${formatTime(slotPrefill.time)} could not be kept.`;
+      }
+      if (endMinutes > (slotPrefill.freeUntilMinutes ?? -1)) {
+        const over = endMinutes - (slotPrefill.freeUntilMinutes ?? endMinutes);
+        return `${formatTime(slotPrefill.time)} would run ${over} min past what this space has free, so it was not kept. Start it from the schedule to approve the overlap.`;
+      }
+    }
+
+    return null;
+  }, [slotPrefill, pkg, walkInSlot, scheduledDate, slots, packageDurationMinutes]);
+
   // Measured against the next booking's own start, never the free-until cap —
   // that cap is already pulled back by the space's reset time, so subtracting
   // from it reported an overlap on walk-ins that had none.
@@ -1208,8 +1242,9 @@ const CreateBookingScreen = () => {
 
     if (slotPrefill.time) {
       Alert.alert(
-        "Time no longer available",
-        "That start time is no longer offered for this package — pick another below.",
+        walkInBlockedReason ? "Walk-in start not kept" : "Time no longer available",
+        walkInBlockedReason ??
+          "That start time is no longer offered for this package — pick another below.",
       );
     }
   }, [
@@ -1221,6 +1256,7 @@ const CreateBookingScreen = () => {
     walkInSlot,
     walkInOverlapMinutes,
     walkInAlreadyStarted,
+    walkInBlockedReason,
   ]);
 
   const [pkgSchedules, setPkgSchedules] = useState<
@@ -1857,6 +1893,18 @@ const CreateBookingScreen = () => {
         { text: "Done", onPress: () => router.back() },
       ]);
     } catch (err) {
+      // The server saw a conflict the page could not — a space taken, or a break added, since it
+      // loaded. Open the same PIN gate rather than leave staff with an error they cannot act on.
+      const body = err instanceof ApiError ? (err.body as { requires_override?: boolean; conflicts?: unknown } | undefined) : undefined;
+      if (err instanceof ApiError && err.status === 409 && body?.requires_override && Array.isArray(body.conflicts)) {
+        setOverrideGate({
+          conflicts: body.conflicts
+            .filter((c): c is string => typeof c === "string" && c.trim().length > 0)
+            .map((reason) => `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`),
+          onlineSlotsLost: [],
+        });
+        return;
+      }
       Alert.alert(
         "Failed to create booking",
         err instanceof Error ? err.message : "Please try again.",
