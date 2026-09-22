@@ -6,6 +6,7 @@ import {
   hasCachedBookings,
   isBookingCacheFresh,
   readBookingCache,
+  subscribeToBookingCache,
   syncBookingList,
 } from "../bookings/bookingListCache";
 import { getToken } from "../session";
@@ -15,6 +16,7 @@ import { getToken } from "../session";
 export {
   consumeBookingsStale,
   markBookingsStale,
+  patchCachedBooking,
 } from "../bookings/bookingListCache";
 
 type UseBookingsParams = { locationId?: number };
@@ -91,6 +93,17 @@ export function useBookings({ locationId }: UseBookingsParams = {}) {
       requestIdRef.current++;
     };
   }, [sync]);
+
+  // A patch (e.g. an internal note just saved) rewrites the cached row; re-read it
+  // so this list repaints without a refetch and without losing its scroll.
+  useEffect(
+    () =>
+      subscribeToBookingCache(() => {
+        const entry = getCachedBookings(bookingCacheKey(locationId));
+        if (entry) setBookings(entry.data);
+      }),
+    [locationId],
+  );
 
   const refetch = useCallback(() => sync({ force: true }), [sync]);
 

@@ -28,6 +28,7 @@ import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { OverlapOverrideModal } from "../../components/ui/OverlapOverrideModal";
+import { onlineStartsLost } from "../../lib/bookings/onlineSlotsLost";
 import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
@@ -723,8 +724,12 @@ const CreateBookingScreen = () => {
   const scrollRef = useRef<ScrollView>(null);
   // held in a ref so the re-submit right after approval sees it without waiting for a render
   const overrideTokenRef = useRef<string | null>(null);
+  // Taking the last online start is worth telling staff about, but it is not an overlap, so it is
+  // confirmed rather than approved by a manager. Held in a ref for the same reason as the token.
+  const sideEffectsAcceptedRef = useRef(false);
   const [overrideGate, setOverrideGate] = useState<{
     conflicts: string[];
+    onlineSlotsLost: string[];
   } | null>(null);
 
   useEffect(() => {
@@ -1019,6 +1024,8 @@ const CreateBookingScreen = () => {
       endTime: minutesToClock(endMinutes),
       roomId: slotPrefill.roomId ?? null,
       roomName: null,
+      // Synthesised here, so the server never said which spaces are free for it.
+      availableRoomIds: [],
       remainingTickets: null,
       // Synthesised here, not offered by the server, so it carries no per-date
       // minimum of its own — the package's own limits still apply.
@@ -1053,9 +1060,15 @@ const CreateBookingScreen = () => {
     const reasons: string[] = [];
 
     if (walkInOverlapMinutes > 0) {
-      reasons.push(
-        `It runs ${walkInOverlapMinutes} min into the next booking in this space.`,
-      );
+      // Name the booking it runs into. "The next booking" makes staff go hunting
+      // through the schedule for the one they are about to clash with.
+      const nextStart = slotPrefill.nextBookingMinutes;
+      const when =
+        nextStart == null
+          ? "the next booking in this space"
+          : `the booking that starts at ${formatTime(minutesToClock(nextStart))} in this space`;
+
+      reasons.push(`It runs ${walkInOverlapMinutes} min into ${when}.`);
     }
 
     // the server lists a start only while a space is still free for it
@@ -1064,7 +1077,45 @@ const CreateBookingScreen = () => {
     }
 
     return reasons;
-  }, [slot, pkg, walkInOverlapMinutes, slots]);
+  }, [
+    slot,
+    pkg,
+    walkInOverlapMinutes,
+    slotPrefill.nextBookingMinutes,
+    slots,
+  ]);
+
+  /**
+   * Start times customers can still book online that this booking would take away — it holds the
+   * space through them, and for some it is the last space left.
+   *
+   * Requirement 05: a walk-in that fits perfectly well can still cost the website later starts,
+   * and staff have no way to see that from the schedule. Kept apart from bookingConflicts on
+   * purpose — nothing here is double-booked, so no manager is needed.
+   */
+  const onlineSlotsLost = useMemo<string[]>(
+    () =>
+      onlineStartsLost({
+        slots,
+        startTime: slot?.startTime ?? null,
+        roomId: slot?.roomId ?? null,
+        durationMinutes: packageDurationMinutes,
+      }).map((startTime) => formatTime(startTime)),
+    [slots, slot, packageDurationMinutes],
+  );
+
+  // An approval, and staff's own go-ahead, belong to the booking they were given for. Move the
+  // start, the space or the package and both are void: the clash and the lost start times are no
+  // longer the ones anybody agreed to. Keyed strictly on those three, so the re-submit that
+  // follows an approval cannot clear the very flag that lets it through.
+  const gatedStart = slot?.startTime ?? null;
+  const gatedRoomId = slot?.roomId ?? null;
+  const gatedPackageId = pkg?.id ?? null;
+
+  useEffect(() => {
+    overrideTokenRef.current = null;
+    sideEffectsAcceptedRef.current = false;
+  }, [gatedStart, gatedRoomId, gatedPackageId]);
 
   // Distinct from an overlap: this walk-in slot isn't offered because its
   // start has already gone by today, not because it clashes with a booking.
@@ -1526,10 +1577,17 @@ const CreateBookingScreen = () => {
     if (submitLockRef.current) return;
     if (!pkg) return;
 
-    // an overlapping booking is never saved on a single tap: the reason is
-    // shown and a manager has to approve it with their PIN
-    if (bookingConflicts.length > 0 && !overrideTokenRef.current) {
-      setOverrideGate({ conflicts: bookingConflicts });
+    // A booking that overlaps, or that takes a start off the website, is never saved on a single
+    // tap. An overlap needs a manager's PIN; losing an online start only needs staff to say yes.
+    if (
+      (bookingConflicts.length > 0 || onlineSlotsLost.length > 0) &&
+      !overrideTokenRef.current &&
+      !sideEffectsAcceptedRef.current
+    ) {
+      setOverrideGate({
+        conflicts: bookingConflicts,
+        onlineSlotsLost,
+      });
       return;
     }
 
@@ -3828,11 +3886,22 @@ const CreateBookingScreen = () => {
       <OverlapOverrideModal
         visible={!!overrideGate}
         conflicts={overrideGate?.conflicts ?? []}
+        onlineSlotsLost={overrideGate?.onlineSlotsLost ?? []}
         locationId={effectiveLocationId}
         onCancel={() => setOverrideGate(null)}
+        onConfirm={() => {
+          // No overlap to approve — staff accepted the lost start times themselves.
+          sideEffectsAcceptedRef.current = true;
+          setOverrideGate(null);
+          // this IS the deliberate second attempt, so it must not be taken for a double tap
+          lastSubmitAtRef.current = 0;
+          void handleSubmit();
+        }}
         onApproved={(token) => {
           overrideTokenRef.current = token;
+          sideEffectsAcceptedRef.current = true;
           setOverrideGate(null);
+          lastSubmitAtRef.current = 0;
           // the gate is satisfied; run the same submit path again
           void handleSubmit();
         }}

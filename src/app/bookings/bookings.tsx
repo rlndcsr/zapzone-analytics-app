@@ -10,7 +10,6 @@ import {
   type ComponentProps,
 } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   RefreshControl,
@@ -23,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingActionsSheet } from "../../components/ui/BookingActionsSheet";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
+import { InternalNotesLog } from "../../components/ui/InternalNotesLog";
 import {
   BookingsBulkBar,
   type BookingBulkAction,
@@ -75,7 +75,6 @@ import {
   exportBookings,
   fetchBookingDetail,
   fetchTrashedBookings,
-  updateBookingInternalNotes,
   updateBookingStatus,
   type BookingDetail,
   type BookingStatus,
@@ -615,9 +614,6 @@ const Bookings = () => {
   const [durationBooking, setDurationBooking] =
     useState<CalendarBooking | null>(null);
   const [notesBooking, setNotesBooking] = useState<CalendarBooking | null>(null);
-  const [notesDraft, setNotesDraft] = useState("");
-  const [notesLoading, setNotesLoading] = useState(false);
-  const [notesSaving, setNotesSaving] = useState(false);
 
   // Process Payment — the row's `$` action. `payDetail` carries the location /
   // customer ids the payments endpoint needs, which the list row doesn't have.
@@ -970,18 +966,9 @@ const Bookings = () => {
           .catch(() => {})
           .finally(() => setPayLoading(false));
       },
-      onNotes: (booking) => {
-        setNotesBooking(booking);
-        setNotesDraft("");
-        setNotesLoading(true);
-        const token = getToken();
-        if (!token) return;
-        // Internal notes aren't on the list row, so read the full record first.
-        fetchBookingDetail(token, booking.id)
-          .then((d) => setNotesDraft(d?.internalNotes ?? ""))
-          .catch(() => setNotesDraft(""))
-          .finally(() => setNotesLoading(false));
-      },
+      // The log fetches itself, and reads nothing from the cache — so there is
+      // nothing to prime here.
+      onNotes: (booking) => setNotesBooking(booking),
       onStatusPress: (booking) => setStatusBooking(booking),
       onLocationPress: (booking) => setLocationBooking(booking),
       onDurationPress: (booking) => setDurationBooking(booking),
@@ -1579,10 +1566,10 @@ const Bookings = () => {
         onSaved={refetch}
       />
 
-      {/* Internal Notes — staff-only, saved to the booking. */}
+      {/* Internal Notes — the booking's staff-only log. */}
       <BottomSheet
         visible={notesBooking !== null}
-        onClose={() => !notesSaving && setNotesBooking(null)}
+        onClose={() => setNotesBooking(null)}
         title="Internal Notes"
       >
         <View className="px-5 pb-6">
@@ -1598,70 +1585,7 @@ const Bookings = () => {
             </View>
           </View>
 
-          <Text className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-            Notes
-          </Text>
-          <View className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-3">
-            <TextInput
-              value={notesDraft}
-              onChangeText={setNotesDraft}
-              editable={!notesLoading && !notesSaving}
-              placeholder={
-                "Add internal notes about this booking...\n\nExamples:\n- Customer requested quiet area\n- VIP - provide extra attention\n- Follow up required after service"
-              }
-              placeholderTextColor="#9CA3AF"
-              multiline
-              textAlignVertical="top"
-              className="min-h-[132px] text-sm text-gray-900 dark:text-white"
-            />
-          </View>
-
-          <View className="flex-row justify-end gap-3 mt-4">
-            <Pressable
-              onPress={() => setNotesBooking(null)}
-              disabled={notesSaving}
-              className="h-11 items-center justify-center rounded-lg border border-gray-300 px-5 dark:border-neutral-700"
-            >
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Cancel
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={async () => {
-                if (!notesBooking) return;
-                const token = getToken();
-                if (!token) return;
-                setNotesSaving(true);
-                try {
-                  await updateBookingInternalNotes(
-                    token,
-                    notesBooking.id,
-                    notesDraft.trim(),
-                  );
-                  setNotesBooking(null);
-                } catch (err) {
-                  Alert.alert(
-                    "Couldn't save notes",
-                    err instanceof Error ? err.message : "Please try again.",
-                  );
-                } finally {
-                  setNotesSaving(false);
-                }
-              }}
-              disabled={notesSaving || notesLoading}
-              className={`h-11 flex-row items-center justify-center gap-2 rounded-lg bg-[#0644C7] px-5 ${
-                notesSaving || notesLoading ? "opacity-60" : "active:opacity-90"
-              }`}
-            >
-              {notesSaving ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text className="text-sm font-semibold text-white">
-                  Save Notes
-                </Text>
-              )}
-            </Pressable>
-          </View>
+          {notesBooking && <InternalNotesLog bookingId={notesBooking.id} />}
         </View>
       </BottomSheet>
 

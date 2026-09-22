@@ -55,6 +55,8 @@ export type CalendarBooking = {
   guestOfHonorName: string | null;
   customerNotes: string | null;
   specialRequests: string | null;
+  /** Staff-only digest of the booking's notes log. Never shown to a guest. */
+  internalNotes: string | null;
 };
 
 export type BookingAddOn = {
@@ -102,6 +104,8 @@ export type AppliedFee = {
   name: string;
   amount: number;
   applicationType: string;
+  /** "4.87%" — shown beside the name, the way the web prints a stored fee. */
+  label: string | null;
 };
 
 /** Full booking detail backing the "Booking Details" sheet. */
@@ -180,6 +184,9 @@ type RawBooking = {
   customer_notes?: string | null;
   notes?: string | null;
   special_requests?: string | null;
+  // The digest the internal notes log rebuilds. The index selects this column, so
+  // every list row carries it and the note badge works straight off the cache.
+  internal_notes?: string | null;
   payment_status?: string | null;
   package?: {
     id?: number | null;
@@ -243,6 +250,8 @@ export type RawBookingDetail = RawBooking & {
         fee_name?: string;
         fee_amount?: number | string;
         fee_application_type?: string;
+        /** "4.87%" — how the fee was worked out, frozen when it was applied. */
+        fee_label?: string | null;
       }[]
     | null;
   package?: {
@@ -408,6 +417,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     guestOfHonorName: raw.guest_of_honor_name?.trim() || null,
     customerNotes: raw.customer_notes?.trim() || raw.notes?.trim() || null,
     specialRequests: raw.special_requests?.trim() || null,
+    internalNotes: raw.internal_notes?.trim() || null,
   };
 }
 
@@ -633,6 +643,7 @@ export function mapBookingDetail(b: RawBookingDetail): BookingDetail {
       name: f.fee_name ?? "Fee",
       amount: Number(f.fee_amount ?? 0),
       applicationType: f.fee_application_type ?? "additive",
+      label: f.fee_label?.trim() || null,
     })),
     appliedDiscounts: (b.applied_discounts ?? []).map((d) => ({
       name: d.discount_name?.trim() || "Discount",
@@ -948,17 +959,147 @@ export function scanBookingFromDetail(d: BookingDetail): ScanBooking {
   };
 }
 
-/** PATCH /api/bookings/{id}/internal-notes — save internal notes. */
-export async function updateBookingInternalNotes(
+/**
+ * A booking's internal notes.
+ *
+ * These are a log, not a field. New information goes in as its own entry, a note can be corrected
+ * but never emptied or deleted, and the version an edit replaces is kept with the editor's name on
+ * it. The `internal_notes` column still exists as a readable digest the backend rebuilds after
+ * every write — that is what the list rows and the note badge read, and what the cache holds.
+ *
+ * The old `PATCH /internal-notes` (replace the whole text) is gone; the backend answers it with a
+ * 409 telling the caller to refresh, because that payload was the entire history plus an edit.
+ */
+
+/** A superseded version of a note, kept forever. */
+export type InternalNoteRevision = {
+  id: number;
+  body: string;
+  category: string | null;
+  categoryLabel: string | null;
+  editedByName: string | null;
+  createdAt: string | null;
+};
+
+/** One entry in a booking's internal log. */
+export type InternalNote = {
+  id: number;
+  body: string;
+  category: string | null;
+  categoryLabel: string | null;
+  employeeName: string;
+  employeeRole: string | null;
+  createdAt: string | null;
+  editedAt: string | null;
+  editedByName: string | null;
+  canEdit: boolean;
+  /** Newest first. Empty when the note has never been corrected. */
+  revisions: InternalNoteRevision[];
+};
+
+type RawInternalNoteRevision = {
+  id?: number | string | null;
+  body?: string | null;
+  category?: string | null;
+  category_label?: string | null;
+  edited_by_name?: string | null;
+  created_at?: string | null;
+};
+
+type RawInternalNote = RawInternalNoteRevision & {
+  employee_name?: string | null;
+  employee_role?: string | null;
+  edited_at?: string | null;
+  can_edit?: boolean | null;
+  revisions?: RawInternalNoteRevision[] | null;
+  /** The rebuilt digest, sent back on a write so a caller can refresh its copy. */
+  internal_notes?: string | null;
+};
+
+function mapRevision(r: RawInternalNoteRevision): InternalNoteRevision {
+  return {
+    id: Number(r.id ?? 0),
+    body: r.body ?? "",
+    category: r.category ?? null,
+    categoryLabel: r.category_label ?? null,
+    editedByName: r.edited_by_name ?? null,
+    createdAt: r.created_at ?? null,
+  };
+}
+
+function mapInternalNote(n: RawInternalNote): InternalNote {
+  return {
+    ...mapRevision(n),
+    employeeName: n.employee_name?.trim() || "Unknown employee",
+    employeeRole: n.employee_role ?? null,
+    editedAt: n.edited_at ?? null,
+    editedByName: n.edited_by_name ?? null,
+    canEdit: n.can_edit === true,
+    revisions: (n.revisions ?? []).map(mapRevision),
+  };
+}
+
+/** What a save gives back: the note itself, and the booking's rebuilt digest. */
+export type InternalNoteSaved = {
+  note: InternalNote;
+  /**
+   * The whole log as one readable block, straight from the server. Null once the log is empty.
+   * `undefined` means the response carried none, and nothing should be written from it.
+   */
+  summary: string | null | undefined;
+};
+
+function mapSaved(res: { data?: RawInternalNote | null }): InternalNoteSaved {
+  const data = res?.data ?? {};
+  return {
+    note: mapInternalNote(data),
+    summary: "internal_notes" in data ? (data.internal_notes ?? null) : undefined,
+  };
+}
+
+/** GET /api/bookings/{id}/internal-notes — the log, newest first, with each note's history. */
+export async function fetchInternalNotes(
   token: string,
-  id: number,
-  internalNotes: string,
-): Promise<void> {
-  await apiRequest(`/api/bookings/${id}/internal-notes`, {
-    method: "PATCH",
-    token,
-    body: { internal_notes: internalNotes },
-  });
+  bookingId: number,
+  signal?: AbortSignal,
+): Promise<{ notes: InternalNote[]; categories: Record<string, string> }> {
+  const res = await apiRequest<{
+    data?: { notes?: RawInternalNote[] | null; categories?: Record<string, string> | null };
+  }>(`/api/bookings/${bookingId}/internal-notes`, { token, signal });
+
+  return {
+    notes: (res?.data?.notes ?? []).map(mapInternalNote),
+    categories: res?.data?.categories ?? {},
+  };
+}
+
+/** POST /api/bookings/{id}/internal-notes — add a note. */
+export async function addInternalNote(
+  token: string,
+  bookingId: number,
+  body: string,
+  category?: string | null,
+): Promise<InternalNoteSaved> {
+  const res = await apiRequest<{ data?: RawInternalNote | null }>(
+    `/api/bookings/${bookingId}/internal-notes`,
+    { method: "POST", token, body: { body, category: category || null } },
+  );
+  return mapSaved(res);
+}
+
+/** PUT /api/bookings/{id}/internal-notes/{noteId} — correct a note, keeping what it replaced. */
+export async function updateInternalNote(
+  token: string,
+  bookingId: number,
+  noteId: number,
+  body: string,
+  category?: string | null,
+): Promise<InternalNoteSaved> {
+  const res = await apiRequest<{ data?: RawInternalNote | null }>(
+    `/api/bookings/${bookingId}/internal-notes/${noteId}`,
+    { method: "PUT", token, body: { body, category: category || null } },
+  );
+  return mapSaved(res);
 }
 
 export type PackageOption = { id: number; name: string; price: number | null };
@@ -1543,6 +1684,15 @@ export type AvailableSlot = {
   roomName: string | null;
   remainingTickets: number | null;
   /**
+   * Every space still free for this start, not just the one the server picked.
+   *
+   * `roomId` is only the first of these. The whole set is what says whether a
+   * booking taking one space would strip this start from the website or merely
+   * narrow the choice — which is the difference between warning staff and
+   * saying nothing. Empty for a slot the client synthesised.
+   */
+  availableRoomIds: number[];
+  /**
    * The smallest party the package accepts on THIS date — special pricing can
    * raise a package's own minimum for a given day, which is why it rides on the
    * slot rather than on the package. Null for a slot the client synthesised.
@@ -1647,6 +1797,11 @@ export async function fetchAvailableTimeSlots(
       endTime: toTime(s.end_time) ?? String(s.end_time ?? ""),
       roomId: s.room_id ?? null,
       roomName: s.room_name ?? null,
+      availableRoomIds: Array.isArray(s.available_room_ids)
+        ? s.available_room_ids
+            .map((id: unknown) => Number(id))
+            .filter((id: number) => Number.isFinite(id))
+        : [],
       remainingTickets: left != null && !Number.isNaN(left) ? left : null,
       minParticipants: min != null && !Number.isNaN(min) ? min : null,
     };
@@ -1670,7 +1825,9 @@ export type BookingUpdateInput = {
   guestOfHonorAge?: number | null;
   guestOfHonorGender?: string | null;
   customerNotes?: string | null;
-  internalNotes?: string | null;
+  // No internalNotes here on purpose: notes are an append-only log now, written only through
+  // addInternalNote/updateInternalNote. The backend leaves internal_notes out of this endpoint's
+  // validation precisely so an ordinary save cannot replace the whole history.
   sendEmail?: boolean;
   additionalAddons?: {
     addon_id: number;
@@ -1767,8 +1924,6 @@ export async function updateBooking(
   if (input.guestOfHonorGender !== undefined)
     body.guest_of_honor_gender = input.guestOfHonorGender;
   if (input.customerNotes !== undefined) body.notes = input.customerNotes;
-  if (input.internalNotes !== undefined)
-    body.internal_notes = input.internalNotes;
   if (input.sendEmail != null) body.send_notification = input.sendEmail;
   if (input.additionalAddons !== undefined)
     body.additional_addons = input.additionalAddons;
@@ -2366,7 +2521,8 @@ export type CreateBookingInput = {
   /** proof a manager approved saving this on top of a detected overlap */
   overlap_override_token?: string;
   notes?: string;
-  internal_notes?: string;
+  // No internal_notes: a booking is never created with one. Notes are an append-only
+  // log, added after the fact through addInternalNote.
   additional_attractions?: BookingAttractionInput[];
   additional_addons?: BookingAddonInput[];
   created_by?: number;

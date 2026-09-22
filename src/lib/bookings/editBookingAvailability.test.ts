@@ -38,6 +38,7 @@ const slot = (startTime: string, endTime: string): AvailableSlot => ({
   endTime,
   roomId: 7,
   roomName: "Lane 1",
+  availableRoomIds: [7],
   remainingTickets: null,
   minParticipants: null,
 });

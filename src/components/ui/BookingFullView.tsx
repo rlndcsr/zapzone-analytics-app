@@ -35,6 +35,7 @@ import { deleteBooking, type BookingDetail } from "../../services/bookingsServic
 import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingQRModal } from "./BookingQRModal";
 import { BottomSheet } from "./BottomSheet";
+import { InternalNotesLog } from "./InternalNotesLog";
 import { PaymentStatusBadge } from "./PaymentStatusBadge";
 
 const MONTH_NAMES = [
@@ -217,6 +218,11 @@ type Props = {
   onEdit?: () => void;
   /** Called after a successful delete so the caller can refresh + dismiss. */
   onDeleted?: () => void;
+  /**
+   * The booking's rebuilt internal-notes digest, after a note is saved here. `detail` is the host
+   * sheet's state, so only it can refresh it.
+   */
+  onNoteSaved?: (summary: string | null) => void;
 };
 
 /**
@@ -224,7 +230,14 @@ type Props = {
  * View button. Presents the booking as icon-tile sections and offers a
  * scannable/downloadable QR code. Editing lives in the Booking Details sheet.
  */
-export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }: Props) {
+export function BookingFullView({
+  visible,
+  detail,
+  onClose,
+  onEdit,
+  onDeleted,
+  onNoteSaved,
+}: Props) {
   const [showQR, setShowQR] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [addingToCalendar, setAddingToCalendar] = useState(false);
@@ -792,30 +805,22 @@ export function BookingFullView({ visible, detail, onClose, onEdit, onDeleted }:
             </View>
           </Section>
 
-          {/* Internal Staff Notes — staff-only, read-only (mirrors the web
-              ViewBooking "Internal Staff Notes" block; editing is in Edit). */}
-          <Text className="text-base font-bold text-gray-900 dark:text-white mt-6 mb-2">
-            Internal Staff Notes
-          </Text>
-          <View className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-2xl px-4 py-3">
-            <View className="flex-row items-center gap-1.5 mb-1.5">
-              <AlertCircle size={14} color="#d97706" />
-              <View className="bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded">
-                <Text className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                  Staff Only
-                </Text>
-              </View>
+          {/* Internal Staff Notes — the booking's log, writable here the way the
+              web ViewBooking writes it.
+
+              Exactly one copy of the log is ever mounted: this body renders as
+              soon as `detail` exists, whether or not the view is on screen, so
+              gate on `visible` — the host sheet shows its own copy until this
+              one is stacked on top, and drops it then. Two mounted copies would
+              both fetch, and the hidden one would go stale behind this one. */}
+          {visible && (
+            <View className="mt-6 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-2xl px-4 py-3">
+              <InternalNotesLog
+                bookingId={detail.id}
+                onNoteSaved={(summary) => onNoteSaved?.(summary)}
+              />
             </View>
-            <Text
-              className={`text-sm ${
-                detail.internalNotes
-                  ? "text-gray-800 dark:text-gray-100"
-                  : "text-gray-400 dark:text-gray-500 italic"
-              }`}
-            >
-              {detail.internalNotes ?? "No internal notes."}
-            </Text>
-          </View>
+          )}
 
           {/* Change history — the backend's permanent booking change log,
               same block the web ViewBooking shows above "Created". */}

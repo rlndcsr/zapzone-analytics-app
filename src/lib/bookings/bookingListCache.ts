@@ -2,6 +2,7 @@ import {
   fetchAllBookings,
   type CalendarBooking,
 } from "../../services/bookingsService";
+import { mergeBookingInto } from "./patchBooking";
 
 // Single source of truth for the full booking list. Manage Bookings and both
 // calendars read/write this one cache, so navigating between them never re-pages.
@@ -41,6 +42,44 @@ export function consumeBookingsStale(): boolean {
   if (!stale) return false;
   stale = false;
   return true;
+}
+
+// Mounted lists subscribe so a patched booking repaints without a refetch.
+type CacheListener = () => void;
+const listeners = new Set<CacheListener>();
+
+/** Re-render on every cache patch. Returns the unsubscribe. */
+export function subscribeToBookingCache(listener: CacheListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/**
+ * Merge a few fields into one cached booking, everywhere it is cached.
+ *
+ * A booking can sit in more than one scope entry (the "all" list and its location's list), so patch
+ * each one rather than guessing which the caller is looking at. The merge itself — and why it is a
+ * merge and not a replace — lives in mergeBookingInto.
+ */
+export function patchCachedBooking(
+  bookingId: number,
+  patch: Partial<CalendarBooking>,
+): void {
+  let touched = false;
+
+  for (const [key, entry] of cache) {
+    const data = mergeBookingInto(entry.data, bookingId, patch);
+    if (data === entry.data) continue;
+
+    // Keep fetchedAt: a patch refreshes a field, it does not re-date the fetch.
+    cache.set(key, { ...entry, data });
+    touched = true;
+  }
+
+  if (!touched) return;
+  for (const listener of [...listeners]) listener();
 }
 
 /** Read this scope's entry, logging the hit/miss. TEMP: investigation logging. */

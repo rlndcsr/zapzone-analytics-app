@@ -7,6 +7,7 @@ import {
   MapPin,
   Package,
   Pencil,
+  Users,
 } from "lucide-react-native";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -26,6 +27,7 @@ import {
 import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
+import { InternalNotesLog } from "./InternalNotesLog";
 import { PaymentStatusBadge } from "./PaymentStatusBadge";
 import { ProcessPaymentSheet } from "./ProcessPaymentSheet";
 
@@ -227,10 +229,12 @@ export function BookingDetailSheet({
     setShowPayment(true);
   };
 
-  const typeLabel =
-    detail?.type === "package"
-      ? "Package Booking"
-      : capitalize(detail?.type ?? "");
+  // What the booking is sold as, keyed off the package the way the web keys it.
+  // The heading below switches on the same thing, so the badge and the section
+  // can never disagree — and a booking with no `type` column still gets a label
+  // instead of an empty badge.
+  const hasPackage = detail?.packageId != null || !!detail?.packageName?.trim();
+  const typeLabel = hasPackage ? "Package Booking" : "Activity Booking";
   const remaining = detail
     ? Math.max(0, detail.totalAmount - detail.amountPaid)
     : 0;
@@ -257,20 +261,45 @@ export function BookingDetailSheet({
               {/* Customer */}
               <SectionTitle>Customer Information</SectionTitle>
               <Card>
-                <Text className="text-base font-semibold text-gray-900 dark:text-white">
-                  {detail.customerName}
+                <View className="flex-row items-center gap-2">
+                  <Users size={16} color="#9ca3af" />
+                  <Text className="flex-1 text-base font-semibold text-gray-900 dark:text-white">
+                    {detail.customerName}
+                  </Text>
+                </View>
+                {/* Said out loud when there is none, the way the web says it: a
+                    missing phone number is something the desk has to know, and
+                    an absent line reads as one nobody thought to show. */}
+                <Text className="ml-6 mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {detail.customerEmail || "No email provided"}
                 </Text>
-                {!!detail.customerEmail && (
-                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {detail.customerEmail}
-                  </Text>
-                )}
-                {!!detail.customerPhone && (
-                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                    {detail.customerPhone}
-                  </Text>
-                )}
+                <Text className="ml-6 mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                  {detail.customerPhone || "No phone provided"}
+                </Text>
               </Card>
+
+              {/* Directly under the customer, because it is what the desk needs
+                  before they speak — the same place the web puts it. Skipped
+                  while the full view is stacked on top, so only the visible
+                  copy fetches. */}
+              {!showFull && (
+                <View className="mt-4">
+                  <InternalNotesLog
+                    bookingId={detail.id}
+                    compact
+                    onNoteSaved={(summary) =>
+                      // Keep the copy this sheet is holding in step with the log, so the
+                      // full view stacked on top of it shows the note too. The cached
+                      // list row is patched by the log itself.
+                      setDetail((current) =>
+                        current && current.id === detail.id
+                          ? { ...current, internalNotes: summary }
+                          : current,
+                      )
+                    }
+                  />
+                </View>
+              )}
 
               {/* Booking info */}
               <SectionTitle>Booking Information</SectionTitle>
@@ -325,8 +354,9 @@ export function BookingDetailSheet({
                 </View>
               </Card>
 
-              {/* Package */}
-              <SectionTitle>Package</SectionTitle>
+              {/* Package, or Activity when the booking has no package — the
+                  web switches this heading on the same condition. */}
+              <SectionTitle>{hasPackage ? "Package" : "Activity"}</SectionTitle>
               <Card>
                 <View className="flex-row items-center justify-between">
                   <View className="flex-row items-center gap-2 flex-1 mr-2">
@@ -335,7 +365,7 @@ export function BookingDetailSheet({
                       className="text-base font-semibold text-[#0644C7] uppercase flex-1"
                       numberOfLines={1}
                     >
-                      {detail.packageName}
+                      {detail.packageName?.trim() || "N/A"}
                     </Text>
                   </View>
                   {detail.packagePrice != null && (
@@ -378,6 +408,36 @@ export function BookingDetailSheet({
                           : detail.guestOfHonorName
                       }
                     />
+                  </Card>
+                </>
+              )}
+
+              {/* Additional Attractions — priced at what they cost when the
+                  booking was made, which is what the guest agreed to. */}
+              {detail.attractions.length > 0 && (
+                <>
+                  <SectionTitle>Additional Attractions</SectionTitle>
+                  <Card>
+                    {detail.attractions.map((a, i) => (
+                      <View
+                        key={a.id}
+                        className={`flex-row items-center justify-between py-1 ${
+                          i > 0
+                            ? "border-t border-gray-200 dark:border-neutral-700"
+                            : ""
+                        }`}
+                      >
+                        <Text className="flex-1 mr-2 text-sm text-gray-900 dark:text-white">
+                          {a.name}
+                        </Text>
+                        <Text className="mr-3 text-sm text-gray-500 dark:text-gray-400">
+                          Qty: {a.quantity}
+                        </Text>
+                        <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                          {formatMoney(a.priceAtBooking * a.quantity)}
+                        </Text>
+                      </View>
+                    ))}
                   </Card>
                 </>
               )}
@@ -448,6 +508,9 @@ export function BookingDetailSheet({
 
                 {detail.appliedFees.length > 0 && (
                   <View className="border-t border-gray-200 dark:border-neutral-700 mt-2 pt-2">
+                    <Text className="mb-1 text-xs text-gray-400 dark:text-gray-500">
+                      Applied Fees
+                    </Text>
                     {detail.appliedFees.map((f, i) => (
                       <View
                         key={`${f.name}-${i}`}
@@ -463,20 +526,28 @@ export function BookingDetailSheet({
                     ))}
                   </View>
                 )}
-              </Card>
 
-              {/* Internal notes */}
-              <SectionTitle>Internal Notes</SectionTitle>
-              <Card>
-                <Text
-                  className={`text-sm ${
-                    detail.internalNotes
-                      ? "text-gray-900 dark:text-white"
-                      : "text-gray-400 dark:text-gray-500 italic"
-                  }`}
-                >
-                  {detail.internalNotes ?? "No internal notes."}
-                </Text>
+                {detail.appliedDiscounts.length > 0 && (
+                  <View className="border-t border-gray-200 dark:border-neutral-700 mt-2 pt-2">
+                    <Text className="mb-1 text-xs text-gray-400 dark:text-gray-500">
+                      Applied Discounts
+                    </Text>
+                    {detail.appliedDiscounts.map((d, i) => (
+                      <View
+                        key={`${d.name}-${i}`}
+                        className="flex-row items-center justify-between py-0.5"
+                      >
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          {d.name}
+                          {d.type ? ` (${d.type})` : ""}
+                        </Text>
+                        <Text className="text-xs font-medium text-green-600 dark:text-green-400">
+                          −{formatMoney(d.amount)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </Card>
 
               {/* Change history — the backend's permanent booking change log
@@ -528,7 +599,7 @@ export function BookingDetailSheet({
                         remaining <= 0 ? "text-gray-400" : "text-amber-600"
                       }`}
                     >
-                      {remaining <= 0 ? "Fully Paid" : "Payment"}
+                      {remaining <= 0 ? "Fully Paid" : "Process Payment"}
                     </Text>
                   </Pressable>
                 </View>
@@ -573,6 +644,13 @@ export function BookingDetailSheet({
         visible={showFull}
         detail={detail}
         onEdit={goEdit}
+        onNoteSaved={(summary) =>
+          setDetail((current) =>
+            current && detail && current.id === detail.id
+              ? { ...current, internalNotes: summary }
+              : current,
+          )
+        }
         onClose={() => {
           setShowFull(false);
           if (initialMode === "details") onClose();

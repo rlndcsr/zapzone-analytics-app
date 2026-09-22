@@ -237,6 +237,9 @@ export function withCurrentTimeSlot(
     endTime: `${pad(Math.floor(endTotal / 60))}:${pad(endTotal % 60)}`,
     roomId: current.roomId,
     roomName: null,
+    // Seeded from the booking itself, not offered by the server, so nothing is
+    // known about which other spaces are free for this start.
+    availableRoomIds: [],
     remainingTickets: null,
     minParticipants: null,
   };

@@ -102,7 +102,6 @@ export function BookingSummaryPanel({
   participants,
   status,
   customerNotes,
-  internalNotes,
   packageLine,
   attractionLines,
   addOnLines,
@@ -125,7 +124,6 @@ export function BookingSummaryPanel({
   participants: number;
   status: string;
   customerNotes: string;
-  internalNotes: string;
   packageLine: SummaryLine | null;
   /** Only the attractions the booking keeps — a package swap drops them. */
   attractionLines: SummaryLine[];
@@ -162,7 +160,7 @@ export function BookingSummaryPanel({
         applicationType: fee.feeApplicationType,
       }))
     : storedFees.map((fee) => ({
-        name: fee.name,
+        name: fee.label ? `${fee.name} (${fee.label})` : fee.name,
         amount: fee.amount,
         applicationType: fee.applicationType,
       }));
@@ -233,23 +231,9 @@ export function BookingSummaryPanel({
         </Field>
       )}
 
-      {!!internalNotes && (
-        <View className="border-b border-gray-100 py-3 dark:border-neutral-800">
-          <View className="mb-1 flex-row items-center gap-2">
-            <Text className="text-xs text-gray-500 dark:text-gray-400">
-              Internal Notes
-            </Text>
-            <View className="rounded bg-amber-100 px-1.5 py-0.5 dark:bg-amber-900/30">
-              <Text className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                Staff Only
-              </Text>
-            </View>
-          </View>
-          <Text className="rounded bg-amber-50 p-2 text-xs text-amber-800 dark:bg-amber-900/10 dark:text-amber-300">
-            {internalNotes}
-          </Text>
-        </View>
-      )}
+      {/* No internal-notes block: the web summary has none, and the notes are a
+          log now — the whole digest would swamp this card. The log itself sits
+          in the form above. */}
 
       {/* Applied fees */}
       <Text className="mb-1 mt-3 text-xs text-gray-500 dark:text-gray-400">

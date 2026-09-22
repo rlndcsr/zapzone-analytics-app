@@ -6,6 +6,7 @@ import {
   hasCachedBookings,
   isBookingCacheFresh,
   readBookingCache,
+  subscribeToBookingCache,
   syncBookingList,
 } from "../bookings/bookingListCache";
 import { getToken } from "../session";
@@ -96,6 +97,17 @@ export function useCalendarBookings({
       requestIdRef.current++;
     };
   }, [sync]);
+
+  // A patch (e.g. an internal note just saved) rewrites the cached row; re-read it
+  // so the schedule repaints without a refetch and without jumping the view.
+  useEffect(
+    () =>
+      subscribeToBookingCache(() => {
+        const entry = getCachedBookings(bookingCacheKey(locationId));
+        if (entry) setAllBookings(entry.data);
+      }),
+    [locationId],
+  );
 
   // Bookings within the visible window (YYYY-MM-DD strings compare lexically).
   const bookings = useMemo(

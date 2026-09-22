@@ -32,8 +32,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingChangeHistory } from "../../components/ui/BookingChangeHistory";
-import { BookingPricePanel } from "../../components/ui/BookingPricePanel";
+import { BookingSummaryPanel } from "../../components/ui/BookingSummaryPanel";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
+import { InternalNotesLog } from "../../components/ui/InternalNotesLog";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { mediaUrl } from "../../lib/api";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
@@ -52,12 +53,15 @@ import {
   packageClosures,
   withCurrentTimeSlot,
 } from "../../lib/bookings/editBookingAvailability";
+import {
+  addOnSummaryLine,
+  attractionSummaryLine,
+  extraParticipantsSummaryLine,
+  packageSummaryLine,
+  type SummaryLine,
+} from "../../lib/bookings/bookingSummaryLines";
 import { toKey } from "../../lib/date/calendar";
 import { venueToday } from "../../lib/date/venueTime";
-import {
-  packagePriceForParticipants,
-  participantLabelFor,
-} from "../../lib/packages/packagePricing";
 import {
   clampParticipants,
   participantLimitsLabel,
@@ -98,6 +102,15 @@ import {
 const PRIMARY = "#0644C7";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS_FULL = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 const MONTH_NAMES = [
   "January",
   "February",
@@ -126,6 +139,31 @@ const MONTH_SHORT = [
   "Nov",
   "Dec",
 ];
+/**
+ * "Friday, December 18, 2026" and "6:00 PM" — the Booking Summary card's date and
+ * time, spelled out the way the web summary spells them.
+ *
+ * Built from the name tables above rather than toLocaleDateString: a YYYY-MM-DD is
+ * a calendar date, and parsing it through a Date to format it is what puts a
+ * booking on the wrong day for anyone west of UTC.
+ */
+const summaryDateLabel = (value: string): string => {
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return "";
+
+  const weekday = WEEKDAYS_FULL[new Date(y, m - 1, d).getDay()];
+  return `${weekday}, ${MONTH_NAMES[m - 1]} ${d}, ${y}`;
+};
+
+const summaryTimeLabel = (value: string): string => {
+  const [hStr, mStr] = value.split(":");
+  const hour = Number(hStr);
+  if (!Number.isFinite(hour) || mStr == null) return "";
+
+  const meridiem = hour >= 12 ? "PM" : "AM";
+  return `${hour % 12 || 12}:${mStr.padStart(2, "0")} ${meridiem}`;
+};
+
 const STATUS_OPTIONS = [
   { label: "Pending", value: "pending" },
   { label: "Confirmed", value: "confirmed" },
@@ -389,7 +427,6 @@ const EditBookingScreen = () => {
   const [gohAge, setGohAge] = useState("");
   const [gohGender, setGohGender] = useState<string | null>(null);
   const [customerNotes, setCustomerNotes] = useState("");
-  const [internalNotes, setInternalNotes] = useState("");
   // The web defaults the update email ON — an edit a guest would notice is
   // told to them unless staff deliberately silence it.
   const [sendEmail, setSendEmail] = useState(true);
@@ -463,7 +500,6 @@ const EditBookingScreen = () => {
         setGohAge(d.guestOfHonorAge != null ? String(d.guestOfHonorAge) : "");
         setGohGender(d.guestOfHonorGender ?? null);
         setCustomerNotes(d.customerNotes ?? "");
-        setInternalNotes(d.internalNotes ?? "");
         setAnchor(d.date ? new Date(`${d.date}T00:00:00`) : new Date());
       } catch (err) {
         if (active)
@@ -600,6 +636,15 @@ const EditBookingScreen = () => {
       alive = false;
     };
   }, [date, locationId]);
+
+  // Every booking sharing this location and date EXCEPT the one being edited.
+  // It is always in that list — it is what the date and location were read from
+  // — so leaving it in would mean the panel could never report a clear day, and
+  // would show the user their own booking as something to avoid.
+  const otherBookingsOnDate = useMemo(
+    () => existing.filter((b) => b.id !== bookingId),
+    [existing, bookingId],
+  );
 
   const packageOptions: Option[] = useMemo(() => {
     const opts = packages.map((p) => ({
@@ -883,6 +928,55 @@ const EditBookingScreen = () => {
     return norm(originalMap) !== norm(selectedAddOns);
   }, [detail, selectedAddOns]);
 
+  /* ---- Booking Summary card ------------------------------------------------
+   *
+   * The priced lines the web Edit Booking summary itemises. These say what each
+   * line is *made of*; they never decide what the booking costs. The money —
+   * subtotal, fees, discount, total — comes off the server's quote, which is why
+   * the package line here is the package alone and the extra participants are a
+   * line of their own, exactly as the web splits them.
+   */
+  const summaryParticipants = Math.max(0, Number(participants) || 0);
+
+  const packageLine = useMemo(
+    () => packageSummaryLine(packageDetail, summaryParticipants),
+    [packageDetail, summaryParticipants],
+  );
+
+  // A package swap drops the booking's attractions, so they are listed only
+  // while the original package is still selected — the web's same condition.
+  const attractionLines = useMemo<SummaryLine[]>(() => {
+    if (!detail || packageId !== detail.packageId) return [];
+
+    return detail.attractions.map(attractionSummaryLine);
+  }, [detail, packageId]);
+
+  const addOnLines = useMemo<SummaryLine[]>(
+    () =>
+      Object.entries(selectedAddOns)
+        .filter(([, quantity]) => quantity > 0)
+        .map(([id, quantity]) => {
+          const addOnId = Number(id);
+          const addOn = availableAddOns.find((a) => a.id === addOnId);
+          if (!addOn) return null;
+
+          // The frozen price wins over the catalog's, the way the form prices it.
+          return addOnSummaryLine(
+            addOn,
+            quantity,
+            getAddOnUnitPrice(addOnId, addOn),
+            summaryParticipants,
+          );
+        })
+        .filter((line): line is SummaryLine => line !== null),
+    [selectedAddOns, availableAddOns, getAddOnUnitPrice, summaryParticipants],
+  );
+
+  const extraParticipantsLine = useMemo(
+    () => extraParticipantsSummaryLine(packageDetail, summaryParticipants),
+    [packageDetail, summaryParticipants],
+  );
+
   const handleSave = async () => {
     if (!detail || saving) return;
     // The price on screen is stale or unknown — saving now would write a total
@@ -925,7 +1019,8 @@ const EditBookingScreen = () => {
         guestOfHonorAge: gohAge ? Number(gohAge) : null,
         guestOfHonorGender: gohGender,
         customerNotes: customerNotes.trim() || null,
-        internalNotes: internalNotes.trim() || null,
+        // internalNotes is deliberately absent: notes are an append-only log, saved
+        // as you write them through the log below, never as part of this save.
         sendEmail,
         ...(addOnsChanged && { additionalAddons: buildAdditionalAddons() }),
         // A new package does not inherit the old one's attractions.
@@ -1110,9 +1205,28 @@ const EditBookingScreen = () => {
               </>
             )}
 
-            {/* Existing bookings */}
-            {!!date && (
-              <View className="mt-3 rounded-2xl border border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+            {/* Existing bookings at this location on the chosen date — the
+                web Edit Booking's conflict-awareness panel.
+
+                The booking being edited is filtered out: it is always at its
+                own location on its own date, so counting it would mean the
+                panel could never say the day is clear. Every other booking is
+                listed, not a first few — the panel exists so nobody schedules
+                on top of one, and a hidden row is the one that bites. */}
+            {locationId != null && !!date && (
+              <View className="mt-3 rounded-2xl border border-gray-200 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-900 p-3">
+                <View className="flex-row items-start gap-2 mb-2">
+                  <View className="pt-0.5">
+                    <AlertCircle size={16} color="#d97706" />
+                  </View>
+                  <Text className="flex-1 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                    Existing bookings at{" "}
+                    {locations.find((l) => l.id === locationId)?.name ??
+                      "this location"}{" "}
+                    on {longDate(date)}
+                  </Text>
+                </View>
+
                 {loadingExisting ? (
                   <View className="flex-row items-center gap-2">
                     <ActivityIndicator size="small" color={PRIMARY} />
@@ -1120,35 +1234,36 @@ const EditBookingScreen = () => {
                       Checking existing bookings…
                     </Text>
                   </View>
+                ) : otherBookingsOnDate.length === 0 ? (
+                  <Text className="text-sm text-green-700 dark:text-green-400">
+                    No other bookings at this location on this date.
+                  </Text>
                 ) : (
-                  <>
-                    <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                      {existing.length === 0
-                        ? `No other bookings at this location on ${longDate(date)}`
-                        : `Existing bookings at this location on ${longDate(date)}`}
-                    </Text>
-                    {existing.slice(0, 5).map((b) => (
+                  <View className="gap-1.5">
+                    {otherBookingsOnDate.map((b) => (
                       <View
                         key={b.id}
-                        className="flex-row items-center justify-between mt-2"
+                        className="flex-row flex-wrap items-center gap-x-2"
                       >
-                        <Text
-                          className="text-xs text-gray-600 dark:text-gray-300 flex-1 mr-2"
-                          numberOfLines={1}
-                        >
-                          {b.time ? to12h(b.time) : "—"} · {b.customerName}
+                        <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                          {b.time ? to12h(b.time) : "—"}
                         </Text>
-                        <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-                          {capitalize(b.status)}
+                        <Text className="text-sm text-gray-300 dark:text-neutral-600">
+                          •
+                        </Text>
+                        <Text className="text-sm text-gray-700 dark:text-gray-300">
+                          {b.roomName ??
+                            (b.roomId ? `Space #${b.roomId}` : "No space")}
+                        </Text>
+                        <Text className="text-sm text-gray-300 dark:text-neutral-600">
+                          •
+                        </Text>
+                        <Text className="flex-1 text-sm text-gray-500 dark:text-gray-400">
+                          {b.customerName?.trim() || b.referenceNumber || "—"}
                         </Text>
                       </View>
                     ))}
-                    {existing.length > 5 && (
-                      <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-2">
-                        +{existing.length - 5} more
-                      </Text>
-                    )}
-                  </>
+                  </View>
                 )}
               </View>
             )}
@@ -1467,18 +1582,10 @@ const EditBookingScreen = () => {
               </View>
             </View>
             <View className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-2xl p-3">
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                Private notes visible only to staff. Never shown to customers.
-              </Text>
-              <TextInput
-                value={internalNotes}
-                onChangeText={setInternalNotes}
-                placeholder="e.g., VIP customer, dietary restrictions, special arrangements…"
-                placeholderTextColor="#9ca3af"
-                multiline
-                textAlignVertical="top"
-                className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 rounded-xl p-3 text-sm text-gray-900 dark:text-white min-h-[80px]"
-              />
+              {/* A note saves as you write it, not with the booking — so it
+                  survives this screen being left without saving, and a save
+                  that fails never takes a note down with it. */}
+              <InternalNotesLog bookingId={bookingId} />
             </View>
 
             {/* Email Notification */}
@@ -1520,12 +1627,34 @@ const EditBookingScreen = () => {
               </View>
             </View>
 
-            {/* The server's price for the edit in progress. Every figure here
-                comes off the reprice quote — the screen shows what the change
-                costs, it does not work it out. While a quote is in flight the
-                last good total stays put under an "updating" note rather than
-                blanking, so the panel doesn't flicker on every keystroke. */}
-            <BookingPricePanel
+            {/* The web Edit Booking's right-hand "Booking Summary" card, as a
+                panel under the form: what the booking now says, then what the
+                edit costs.
+
+                Every figure that is money comes off the reprice quote — the
+                screen shows what the change costs, it does not work it out.
+                While a quote is in flight the last good total stays put under
+                an "updating" note rather than blanking, so the card doesn't
+                flicker on every keystroke. The booking's own stored fees and
+                total stand in until the first quote lands, so it is never
+                blank. */}
+            <BookingSummaryPanel
+              packageName={packageDetail?.name ?? null}
+              packagePrice={packageDetail?.price ?? null}
+              spaceName={rooms.find((r) => r.id === roomId)?.name ?? null}
+              customerName={fullName}
+              customerEmail={email}
+              customerPhone={phone}
+              dateLabel={date ? summaryDateLabel(date) : ""}
+              timeLabel={time ? summaryTimeLabel(time) : ""}
+              participants={summaryParticipants}
+              status={status}
+              customerNotes={customerNotes}
+              packageLine={packageLine}
+              attractionLines={attractionLines}
+              addOnLines={addOnLines}
+              extraParticipantsLine={extraParticipantsLine}
+              storedFees={detail?.appliedFees ?? []}
               quote={priceQuote}
               storedTotal={detail?.totalAmount ?? 0}
               storedAmountPaid={detail?.amountPaid ?? 0}
