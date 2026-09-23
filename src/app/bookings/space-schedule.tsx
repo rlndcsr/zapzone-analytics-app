@@ -493,20 +493,30 @@ const GridBookingBlock = ({
             </Text>
           </View>
         ) : compact ? (
-          <View className="flex-row items-center gap-1.5">
-            <View
-              style={{ backgroundColor: statusColor(b.status) }}
-              className="w-1.5 h-1.5 rounded-full"
-            />
-            <Text style={{ color: pkg.text }} className="text-xs opacity-70">
-              {minutesToLabel(item.startMin)}
-            </Text>
+          // two tight lines: who and when, then what they booked
+          <View>
+            <View className="flex-row items-center gap-1.5">
+              <View
+                style={{ backgroundColor: statusColor(b.status) }}
+                className="w-1.5 h-1.5 rounded-full"
+              />
+              <Text style={{ color: pkg.text }} className="text-xs opacity-70">
+                {minutesToLabel(item.startMin)}
+              </Text>
+              <Text
+                style={{ color: pkg.text }}
+                className="text-xs font-semibold flex-shrink"
+                numberOfLines={1}
+              >
+                {b.customerName || "Walk-in"}
+              </Text>
+            </View>
             <Text
               style={{ color: pkg.text }}
-              className="text-xs font-semibold flex-shrink"
+              className="text-[10px] opacity-80"
               numberOfLines={1}
             >
-              {b.customerName || "Walk-in"}
+              {b.packageName}
             </Text>
           </View>
         ) : (
@@ -564,15 +574,16 @@ const GridBookingBlock = ({
             >
               {b.customerName || "Walk-in"}
             </Text>
+            {/* the package belongs at this glance-priority whether or not the extras below fit too */}
+            <Text
+              style={{ color: pkg.text }}
+              className="text-[10px] opacity-80"
+              numberOfLines={1}
+            >
+              {b.packageName}
+            </Text>
             {!medium && (
               <>
-                <Text
-                  style={{ color: pkg.text }}
-                  className="text-[10px] opacity-80"
-                  numberOfLines={1}
-                >
-                  {b.packageName}
-                </Text>
                 <View className="flex-row items-center gap-1 mt-0.5">
                   <Feather name="users" size={10} color={pkg.text} />
                   <Text

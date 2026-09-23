@@ -609,6 +609,8 @@ const DayBookingBlock = ({
   const showNotes = (noteFlags.guest || noteFlags.staff) && height >= 20;
   // a tiny block has room for one badge: the staff note wins, being rarer and written for staff
   const tightNotes = height < 30 && noteFlags.guest && noteFlags.staff;
+  // one slot (SLOT_HEIGHT - 4) is the only size still short on room for the package line
+  const short = height < 60;
   return (
     <Pressable
       onPress={onPress}
@@ -621,7 +623,7 @@ const DayBookingBlock = ({
         backgroundColor: tone.bg,
         borderLeftColor: doubleBooked ? "#f43f5e" : clashing ? "#fbbf24" : status.color,
       }}
-      className={`rounded-md border-l-4 px-1.5 py-1 overflow-hidden active:opacity-80 ${
+      className={`rounded-md border-l-4 px-1.5 overflow-hidden active:opacity-80 ${short ? "py-0.5" : "py-1"} ${
         doubleBooked ? "ring-2 ring-rose-500" : clashing ? "ring-2 ring-amber-400" : ""
       }`}
       accessibilityRole="button"
@@ -673,7 +675,7 @@ const DayBookingBlock = ({
           {booking.customerName}
         </Text>
       )}
-      {height > 52 && (
+      {height >= 36 && (
         <Text
           className="text-[10px]"
           style={{ color: tone.text }}
