@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import { validateOverridePin } from "../../lib/overridePin";
 import { getToken } from "../../lib/session";
 import { setOverridePin } from "../../services/overridePinService";
 import { CenterModal } from "./CenterModal";
 import { PressableScale } from "./motion/PressableScale";
+
+// three fields plus the password keyboard can push Save below the fold — cap
+// the card and let it scroll instead
+const MAX_MODAL_HEIGHT = Dimensions.get("window").height * 0.85;
 
 type Props = {
   visible: boolean;
@@ -66,6 +79,11 @@ export function OverridePinModal({
 
   return (
     <CenterModal visible={visible} onClose={onCancel} dismissable={!saving}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ maxHeight: MAX_MODAL_HEIGHT }}
+      >
+      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <View className="rounded-3xl bg-white p-6 dark:bg-neutral-900">
         <Text className="text-lg font-bold text-gray-900 dark:text-white">
           {hasPin ? "Change your override PIN" : "Set your override PIN"}
@@ -151,6 +169,8 @@ export function OverridePinModal({
           </PressableScale>
         </View>
       </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
     </CenterModal>
   );
 }

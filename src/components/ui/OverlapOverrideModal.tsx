@@ -1,11 +1,24 @@
 import { Feather } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import { getToken } from "../../lib/session";
 import { verifyOverridePin } from "../../services/overridePinService";
 import { CenterModal } from "./CenterModal";
 import { PressableScale } from "./motion/PressableScale";
+
+// a manager's conflict list can run long enough that the keyboard covers the
+// PIN field and the buttons below it — cap the card and let it scroll instead
+const MAX_MODAL_HEIGHT = Dimensions.get("window").height * 0.85;
 
 type Props = {
   visible: boolean;
@@ -85,6 +98,11 @@ export function OverlapOverrideModal({
 
   return (
     <CenterModal visible={visible} onClose={onCancel} dismissable={!checking}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ maxHeight: MAX_MODAL_HEIGHT }}
+      >
+      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <View className="rounded-3xl bg-white p-6 dark:bg-neutral-900">
         <View className="flex-row items-start gap-3">
           <View
@@ -217,6 +235,8 @@ export function OverlapOverrideModal({
           </>
         )}
       </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
     </CenterModal>
   );
 }
