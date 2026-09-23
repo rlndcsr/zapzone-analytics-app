@@ -476,21 +476,32 @@ const GridBookingBlock = ({
         className={`h-full ${tiny ? "px-1.5 justify-center" : compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
       >
         {tiny ? (
-          // One line only fits — spend it on the time AND the name.
-          <View className="flex-row items-baseline gap-1">
-            <Text
-              style={{ color: pkg.text }}
-              className="text-[10px] font-bold flex-shrink-0"
-            >
-              {minutesToLabel(item.startMin)}
-            </Text>
-            <Text
-              style={{ color: pkg.text }}
-              className="text-[10px] font-semibold flex-shrink"
-              numberOfLines={1}
-            >
-              {b.customerName || "Walk-in"}
-            </Text>
+          // who and when always fit; the package only where there's genuinely room for it too
+          <View>
+            <View className="flex-row items-baseline gap-1">
+              <Text
+                style={{ color: pkg.text }}
+                className="text-[10px] font-bold flex-shrink-0"
+              >
+                {minutesToLabel(item.startMin)}
+              </Text>
+              <Text
+                style={{ color: pkg.text }}
+                className="text-[10px] font-semibold flex-shrink"
+                numberOfLines={1}
+              >
+                {b.customerName || "Walk-in"}
+              </Text>
+            </View>
+            {item.height >= 26 && (
+              <Text
+                style={{ color: pkg.text }}
+                className="text-[9px] opacity-80"
+                numberOfLines={1}
+              >
+                {b.packageName}
+              </Text>
+            )}
           </View>
         ) : compact ? (
           // two tight lines: who and when, then what they booked
