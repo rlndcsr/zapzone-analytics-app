@@ -46,7 +46,10 @@ import {
   resolveClickedSlot,
   slotsOfferRoom,
 } from "../../lib/bookings/bookingPrefill";
-import { packageServesRoom } from "../../lib/bookings/packageCandidates";
+import {
+  isPackageTimeSlotRestricted,
+  packageServesRoom,
+} from "../../lib/bookings/packageCandidates";
 import {
   isBlankOrValidEmail,
   isWalkInCustomerValid,
@@ -107,6 +110,7 @@ import {
   searchCustomers,
   type CustomerHit,
 } from "../../services/customersService";
+import { fetchDayOffsByLocation, type DayOff } from "../../services/dayOffsService";
 import {
   validateGiftCardCode,
   validatePromoCode,
@@ -1002,6 +1006,34 @@ const CreateBookingScreen = () => {
     return Math.round(value * 60);
   }, [pkg]);
 
+  const effectiveLocationId =
+    pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
+
+  const [locationDayOffs, setLocationDayOffs] = useState<DayOff[]>([]);
+
+  // Package/venue-wide time-restricted day-offs — the server's own slot list
+  // already avoids offering these, but a walk-in click bypasses that list, so
+  // the same data has to be carried here to explain why one is refused.
+  useEffect(() => {
+    if (effectiveLocationId == null) {
+      setLocationDayOffs([]);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    let active = true;
+    fetchDayOffsByLocation(token, effectiveLocationId)
+      .then((offs) => {
+        if (active) setLocationDayOffs(offs);
+      })
+      .catch(() => {
+        if (active) setLocationDayOffs([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [effectiveLocationId]);
+
   /**
    * A synthetic slot for a schedule tap that isn't one of the package's own
    * offered starts — a walk-in, or any start staff picked off the customer's
@@ -1035,6 +1067,23 @@ const CreateBookingScreen = () => {
       return null;
     }
 
+    // package-wide/venue-wide only — a room-scoped closure is a different
+    // concern and is deliberately ignored here, same as walkInBlockedReason
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (
+      isPackageTimeSlotRestricted(
+        locationDayOffs,
+        pkg.id,
+        scheduledDate,
+        startMinutes,
+        endMinutes,
+        today,
+      )
+    ) {
+      return null;
+    }
+
     return {
       startTime: slotPrefill.time,
       endTime: minutesToClock(endMinutes),
@@ -1047,7 +1096,14 @@ const CreateBookingScreen = () => {
       // minimum of its own — the package's own limits still apply.
       minParticipants: null,
     };
-  }, [slotPrefill, pkg, scheduledDate, slots, packageDurationMinutes]);
+  }, [
+    slotPrefill,
+    pkg,
+    scheduledDate,
+    slots,
+    packageDurationMinutes,
+    locationDayOffs,
+  ]);
 
   /**
    * Why the start carried over from the schedule could not be kept. walkInSlot bails for several
@@ -1081,8 +1137,33 @@ const CreateBookingScreen = () => {
       }
     }
 
+    // this only ever fires for a package-wide or venue-wide closure; a closure
+    // on the room itself is deliberately ignored here, so do not blame the space
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (
+      isPackageTimeSlotRestricted(
+        locationDayOffs,
+        pkg.id,
+        scheduledDate,
+        startMinutes,
+        endMinutes,
+        today,
+      )
+    ) {
+      return `${pkg.name} is closed for part of ${formatTime(slotPrefill.time)} to ${formatTime(minutesToClock(endMinutes))}, so that start could not be kept.`;
+    }
+
     return null;
-  }, [slotPrefill, pkg, walkInSlot, scheduledDate, slots, packageDurationMinutes]);
+  }, [
+    slotPrefill,
+    pkg,
+    walkInSlot,
+    scheduledDate,
+    slots,
+    packageDurationMinutes,
+    locationDayOffs,
+  ]);
 
   // Measured against the next booking's own start, never the free-until cap —
   // that cap is already pulled back by the space's reset time, so subtracting
@@ -1354,9 +1435,6 @@ const CreateBookingScreen = () => {
         })),
     [pkg, attractionQty, participants],
   );
-
-  const effectiveLocationId =
-    pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
 
   /** Venue name + number for the Call to Book card — the booking's own venue. */
   const { name: venueName, phone: venuePhone } =
