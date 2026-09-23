@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type CalendarBooking } from "../../services/bookingsService";
 import {
   bookingCacheKey,
+  bookingRangeKey,
   getCachedBookings,
-  hasCachedBookings,
+  getCachedRange,
   isBookingCacheFresh,
-  readBookingCache,
   subscribeToBookingCache,
-  syncBookingList,
+  syncBookingRange,
 } from "../bookings/bookingListCache";
 import { getToken } from "../session";
 
@@ -19,37 +19,47 @@ type UseCalendarBookingsParams = {
   locationId?: number;
 };
 
-// The booking list lives in the shared bookingListCache — the same entries the
-// Manage Bookings screen fills, so opening a calendar after it is a cache hit.
+/**
+ * The bookings on screen, and only those.
+ *
+ * This used to pull the whole history through `syncBookingList` and filter it down to the visible
+ * days on the device — up to a hundred pages of bookings to draw one day. The window is known
+ * before the request is made, so it is asked for; a venue with years of bookings now costs the
+ * same as a quiet one. A fresh full list, left behind by Manage Bookings, is still used as-is, so
+ * moving between the two screens stays instant.
+ */
 export function useCalendarBookings({
   startDate,
   endDate,
   locationId,
 }: UseCalendarBookingsParams) {
-  const cached = getCachedBookings(bookingCacheKey(locationId));
-
-  const [allBookings, setAllBookings] = useState<CalendarBooking[]>(
-    cached?.data ?? [],
+  /** Whatever is already held for this window — the full list if fresh, else the window itself. */
+  const cachedFor = useCallback(
+    (from: string, to: string): CalendarBooking[] | null => {
+      const full = getCachedBookings(bookingCacheKey(locationId));
+      if (isBookingCacheFresh(full)) {
+        return full!.data.filter((b) => b.date >= from && b.date <= to);
+      }
+      const range = getCachedRange(bookingRangeKey(from, to, locationId));
+      return isBookingCacheFresh(range) ? range!.data : (range?.data ?? null);
+    },
+    [locationId],
   );
-  const [loading, setLoading] = useState(!isBookingCacheFresh(cached));
+
+  const [bookings, setBookings] = useState<CalendarBooking[]>(
+    () => cachedFor(startDate, endDate) ?? [],
+  );
+  const [loading, setLoading] = useState(
+    () => cachedFor(startDate, endDate) === null,
+  );
   const [error, setError] = useState<string | null>(null);
 
-  // Only the latest sync may write state (guards against stale responses).
+  // Only the latest sync may write state (guards against stale responses, and against a fast
+  // swipe through weeks landing an earlier window's rows on a later one).
   const requestIdRef = useRef(0);
 
-  // Fetch + cache this scope's list; `force` (pull-to-refresh) ignores the TTL.
   const sync = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      const k = bookingCacheKey(locationId);
-      const entry = readBookingCache(k, "useCalendarBookings");
-
-      if (isBookingCacheFresh(entry) && !force) {
-        setAllBookings(entry!.data);
-        setError(null);
-        setLoading(false);
-        return;
-      }
-
       const requestId = ++requestIdRef.current;
       const isCurrent = () => requestId === requestIdRef.current;
 
@@ -62,18 +72,26 @@ export function useCalendarBookings({
         return;
       }
 
-      // Show stale cache instantly and refresh quietly; else show the spinner.
-      if (entry && !force) {
-        setAllBookings(entry.data);
+      // Paint what is held — even if stale — and refresh behind it; only a window we hold
+      // nothing for gets the spinner.
+      const held = force ? null : cachedFor(startDate, endDate);
+      if (held) {
+        setBookings(held);
         setLoading(false);
       } else {
         setLoading(true);
       }
 
       try {
-        const data = await syncBookingList({ token, locationId, force });
+        const data = await syncBookingRange({
+          token,
+          locationId,
+          from: startDate,
+          to: endDate,
+          force,
+        });
         if (isCurrent()) {
-          setAllBookings(data);
+          setBookings(data);
           setError(null);
         }
       } catch (err) {
@@ -82,13 +100,13 @@ export function useCalendarBookings({
           setError(
             err instanceof Error ? err.message : "Failed to load bookings",
           );
-          if (!hasCachedBookings(k)) setAllBookings([]);
+          if (!held) setBookings([]);
         }
       } finally {
         if (isCurrent()) setLoading(false);
       }
     },
-    [locationId],
+    [locationId, startDate, endDate, cachedFor],
   );
 
   useEffect(() => {
@@ -103,22 +121,13 @@ export function useCalendarBookings({
   useEffect(
     () =>
       subscribeToBookingCache(() => {
-        const entry = getCachedBookings(bookingCacheKey(locationId));
-        if (entry) setAllBookings(entry.data);
+        const held = cachedFor(startDate, endDate);
+        if (held) setBookings(held);
       }),
-    [locationId],
-  );
-
-  // Bookings within the visible window (YYYY-MM-DD strings compare lexically).
-  const bookings = useMemo(
-    () => allBookings.filter((b) => b.date >= startDate && b.date <= endDate),
-    [allBookings, startDate, endDate],
+    [cachedFor, startDate, endDate],
   );
 
   const refetch = useCallback(() => sync({ force: true }), [sync]);
 
-  // `bookings` is the visible window; `allBookings` is the full cached set,
-  // handy for deriving stable filter options (e.g. the location list) that
-  // shouldn't change as the user navigates between months.
-  return { bookings, allBookings, loading, error, refetch };
+  return { bookings, loading, error, refetch };
 }

@@ -511,14 +511,72 @@ export function nextBookableFrom({
   return null;
 }
 
+/** The least a booking has to say for the area-stagger rule to be applied to it. */
+export type StaggerBooking = {
+  roomId: number | null;
+  time: string | null;
+};
+
+/**
+ * Spaces in one area group have to start far enough apart for staff to run both, and the server
+ * refuses a booking that does not. The schedule has to know about it too, or staff are only told
+ * after the click — by a refusal they could have been warned about before it.
+ *
+ * `bookings` is the day's occupying bookings across EVERY space, never the filtered list: the
+ * clash is with a neighbour, which a category or search filter may well be hiding.
+ *
+ * The group is exactly the one the server builds (`roomIdsSharingStagger`): every space at THIS
+ * venue carrying the same area name, this one included. Two venues may both call an area "Arena"
+ * without their bookings having anything to do with each other.
+ */
+export function areaStaggerClash<B extends StaggerBooking>({
+  column,
+  dayWindow,
+  bookings,
+  minute,
+}: {
+  column: ScheduleColumn;
+  dayWindow: ScheduleDayWindow | null;
+  bookings: readonly B[];
+  minute: number;
+}): B | null {
+  if (column.roomId == null) return null;
+
+  const rooms = dayWindow?.rooms ?? [];
+  const space = rooms.find((room) => room.room_id === column.roomId);
+  const gap = space?.stagger_minutes ?? 0;
+
+  if (!space?.area_group || gap <= 0) return null;
+
+  const peers = new Set(
+    rooms
+      .filter(
+        (room) =>
+          room.area_group === space.area_group &&
+          room.location_id === space.location_id,
+      )
+      .map((room) => room.room_id),
+  );
+
+  return (
+    bookings.find(
+      (booking) =>
+        booking.roomId != null &&
+        peers.has(booking.roomId) &&
+        Math.abs(timeToMinutes(booking.time) - minute) < gap,
+    ) ?? null
+  );
+}
+
 /** Whether a walk-in starting now would fit before whatever is next. */
-export function walkInFit({
+export function walkInFit<B extends StaggerBooking>({
   column,
   schedule,
   dayWindow,
   occupancy,
   hardBlocks,
   nowMinutes,
+  bookings = [],
 }: {
   column: ScheduleColumn;
   schedule: ColumnSchedule;
@@ -526,11 +584,17 @@ export function walkInFit({
   occupancy: TimeRange[];
   hardBlocks: TimeRange[];
   nowMinutes: number;
+  /** The day's occupying bookings in every space, for the area-stagger rule. */
+  bookings?: readonly B[];
 }): {
   fits: boolean;
   freeFor: number;
   shortest: number | null;
   packageName: string | null;
+  /** The neighbouring booking this walk-in would start too close to, if any. */
+  areaClash: B | null;
+  /** Packages do run here now, but every one of them would still be running at closing. */
+  blockedByClose: boolean;
 } {
   const until = usableFreeUntil({
     schedule,
@@ -544,17 +608,37 @@ export function walkInFit({
   );
 
   const ids = new Set(packageIdsForSlot({ column, dayWindow, minute: nowMinutes }));
-  const shortestEntry = (dayWindow?.packages ?? [])
-    .filter((entry) => ids.has(entry.package_id) && (entry.duration_minutes ?? 0) > 0)
+  const running = (dayWindow?.packages ?? []).filter(
+    (entry) => ids.has(entry.package_id) && (entry.duration_minutes ?? 0) > 0,
+  );
+  const candidates = running
     // it must finish inside its OWN schedule — a room stays "open" only because a later package is
     .filter((entry) => nowMinutes + (entry.duration_minutes as number) <= entry.close_minutes)
-    .sort((a, b) => (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0))[0];
+    .sort((a, b) => (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0));
+  const shortestEntry = candidates[0];
+  // something runs here, but nothing short enough to finish before it closes
+  const blockedByClose = running.length > 0 && candidates.length === 0;
+
+  // measured at the minute a walk-in would actually be recorded at, not the raw clock
+  const walkInMinute =
+    Math.floor(nowMinutes / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
+  const areaClash = areaStaggerClash({
+    column,
+    dayWindow,
+    bookings,
+    minute: walkInMinute,
+  });
 
   return {
-    fits: shortestEntry !== undefined && (shortestEntry.duration_minutes as number) <= freeFor,
+    fits:
+      shortestEntry !== undefined &&
+      (shortestEntry.duration_minutes as number) <= freeFor &&
+      areaClash === null,
     freeFor,
     shortest: shortestEntry?.duration_minutes ?? null,
     packageName: shortestEntry?.name ?? null,
+    areaClash,
+    blockedByClose,
   };
 }
 
@@ -576,6 +660,7 @@ export function columnStatusFor({
   hardBlocks,
   isToday,
   nowMinutes,
+  bookings = [],
 }: {
   column: ScheduleColumn;
   schedule: ColumnSchedule;
@@ -584,6 +669,8 @@ export function columnStatusFor({
   hardBlocks: TimeRange[];
   isToday: boolean;
   nowMinutes: number;
+  /** The day's occupying bookings in every space, so the header agrees with the walk-in prompt. */
+  bookings?: readonly StaggerBooking[];
 }): ColumnStatus {
   if (!schedule.windowKnown) {
     return { kind: "closed", reason: "Schedule unavailable" };
@@ -619,6 +706,7 @@ export function columnStatusFor({
       occupancy,
       hardBlocks,
       nowMinutes,
+      bookings,
     });
     return { kind: "walk-in", fits: fit.fits, freeFor: fit.freeFor };
   }

@@ -16,6 +16,7 @@ import {
   type WaiverTemplate,
 } from "../../services/waiversService";
 import { BottomSheet } from "./BottomSheet";
+import { SheetSelect } from "./SheetSelect";
 
 const PRIMARY = "#0644C7";
 
@@ -89,16 +90,27 @@ const ModeCard = ({
  */
 export function LaunchKioskSheet({
   template,
+  templates,
   visible,
   onClose,
 }: {
   template: WaiverTemplate | null;
+  /** When the caller has no template in hand, pass the choices and let the sheet ask. */
+  templates?: WaiverTemplate[];
   visible: boolean;
   onClose: () => void;
 }) {
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
   const { locations } = useLocationOptions();
+
+  // The choices are only passed when the caller had no template in hand (the check-in desk).
+  // Default to the active catch-all so the common case is one tap, but keep the choice on screen —
+  // a kiosk launched against the wrong template collects a legally wrong signature.
+  const choices = templates ?? [];
+  const asksForTemplate = template == null && choices.length > 0;
+  const [pickedId, setPickedId] = useState<number | null>(null);
+  const picked = template ?? choices.find((t) => t.id === pickedId) ?? null;
 
   const [mode, setMode] = useState<"generic" | "bound">("generic");
   const [locationId, setLocationId] = useState<number | null>(null);
@@ -180,7 +192,16 @@ export function LaunchKioskSheet({
       setActivityType(null);
       setActivityPick(null);
       setActivityOpen(false);
+      if (template == null) {
+        const active = choices.filter((t) => t.status === "active");
+        setPickedId(
+          active.find((t) => t.isDefault)?.id ?? active[0]?.id ?? null,
+        );
+      }
     }
+    // `choices` is read only to seed the default; re-running on a new array identity would
+    // reset a choice staff had already made.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, template?.id]);
 
   useEffect(
@@ -227,9 +248,11 @@ export function LaunchKioskSheet({
     runSearch(linkTab, q);
   };
 
-  const isPreview = !!template && template.status !== "active";
+  const isPreview = !!picked && picked.status !== "active";
 
   const canLaunch = () => {
+    // nothing to launch until a template is settled on
+    if (!picked) return false;
     if (mode === "generic") return !isCompanyAdmin || locationId != null;
     // Either a purchase or an activity is enough to bind the session.
     return selected != null || activityPick != null;
@@ -241,7 +264,7 @@ export function LaunchKioskSheet({
    * up on the same screen; only how it is addressed differs.
    */
   const launch = async () => {
-    if (!template) return;
+    if (!picked) return;
     setError(null);
 
     if (mode === "generic") {
@@ -252,7 +275,7 @@ export function LaunchKioskSheet({
       router.push({
         pathname: "/waivers/kiosk",
         params: {
-          templateId: String(template.id),
+          templateId: String(picked.id),
           ...(resolvedLocation != null
             ? { locationId: String(resolvedLocation) }
             : {}),
@@ -284,7 +307,7 @@ export function LaunchKioskSheet({
         token,
         source.type,
         source.id,
-        { templateId: template.id },
+        { templateId: picked.id },
       );
       if (session.alreadyCompleted) {
         setError("This waiver has already been completed for the booking date.");
@@ -321,6 +344,26 @@ export function LaunchKioskSheet({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 24 }}
       >
+        {/* Which waiver this kiosk collects. Only asked when the caller had none in hand. */}
+        {asksForTemplate && (
+          <View className="mb-4">
+            <Text className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Waiver template
+            </Text>
+            <SheetSelect
+              icon="file-text"
+              title="Waiver template"
+              placeholder="— select a template —"
+              value={pickedId}
+              options={choices.map((t) => ({
+                label: t.status === "active" ? t.title : `${t.title} (draft)`,
+                value: t.id,
+              }))}
+              onSelect={(value) => setPickedId(Number(value))}
+            />
+          </View>
+        )}
+
         {isPreview && (
           <View className="mb-4 flex-row gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 dark:border-amber-900/40 dark:bg-amber-900/20">
             <Feather name="info" size={16} color="#D97706" />

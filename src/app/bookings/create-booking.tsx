@@ -28,6 +28,7 @@ import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InputField } from "../../components/ui/InputField";
 import { OverlapOverrideModal } from "../../components/ui/OverlapOverrideModal";
+import { Toast, type ToastType } from "../../components/ui/Toast";
 import { onlineStartsLost } from "../../lib/bookings/onlineSlotsLost";
 import {
   clampAddOnQuantity,
@@ -732,10 +733,24 @@ const CreateBookingScreen = () => {
     conflicts: string[];
     onlineSlotsLost: string[];
   } | null>(null);
+  // Saving after an approval takes a moment, and the screen went back to the form with nothing on
+  // it to say the PIN had landed. Say who approved it, and that the booking is on its way.
+  const [toast, setToast] = useState<{
+    message: string;
+    type: ToastType;
+  } | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [step]);
+
+  // It says the save is under way, so it must not outlive the save — least of all over the alert
+  // that says the save failed.
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   // Pricing (fees + special pricing), fetched only on the Payment step.
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
@@ -1050,7 +1065,9 @@ const CreateBookingScreen = () => {
 
     const startMinutes =
       slotPrefill.startMinutes ?? clockToMinutes(slotPrefill.time);
-    if (startMinutes == null) return null;
+    if (startMinutes == null) {
+      return "The start time carried over from the schedule was not readable, so it could not be kept.";
+    }
     const endMinutes = startMinutes + packageDurationMinutes;
 
     // same order as walkInSlot, or staff are told the wrong cause when two guards both hold
@@ -1888,6 +1905,13 @@ const CreateBookingScreen = () => {
         setPaymentError("");
       }
 
+      // An approval belongs to the booking it was given for, and that booking is now saved. The
+      // screen is normally popped from here, but the approval must not be able to reach a second
+      // booking even if it were not — one PIN would otherwise wave through the rest of the shift.
+      overrideTokenRef.current = null;
+      sideEffectsAcceptedRef.current = false;
+      setOverrideGate(null);
+
       markBookingsStale();
       Alert.alert("Booking created", `Reference: ${referenceNumber ?? id}`, [
         { text: "Done", onPress: () => router.back() },
@@ -1895,15 +1919,24 @@ const CreateBookingScreen = () => {
     } catch (err) {
       // The server saw a conflict the page could not — a space taken, or a break added, since it
       // loaded. Open the same PIN gate rather than leave staff with an error they cannot act on.
-      const body = err instanceof ApiError ? (err.body as { requires_override?: boolean; conflicts?: unknown } | undefined) : undefined;
-      if (err instanceof ApiError && err.status === 409 && body?.requires_override && Array.isArray(body.conflicts)) {
-        setOverrideGate({
-          conflicts: body.conflicts
-            .filter((c): c is string => typeof c === "string" && c.trim().length > 0)
-            .map((reason) => `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`),
-          onlineSlotsLost: [],
-        });
-        return;
+      // A card booking gets here too: the refusal is the booking's, not the card's, so it must
+      // never be dressed up as a payment problem the card had no part in.
+      const body =
+        err instanceof ApiError
+          ? (err.body as
+              | { requires_override?: boolean; conflicts?: unknown }
+              | undefined)
+          : undefined;
+      if (err instanceof ApiError && err.status === 409 && body?.requires_override) {
+        const conflicts = (Array.isArray(body.conflicts) ? body.conflicts : [])
+          .filter((c): c is string => typeof c === "string" && c.trim().length > 0)
+          .map((reason) => `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`);
+        // an empty list would offer staff a confirm button that only re-runs the same refusal
+        if (conflicts.length > 0) {
+          setPaymentError("");
+          setOverrideGate({ conflicts, onlineSlotsLost: [] });
+          return;
+        }
       }
       Alert.alert(
         "Failed to create booking",
@@ -3945,15 +3978,28 @@ const CreateBookingScreen = () => {
           lastSubmitAtRef.current = 0;
           void handleSubmit();
         }}
-        onApproved={(token) => {
+        onApproved={(token, approvedBy) => {
           overrideTokenRef.current = token;
           sideEffectsAcceptedRef.current = true;
           setOverrideGate(null);
+          // the first attempt already armed the double-tap guard; this approved retry is not one
           lastSubmitAtRef.current = 0;
+          setToast({
+            message: `${approvedBy} approved the overlap — saving the booking.`,
+            type: "info",
+          });
           // the gate is satisfied; run the same submit path again
           void handleSubmit();
         }}
       />
+
+      {!!toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
     </View>
   );
 };

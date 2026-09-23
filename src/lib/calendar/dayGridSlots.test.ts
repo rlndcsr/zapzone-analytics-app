@@ -8,6 +8,7 @@ import type {
 } from "../../services/scheduleWindowService.ts";
 import type { ScheduleColumn } from "../bookings/spaceScheduleGrid.ts";
 import {
+  areaStaggerClash,
   buildColumnSchedules,
   buildOccupancy,
   columnStatusFor,
@@ -264,6 +265,210 @@ describe("keeping a walk-in inside its own package's hours", () => {
     const fit = walkInFit({ ...setup(twoPackageWindow), nowMinutes: AT(17) });
     assert.equal(fit.shortest, 30);
     assert.equal(fit.packageName, "Early Slot");
+  });
+});
+
+describe("saying so when nothing here can finish before closing", () => {
+  it("flags a space whose every package would still be running at closing", () => {
+    // the 90-minute package is open at 19:00, but would run to 20:30 — past its own 20:00 close
+    const fit = walkInFit({
+      ...setup(window({ packages: [pkg({ duration_minutes: 90 })] })),
+      nowMinutes: AT(19),
+    });
+    assert.equal(fit.shortest, null);
+    assert.equal(fit.blockedByClose, true);
+    assert.equal(fit.fits, false);
+  });
+
+  it("does not flag a space that simply runs nothing at this minute", () => {
+    // the room is open until 22:00, but its only package shut at 18:00 — nothing to be blocked
+    const fit = walkInFit({
+      ...setup(
+        window({
+          rooms: [room({ close_minutes: AT(22) })],
+          packages: [pkg({ close_minutes: AT(18) })],
+        }),
+      ),
+      nowMinutes: AT(19),
+    });
+    assert.equal(fit.shortest, null);
+    assert.equal(fit.blockedByClose, false);
+  });
+
+  it("does not flag a space that still has something short enough", () => {
+    const fit = walkInFit({ ...setup(window()), nowMinutes: AT(19) });
+    assert.equal(fit.shortest, 60);
+    assert.equal(fit.blockedByClose, false);
+  });
+});
+
+describe("warning about area staggering before the server refuses it", () => {
+  /** Two bays in one arena that have to start 30 minutes apart. */
+  const arena = (over: Partial<ScheduleDayWindow> = {}) =>
+    window({
+      rooms: [
+        room({ room_id: 1, area_group: "Arena", stagger_minutes: 30 }),
+        room({ room_id: 2, area_group: "Arena", stagger_minutes: 30 }),
+      ],
+      packages: [pkg({ room_ids: [1, 2] })],
+      ...over,
+    });
+
+  const neighbour = (time: string) => booking(time, 60, { roomId: 2 });
+
+  it("names the neighbouring booking a walk-in would start too close to", () => {
+    const clash = areaStaggerClash({
+      column: airlock,
+      dayWindow: arena(),
+      bookings: [neighbour("17:10")],
+      minute: AT(17),
+    });
+    assert.equal(clash?.roomId, 2);
+    assert.equal(clash?.time, "17:10");
+  });
+
+  it("counts a neighbour that started before it, not only one still to come", () => {
+    const clash = areaStaggerClash({
+      column: airlock,
+      dayWindow: arena(),
+      bookings: [neighbour("16:45")],
+      minute: AT(17),
+    });
+    assert.equal(clash?.time, "16:45");
+  });
+
+  it("allows a neighbour exactly the stagger away", () => {
+    assert.equal(
+      areaStaggerClash({
+        column: airlock,
+        dayWindow: arena(),
+        bookings: [neighbour("17:30")],
+        minute: AT(17),
+      }),
+      null,
+    );
+  });
+
+  it("counts the space's own bookings — the server's group includes it", () => {
+    const clash = areaStaggerClash({
+      column: airlock,
+      dayWindow: arena(),
+      bookings: [booking("17:10", 60, { roomId: 1 })],
+      minute: AT(17),
+    });
+    assert.equal(clash?.roomId, 1);
+  });
+
+  it("ignores a space in another area, and one in no area at all", () => {
+    const mixed = window({
+      rooms: [
+        room({ room_id: 1, area_group: "Arena", stagger_minutes: 30 }),
+        room({ room_id: 2, area_group: "Lanes", stagger_minutes: 30 }),
+        room({ room_id: 3, area_group: null, stagger_minutes: 0 }),
+      ],
+      packages: [pkg({ room_ids: [1, 2, 3] })],
+    });
+    assert.equal(
+      areaStaggerClash({
+        column: airlock,
+        dayWindow: mixed,
+        bookings: [neighbour("17:10"), booking("17:10", 60, { roomId: 3 })],
+        minute: AT(17),
+      }),
+      null,
+    );
+  });
+
+  it("ignores another venue's area of the same name — a group belongs to one venue", () => {
+    const twoVenues = window({
+      rooms: [
+        room({ room_id: 1, location_id: 3, area_group: "Arena", stagger_minutes: 30 }),
+        room({ room_id: 2, location_id: 9, area_group: "Arena", stagger_minutes: 30 }),
+      ],
+      packages: [pkg({ room_ids: [1, 2] })],
+    });
+    assert.equal(
+      areaStaggerClash({
+        column: airlock,
+        dayWindow: twoVenues,
+        bookings: [neighbour("17:10")],
+        minute: AT(17),
+      }),
+      null,
+    );
+  });
+
+  it("holds nobody to a stagger of zero", () => {
+    assert.equal(
+      areaStaggerClash({
+        column: airlock,
+        dayWindow: arena({
+          rooms: [
+            room({ room_id: 1, area_group: "Arena", stagger_minutes: 0 }),
+            room({ room_id: 2, area_group: "Arena", stagger_minutes: 0 }),
+          ],
+        }),
+        bookings: [neighbour("17:10")],
+        minute: AT(17),
+      }),
+      null,
+    );
+  });
+
+  it("never holds a roomless column to it", () => {
+    assert.equal(
+      areaStaggerClash({
+        column: { ...airlock, key: "pkg-7", roomId: null, virtual: true },
+        dayWindow: arena(),
+        bookings: [neighbour("17:10")],
+        minute: AT(17),
+      }),
+      null,
+    );
+  });
+
+  it("refuses the walk-in and hands back the clash, though the space itself is free", () => {
+    const fit = walkInFit({
+      ...setup(arena()),
+      nowMinutes: AT(17),
+      bookings: [neighbour("17:10")],
+    });
+    assert.equal(fit.fits, false);
+    assert.equal(fit.areaClash?.time, "17:10");
+    // the space's own hours are untouched: it is the neighbour that refuses this, nothing here
+    assert.equal(fit.shortest, 60);
+    assert.equal(fit.freeFor, AT(20) - AT(17));
+  });
+
+  it("measures from the minute a walk-in is recorded at, not the raw clock", () => {
+    // 17:04 is recorded as 17:00, which is 30 clear of 17:30 — 17:04 itself would not be
+    const fit = walkInFit({
+      ...setup(arena()),
+      nowMinutes: AT(17, 4),
+      bookings: [neighbour("17:30")],
+    });
+    assert.equal(fit.areaClash, null);
+  });
+
+  it("lets it through once no neighbour is near", () => {
+    const fit = walkInFit({
+      ...setup(arena()),
+      nowMinutes: AT(17),
+      bookings: [neighbour("18:00")],
+    });
+    assert.equal(fit.fits, true);
+    assert.equal(fit.areaClash, null);
+  });
+
+  it("says so on the column header too, so it does not read as free to start", () => {
+    const status = columnStatusFor({
+      ...setup(arena()),
+      isToday: true,
+      nowMinutes: AT(17),
+      bookings: [neighbour("17:10")],
+    });
+    assert.equal(status.kind, "walk-in");
+    assert.equal(status.kind === "walk-in" && status.fits, false);
   });
 });
 

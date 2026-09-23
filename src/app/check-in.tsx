@@ -28,6 +28,7 @@ import { VerifyTicketDetails } from "../components/checkin/VerifyTicketDetails";
 import { BottomSheet } from "../components/ui/BottomSheet";
 import { CheckInBookingsTable } from "../components/ui/CheckInBookingsTable";
 import { DatePickerSheet } from "../components/ui/DatePickerSheet";
+import { LaunchKioskSheet } from "../components/ui/LaunchKioskSheet";
 import { Pagination } from "../components/ui/Pagination";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../components/ui/ViewToggle";
@@ -47,6 +48,10 @@ import {
   type CalendarBooking,
   type ScanBooking,
 } from "../services/bookingsService";
+import {
+  fetchTemplates,
+  type WaiverTemplate,
+} from "../services/waiversService";
 
 const PRIMARY = "#0644C7";
 
@@ -289,6 +294,41 @@ export default function CheckInWaiversScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [detailsOnly, setDetailsOnly] = useState(false);
   const [guestQuery, setGuestQuery] = useState("");
+
+  // The desk's own kiosk launch, bound to no record. The templates are fetched once and kept, so a
+  // second launch reopens the sheet rather than asking the API again.
+  const [kioskTemplates, setKioskTemplates] = useState<WaiverTemplate[]>([]);
+  const [kioskLoading, setKioskLoading] = useState(false);
+  const [kioskOpen, setKioskOpen] = useState(false);
+
+  const openKiosk = useCallback(async () => {
+    if (kioskTemplates.length > 0) {
+      setKioskOpen(true);
+      return;
+    }
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not signed in", "Sign in again to open the waiver kiosk.");
+      return;
+    }
+    setKioskLoading(true);
+    try {
+      const list = await fetchTemplates(token);
+      if (list.length === 0) {
+        Alert.alert(
+          "No waiver templates",
+          "No waiver templates exist yet — create one first.",
+        );
+        return;
+      }
+      setKioskTemplates(list);
+      setKioskOpen(true);
+    } catch {
+      Alert.alert("Unable to open kiosk", "Could not load waiver templates.");
+    } finally {
+      setKioskLoading(false);
+    }
+  }, [kioskTemplates.length]);
 
   /** True while any record owns the screen — the lists step aside for it. */
   const busySurface =
@@ -641,6 +681,40 @@ export default function CheckInWaiversScreen() {
               bulk order, membership or waiver code, or find the guest by name.
             </Text>
           </View>
+        </View>
+
+        {/* The web page's two header actions. Below the title rather than beside it: at phone
+            width there is no room for both next to the name without truncating one. */}
+        <View className="mt-3 flex-row gap-2">
+          <Pressable
+            onPress={openKiosk}
+            disabled={kioskLoading}
+            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900 ${
+              kioskLoading ? "opacity-60" : ""
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel="Launch waiver kiosk"
+          >
+            {kioskLoading ? (
+              <ActivityIndicator size="small" color={PRIMARY} />
+            ) : (
+              <Feather name="tablet" size={14} color={headerIcon} />
+            )}
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              {kioskLoading ? "Loading…" : "Launch Kiosk"}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push("/waivers/waivers")}
+            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900"
+            accessibilityRole="button"
+            accessibilityLabel="Open waiver records"
+          >
+            <Feather name="file-text" size={14} color={headerIcon} />
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Waiver Records
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -1528,6 +1602,14 @@ export default function CheckInWaiversScreen() {
           setSelectedDate(date);
           setDatePickerOpen(false);
         }}
+      />
+
+      {/* Launched from the desk with no record in hand, so the sheet asks which waiver it is. */}
+      <LaunchKioskSheet
+        template={null}
+        templates={kioskTemplates}
+        visible={kioskOpen}
+        onClose={() => setKioskOpen(false)}
       />
     </View>
   );

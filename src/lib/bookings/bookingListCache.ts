@@ -1,5 +1,6 @@
 import {
   fetchAllBookings,
+  fetchBookingsInRange,
   type CalendarBooking,
 } from "../../services/bookingsService";
 import { mergeBookingInto } from "./patchBooking";
@@ -13,8 +14,26 @@ const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<CalendarBooking[]>>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// The calendars want one day, one week or one month — not the whole history. Those windows live
+// in their own map, keyed by scope AND range, so a day's grid costs one small request instead of
+// paging the entire venue. Kept apart from `cache` on purpose: a window is not the full list, and
+// anything reading `cache` is entitled to assume what it holds is complete for its scope.
+const rangeCache = new Map<string, CacheEntry>();
+const rangeInFlight = new Map<string, Promise<CalendarBooking[]>>();
+/** Swiping through a month of days would otherwise keep every one of them for the session. */
+const MAX_RANGE_ENTRIES = 24;
+
 export const bookingCacheKey = (locationId?: number) =>
   String(locationId ?? "all");
+
+export const bookingRangeKey = (
+  from: string,
+  to: string,
+  locationId?: number,
+) => `${bookingCacheKey(locationId)}|${from}|${to}`;
+
+export const getCachedRange = (key: string): CacheEntry | undefined =>
+  rangeCache.get(key);
 
 export const getCachedBookings = (key: string): CacheEntry | undefined =>
   cache.get(key);
@@ -34,6 +53,7 @@ let stale = false;
 /** Mark the cached booking list stale so it refetches on next focus. */
 export function markBookingsStale(): void {
   cache.clear();
+  rangeCache.clear();
   stale = true;
 }
 
@@ -69,13 +89,17 @@ export function patchCachedBooking(
 ): void {
   let touched = false;
 
-  for (const [key, entry] of cache) {
-    const data = mergeBookingInto(entry.data, bookingId, patch);
-    if (data === entry.data) continue;
+  // Both maps: a booking the calendar is showing lives in a range entry, and a note saved from
+  // there has to appear on the grid behind it, not only in the full list.
+  for (const map of [cache, rangeCache]) {
+    for (const [key, entry] of map) {
+      const data = mergeBookingInto(entry.data, bookingId, patch);
+      if (data === entry.data) continue;
 
-    // Keep fetchedAt: a patch refreshes a field, it does not re-date the fetch.
-    cache.set(key, { ...entry, data });
-    touched = true;
+      // Keep fetchedAt: a patch refreshes a field, it does not re-date the fetch.
+      map.set(key, { ...entry, data });
+      touched = true;
+    }
   }
 
   if (!touched) return;
@@ -122,5 +146,54 @@ export async function syncBookingList({
 
   const data = await pending;
   cache.set(key, { fetchedAt: Date.now(), data });
+  return data;
+}
+
+/**
+ * Fetch + cache one date window for this scope, joining any sync already in flight.
+ *
+ * A fresh FULL list already contains the window, so it is used rather than asking the server for
+ * something we hold — that is what keeps opening a calendar straight after Manage Bookings
+ * instant. The reverse is never done: a window is not the full list and must not be filed as one.
+ */
+export async function syncBookingRange({
+  token,
+  locationId,
+  from,
+  to,
+  force = false,
+}: {
+  token: string;
+  locationId?: number;
+  from: string;
+  to: string;
+  force?: boolean;
+}): Promise<CalendarBooking[]> {
+  const full = cache.get(bookingCacheKey(locationId));
+  if (!force && isBookingCacheFresh(full)) {
+    return full!.data.filter((b) => b.date >= from && b.date <= to);
+  }
+
+  const key = bookingRangeKey(from, to, locationId);
+
+  const joined = force ? undefined : rangeInFlight.get(key);
+  if (joined) return joined;
+
+  const pending = fetchBookingsInRange({ token, locationId, from, to }).finally(
+    () => {
+      rangeInFlight.delete(key);
+    },
+  );
+  rangeInFlight.set(key, pending);
+
+  const data = await pending;
+  // Re-inserting moves the key to the end, so the oldest-touched window is the one dropped.
+  rangeCache.delete(key);
+  rangeCache.set(key, { fetchedAt: Date.now(), data });
+  while (rangeCache.size > MAX_RANGE_ENTRIES) {
+    const oldest = rangeCache.keys().next();
+    if (oldest.done) break;
+    rangeCache.delete(oldest.value);
+  }
   return data;
 }

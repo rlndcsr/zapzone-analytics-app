@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -286,6 +286,10 @@ const slotLabel = (mins: number): string => {
   const meridian = h24 >= 12 ? "PM" : "AM";
   return `${h24 % 12 || 12}:${pad2(m)} ${meridian}`;
 };
+
+/** "3:30 PM – 9:30 PM", the hours a free band actually covers. */
+const rangeLabel = (from: number, to: number): string =>
+  `${slotLabel(from)} – ${slotLabel(to)}`;
 
 function formatTime(time: string | null): string {
   if (!time) return "Any time";
@@ -861,6 +865,90 @@ const summaryText = (group: DayGroup | undefined): string => {
   return parts.join(" • ");
 };
 
+export type SlotMarkerHandle = {
+  show: (columnIndex: number, minute: number, picking: boolean) => void;
+  hide: () => void;
+};
+
+/**
+ * The "you are here" marker on a free band: which minute a lift would book.
+ *
+ * It owns its own position instead of taking it from the screen's state. A drag updates it many
+ * times, and the day grid is thousands of views — re-rendering the screen for each move is what
+ * made picking a time stutter. The parent pushes updates in through the ref, so a drag repaints
+ * this one small view and nothing else.
+ *
+ * Drawn as a sibling of the columns rather than inside one, so there is a single marker on the
+ * grid however many spaces are on it.
+ */
+const SlotMarker = React.forwardRef<
+  SlotMarkerHandle,
+  {
+    columnWidth: number;
+    /** Where a column's body starts, under its header. */
+    topOffset: number;
+    windowStart: number;
+    pxPerMinute: number;
+    spanMinutes: number;
+  }
+>(({ columnWidth, topOffset, windowStart, pxPerMinute, spanMinutes }, ref) => {
+  const [at, setAt] = useState<{
+    column: number;
+    minute: number;
+    picking: boolean;
+  } | null>(null);
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      show: (column, minute, picking) =>
+        setAt((prev) =>
+          prev &&
+          prev.column === column &&
+          prev.minute === minute &&
+          prev.picking === picking
+            ? prev
+            : { column, minute, picking },
+        ),
+      hide: () => setAt((prev) => (prev === null ? prev : null)),
+    }),
+    [],
+  );
+
+  if (!at) return null;
+
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        left: at.column * columnWidth,
+        width: columnWidth,
+        top: topOffset + (at.minute - windowStart) * pxPerMinute,
+        height: Math.max(16, spanMinutes * pxPerMinute),
+      }}
+      className={`z-30 flex-row items-center gap-1 border-y px-1 ${
+        at.picking
+          ? "border-solid border-[#0644C7] bg-blue-50/95 dark:bg-blue-900/70"
+          : "border-dashed border-gray-400 bg-white/70 dark:border-neutral-500 dark:bg-black/60"
+      }`}
+    >
+      <Plus size={11} color={at.picking ? "#0644C7" : "#4b5563"} />
+      <Text
+        className={`text-[10px] font-bold leading-tight ${
+          at.picking
+            ? "text-[#0644C7] dark:text-blue-300"
+            : "text-gray-700 dark:text-gray-200"
+        }`}
+        numberOfLines={1}
+      >
+        {slotLabel(at.minute)}
+      </Text>
+    </View>
+  );
+});
+SlotMarker.displayName = "SlotMarker";
+
 const Calendar = () => {
   const insets = useSafeAreaInsets();
   const today = useMemo(() => new Date(), []);
@@ -1180,6 +1268,7 @@ const Calendar = () => {
           hardBlocks: dayHardBlocks.get(column.key) ?? [],
           isToday: isVenueToday,
           nowMinutes,
+          bookings: dayActiveBookings,
         }),
       );
     }
@@ -1192,6 +1281,7 @@ const Calendar = () => {
     dayHardBlocks,
     isVenueToday,
     nowMinutes,
+    dayActiveBookings,
   ]);
 
   /** The widest open→close across the day's columns, so a space that is open
@@ -1317,9 +1407,11 @@ const Calendar = () => {
     }
     return rows.sort((x, y) => y.overlapMinutes - x.overlapMinutes);
   }, [dayColumnsForConflicts, dayPlacementsForConflicts]);
+  /** Real spaces on the grid. A virtual column is a booking with no space, not a space. */
+  const daySpaceCount = dayColumns.filter((c) => !c.virtual).length;
   /** Room columns the "hide empty spaces" toggle is currently holding back. */
   const hiddenSpaceCount = hideEmptySpaces
-    ? spaces.length - dayColumns.filter((c) => !c.virtual).length
+    ? spaces.length - daySpaceCount
     : 0;
 
   /** Where a column's free band starts on screen, in minutes past midnight. */
@@ -1405,6 +1497,74 @@ const Calendar = () => {
   );
 
   /**
+   * The minute a tap where the finger is would actually book — the web shows this on hover, and
+   * a finger is the nearest thing to a pointer we have. Resolved through the same call the tap
+   * itself makes, so the marker can never name a minute the tap would not use.
+   */
+  const previewSlotMinute = useCallback(
+    (column: ScheduleColumn, rawMinute: number): number | null => {
+      const schedule = daySchedules.get(column.key);
+      if (!schedule || isPastDate) return null;
+
+      return (
+        resolveSlotTap({
+          column,
+          schedule,
+          dayWindow: scheduleWindow,
+          occupancy: dayOccupancy.get(column.key) ?? [],
+          hardBlocks: dayHardBlocks.get(column.key) ?? [],
+          rawMinute,
+          isToday: isVenueToday,
+        })?.minute ?? null
+      );
+    },
+    [
+      daySchedules,
+      isPastDate,
+      scheduleWindow,
+      dayOccupancy,
+      dayHardBlocks,
+      isVenueToday,
+    ],
+  );
+
+  /** The marker is one booking interval tall, the way the web draws it. */
+  const previewSpanMinutes = Math.max(
+    5,
+    scheduleWindow?.interval_minutes ?? SLOT_MINUTES,
+  );
+
+  const markerRef = useRef<SlotMarkerHandle>(null);
+  /** The minute under the finger, for the lift to read. A ref: nothing on screen reads it. */
+  const pickedMinuteRef = useRef<number | null>(null);
+  /**
+   * True once a long press has turned the touch into a deliberate pick. Held in a ref for the
+   * handlers and mirrored into state only to lock the scrollers — two renders a gesture, not one
+   * per move.
+   */
+  const pickingRef = useRef(false);
+  const [picking, setPicking] = useState(false);
+
+  const trackHover = useCallback(
+    (column: ScheduleColumn, columnIndex: number, rawMinute: number) => {
+      const minute = previewSlotMinute(column, rawMinute);
+      // Dragging past the end of the band resolves to nothing; hold the last good minute rather
+      // than blinking the marker out from under the finger.
+      if (minute === null) return;
+      pickedMinuteRef.current = minute;
+      markerRef.current?.show(columnIndex, minute, pickingRef.current);
+    },
+    [previewSlotMinute],
+  );
+
+  const endHover = useCallback(() => {
+    markerRef.current?.hide();
+    pickedMinuteRef.current = null;
+    pickingRef.current = false;
+    setPicking((was) => (was ? false : was));
+  }, []);
+
+  /**
    * The header's walk-in carries the minute the guests are actually standing
    * there, deliberately not one of the package's own start times — so it goes
    * around the snapping a band tap does. A walk-in whose gap is too short for
@@ -1438,13 +1598,19 @@ const Calendar = () => {
         occupancy: dayOccupancy.get(column.key) ?? [],
         hardBlocks: dayHardBlocks.get(column.key) ?? [],
         nowMinutes,
+        bookings: dayActiveBookings,
       });
-      if (fit.fits || fit.shortest === null) {
+      // an area clash and a space that closes before anything can finish are each a refusal of
+      // their own, so either must stop a walk-in that has nothing to fit
+      if (
+        fit.fits ||
+        (fit.shortest === null && fit.areaClash === null && !fit.blockedByClose)
+      ) {
         openBookingForTap(column, tap);
         return;
       }
 
-      const endMinute = walkInMinute + fit.shortest;
+      const endMinute = walkInMinute + (fit.shortest ?? 0);
       const packageName = fit.packageName ?? "the shortest package here";
       const clash =
         dayBookings
@@ -1453,13 +1619,36 @@ const Calendar = () => {
           .filter(({ start }) => start >= walkInMinute && start < endMinute)
           .sort((a, b) => a.start - b.start)[0]?.booking ?? null;
 
+      // The area group includes this space, so the clash can be its own booking — calling that
+      // "a space nearby" would name the wrong space.
+      const areaClashIsHere =
+        !!fit.areaClash && fit.areaClash.roomId === column.roomId;
+
+      // say which problem it is: something in the area starting too close, nothing here short
+      // enough to finish before closing, or this walk-in running long
       const lines = [
-        `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
-        "",
-        `Walk-in would run ${slotLabel(walkInMinute)} – ${slotLabel(endMinute)}`,
-        `Space is free for ${fit.freeFor} min`,
-        `Overlap: ${fit.shortest - fit.freeFor} min`,
+        fit.areaClash
+          ? areaClashIsHere
+            ? `${column.name} already has a booking at ${slotLabel(
+                timeToMinutes(fit.areaClash.time),
+              )}, and bookings in its area have to start far enough apart for staff to run them.`
+            : `${column.name} shares an area with a space that already starts at ${slotLabel(
+                timeToMinutes(fit.areaClash.time),
+              )}. They have to start far enough apart for staff to run both.`
+          : fit.shortest === null
+            ? `Every package in ${column.name} would still be running when it closes, so none of them can be started now.`
+            : `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
       ];
+      if (fit.shortest !== null) {
+        lines.push(
+          "",
+          `Walk-in would run ${slotLabel(walkInMinute)} – ${slotLabel(endMinute)}`,
+          `Space is free for ${fit.freeFor} min`,
+        );
+        if (!fit.areaClash) {
+          lines.push(`Overlap: ${fit.shortest - fit.freeFor} min`);
+        }
+      }
       if (clash) {
         lines.push(
           "",
@@ -1468,14 +1657,24 @@ const Calendar = () => {
         );
       }
 
-      Alert.alert("This walk-in runs past the next booking", lines.join("\n"), [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Start anyway",
-          onPress: () =>
-            openBookingForTap(column, tap, { walkInOverride: true }),
-        },
-      ]);
+      Alert.alert(
+        fit.areaClash
+          ? areaClashIsHere
+            ? "Another booking here starts too close to this"
+            : "Another space nearby starts too close to this"
+          : fit.shortest === null
+            ? "Nothing here can finish before closing"
+            : "This walk-in runs past the next booking",
+        lines.join("\n"),
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Start anyway",
+            onPress: () =>
+              openBookingForTap(column, tap, { walkInOverride: true }),
+          },
+        ],
+      );
     },
     [
       daySchedules,
@@ -1486,6 +1685,7 @@ const Calendar = () => {
       dayHardBlocks,
       nowMinutes,
       dayBookings,
+      dayActiveBookings,
       knownRoomIds,
       openBookingForTap,
     ],
@@ -1648,6 +1848,8 @@ const Calendar = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        // Picking a time IS a vertical drag, so the page must hold still under it.
+        scrollEnabled={!picking}
         contentContainerStyle={{
           paddingBottom: insets.bottom + 96,
           paddingTop: 0,
@@ -2161,13 +2363,25 @@ const Calendar = () => {
                           Time
                         </Text>
                       </View>
+                      {/* A line per quarter hour, darker on the hour — the web's own weighting,
+                          so the eye can still find 4:00 among its quarters. */}
                       {daySlots.map((minutes) => (
                         <View
                           key={minutes}
                           style={{ height: SLOT_HEIGHT }}
-                          className="px-3 pt-1 border-b border-gray-100 dark:border-neutral-800"
+                          className={`px-3 pt-1 border-b ${
+                            (minutes + SLOT_MINUTES) % 60 === 0
+                              ? "border-gray-200 dark:border-neutral-700"
+                              : "border-gray-100 dark:border-neutral-800"
+                          }`}
                         >
-                          <Text className="text-xs font-medium text-[#0644C7]">
+                          <Text
+                            className={`text-xs text-[#0644C7] ${
+                              minutes % 60 === 0
+                                ? "font-bold"
+                                : "font-medium opacity-70"
+                            }`}
+                          >
                             {slotLabel(minutes)}
                           </Text>
                         </View>
@@ -2177,9 +2391,11 @@ const Calendar = () => {
                     <ScrollView
                       horizontal
                       showsHorizontalScrollIndicator={false}
+                      // Picking a time IS a drag, so the grid must hold still under it.
+                      scrollEnabled={!picking}
                     >
                       <View className="flex-row">
-                        {dayColumns.map((column) => {
+                        {dayColumns.map((column, columnIndex) => {
                           const schedule = daySchedules.get(column.key);
                           const band = schedule
                             ? bandGeometry(
@@ -2245,7 +2461,11 @@ const Calendar = () => {
                                   <View
                                     key={minutes}
                                     style={{ height: SLOT_HEIGHT }}
-                                    className="border-b border-gray-100 dark:border-neutral-800"
+                                    className={`border-b ${
+                                      (minutes + SLOT_MINUTES) % 60 === 0
+                                        ? "border-gray-200 dark:border-neutral-700"
+                                        : "border-gray-100 dark:border-neutral-800"
+                                    }`}
                                   />
                                 ))}
 
@@ -2254,51 +2474,131 @@ const Calendar = () => {
                                     bookings sit on top and the tap is walked
                                     forward to the next minute that is free. */}
                                 {band &&
-                                  (bookable ? (
-                                    <Pressable
-                                      onPress={(e) =>
-                                        openSlot(
-                                          column,
-                                          minuteAtOffset(
-                                            schedule
-                                              ? bandOriginFor(schedule)
-                                              : dayWindow.start,
-                                            e.nativeEvent.locationY,
-                                            PX_PER_MINUTE,
-                                          ),
-                                        )
-                                      }
-                                      accessibilityRole="button"
-                                      accessibilityLabel={`Start a booking in ${column.name}`}
-                                      style={{
-                                        position: "absolute",
-                                        left: 0,
-                                        right: 0,
-                                        top: band.top,
-                                        height: band.height,
-                                      }}
-                                      className="overflow-hidden bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
-                                    >
-                                      <View className="flex-row items-center gap-1 px-1 pt-1">
-                                        <Plus size={10} color="#9ca3af" />
-                                        <Text className="text-[9px] font-semibold text-gray-400 dark:text-gray-500">
-                                          Tap to book
-                                        </Text>
-                                      </View>
-                                    </Pressable>
-                                  ) : (
-                                    <View
-                                      pointerEvents="none"
-                                      style={{
-                                        position: "absolute",
-                                        left: 0,
-                                        right: 0,
-                                        top: band.top,
-                                        height: band.height,
-                                      }}
-                                      className="bg-gray-50 dark:bg-neutral-900/40"
-                                    />
-                                  ))}
+                                  (() => {
+                                    // The web puts these hours in a hover tooltip. There is no
+                                    // hover here, so the band says them itself — otherwise the
+                                    // only way to learn them is to tap and find out.
+                                    const hours =
+                                      schedule?.open != null &&
+                                      schedule?.close != null
+                                        ? rangeLabel(
+                                            schedule.open,
+                                            schedule.close,
+                                          )
+                                        : null;
+                                    const bandOrigin = schedule
+                                      ? bandOriginFor(schedule)
+                                      : dayWindow.start;
+                                    const atFinger = (y: number) =>
+                                      minuteAtOffset(
+                                        bandOrigin,
+                                        y,
+                                        PX_PER_MINUTE,
+                                      );
+                                    return bookable ? (
+                                      <Pressable
+                                        // A tap books the minute tapped, as it always has. Holding
+                                        // instead starts a pick: the grid stops scrolling, the
+                                        // marker follows the finger, and lifting books where it
+                                        // ended up. A long press never also fires onPress.
+                                        onPress={(e) =>
+                                          openSlot(
+                                            column,
+                                            atFinger(e.nativeEvent.locationY),
+                                          )
+                                        }
+                                        onLongPress={() => {
+                                          pickingRef.current = true;
+                                          setPicking(true);
+                                          if (pickedMinuteRef.current !== null) {
+                                            markerRef.current?.show(
+                                              columnIndex,
+                                              pickedMinuteRef.current,
+                                              true,
+                                            );
+                                          }
+                                        }}
+                                        delayLongPress={250}
+                                        onTouchStart={(e) =>
+                                          trackHover(
+                                            column,
+                                            columnIndex,
+                                            atFinger(e.nativeEvent.locationY),
+                                          )
+                                        }
+                                        onTouchMove={(e) =>
+                                          trackHover(
+                                            column,
+                                            columnIndex,
+                                            atFinger(e.nativeEvent.locationY),
+                                          )
+                                        }
+                                        onTouchEnd={() => {
+                                          const minute = pickedMinuteRef.current;
+                                          const picked = pickingRef.current;
+                                          endHover();
+                                          if (picked && minute !== null) {
+                                            openSlot(column, minute);
+                                          }
+                                        }}
+                                        onTouchCancel={endHover}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={
+                                          hours
+                                            ? `Available ${hours} in ${column.name} — tap to start a booking, or hold to pick a time`
+                                            : `Start a booking in ${column.name}`
+                                        }
+                                        style={{
+                                          position: "absolute",
+                                          left: 0,
+                                          right: 0,
+                                          top: band.top,
+                                          height: band.height,
+                                        }}
+                                        className="overflow-hidden bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
+                                      >
+                                        {/* Untouchable, so locationY above stays measured from
+                                            the band and not from whichever label was hit. */}
+                                        <View pointerEvents="none">
+                                          <View className="flex-row items-center gap-1 px-1 pt-1">
+                                            <Plus size={10} color="#9ca3af" />
+                                            {/* The hold gesture is only useful if staff know it
+                                                is there, so the band says so. */}
+                                            <Text className="text-[9px] font-semibold text-gray-400 dark:text-gray-500">
+                                              Tap · hold to pick
+                                            </Text>
+                                          </View>
+                                          {/* Only when the band has the room for it — a sliver of
+                                              free time must not paint its hours over a booking. */}
+                                          {!!hours && band.height >= 34 && (
+                                            <Text
+                                              className="px-1 text-[9px] leading-tight text-gray-400 dark:text-gray-500"
+                                              numberOfLines={1}
+                                            >
+                                              {hours}
+                                            </Text>
+                                          )}
+                                        </View>
+                                      </Pressable>
+                                    ) : (
+                                      <View
+                                        accessible={!!hours}
+                                        accessibilityLabel={
+                                          hours
+                                            ? `${column.name} available ${hours}`
+                                            : undefined
+                                        }
+                                        style={{
+                                          position: "absolute",
+                                          left: 0,
+                                          right: 0,
+                                          top: band.top,
+                                          height: band.height,
+                                        }}
+                                        className="bg-gray-50 dark:bg-neutral-900/40"
+                                      />
+                                    );
+                                  })()}
 
                                 {(schedule?.closedRanges ?? []).map(
                                   (closure, index) => {
@@ -2435,25 +2735,58 @@ const Calendar = () => {
                             </View>
                           );
                         })}
+
+                        {/* One marker for the whole grid, positioned by column. */}
+                        <SlotMarker
+                          ref={markerRef}
+                          columnWidth={DAY_COL_WIDTH}
+                          topOffset={GRID_HEADER_HEIGHT}
+                          windowStart={dayWindow.start}
+                          pxPerMinute={PX_PER_MINUTE}
+                          spanMinutes={previewSpanMinutes}
+                        />
                       </View>
                     </ScrollView>
                   </View>
                 )}
 
+                {/* The web grid's footer: what is on the day, and what the two
+                    background tones mean. A virtual column is a booking with no
+                    space of its own, so it is not counted as one. */}
                 <View className="px-4 py-2.5 border-t border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/50">
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    <Text className="font-semibold text-[#0644C7]">
-                      {dayBookings.length}
-                    </Text>{" "}
-                    {dayBookings.length === 1 ? "booking" : "bookings"} across{" "}
-                    <Text className="font-semibold text-gray-700 dark:text-gray-200">
-                      {dayColumns.length}
-                    </Text>{" "}
-                    {dayColumns.length === 1 ? "column" : "columns"}
-                    {hiddenSpaceCount > 0
-                      ? ` · ${hiddenSpaceCount} empty space${hiddenSpaceCount === 1 ? "" : "s"} hidden`
-                      : ""}
-                  </Text>
+                  <View className="flex-row flex-wrap items-center gap-x-4 gap-y-1">
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      <Text className="font-semibold text-[#0644C7]">
+                        {dayBookings.length}
+                      </Text>{" "}
+                      {dayBookings.length === 1 ? "booking" : "bookings"} across{" "}
+                      <Text className="font-semibold text-gray-700 dark:text-gray-200">
+                        {daySpaceCount}
+                      </Text>{" "}
+                      {daySpaceCount === 1 ? "space" : "spaces"}
+                      {hiddenSpaceCount > 0
+                        ? ` · ${hiddenSpaceCount} empty space${hiddenSpaceCount === 1 ? "" : "s"} hidden`
+                        : ""}
+                    </Text>
+                    <View className="flex-row items-center gap-1.5">
+                      <View className="h-2.5 w-3.5 rounded-sm border border-gray-300 bg-gray-100 dark:border-neutral-600 dark:bg-neutral-800" />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        Available
+                      </Text>
+                    </View>
+                    <View className="flex-row items-center gap-1.5">
+                      <View className="h-2.5 w-3.5 rounded-sm border-l-4 border-green-400 bg-green-50 dark:bg-green-900/30" />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        Booked
+                      </Text>
+                    </View>
+                  </View>
+                  {scheduleWindow?.has_schedule === false && (
+                    <Text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                      No package schedule for this day — showing a default
+                      window.
+                    </Text>
+                  )}
                 </View>
               </View>
 

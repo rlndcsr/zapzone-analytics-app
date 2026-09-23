@@ -11,6 +11,10 @@ export type ScheduleRoomWindow = {
   location_id: number;
   /** The room's own turnaround/interval — a deliberate 0 means no gap. */
   interval_minutes?: number | null;
+  /** The area this space belongs to, null when it stands on its own. */
+  area_group?: string | null;
+  /** How far apart spaces in this area have to start; 0 when they may start together. */
+  stagger_minutes?: number | null;
   open_minutes: number | null;
   close_minutes: number | null;
   closed_all_day: boolean;

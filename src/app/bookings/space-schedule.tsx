@@ -57,6 +57,7 @@ import {
   type TimeWindow,
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
+  areaStaggerClash,
   columnStarts,
   nextBookableFrom,
   nextBookingMinuteFrom,
@@ -189,6 +190,8 @@ const COLUMN_MIN_WIDTH = 96;
 const COLUMN_MAX_WIDTH = 220;
 const COLUMN_BOOKED_MIN_WIDTH = 168;
 const HEADER_CHAR_WIDTH = 7.5;
+/** How tall the touch preview is drawn when the day window names no interval of its own. */
+const SLOT_PREVIEW_FALLBACK_MINUTES = 15;
 
 type ViewMode = "grid" | "list";
 
@@ -623,6 +626,13 @@ const GridColumnBackground = ({
   meta,
   isPastDate,
   onPressBand,
+  hoverMinute,
+  picking,
+  previewSpanMinutes,
+  onHoverBand,
+  onStartPick,
+  onHoverEnd,
+  onHoverCancel,
 }: {
   column: ScheduleColumn;
   breaks: { start: number; end: number }[];
@@ -638,10 +648,27 @@ const GridColumnBackground = ({
   };
   isPastDate: boolean;
   onPressBand: (bandOrigin: number, locationY: number) => void;
+  /** The minute the finger is over in THIS column, or null when it is elsewhere. */
+  hoverMinute: number | null;
+  /** True once a long press has turned this touch into a deliberate pick. */
+  picking: boolean;
+  /** How tall the preview marker is drawn — one booking interval. */
+  previewSpanMinutes: number;
+  onHoverBand: (bandOrigin: number, locationY: number) => void;
+  onStartPick: () => void;
+  /** Lift: books the marked minute when picking, otherwise just clears the marker. */
+  onHoverEnd: () => void;
+  onHoverCancel: () => void;
 }) => {
   const band = bandGeometry(meta.open, meta.close, timeWindow, pxPerMinute);
   const bandOrigin = Math.max(meta.open ?? timeWindow.start, timeWindow.start);
   const clickable = !!band && meta.bookable && !isPastDate;
+  // The web shows these hours in a hover tooltip on the band. There is no hover here, so the
+  // band carries them itself rather than leaving staff to tap and find out.
+  const hours =
+    meta.open != null && meta.close != null
+      ? `${minutesToLabel(meta.open)} – ${minutesToLabel(meta.close)}`
+      : null;
 
   return (
     <>
@@ -649,9 +676,33 @@ const GridColumnBackground = ({
         <Pressable
           disabled={!clickable}
           onPress={(e) => onPressBand(bandOrigin, e.nativeEvent.locationY)}
+          // A tap books the minute tapped. Holding instead starts a pick: the grid stops
+          // scrolling, the marker follows the finger, and lifting books where it ended up.
+          // A long press never also fires onPress.
+          onLongPress={clickable ? onStartPick : undefined}
+          delayLongPress={250}
+          onTouchStart={
+            clickable
+              ? (e) => onHoverBand(bandOrigin, e.nativeEvent.locationY)
+              : undefined
+          }
+          onTouchMove={
+            clickable
+              ? (e) => onHoverBand(bandOrigin, e.nativeEvent.locationY)
+              : undefined
+          }
+          onTouchEnd={clickable ? onHoverEnd : undefined}
+          onTouchCancel={clickable ? onHoverCancel : undefined}
           accessibilityRole={clickable ? "button" : undefined}
+          accessible={clickable || !!hours}
           accessibilityLabel={
-            clickable ? `Start a booking in ${column.name}` : undefined
+            clickable
+              ? hours
+                ? `Available ${hours} in ${column.name} — tap to start a booking, or hold to pick a time`
+                : `Start a booking in ${column.name}`
+              : hours
+                ? `${column.name} available ${hours}`
+                : undefined
           }
           style={{
             position: "absolute",
@@ -662,10 +713,58 @@ const GridColumnBackground = ({
           }}
           className={
             clickable
-              ? "z-[1] bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
-              : "z-[1] bg-gray-200/70 dark:bg-neutral-800/50"
+              ? "z-[1] overflow-hidden bg-gray-100 dark:bg-neutral-800/60 active:bg-gray-200 dark:active:bg-neutral-700/60"
+              : "z-[1] overflow-hidden bg-gray-200/70 dark:bg-neutral-800/50"
           }
-        />
+        >
+          {/* Only when the band has the room for it — a sliver of free time must not
+              paint its hours over what sits next to it. Untouchable, so the locationY
+              above stays measured from the band rather than from this label. */}
+          {!!hours && band.height >= 22 && (
+            <Text
+              pointerEvents="none"
+              className="px-1 pt-0.5 text-[9px] leading-tight text-gray-400 dark:text-gray-500"
+              numberOfLines={1}
+            >
+              {hours}
+            </Text>
+          )}
+        </Pressable>
+      )}
+      {/* Where the finger is, and what lifting it would book. Above the breaks, below the
+          bookings and closures — the same order the web draws it in. */}
+      {hoverMinute !== null && clickable && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: (hoverMinute - timeWindow.start) * pxPerMinute,
+            height: Math.max(14, previewSpanMinutes * pxPerMinute),
+          }}
+          className={`z-[5] flex-row items-center gap-1 border-y px-1 ${
+            picking
+              ? "border-solid border-[#0644C7] bg-blue-50/95 dark:bg-blue-900/70"
+              : "border-dashed border-gray-400 bg-white/70 dark:border-neutral-500 dark:bg-black/60"
+          }`}
+        >
+          <Feather
+            name="plus"
+            size={11}
+            color={picking ? PRIMARY : "#4b5563"}
+          />
+          <Text
+            className={`text-[10px] font-bold leading-tight ${
+              picking
+                ? "text-[#0644C7] dark:text-blue-300"
+                : "text-gray-700 dark:text-gray-200"
+            }`}
+            numberOfLines={1}
+          >
+            {minutesToLabel(hoverMinute)}
+          </Text>
+        </View>
       )}
       {!band && !closure?.fullDay && meta.reason && (
         <View className="absolute inset-0 z-[1] items-center bg-gray-200/70 pt-8 dark:bg-neutral-800/50">
@@ -765,6 +864,13 @@ const ScheduleGrid = ({
   onOpenSlot,
   onStartWalkIn,
   walkInFit,
+  hoverSlot,
+  picking,
+  previewSpanMinutes,
+  onHoverBand,
+  onStartPick,
+  onHoverEnd,
+  onHoverCancel,
 }: {
   columns: ScheduleColumn[];
   positionedByColumn: Map<string, PositionedBooking[]>;
@@ -808,11 +914,37 @@ const ScheduleGrid = ({
     fits: boolean;
     freeFor: number;
     shortest: number | null;
+    areaClash: ScheduleBooking | null;
   };
+  /** Which column the finger is on, and the minute it would book. */
+  hoverSlot: { key: string; minute: number } | null;
+  /** True once a long press has turned the touch into a deliberate pick. */
+  picking: boolean;
+  previewSpanMinutes: number;
+  onHoverBand: (
+    column: ScheduleColumn,
+    bandOrigin: number,
+    locationY: number,
+  ) => void;
+  onStartPick: () => void;
+  onHoverEnd: (column: ScheduleColumn) => void;
+  onHoverCancel: () => void;
 }) => {
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyHeight = timeWindow.total * pxPerMinute;
   const marks = hourMarks(timeWindow);
+  /** Every interval boundary, so the grid is ruled at the times it can be booked at. */
+  const intervalMarks = useMemo(() => {
+    const step = Math.max(5, previewSpanMinutes);
+    // A five-minute interval over a fourteen-hour day is hundreds of lines per column: noise on
+    // screen and views to lay out. Step up in whole multiples of the interval until it is sane,
+    // so every line drawn still lands on a minute that can be booked.
+    let stride = step;
+    while (timeWindow.total / stride > 96) stride += step;
+    const out: number[] = [];
+    for (let m = timeWindow.start; m <= timeWindow.end; m += stride) out.push(m);
+    return out;
+  }, [timeWindow, previewSpanMinutes]);
 
   const columnWidths = useMemo(() => {
     const widths = new Map<string, number>();
@@ -952,7 +1084,10 @@ const ScheduleGrid = ({
                         accessibilityLabel={
                           fit.fits
                             ? `Start a walk-in in ${column.name} now`
-                            : `Only ${fit.freeFor} min free in ${column.name} before the next booking`
+                            : fit.areaClash
+                              ? // not a shortage of time here — a space in the same area starts too close
+                                `A space sharing an area with ${column.name} starts too close to now`
+                              : `Only ${fit.freeFor} min free in ${column.name} before the next booking`
                         }
                       >
                         <Text
@@ -998,6 +1133,8 @@ const ScheduleGrid = ({
         ref={scrollRef}
         refreshControl={refreshControl}
         showsVerticalScrollIndicator
+        // Picking a time IS a vertical drag, so the grid must hold still under it.
+        scrollEnabled={!picking}
         contentContainerStyle={{ paddingBottom: bottomInset }}
       >
         <View className="flex-row">
@@ -1035,6 +1172,7 @@ const ScheduleGrid = ({
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator
+            scrollEnabled={!picking}
             scrollEventThrottle={16}
             onScroll={(e) =>
               headerScrollRef.current?.scrollTo({
@@ -1052,7 +1190,24 @@ const ScheduleGrid = ({
                     style={{ width: widthOf(column.key), height: bodyHeight }}
                     className="relative border-r border-gray-200 dark:border-neutral-800"
                   >
-                    {/* Hour gridlines */}
+                    {/* A line at every bookable interval, darker on the hour — the same
+                        weighting the web grid uses, so the eye can still find 4:00. */}
+                    {intervalMarks.map((mark) => (
+                      <View
+                        key={`interval-${mark}`}
+                        style={{
+                          position: "absolute",
+                          top: (mark - timeWindow.start) * pxPerMinute,
+                          left: 0,
+                          right: 0,
+                        }}
+                        className={`z-[2] border-t ${
+                          mark % 60 === 0
+                            ? "border-gray-200 dark:border-neutral-700"
+                            : "border-gray-100/70 dark:border-neutral-800/70"
+                        }`}
+                      />
+                    ))}
                     {marks.map((mark) => (
                       <View
                         key={mark}
@@ -1062,7 +1217,7 @@ const ScheduleGrid = ({
                           left: 0,
                           right: 0,
                         }}
-                        className="z-[2] border-t border-gray-100 dark:border-neutral-800"
+                        className="z-[2] border-t border-gray-200 dark:border-neutral-700"
                       />
                     ))}
                     <GridColumnBackground
@@ -1092,6 +1247,17 @@ const ScheduleGrid = ({
                       onPressBand={(bandOrigin, locationY) =>
                         onOpenSlot(column, bandOrigin, locationY)
                       }
+                      hoverMinute={
+                        hoverSlot?.key === column.key ? hoverSlot.minute : null
+                      }
+                      picking={picking}
+                      previewSpanMinutes={previewSpanMinutes}
+                      onHoverBand={(bandOrigin, locationY) =>
+                        onHoverBand(column, bandOrigin, locationY)
+                      }
+                      onStartPick={onStartPick}
+                      onHoverEnd={() => onHoverEnd(column)}
+                      onHoverCancel={onHoverCancel}
                     />
                     {/* The space is still being reset here — drawn so the gap
                         after a booking doesn't read as free. */}
@@ -1991,6 +2157,77 @@ const SpaceScheduleScreen = () => {
     [pxPerMinute, resolveClickMinute, scheduleMetaByColumn, navigateToMinute],
   );
 
+  /** Which column the finger is on, and the minute it would book. Cleared on lift. */
+  const [hoverSlot, setHoverSlot] = useState<{
+    key: string;
+    minute: number;
+  } | null>(null);
+  /**
+   * True once a long press has turned the touch into a deliberate pick. Held in a ref for the
+   * handlers and mirrored into state only to lock the scrollers and colour the marker.
+   */
+  const pickingRef = useRef(false);
+  const [picking, setPicking] = useState(false);
+  /** The minute under the finger, for the lift to read without waiting for a render. */
+  const pickedMinuteRef = useRef<number | null>(null);
+
+  /** The marker is one booking interval tall, the way the web draws it. */
+  const previewSpanMinutes = Math.max(
+    5,
+    dayWindow?.interval_minutes ?? SLOT_PREVIEW_FALLBACK_MINUTES,
+  );
+
+  /**
+   * The minute a lift here would book. Resolved through the very call the tap makes, so the
+   * marker can never name a minute the tap would not use.
+   */
+  const trackHoverSlot = useCallback(
+    (column: ScheduleColumn, bandOrigin: number, locationY: number) => {
+      const meta = scheduleMetaByColumn.get(column.key);
+      if (!meta || meta.open == null || meta.close == null) return;
+
+      const minute = resolveClickMinute(
+        column,
+        meta,
+        minuteAtOffset(bandOrigin, locationY, pxPerMinute),
+      );
+      // Dragging past the end of the band resolves to nothing; hold the last good minute rather
+      // than blinking the marker out from under the finger.
+      if (minute === null) return;
+      pickedMinuteRef.current = minute;
+      // returning the same object when nothing moved keeps a drag from re-rendering the grid
+      setHoverSlot((prev) =>
+        prev?.key === column.key && prev.minute === minute
+          ? prev
+          : { key: column.key, minute },
+      );
+    },
+    [pxPerMinute, resolveClickMinute, scheduleMetaByColumn],
+  );
+
+  const startPick = useCallback(() => {
+    pickingRef.current = true;
+    setPicking(true);
+  }, []);
+
+  const clearHoverSlot = useCallback(() => {
+    setHoverSlot(null);
+    pickedMinuteRef.current = null;
+    pickingRef.current = false;
+    setPicking((was) => (was ? false : was));
+  }, []);
+
+  /** Lift: a pick books where the finger ended up; a plain tap leaves that to onPress. */
+  const endHoverSlot = useCallback(
+    (column: ScheduleColumn) => {
+      const minute = pickedMinuteRef.current;
+      const picked = pickingRef.current;
+      clearHoverSlot();
+      if (picked && minute !== null) navigateToMinute(column, minute);
+    },
+    [clearHoverSlot, navigateToMinute],
+  );
+
   // A walk-in runs for the package's duration, so it only really fits if a
   // package that can actually start now clears before the next booking.
   const walkInFit = useCallback(
@@ -2001,6 +2238,10 @@ const SpaceScheduleScreen = () => {
       freeFor: number;
       shortest: number | null;
       packageName: string | null;
+      /** The booking in this space's area this walk-in would start too close to, if any. */
+      areaClash: ScheduleBooking | null;
+      /** Packages do run here now, but every one of them would still be running at closing. */
+      blockedByClose: boolean;
     } => {
       const meta = scheduleMetaByColumn.get(column.key);
       const close = meta?.close ?? timeWindow.end;
@@ -2010,24 +2251,47 @@ const SpaceScheduleScreen = () => {
       const freeFor = Math.max(0, (until ?? close) - nowMinutes);
 
       const startable = new Set(packagesForColumnSlot(column, nowMinutes));
-      const candidates = (dayWindow?.packages ?? [])
-        .filter(
-          (p) => startable.has(p.package_id) && (p.duration_minutes ?? 0) > 0,
-        )
+      const running = (dayWindow?.packages ?? []).filter(
+        (p) => startable.has(p.package_id) && (p.duration_minutes ?? 0) > 0,
+      );
+      const candidates = running
         // it must finish inside its OWN schedule — a room closes when its latest package does
         .filter((p) => nowMinutes + (p.duration_minutes as number) <= p.close_minutes)
         .sort((a, b) => (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0));
       const shortestEntry = candidates[0] ?? null;
       const shortest = shortestEntry?.duration_minutes ?? null;
+      // something runs here, but nothing short enough to finish before it closes
+      const blockedByClose = running.length > 0 && candidates.length === 0;
+
+      // measured at the minute a walk-in would actually be recorded at, not the raw clock
+      const walkInMinute =
+        Math.floor(nowMinutes / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
+      // the unfiltered list: the neighbour it clashes with may be hidden by a category or search
+      const areaClash = areaStaggerClash({
+        column,
+        dayWindow,
+        bookings: activeBookings,
+        minute: walkInMinute,
+      });
 
       return {
-        fits: shortest !== null && shortest <= freeFor,
+        fits: shortest !== null && shortest <= freeFor && areaClash === null,
         freeFor,
         shortest,
         packageName: shortestEntry?.name ?? null,
+        areaClash,
+        blockedByClose,
       };
     },
-    [scheduleMetaByColumn, timeWindow, usableFreeUntil, nowMinutes, packagesForColumnSlot, dayWindow],
+    [
+      scheduleMetaByColumn,
+      timeWindow,
+      usableFreeUntil,
+      nowMinutes,
+      packagesForColumnSlot,
+      dayWindow,
+      activeBookings,
+    ],
   );
 
   const startWalkIn = useCallback(
@@ -2038,12 +2302,17 @@ const SpaceScheduleScreen = () => {
       const walkInMinute =
         Math.floor(nowMinutes / WALK_IN_SNAP_MINUTES) * WALK_IN_SNAP_MINUTES;
 
-      if (fit.fits || fit.shortest === null) {
+      // an area clash and a space that closes before anything can finish are each a refusal of
+      // their own, so either must stop a walk-in that has nothing to fit
+      if (
+        fit.fits ||
+        (fit.shortest === null && fit.areaClash === null && !fit.blockedByClose)
+      ) {
         navigateToMinute(column, walkInMinute);
         return;
       }
 
-      const endMinute = walkInMinute + fit.shortest;
+      const endMinute = walkInMinute + (fit.shortest ?? 0);
       const packageName = fit.packageName ?? "the shortest package here";
 
       const clash =
@@ -2053,13 +2322,36 @@ const SpaceScheduleScreen = () => {
           .filter(({ start }) => start >= walkInMinute && start < endMinute)
           .sort((a, b) => a.start - b.start)[0]?.booking ?? null;
 
+      // The area group includes this space, so the clash can be its own booking — calling that
+      // "a space nearby" would name the wrong space.
+      const areaClashIsHere =
+        !!fit.areaClash && fit.areaClash.roomId === column.roomId;
+
+      // say which problem it is: something in the area starting too close, nothing here short
+      // enough to finish before closing, or this walk-in running long
       const lines = [
-        `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
-        "",
-        `Walk-in would run ${minutesToLabel(walkInMinute)} – ${minutesToLabel(endMinute)}`,
-        `Space is free for ${fit.freeFor} min`,
-        `Overlap: ${fit.shortest - fit.freeFor} min`,
+        fit.areaClash
+          ? areaClashIsHere
+            ? `${column.name} already has a booking at ${minutesToLabel(
+                timeToMinutes(fit.areaClash.time),
+              )}, and bookings in its area have to start far enough apart for staff to run them.`
+            : `${column.name} shares an area with a space that already starts at ${minutesToLabel(
+                timeToMinutes(fit.areaClash.time),
+              )}. They have to start far enough apart for staff to run both.`
+          : fit.shortest === null
+            ? `Every package in ${column.name} would still be running when it closes, so none of them can be started now.`
+            : `${column.name} is free for ${fit.freeFor} min, but ${packageName} needs ${fit.shortest} min.`,
       ];
+      if (fit.shortest !== null) {
+        lines.push(
+          "",
+          `Walk-in would run ${minutesToLabel(walkInMinute)} – ${minutesToLabel(endMinute)}`,
+          `Space is free for ${fit.freeFor} min`,
+        );
+        if (!fit.areaClash) {
+          lines.push(`Overlap: ${fit.shortest - fit.freeFor} min`);
+        }
+      }
       if (clash) {
         lines.push(
           "",
@@ -2068,14 +2360,24 @@ const SpaceScheduleScreen = () => {
         );
       }
 
-      Alert.alert("This walk-in runs past the next booking", lines.join("\n"), [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Start anyway",
-          onPress: () =>
-            navigateToMinute(column, walkInMinute, { walkInOverride: true }),
-        },
-      ]);
+      Alert.alert(
+        fit.areaClash
+          ? areaClashIsHere
+            ? "Another booking here starts too close to this"
+            : "Another space nearby starts too close to this"
+          : fit.shortest === null
+            ? "Nothing here can finish before closing"
+            : "This walk-in runs past the next booking",
+        lines.join("\n"),
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Start anyway",
+            onPress: () =>
+              navigateToMinute(column, walkInMinute, { walkInOverride: true }),
+          },
+        ],
+      );
     },
     [
       walkInFit,
@@ -2685,6 +2987,13 @@ const SpaceScheduleScreen = () => {
               onOpenSlot={openBookingForSlot}
               onStartWalkIn={startWalkIn}
               walkInFit={walkInFit}
+              hoverSlot={hoverSlot}
+              picking={picking}
+              previewSpanMinutes={previewSpanMinutes}
+              onHoverBand={trackHoverSlot}
+              onStartPick={startPick}
+              onHoverEnd={endHoverSlot}
+              onHoverCancel={clearHoverSlot}
             />
           ) : (
             <ScrollView
@@ -2890,11 +3199,23 @@ const SpaceScheduleScreen = () => {
             Each package has its own color.
           </Text>
           <View className="flex-row items-center gap-2.5 mb-2">
+            <View className="w-6 h-6 rounded-md bg-gray-100 dark:bg-neutral-800 border border-gray-300 dark:border-neutral-600" />
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              Available — tap to book
+            </Text>
+          </View>
+          <View className="flex-row items-center gap-2.5 mb-2">
             <View className="w-6 h-6 rounded-md bg-gray-100 dark:bg-neutral-800 border border-dashed border-gray-300 dark:border-neutral-600 items-center justify-center">
               <Feather name="coffee" size={12} color="#6b7280" />
             </View>
             <Text className="text-sm text-gray-600 dark:text-gray-300">
               Break Time
+            </Text>
+          </View>
+          <View className="flex-row items-center gap-2.5 mb-2">
+            <View className="w-6 h-6 rounded-md border-y border-amber-200 bg-amber-100 dark:border-amber-900/40 dark:bg-amber-900/30" />
+            <Text className="text-sm text-gray-600 dark:text-gray-300">
+              Turnaround — the space is being reset
             </Text>
           </View>
           <View className="flex-row items-center gap-2.5 mb-2">

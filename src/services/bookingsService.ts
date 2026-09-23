@@ -445,6 +445,42 @@ async function fetchPage(
   );
 }
 
+/**
+ * Just the bookings inside a date window, paged newest-first.
+ *
+ * The calendar knows exactly which days it is drawing, so it has no business pulling the whole
+ * history down and filtering it on the device: a venue with a few thousand bookings turned one
+ * day's grid into a dozen round trips of data that is thrown away. The index endpoint takes
+ * `date_from` / `date_to` (BookingController@index), so ask it for the window.
+ */
+export async function fetchBookingsInRange({
+  token,
+  locationId,
+  from,
+  to,
+  signal,
+}: FetchParams & { from: string; to: string }): Promise<CalendarBooking[]> {
+  return fetchAllPages<CalendarBooking>(
+    async (page) => {
+      const res = await fetchPage(
+        page,
+        { date_from: from, date_to: to },
+        { token, locationId, signal },
+      );
+      const bookings: CalendarBooking[] = [];
+      for (const raw of res?.data?.bookings ?? []) {
+        const date = toDateKey(raw.booking_date);
+        if (date) bookings.push(mapBooking(raw, date));
+      }
+      return {
+        items: bookings,
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: SYNC_MAX_PAGES },
+  );
+}
+
 /** Every booking, paged newest-first. Callers filter by date and cache it. */
 export async function fetchAllBookings({
   token,

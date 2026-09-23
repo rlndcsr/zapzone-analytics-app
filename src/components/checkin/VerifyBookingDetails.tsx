@@ -3,6 +3,7 @@ import * as Clipboard from "expo-clipboard";
 import React from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
+import { cardFromPayments } from "../../lib/payments/cardLabel";
 import { resolvePaymentState } from "../../lib/payments/paymentState";
 import { formatDuration } from "../../lib/time";
 import { launchKioskSession } from "../../lib/waivers/kiosk";
@@ -18,6 +19,15 @@ const MONTHS = [
 ];
 
 const money = (n: number | null | undefined) => `$${Number(n ?? 0).toFixed(2)}`;
+
+/**
+ * "• Protective Rage Suit - $24.00 (x2)" — the web's own line, except that the
+ * web reads a `price` the API does not send on these rows and prints "$NaN".
+ * The charged unit price is what the desk has to be able to read back, so use
+ * the resolved one the rest of the app already prices these lines with.
+ */
+const lineLabel = (name: string, unitPrice: number, quantity: number) =>
+  `• ${name} - ${money(unitPrice)}${quantity > 1 ? ` (x${quantity})` : ""}`;
 
 function fmtDate(raw: string | null | undefined): string {
   if (!raw) return "—";
@@ -64,7 +74,7 @@ function statusColor(status: string): string {
 
 type IconName = React.ComponentProps<typeof Feather>["name"];
 
-/** One icon-led detail tile (icon square + label + value). */
+/** One icon-led detail tile (icon square + label + value, or a list as children). */
 function InfoTile({
   icon,
   label,
@@ -72,13 +82,19 @@ function InfoTile({
   subValue,
   valueClass = "text-gray-900 dark:text-white",
   full,
+  lines = 2,
+  children,
 }: {
   icon: IconName;
   label: string;
-  value: string;
+  value?: string;
   subValue?: string | null;
   valueClass?: string;
   full?: boolean;
+  /** 0 lets the value run as long as it needs — notes and requests are not clamped. */
+  lines?: number;
+  /** Rendered in place of `value`, for the tiles that hold a list of lines. */
+  children?: React.ReactNode;
 }) {
   return (
     <View className={`${full ? "w-full" : "w-1/2"} px-2 mb-4`}>
@@ -90,9 +106,14 @@ function InfoTile({
           <Text className="text-[11px] text-gray-400 dark:text-gray-500">
             {label}
           </Text>
-          <Text className={`text-sm font-semibold ${valueClass}`} numberOfLines={2}>
-            {value}
-          </Text>
+          {children ?? (
+            <Text
+              className={`text-sm font-semibold ${valueClass}`}
+              numberOfLines={lines > 0 ? lines : undefined}
+            >
+              {value}
+            </Text>
+          )}
           {subValue ? (
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
               {subValue}
@@ -184,6 +205,9 @@ export function VerifyBookingDetails({
     total_amount: detail.totalAmount,
     amount_paid: detail.amountPaid,
   });
+  // The card the guest actually paid with, picked from the payment history the
+  // same way the web's modal picks it — not the booking's stored method.
+  const card = cardFromPayments(detail.payments);
 
   const [launchingKiosk, setLaunchingKiosk] = React.useState(false);
 
@@ -450,6 +474,13 @@ export function VerifyBookingDetails({
             label="Amount Paid"
             value={money(detail.amountPaid)}
           />
+          {detail.discountAmount > 0 && (
+            <InfoTile
+              icon="dollar-sign"
+              label="Discount Amount"
+              value={money(detail.discountAmount)}
+            />
+          )}
         </View>
 
         {/* Applied fees */}
@@ -477,6 +508,34 @@ export function VerifyBookingDetails({
           </View>
         )}
 
+        {/* Applied discounts — what came off, against the fees that went on. */}
+        {detail.appliedDiscounts.length > 0 && (
+          <View className="mt-1 border-t border-gray-100 pt-3 dark:border-neutral-800">
+            <Text className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">
+              Applied Discounts
+            </Text>
+            {detail.appliedDiscounts.map((discount, i) => (
+              <View
+                key={`${discount.name}-${i}`}
+                className="flex-row items-center justify-between py-1"
+              >
+                <Text className="flex-1 pr-2 text-sm text-gray-600 dark:text-gray-300">
+                  {discount.name}
+                  {!!discount.type && (
+                    <Text className="text-xs text-gray-400">
+                      {" "}
+                      ({titleCase(discount.type)})
+                    </Text>
+                  )}
+                </Text>
+                <Text className="text-sm font-semibold text-green-600">
+                  -{money(discount.amount)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Payment / status / contact / space / guest of honor */}
         <View className="mt-3 flex-row flex-wrap -mx-2 border-t border-gray-100 pt-4 dark:border-neutral-800">
           {!!detail.paymentMethod && (
@@ -484,7 +543,15 @@ export function VerifyBookingDetails({
               icon="credit-card"
               label="Payment Method"
               value={titleCase(detail.paymentMethod)}
-              subValue={detail.cardLabel}
+            />
+          )}
+          {/* Its own tile, as on the web — the hint below it is what the desk acts on. */}
+          {!!card && (
+            <InfoTile
+              icon="credit-card"
+              label="Card Used"
+              value={card.label}
+              subValue="Ask the guest to confirm the last four digits."
             />
           )}
           <InfoTile
@@ -518,6 +585,7 @@ export function VerifyBookingDetails({
               icon="home"
               label="Location"
               value={detail.locationName}
+              subValue={detail.locationAddress}
               full
             />
           )}
@@ -537,7 +605,92 @@ export function VerifyBookingDetails({
               full
             />
           )}
+
+          {/* What the party has bought beyond the package — the desk hands these
+              over at check-in, so they belong on the same screen as the booking. */}
+          {detail.attractions.length > 0 && (
+            <InfoTile
+              icon="package"
+              label={`Attractions (${detail.attractions.length})`}
+              full
+            >
+              {detail.attractions.map((attraction, i) => (
+                <Text
+                  key={`attraction-${attraction.id}-${i}`}
+                  className="text-sm font-semibold text-gray-900 dark:text-white"
+                >
+                  {lineLabel(
+                    attraction.name,
+                    attraction.priceAtBooking,
+                    attraction.quantity,
+                  )}
+                </Text>
+              ))}
+            </InfoTile>
+          )}
+
+          {detail.addOns.length > 0 && (
+            <InfoTile
+              icon="package"
+              label={`Add-Ons (${detail.addOns.length})`}
+              full
+            >
+              {detail.addOns.map((addOn, i) => (
+                <Text
+                  key={`addon-${addOn.id}-${i}`}
+                  className="text-sm font-semibold text-gray-900 dark:text-white"
+                >
+                  {lineLabel(addOn.name, addOn.unitPrice, addOn.quantity)}
+                </Text>
+              ))}
+            </InfoTile>
+          )}
+
+          {!!detail.specialRequests && (
+            <InfoTile
+              icon="alert-circle"
+              label="Special Requests"
+              value={detail.specialRequests}
+              lines={0}
+              full
+            />
+          )}
+
+          {!!detail.customerNotes && (
+            <InfoTile
+              icon="alert-circle"
+              label="Customer Notes"
+              value={detail.customerNotes}
+              lines={0}
+              full
+            />
+          )}
         </View>
+
+        {/* Internal staff notes — read-only here. This is the desk's scan review,
+            not the booking's editor, so it shows what is written, nothing more. */}
+        {!!detail.internalNotes && (
+          <View className="flex-row items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-900/20">
+            <View className="h-9 w-9 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/40">
+              <Feather name="alert-circle" size={16} color="#D97706" />
+            </View>
+            <View className="flex-1">
+              <View className="flex-row items-center gap-2">
+                <Text className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  Internal Staff Notes
+                </Text>
+                <View className="rounded bg-amber-100 px-1.5 py-0.5 dark:bg-amber-900/40">
+                  <Text className="text-[10px] text-amber-700 dark:text-amber-300">
+                    Staff Only
+                  </Text>
+                </View>
+              </View>
+              <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                {detail.internalNotes}
+              </Text>
+            </View>
+          </View>
+        )}
       </View>
     </View>
   );
