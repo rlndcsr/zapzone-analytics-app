@@ -27,6 +27,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
+import { OverlapOverrideModal } from "../../components/ui/OverlapOverrideModal";
 import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
@@ -64,6 +65,7 @@ import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { derivePaymentStatus } from "../../lib/payments/paymentState";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
+import { ApiError } from "../../lib/api";
 import {
   CHARGE_UNKNOWN_MESSAGE,
   chargeOutcomeUnknown,
@@ -431,6 +433,16 @@ const ManualBookingScreen = () => {
   /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
    *  produce a second card charge. */
   const lastSubmitAtRef = useRef(0);
+
+  // a manager's approval belongs to the booking it was given for
+  const overrideTokenRef = useRef<string | null>(null);
+  const [overrideGate, setOverrideGate] = useState<{
+    conflicts: string[];
+    onlineSlotsLost: string[];
+  } | null>(null);
+  useEffect(() => {
+    overrideTokenRef.current = null;
+  }, [pkg?.id, scheduledDate, scheduledTime, selectedRoomId]);
 
   // ---- Package list -------------------------------------------------------
   useEffect(() => {
@@ -901,6 +913,7 @@ const ManualBookingScreen = () => {
       );
 
       const { id, referenceNumber, customerId } = await createBooking(token, {
+        overlap_override_token: overrideTokenRef.current ?? undefined,
         guest_name: customerName.trim(),
         guest_email: email.trim() || undefined,
         guest_phone: phone.trim() || undefined,
@@ -1031,6 +1044,10 @@ const ManualBookingScreen = () => {
         setPaymentError("");
       }
 
+      // the approval was for this booking, now saved — it must not reach another one
+      overrideTokenRef.current = null;
+      setOverrideGate(null);
+
       markBookingsStale();
       Alert.alert(
         bookingMode === "standard" ? "Booking created" : "Booking recorded",
@@ -1038,6 +1055,23 @@ const ManualBookingScreen = () => {
         [{ text: "Done", onPress: () => router.back() }],
       );
     } catch (err) {
+      // the space is taken: the server saw a conflict this page couldn't, so ask a manager to
+      // approve it rather than showing an error staff cannot act on
+      const body =
+        err instanceof ApiError
+          ? (err.body as
+              | { requires_override?: boolean; conflicts?: unknown }
+              | undefined)
+          : undefined;
+      if (err instanceof ApiError && err.status === 409 && body?.requires_override) {
+        const conflicts = (Array.isArray(body.conflicts) ? body.conflicts : [])
+          .filter((c): c is string => typeof c === "string" && c.trim().length > 0)
+          .map((reason) => `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`);
+        if (conflicts.length > 0) {
+          setOverrideGate({ conflicts, onlineSlotsLost: [] });
+          return;
+        }
+      }
       Alert.alert(
         "Failed to create booking",
         err instanceof Error ? err.message : "Please try again.",
@@ -2429,6 +2463,26 @@ const ManualBookingScreen = () => {
         initialName={customerName}
         initialPhone={phone}
         initialEmail={email}
+      />
+
+      <OverlapOverrideModal
+        visible={!!overrideGate}
+        conflicts={overrideGate?.conflicts ?? []}
+        onlineSlotsLost={overrideGate?.onlineSlotsLost ?? []}
+        locationId={effectiveLocationId}
+        onCancel={() => setOverrideGate(null)}
+        onConfirm={() => {
+          setOverrideGate(null);
+          lastSubmitAtRef.current = 0;
+          void handleSubmit();
+        }}
+        onApproved={(token) => {
+          overrideTokenRef.current = token;
+          setOverrideGate(null);
+          // the first attempt already armed the double-tap guard; this approved retry is not one
+          lastSubmitAtRef.current = 0;
+          void handleSubmit();
+        }}
       />
     </View>
   );
