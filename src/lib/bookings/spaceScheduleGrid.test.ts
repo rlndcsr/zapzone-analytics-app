@@ -12,20 +12,19 @@ import {
   computeCategoryOptions,
   computeDaySummary,
   computeSpaceClosures,
+  bookingStretchSpans,
   computeTimeWindow,
-  DETAILED_BLOCK_HEIGHT,
   hourMarks,
-  MAX_PX_PER_MINUTE,
   minutesToLabel,
   nowLineTop,
   positionBookingsByColumn,
-  shortestBookingMinutes,
-  stretchedPxPerMinute,
   timeToMinutes,
   ZOOM_LEVELS,
   type PositionedBooking,
   type ScheduleColumn,
 } from "./spaceScheduleGrid.ts";
+import { minuteAtOffset } from "./freeTime.ts";
+import { buildMinuteScale, DETAIL_HEIGHT } from "./minuteScale.ts";
 
 let nextId = 1;
 function makeBooking(
@@ -293,6 +292,8 @@ describe("positionBookingsByColumn", () => {
   ];
   const knownRoomIds = new Set([1]);
   const window = { start: 9 * 60, end: 17 * 60, total: 8 * 60 };
+  const linear = (pxPerMinute: number) =>
+    buildMinuteScale(window.start, window.end, pxPerMinute);
 
   it("positions a booking at the right pixel offset for the window and zoom", () => {
     const bookings = [
@@ -302,7 +303,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 2,
+      scale: linear(2),
       knownRoomIds,
     });
     const [placed] = map.get("room-1")!;
@@ -321,7 +322,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: ZOOM_LEVELS[0],
+      scale: linear(ZOOM_LEVELS[0]),
       knownRoomIds,
     });
     const height = (id: number) =>
@@ -341,7 +342,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
     });
     const [placed] = map.get("room-1")!;
@@ -356,7 +357,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 0.5,
+      scale: linear(0.5),
       knownRoomIds,
     });
     const [placed] = map.get("room-1")!;
@@ -371,7 +372,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
     });
     const [placed] = map.get("room-1")!;
@@ -386,7 +387,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
     });
     assert.equal(map.get("room-1")!.length, 0);
@@ -401,7 +402,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
     });
     const [a, b] = map.get("room-1")!;
@@ -420,7 +421,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
     });
     const [a, b] = map.get("room-1")!;
@@ -439,7 +440,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
       turnaroundFor: () => 15,
     });
@@ -461,7 +462,7 @@ describe("positionBookingsByColumn", () => {
       columns,
       bookings,
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
       turnaroundFor: () => 0,
     });
@@ -485,7 +486,7 @@ describe("positionBookingsByColumn", () => {
         hidden,
       ],
       timeWindow: window,
-      pxPerMinute: 1,
+      scale: linear(1),
       knownRoomIds,
     });
     const [a] = map.get("room-1")!;
@@ -583,16 +584,16 @@ describe("hourMarks / nowLineTop", () => {
   });
 
   it("places the now-line at the right pixel offset when today and in-window", () => {
-    assert.equal(nowLineTop(10 * 60, window, 2, true), (10 * 60 - 9 * 60) * 2);
+    assert.equal(nowLineTop(10 * 60, window, buildMinuteScale(window.start, window.end, 2), true), (10 * 60 - 9 * 60) * 2);
   });
 
   it("is null when a different day is selected", () => {
-    assert.equal(nowLineTop(10 * 60, window, 2, false), null);
+    assert.equal(nowLineTop(10 * 60, window, buildMinuteScale(window.start, window.end, 2), false), null);
   });
 
   it("is null when now falls outside the visible window", () => {
-    assert.equal(nowLineTop(8 * 60, window, 2, true), null);
-    assert.equal(nowLineTop(13 * 60, window, 2, true), null);
+    assert.equal(nowLineTop(8 * 60, window, buildMinuteScale(window.start, window.end, 2), true), null);
+    assert.equal(nowLineTop(13 * 60, window, buildMinuteScale(window.start, window.end, 2), true), null);
   });
 });
 
@@ -812,7 +813,7 @@ describe("closureBoundaryMinutes / closureLabel", () => {
   });
 });
 
-describe("stretchedPxPerMinute — the day stretches for its shortest booking", () => {
+describe("the variable timeline — only booked minutes grow", () => {
   const columns: ScheduleColumn[] = [
     { key: "room-1", name: "Room A", capacity: null, roomId: 1, virtual: false },
     { key: "room-2", name: "Room B", capacity: null, roomId: 2, virtual: false },
@@ -820,85 +821,112 @@ describe("stretchedPxPerMinute — the day stretches for its shortest booking", 
   const knownRoomIds = new Set([1, 2]);
   const window = { start: 9 * 60, end: 17 * 60, total: 8 * 60 };
   const scaleFor = (bookings: ScheduleBooking[], zoom: number = ZOOM_LEVELS[0]) =>
-    stretchedPxPerMinute(shortestBookingMinutes(bookings), zoom);
-  const place = (bookings: ScheduleBooking[], pxPerMinute: number) =>
-    positionBookingsByColumn({ columns, bookings, timeWindow: window, pxPerMinute, knownRoomIds });
+    buildMinuteScale(window.start, window.end, zoom, bookingStretchSpans(bookings));
+  const place = (bookings: ScheduleBooking[], zoom: number = ZOOM_LEVELS[0]) =>
+    positionBookingsByColumn({
+      columns,
+      bookings,
+      timeWindow: window,
+      scale: scaleFor(bookings, zoom),
+      knownRoomIds,
+    });
+  const find = (map: Map<string, PositionedBooking[]>, id: number) =>
+    [...map.values()].flat().find((p) => p.booking.id === id)!;
+  const near = (actual: number, expected: number) =>
+    assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} ≉ ${expected}`);
 
-  it("keeps the zoom on an empty day", () => {
-    assert.equal(shortestBookingMinutes([]), null);
-    assert.equal(scaleFor([], ZOOM_LEVELS[1]), ZOOM_LEVELS[1]);
+  it("asks for the detail height across each booking's minutes, 15 at least", () => {
+    assert.deepEqual(
+      bookingStretchSpans([makeBooking({ time: "10:00", durationMinutes: 5 })]),
+      [{ startMinutes: 600, endMinutes: 615, minHeight: DETAIL_HEIGHT }],
+    );
   });
 
-  it("gives a quarter-hour booking a detailed block", () => {
-    const bookings = [makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })];
-    const scale = scaleFor(bookings);
-    assert.equal(scale, DETAILED_BLOCK_HEIGHT / 15);
-    const [placed] = place(bookings, scale).get("room-1")!;
-    // 60px is where the block shows its full time range, the guest and the package
-    assert.ok(placed.height >= 60);
-    assert.ok(placed.height >= DETAILED_BLOCK_HEIGHT - 2);
+  it("gives a quarter-hour booking room for its time, guest and package", () => {
+    const placed = find(place([makeBooking({ id: 1, roomId: 1, durationMinutes: 15 })]), 1);
+    // 30px is where the block stops dropping its package line
+    near(placed.height, DETAIL_HEIGHT - 2);
+    assert.ok(placed.height >= 30);
   });
 
-  it("treats a booking shorter than 15 minutes as the 15 minutes it is drawn at", () => {
-    const bookings = [makeBooking({ id: 1, roomId: 1, durationMinutes: 5 })];
-    assert.equal(shortestBookingMinutes(bookings), 15);
+  it("keeps the empty hours before and after at the zoom's own height", () => {
+    const scale = scaleFor([makeBooking({ id: 1, roomId: 1, time: "12:00", durationMinutes: 15 })]);
+    near(scale.spanHeight(9 * 60, 12 * 60), 180 * ZOOM_LEVELS[0]);
+    near(scale.spanHeight(12 * 60 + 15, 17 * 60), 285 * ZOOM_LEVELS[0]);
+    near(scale.height, 465 * ZOOM_LEVELS[0] + DETAIL_HEIGHT);
   });
 
-  it("stretches a half-hour day only as far as its half-hour booking needs", () => {
-    const bookings = [
-      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 30 }),
-      makeBooking({ id: 2, roomId: 2, time: "11:00", durationMinutes: 120 }),
-    ];
-    assert.equal(scaleFor(bookings), DETAILED_BLOCK_HEIGHT / 30);
-    assert.equal(scaleFor(bookings, ZOOM_LEVELS[1]), ZOOM_LEVELS[1]);
-  });
-
-  it("leaves a day of hour-long and longer bookings at the zoom", () => {
-    const bookings = [
-      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
-      makeBooking({ id: 2, roomId: 2, time: "11:00", durationMinutes: 120 }),
-    ];
-    assert.equal(scaleFor(bookings), ZOOM_LEVELS[0]);
-  });
-
-  it("sizes the day by its shortest booking, with longer ones growing in proportion", () => {
-    const bookings = [
-      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 20 }),
-      makeBooking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 120 }),
-      makeBooking({ id: 3, roomId: 2, time: "10:00", durationMinutes: 60 }),
-    ];
-    const scale = scaleFor(bookings);
-    assert.equal(scale, DETAILED_BLOCK_HEIGHT / 20);
-    const map = place(bookings, scale);
-    const long = map.get("room-1")!.find((p) => p.booking.id === 2)!;
-    const hour = map.get("room-2")![0];
-    assert.equal(long.height, 120 * scale - 2);
-    assert.equal(hour.height, 60 * scale - 2);
-  });
-
-  it("keeps every column and the now-line on the one scale", () => {
+  it("grows each short booking on its own and leaves a long one at the zoom", () => {
     const bookings = [
       makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
-      makeBooking({ id: 2, roomId: 2, time: "10:00", durationMinutes: 90 }),
+      makeBooking({ id: 2, roomId: 1, time: "13:00", durationMinutes: 20 }),
+      makeBooking({ id: 3, roomId: 2, time: "15:00", durationMinutes: 90 }),
+    ];
+    const map = place(bookings);
+    near(find(map, 1).height, DETAIL_HEIGHT - 2);
+    near(find(map, 2).height, DETAIL_HEIGHT - 2);
+    near(find(map, 3).height, 90 * ZOOM_LEVELS[0] - 2);
+    near(scaleFor(bookings).spanHeight(11 * 60, 12 * 60), 60 * ZOOM_LEVELS[0]);
+  });
+
+  it("gives two overlapping short bookings each the room they need", () => {
+    const map = place([
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      makeBooking({ id: 2, roomId: 1, time: "10:10", durationMinutes: 15 }),
+    ]);
+    assert.ok(find(map, 1).height >= DETAIL_HEIGHT - 2 - 1e-9);
+    assert.ok(find(map, 2).height >= DETAIL_HEIGHT - 2 - 1e-9);
+  });
+
+  it("grows the same minutes in every column, so the columns stay aligned", () => {
+    const map = place([
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      makeBooking({ id: 2, roomId: 2, time: "10:15", durationMinutes: 60 }),
+    ]);
+    // the Room B booking starts exactly where the grown Room A one ends
+    near(find(map, 2).top, find(map, 1).top + DETAIL_HEIGHT);
+  });
+
+  it("never lets a grown booking run into the one below it", () => {
+    const map = place([
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      makeBooking({ id: 2, roomId: 1, time: "10:15", durationMinutes: 15 }),
+    ]);
+    const first = find(map, 1);
+    assert.ok(first.top + first.height <= find(map, 2).top);
+  });
+
+  it("puts the hour lines, the now-line and the blocks on the one mapping", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      makeBooking({ id: 2, roomId: 2, time: "11:00", durationMinutes: 60 }),
     ];
     const scale = scaleFor(bookings);
-    const map = place(bookings, scale);
-    assert.equal(map.get("room-1")![0].top, map.get("room-2")![0].top);
-    // a now-line at 10:00 lands exactly on both blocks' tops, and the 10:00 hour mark with it
-    assert.equal(nowLineTop(10 * 60, window, scale, true), map.get("room-1")![0].top);
+    const map = place(bookings);
+    // the 11:00 hour line sits on the 11:00 block, pushed down by the grown 10:00 booking
+    assert.equal(scale.at(11 * 60), find(map, 2).top);
+    near(scale.at(11 * 60), 105 * ZOOM_LEVELS[0] + DETAIL_HEIGHT);
+    assert.equal(nowLineTop(11 * 60, window, scale, true), find(map, 2).top);
+    assert.equal(nowLineTop(10 * 60, window, scale, true), find(map, 1).top);
   });
 
-  it("never stretches the day past the cap", () => {
-    assert.equal(stretchedPxPerMinute(5, ZOOM_LEVELS[0]), MAX_PX_PER_MINUTE);
-    assert.ok(scaleFor([makeBooking({ roomId: 1, durationMinutes: 1 })]) <= MAX_PX_PER_MINUTE);
+  it("books the minute under the finger, inside and past a grown booking", () => {
+    const scale = scaleFor([makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })]);
+    const bandOrigin = 9 * 60;
+    // halfway down the grown booking is 10:07:30
+    near(minuteAtOffset(bandOrigin, scale.at(10 * 60) + DETAIL_HEIGHT / 2, scale), 10 * 60 + 7.5);
+    // an hour past it is back on the zoom's straight line
+    near(minuteAtOffset(bandOrigin, scale.at(11 * 60 + 15), scale), 11 * 60 + 15);
   });
 
-  it("still zooms in on top of the stretch", () => {
-    const bookings = [makeBooking({ id: 1, roomId: 1, durationMinutes: 30 })];
-    assert.ok(scaleFor(bookings, ZOOM_LEVELS[2]) > scaleFor(bookings, ZOOM_LEVELS[0]));
-    // a stretch past the zoom wins; a zoom past the stretch wins
-    const short = [makeBooking({ id: 1, roomId: 1, durationMinutes: 20 })];
-    assert.equal(scaleFor(short, ZOOM_LEVELS[0]), DETAILED_BLOCK_HEIGHT / 20);
-    assert.equal(scaleFor(short, ZOOM_LEVELS[2]), ZOOM_LEVELS[2]);
+  it("zooms the empty minutes and stops growing a booking the zoom already fits", () => {
+    const bookings = [makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })];
+    const tight = scaleFor(bookings, ZOOM_LEVELS[0]);
+    const wide = scaleFor(bookings, ZOOM_LEVELS[2]);
+    near(wide.spanHeight(9 * 60, 10 * 60), 60 * ZOOM_LEVELS[2]);
+    assert.ok(wide.spanHeight(9 * 60, 10 * 60) > tight.spanHeight(9 * 60, 10 * 60));
+    // 15 minutes at the widest zoom is already past the detail height, so nothing is grown
+    near(wide.spanHeight(10 * 60, 10 * 60 + 15), 15 * ZOOM_LEVELS[2]);
+    near(tight.spanHeight(10 * 60, 10 * 60 + 15), DETAIL_HEIGHT);
   });
 });

@@ -1,15 +1,7 @@
-// Slot geometry for the Calendar tab's Day and Week grids.
-//
-// The Day grid lays spaces out as columns and 15-minute slots as rows, the same
-// model the Space Schedule uses — so it reuses that screen's `buildColumns` /
-// `columnKeyFor` and only adds the slot-based placement the timeline doesn't
-// need. The Week grid is the transpose: one column per weekday, one row per
-// distinct start time in the week.
-
 import { conflictsWith } from "../bookings/freeTime.ts";
+import { DETAIL_HEIGHT, type StretchSpan } from "../bookings/minuteScale.ts";
 import {
   columnKeyFor,
-  stretchedPxPerMinute,
   timeToMinutes,
   type ScheduleColumn,
 } from "../bookings/spaceScheduleGrid.ts";
@@ -17,16 +9,10 @@ import {
 export const SLOT_MINUTES = 15;
 export const MIN_PX_PER_MINUTE = 3;
 
-export function daySlotHeight(
-  slotMinutes: number,
-  base: number,
-  pxPerMinute: number = MIN_PX_PER_MINUTE,
-): number {
+export function daySlotHeight(slotMinutes: number, base: number): number {
   return Math.max(
     base,
-    Math.round(
-      Math.max(MIN_PX_PER_MINUTE, pxPerMinute) * Math.max(5, slotMinutes),
-    ),
+    Math.ceil(MIN_PX_PER_MINUTE * Math.max(5, slotMinutes)),
   );
 }
 
@@ -35,15 +21,11 @@ const FALLBACK_START = 10 * 60;
 const FALLBACK_END = 22 * 60;
 
 export type SlotWindow = {
-  /** Minutes past midnight at the top of the first row. */
   start: number;
-  /** Minutes past midnight at the bottom of the last row. */
   end: number;
-  /** How many rows that spans. */
   slots: number;
 };
 
-/** Anything the grids can place: a start time and a length. */
 export type TimedItem = {
   time: string | null;
   durationMinutes: number;
@@ -55,15 +37,6 @@ const floorSlot = (mins: number) =>
 const ceilSlot = (mins: number) =>
   Math.ceil(mins / SLOT_MINUTES) * SLOT_MINUTES;
 
-/**
- * The slot window that just contains `items` — snapped outwards to whole slots
- * and clamped to the day. An empty day falls back to a plain 10am–10pm frame so
- * the grid still has a shape to draw.
- *
- * `bounds` widens it to the day's operating window as well, so a space that is
- * open but unbooked still draws — and can be tapped — across the hours it is
- * actually free, rather than only around whatever happens to be booked.
- */
 export function computeSlotWindow(
   items: TimedItem[],
   bounds?: { start: number | null; end: number | null },
@@ -112,34 +85,32 @@ export type SlotPlacement<T> = {
   conflicts: ItemClash<T>[];
 };
 
-/** The shortest block drawn on the day, in whole-slot minutes, or null for an empty day. */
-export function shortestSlotMinutes(
-  byColumn: ReadonlyMap<string, readonly SlotPlacement<unknown>[]>,
-): number | null {
-  let shortestSpan: number | null = null;
-  for (const placements of byColumn.values()) {
-    for (const p of placements) {
-      if (shortestSpan === null || p.slotSpan < shortestSpan) {
-        shortestSpan = p.slotSpan;
-      }
-    }
-  }
-  return shortestSpan === null ? null : shortestSpan * SLOT_MINUTES;
+/** The whole slots a block is drawn across, in minutes of the day. */
+export function placementMinutes(
+  placement: Pick<SlotPlacement<unknown>, "slotIndex" | "slotSpan">,
+  window: Pick<SlotWindow, "start">,
+): { from: number; to: number } {
+  const from = window.start + placement.slotIndex * SLOT_MINUTES;
+  return { from, to: from + placement.slotSpan * SLOT_MINUTES };
 }
 
-/**
- * Row height for the whole day, stretched so the shortest booking on it gets a detailed block.
- * Every column and the time gutter share it, so they stay in step.
- */
-export function stretchedSlotHeight(
+/** The slots each drawn booking covers, each asking for room to carry its details. */
+export function placementStretchSpans(
   byColumn: ReadonlyMap<string, readonly SlotPlacement<unknown>[]>,
-  base: number,
-): number {
-  return daySlotHeight(
-    SLOT_MINUTES,
-    base,
-    stretchedPxPerMinute(shortestSlotMinutes(byColumn), MIN_PX_PER_MINUTE),
-  );
+  window: Pick<SlotWindow, "start">,
+): StretchSpan[] {
+  const spans: StretchSpan[] = [];
+  for (const placements of byColumn.values()) {
+    for (const placement of placements) {
+      const { from, to } = placementMinutes(placement, window);
+      spans.push({
+        startMinutes: from,
+        endMinutes: to,
+        minHeight: DETAIL_HEIGHT,
+      });
+    }
+  }
+  return spans;
 }
 
 export function assignSlotLanes<T>(

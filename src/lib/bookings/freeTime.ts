@@ -1,3 +1,4 @@
+import type { MinuteScale } from "./minuteScale";
 import type { TimeWindow } from "./spaceScheduleGrid";
 
 export type TimeRange = {
@@ -58,29 +59,25 @@ export function snapToOfferedStart(
 export function minuteAtOffset(
   originMinute: number,
   offsetPx: number,
-  pxPerMinute: number,
+  scale: MinuteScale,
 ): number {
   const origin = finite(originMinute, 0);
   const offset = finite(offsetPx, 0);
-  const scale = finite(pxPerMinute, 0);
-  if (scale <= 0) return origin;
-  return origin + offset / scale;
+  // the rate is not a straight line, so walk back through the scale from where the element starts
+  return scale.minuteAt(scale.at(origin) + offset);
 }
 
 export function bandGeometry(
   openMinutes: number | null,
   closeMinutes: number | null,
   timeWindow: TimeWindow,
-  pxPerMinute: number,
+  scale: MinuteScale,
 ): BandGeometry | null {
   if (openMinutes == null || closeMinutes == null) return null;
   const from = Math.max(openMinutes, timeWindow.start);
   const to = Math.min(closeMinutes, timeWindow.end);
   if (to <= from) return null;
-  return {
-    top: (from - timeWindow.start) * pxPerMinute,
-    height: (to - from) * pxPerMinute,
-  };
+  return { top: scale.at(from), height: scale.spanHeight(from, to) };
 }
 
 export function nextFreeMinute(

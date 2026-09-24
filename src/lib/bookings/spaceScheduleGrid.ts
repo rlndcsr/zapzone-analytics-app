@@ -1,43 +1,31 @@
 import type { ScheduleBooking } from "../../services/bookingsService";
 import type { DayOff } from "../../services/dayOffsService";
 import { conflictsWith } from "./freeTime.ts";
+import {
+  DETAIL_HEIGHT,
+  type MinuteScale,
+  type StretchSpan,
+} from "./minuteScale.ts";
 
 // even the tightest zoom has to leave a short booking room for its details rather than cut them
 export const ZOOM_LEVELS = [2.4, 3.6, 5.2] as const;
 export const DEFAULT_ZOOM_INDEX = 1;
 
-/** What a booked block needs to carry its times, guest, package, party size and balance. */
-export const DETAILED_BLOCK_HEIGHT = 88;
-/** However short the booking, the day is never stretched past this. */
-export const MAX_PX_PER_MINUTE = 6;
 /** A booking is placed as at least this long, however short it is. */
 const MIN_PLACED_MINUTES = 15;
 
-/**
- * The scale for the whole timeline: stretched until the shortest booking gets a detailed
- * block, never below `floor` (the zoom or readable minimum) and never past the cap.
- */
-export function stretchedPxPerMinute(
-  shortestMinutes: number | null,
-  floor: number,
-): number {
-  if (shortestMinutes == null || !(shortestMinutes > 0)) return floor;
-  return Math.min(
-    MAX_PX_PER_MINUTE,
-    Math.max(floor, DETAILED_BLOCK_HEIGHT / shortestMinutes),
-  );
-}
-
-/** The shortest booking as the timeline places it, or null for an empty day. */
-export function shortestBookingMinutes(
-  bookings: readonly Pick<ScheduleBooking, "durationMinutes">[],
-): number | null {
-  let shortest: number | null = null;
-  for (const b of bookings) {
-    const minutes = Math.max(MIN_PLACED_MINUTES, b.durationMinutes);
-    if (shortest === null || minutes < shortest) shortest = minutes;
-  }
-  return shortest;
+/** The minutes each booking occupies, each asking to be drawn tall enough to carry its details. */
+export function bookingStretchSpans(
+  bookings: readonly Pick<ScheduleBooking, "time" | "durationMinutes">[],
+): StretchSpan[] {
+  return bookings.map((b) => {
+    const startMinutes = timeToMinutes(b.time);
+    return {
+      startMinutes,
+      endMinutes: startMinutes + Math.max(MIN_PLACED_MINUTES, b.durationMinutes),
+      minHeight: DETAIL_HEIGHT,
+    };
+  });
 }
 
 export const UNCATEGORIZED_LABEL = "No category";
@@ -190,7 +178,7 @@ export function positionBookingsByColumn({
   columns,
   bookings,
   timeWindow,
-  pxPerMinute,
+  scale,
   knownRoomIds,
   activeBookings = bookings,
   turnaroundFor = () => 0,
@@ -198,7 +186,7 @@ export function positionBookingsByColumn({
   columns: ScheduleColumn[];
   bookings: ScheduleBooking[];
   timeWindow: TimeWindow;
-  pxPerMinute: number;
+  scale: MinuteScale;
   knownRoomIds: ReadonlySet<number>;
   /** Every live booking, unfiltered — a booking a filter hides can still clash. */
   activeBookings?: ScheduleBooking[];
@@ -218,8 +206,8 @@ export function positionBookingsByColumn({
       startMin,
       endMin,
       endMinRaw: rawEnd,
-      top: (startMin - timeWindow.start) * pxPerMinute,
-      height: Math.max(24, (endMin - startMin) * pxPerMinute - 2),
+      top: scale.at(startMin),
+      height: Math.max(24, scale.spanHeight(startMin, endMin) - 2),
       lane: 0,
       laneCount: 1,
       clipped: rawEnd > timeWindow.end,
@@ -320,12 +308,12 @@ export function hourMarks(window: TimeWindow): number[] {
 export function nowLineTop(
   nowMinutes: number,
   window: TimeWindow,
-  pxPerMinute: number,
+  scale: MinuteScale,
   isToday: boolean,
 ): number | null {
   if (!isToday || nowMinutes < window.start || nowMinutes > window.end)
     return null;
-  return (nowMinutes - window.start) * pxPerMinute;
+  return scale.at(nowMinutes);
 }
 
 /* -------------------------------------------------------------- filters -- */

@@ -33,8 +33,13 @@ import {
   type FreeState,
   type TimeRange,
 } from "../../lib/bookings/freeTime";
+import {
+  buildMinuteScale,
+  type MinuteScale,
+} from "../../lib/bookings/minuteScale";
 import { packagesValidForSlot } from "../../lib/bookings/packageCandidates";
 import {
+  bookingStretchSpans,
   buildColumns,
   closureBoundaryMinutes,
   closureLabel,
@@ -49,8 +54,6 @@ import {
   minutesToLabel,
   nowLineTop,
   positionBookingsByColumn,
-  shortestBookingMinutes,
-  stretchedPxPerMinute,
   timeToMinutes,
   UNCATEGORIZED_LABEL,
   ZOOM_LEVELS,
@@ -648,7 +651,7 @@ const GridColumnBackground = ({
   breaks,
   closure,
   timeWindow,
-  pxPerMinute,
+  scale,
   meta,
   isPastDate,
   onPressBand,
@@ -664,7 +667,7 @@ const GridColumnBackground = ({
   breaks: { start: number; end: number }[];
   closure: SpaceClosure | undefined;
   timeWindow: TimeWindow;
-  pxPerMinute: number;
+  scale: MinuteScale;
   meta: {
     open: number | null;
     close: number | null;
@@ -686,7 +689,7 @@ const GridColumnBackground = ({
   onHoverEnd: () => void;
   onHoverCancel: () => void;
 }) => {
-  const band = bandGeometry(meta.open, meta.close, timeWindow, pxPerMinute);
+  const band = bandGeometry(meta.open, meta.close, timeWindow, scale);
   const bandOrigin = Math.max(meta.open ?? timeWindow.start, timeWindow.start);
   const clickable = !!band && meta.bookable && !isPastDate;
   // The web shows these hours in a hover tooltip on the band. There is no hover here, so the
@@ -766,8 +769,11 @@ const GridColumnBackground = ({
             position: "absolute",
             left: 0,
             right: 0,
-            top: (hoverMinute - timeWindow.start) * pxPerMinute,
-            height: Math.max(14, previewSpanMinutes * pxPerMinute),
+            top: scale.at(hoverMinute),
+            height: Math.max(
+              14,
+              scale.spanHeight(hoverMinute, hoverMinute + previewSpanMinutes),
+            ),
           }}
           className={`z-[5] flex-row items-center gap-1 border-y px-1 ${
             picking
@@ -831,8 +837,8 @@ const GridColumnBackground = ({
                 position: "absolute",
                 left: 2,
                 right: 2,
-                top: (start - timeWindow.start) * pxPerMinute,
-                height: (end - start) * pxPerMinute,
+                top: scale.at(start),
+                height: scale.spanHeight(start, end),
               }}
               className="bg-red-50/90 dark:bg-red-950/50 border border-dashed border-red-200 dark:border-red-900/40 rounded items-center justify-center z-10"
             >
@@ -849,8 +855,8 @@ const GridColumnBackground = ({
             position: "absolute",
             left: 2,
             right: 2,
-            top: (brk.start - timeWindow.start) * pxPerMinute,
-            height: (brk.end - brk.start) * pxPerMinute,
+            top: scale.at(brk.start),
+            height: scale.spanHeight(brk.start, brk.end),
           }}
           className="z-[4] bg-gray-300/70 dark:bg-neutral-700 border-2 border-dashed border-gray-400 dark:border-neutral-600 rounded items-center justify-center"
         >
@@ -873,7 +879,7 @@ const ScheduleGrid = ({
   breaksByRoom,
   closuresBySpace,
   timeWindow,
-  pxPerMinute,
+  scale,
   nowTop,
   nowLabel,
   isVenueToday,
@@ -904,7 +910,7 @@ const ScheduleGrid = ({
   breaksByRoom: Map<number, { start: number; end: number }[]>;
   closuresBySpace: Map<number, SpaceClosure>;
   timeWindow: TimeWindow;
-  pxPerMinute: number;
+  scale: MinuteScale;
   nowTop: number | null;
   nowLabel: string;
   isVenueToday: boolean;
@@ -960,7 +966,7 @@ const ScheduleGrid = ({
   venueLabelFor: ((column: ScheduleColumn) => string) | null;
 }) => {
   const headerScrollRef = useRef<ScrollView>(null);
-  const bodyHeight = timeWindow.total * pxPerMinute;
+  const bodyHeight = scale.height;
   const marks = hourMarks(timeWindow);
   /** Every interval boundary, so the grid is ruled at the times it can be booked at. */
   const intervalMarks = useMemo(() => {
@@ -1188,7 +1194,7 @@ const ScheduleGrid = ({
                 key={mark}
                 style={{
                   position: "absolute",
-                  top: (mark - timeWindow.start) * pxPerMinute - 6,
+                  top: scale.at(mark) - 6,
                   right: 6,
                 }}
                 className="text-[10px] font-medium text-gray-400 dark:text-gray-500"
@@ -1237,7 +1243,7 @@ const ScheduleGrid = ({
                         key={`interval-${mark}`}
                         style={{
                           position: "absolute",
-                          top: (mark - timeWindow.start) * pxPerMinute,
+                          top: scale.at(mark),
                           left: 0,
                           right: 0,
                         }}
@@ -1253,7 +1259,7 @@ const ScheduleGrid = ({
                         key={mark}
                         style={{
                           position: "absolute",
-                          top: (mark - timeWindow.start) * pxPerMinute,
+                          top: scale.at(mark),
                           left: 0,
                           right: 0,
                         }}
@@ -1273,7 +1279,7 @@ const ScheduleGrid = ({
                           : undefined
                       }
                       timeWindow={timeWindow}
-                      pxPerMinute={pxPerMinute}
+                      scale={scale}
                       meta={
                         metaByColumn.get(column.key) ?? {
                           open: null,
@@ -1317,8 +1323,8 @@ const ScheduleGrid = ({
                             position: "absolute",
                             left: 0,
                             right: 0,
-                            top: (item.endMin - timeWindow.start) * pxPerMinute,
-                            height: (to - item.endMin) * pxPerMinute,
+                            top: scale.at(item.endMin),
+                            height: scale.spanHeight(item.endMin, to),
                           }}
                           className="z-[3] border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
                         />
@@ -1607,16 +1613,6 @@ const SpaceScheduleScreen = () => {
     });
   }, [activeBookings, effectiveCategory, statusFilter, searchInput]);
 
-  // the whole day stretches so its shortest booking has room for every detail; zoom sits on top
-  const pxPerMinute = useMemo(
-    () =>
-      stretchedPxPerMinute(
-        shortestBookingMinutes(filteredBookings),
-        ZOOM_LEVELS[zoomIndex],
-      ),
-    [filteredBookings, zoomIndex],
-  );
-
   const knownRoomIds = useMemo(
     () => new Set(sortedSpaces.map((s) => s.id)),
     [sortedSpaces],
@@ -1727,6 +1723,18 @@ const SpaceScheduleScreen = () => {
     effectiveLocationId,
   ]);
 
+  // the zoom sets how tall an empty minute is; a booked one grows only as far as its details need
+  const scale = useMemo(
+    () =>
+      buildMinuteScale(
+        timeWindow.start,
+        timeWindow.end,
+        ZOOM_LEVELS[zoomIndex],
+        bookingStretchSpans(filteredBookings),
+      ),
+    [timeWindow, zoomIndex, filteredBookings],
+  );
+
   /**
    * How long a space stays shut after a booking ends — the same gap the
    * server's conflict check enforces. A package with no space attached is
@@ -1747,7 +1755,7 @@ const SpaceScheduleScreen = () => {
         columns,
         bookings: filteredBookings,
         timeWindow,
-        pxPerMinute,
+        scale,
         knownRoomIds,
         // clashes are measured against every live booking, so a filter can't hide one
         activeBookings,
@@ -1757,7 +1765,7 @@ const SpaceScheduleScreen = () => {
       columns,
       filteredBookings,
       timeWindow,
-      pxPerMinute,
+      scale,
       knownRoomIds,
       activeBookings,
       turnaroundFor,
@@ -1783,7 +1791,7 @@ const SpaceScheduleScreen = () => {
         columns: columnsForConflicts,
         bookings: activeBookings,
         timeWindow,
-        pxPerMinute,
+        scale,
         knownRoomIds,
         activeBookings,
         turnaroundFor,
@@ -1792,7 +1800,7 @@ const SpaceScheduleScreen = () => {
       columnsForConflicts,
       activeBookings,
       timeWindow,
-      pxPerMinute,
+      scale,
       knownRoomIds,
       turnaroundFor,
     ],
@@ -2203,7 +2211,7 @@ const SpaceScheduleScreen = () => {
       const meta = scheduleMetaByColumn.get(column.key);
       if (!meta || meta.open == null || meta.close == null) return;
 
-      const rawMinute = minuteAtOffset(bandOrigin, locationY, pxPerMinute);
+      const rawMinute = minuteAtOffset(bandOrigin, locationY, scale);
       const minute = resolveClickMinute(column, meta, rawMinute);
       // Nothing free between here and closing — never hand the booking form a
       // minute this grid already knows it would refuse.
@@ -2211,7 +2219,7 @@ const SpaceScheduleScreen = () => {
 
       navigateToMinute(column, minute);
     },
-    [pxPerMinute, resolveClickMinute, scheduleMetaByColumn, navigateToMinute],
+    [scale, resolveClickMinute, scheduleMetaByColumn, navigateToMinute],
   );
 
   /** Which column the finger is on, and the minute it would book. Cleared on lift. */
@@ -2246,7 +2254,7 @@ const SpaceScheduleScreen = () => {
       const minute = resolveClickMinute(
         column,
         meta,
-        minuteAtOffset(bandOrigin, locationY, pxPerMinute),
+        minuteAtOffset(bandOrigin, locationY, scale),
       );
       // Dragging past the end of the band resolves to nothing; hold the last good minute rather
       // than blinking the marker out from under the finger.
@@ -2259,7 +2267,7 @@ const SpaceScheduleScreen = () => {
           : { key: column.key, minute },
       );
     },
-    [pxPerMinute, resolveClickMinute, scheduleMetaByColumn],
+    [scale, resolveClickMinute, scheduleMetaByColumn],
   );
 
   const startPick = useCallback(() => {
@@ -2452,8 +2460,8 @@ const SpaceScheduleScreen = () => {
   }, [columns, turnaroundFor]);
 
   const nowTop = useMemo(
-    () => nowLineTop(nowMinutes, timeWindow, pxPerMinute, isVenueToday),
-    [nowMinutes, timeWindow, pxPerMinute, isVenueToday],
+    () => nowLineTop(nowMinutes, timeWindow, scale, isVenueToday),
+    [nowMinutes, timeWindow, scale, isVenueToday],
   );
 
   const daySummary = useMemo(
@@ -3027,7 +3035,7 @@ const SpaceScheduleScreen = () => {
               breaksByRoom={roomBreaks}
               closuresBySpace={spaceClosures}
               timeWindow={timeWindow}
-              pxPerMinute={pxPerMinute}
+              scale={scale}
               nowTop={nowTop}
               nowLabel={minutesToLabel(nowMinutes)}
               isVenueToday={isVenueToday}

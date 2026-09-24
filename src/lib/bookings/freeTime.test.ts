@@ -13,6 +13,7 @@ import {
   type Occupant,
   type TimeRange,
 } from "./freeTime.ts";
+import { buildMinuteScale } from "./minuteScale.ts";
 
 describe("snapToInterval", () => {
   it("floors to the nearest interval", () => {
@@ -32,35 +33,52 @@ describe("snapToInterval", () => {
 });
 
 describe("minuteAtOffset", () => {
+  const linear = buildMinuteScale(0, 24 * 60, 2);
+
   it("adds the pixel offset scaled by px-per-minute to the band's own origin", () => {
-    assert.equal(minuteAtOffset(600, 60, 2), 630);
+    assert.equal(minuteAtOffset(600, 60, linear), 630);
   });
 
   it("never crosses the whole-timeline anchor bug — origin is the band's top, not 0", () => {
-    const result = minuteAtOffset(18 * 60, 10, 2);
+    const result = minuteAtOffset(18 * 60, 10, linear);
     assert.ok(Math.abs(result - 18 * 60) < 10);
   });
 
-  it("falls back to the origin when scale is non-positive", () => {
-    assert.equal(minuteAtOffset(600, 100, 0), 600);
+  it("walks back through a grown stretch rather than dividing by one rate", () => {
+    // 10:00–10:15 grown from 30px to 54px: 20px into the band from 9:50, then 27px into the stretch
+    const scale = buildMinuteScale(0, 24 * 60, 2, [
+      { startMinutes: 600, endMinutes: 615, minHeight: 54 },
+    ]);
+    assert.equal(minuteAtOffset(590, 20 + 27, scale), 607.5);
   });
 });
 
 describe("bandGeometry", () => {
   const window = { start: 600, end: 1320, total: 720 };
+  const linear = buildMinuteScale(window.start, window.end, 1);
 
   it("returns null when open/close is unknown", () => {
-    assert.equal(bandGeometry(null, 1000, window, 1), null);
-    assert.equal(bandGeometry(900, null, window, 1), null);
+    assert.equal(bandGeometry(null, 1000, window, linear), null);
+    assert.equal(bandGeometry(900, null, window, linear), null);
   });
 
   it("clips to the visible time window", () => {
-    const band = bandGeometry(500, 1400, window, 1);
+    const band = bandGeometry(500, 1400, window, linear);
     assert.deepEqual(band, { top: 0, height: 720 });
   });
 
   it("returns null when the room's window doesn't intersect what's visible", () => {
-    assert.equal(bandGeometry(1400, 1450, window, 1), null);
+    assert.equal(bandGeometry(1400, 1450, window, linear), null);
+  });
+
+  it("follows the same grown stretch as the bookings", () => {
+    const scale = buildMinuteScale(window.start, window.end, 1, [
+      { startMinutes: 630, endMinutes: 645, minHeight: 54 },
+    ]);
+    // opens 10 minutes into the grown 10:30 slot (3.6px a minute there), closes in plain time
+    const band = bandGeometry(640, 700, window, scale)!;
+    assert.ok(Math.abs(band.top - (30 + 10 * 3.6)) < 1e-9);
+    assert.ok(Math.abs(band.height - (5 * 3.6 + 55)) < 1e-9);
   });
 });
 

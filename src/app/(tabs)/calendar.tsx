@@ -45,12 +45,18 @@ import {
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
   computeSlotWindow,
+  daySlotHeight,
   distinctStartMinutes,
   placeByColumn,
+  placementMinutes,
+  placementStretchSpans,
   SLOT_MINUTES,
-  stretchedSlotHeight,
   type SlotPlacement,
 } from "../../lib/calendar/dayGrid";
+import {
+  buildMinuteScale,
+  type MinuteScale,
+} from "../../lib/bookings/minuteScale";
 import {
   buildColumnSchedules,
   buildOccupancy,
@@ -164,8 +170,9 @@ const DAY_COL_WIDTH = 148;
 const WEEK_COL_WIDTH = 200;
 /** Tall enough for the space's name, its location and its schedule status. */
 const GRID_HEADER_HEIGHT = 66;
-/** The shortest a 15-minute row of the day grid is ever drawn. */
-const MIN_SLOT_HEIGHT = 44;
+/** One unbooked 15-minute row of the day grid, held to the 3px-a-minute floor. */
+const SLOT_HEIGHT = daySlotHeight(SLOT_MINUTES, 44);
+const PX_PER_MINUTE = SLOT_HEIGHT / SLOT_MINUTES;
 /** A week card is a fixed height so every column's rows stay aligned. */
 const WEEK_CARD_HEIGHT = 104;
 const WEEK_ROW_MIN_HEIGHT = 64;
@@ -593,17 +600,20 @@ const DayColumnStatus = ({
 
 const DayBookingBlock = ({
   placement,
-  slotHeight,
+  scale,
+  windowStart,
   onPress,
 }: {
   placement: SlotPlacement<CalendarBooking>;
-  slotHeight: number;
+  scale: MinuteScale;
+  windowStart: number;
   onPress: () => void;
 }) => {
   const booking = placement.item;
   const tone = packageColor(booking.packageName);
   const status = statusStyle(booking.status);
-  const height = placement.slotSpan * slotHeight - 4;
+  const slots = placementMinutes(placement, { start: windowStart });
+  const height = scale.spanHeight(slots.from, slots.to) - 4;
   const doubleBooked = placement.conflicts.some((c) => c.overlapMinutes > 0);
   const clashing = placement.conflicts.length > 0;
   const noteFlags = noteFlagsOf(booking);
@@ -612,14 +622,14 @@ const DayBookingBlock = ({
   const showNotes = (noteFlags.guest || noteFlags.staff) && height >= 20;
   // a tiny block has room for one badge: the staff note wins, being rarer and written for staff
   const tightNotes = height < 30 && noteFlags.guest && noteFlags.staff;
-  // one unstretched slot (MIN_SLOT_HEIGHT - 4) is the only size still short on room for the package line
+  // one slot, even stretched to carry its package line, is still short on room
   const short = height < 60;
   return (
     <Pressable
       onPress={onPress}
       style={{
         position: "absolute",
-        top: placement.slotIndex * slotHeight + 2,
+        top: scale.at(slots.from) + 2,
         height,
         left: `${(100 / placement.laneCount) * placement.lane}%`,
         width: `${100 / placement.laneCount}%`,
@@ -892,11 +902,10 @@ const SlotMarker = React.forwardRef<
     columnWidth: number;
     /** Where a column's body starts, under its header. */
     topOffset: number;
-    windowStart: number;
-    pxPerMinute: number;
+    scale: MinuteScale;
     spanMinutes: number;
   }
->(({ columnWidth, topOffset, windowStart, pxPerMinute, spanMinutes }, ref) => {
+>(({ columnWidth, topOffset, scale, spanMinutes }, ref) => {
   const [at, setAt] = useState<{
     column: number;
     minute: number;
@@ -929,8 +938,8 @@ const SlotMarker = React.forwardRef<
         position: "absolute",
         left: at.column * columnWidth,
         width: columnWidth,
-        top: topOffset + (at.minute - windowStart) * pxPerMinute,
-        height: Math.max(16, spanMinutes * pxPerMinute),
+        top: topOffset + scale.at(at.minute),
+        height: Math.max(16, scale.spanHeight(at.minute, at.minute + spanMinutes)),
       }}
       className={`z-30 flex-row items-center gap-1 border-y px-1 ${
         at.picking
@@ -1354,12 +1363,17 @@ const Calendar = () => {
       daySchedules,
     ],
   );
-  // the whole day stretches so its shortest booking has room for every detail
-  const slotHeight = useMemo(
-    () => stretchedSlotHeight(dayPlacements, MIN_SLOT_HEIGHT),
-    [dayPlacements],
+  // only the slots a booking sits in grow, and only as far as its time, guest and package need
+  const dayScale = useMemo(
+    () =>
+      buildMinuteScale(
+        dayWindow.start,
+        dayWindow.end,
+        PX_PER_MINUTE,
+        placementStretchSpans(dayPlacements, dayWindow),
+      ),
+    [dayWindow, dayPlacements],
   );
-  const pxPerMinute = slotHeight / SLOT_MINUTES;
 
   const dayColumnsForConflicts = useMemo(
     () =>
@@ -2387,7 +2401,12 @@ const Calendar = () => {
                       {daySlots.map((minutes) => (
                         <View
                           key={minutes}
-                          style={{ height: slotHeight }}
+                          style={{
+                            height: dayScale.spanHeight(
+                              minutes,
+                              minutes + SLOT_MINUTES,
+                            ),
+                          }}
                           className={`px-3 pt-1 border-b ${
                             (minutes + SLOT_MINUTES) % 60 === 0
                               ? "border-gray-200 dark:border-neutral-700"
@@ -2421,7 +2440,7 @@ const Calendar = () => {
                                 schedule.open,
                                 schedule.close,
                                 dayTimeWindow,
-                                pxPerMinute,
+                                dayScale,
                               )
                             : null;
                           // A past day is read-only, and a space with no window
@@ -2475,13 +2494,18 @@ const Calendar = () => {
 
                               <View
                                 style={{
-                                  height: daySlots.length * slotHeight,
+                                  height: dayScale.height,
                                 }}
                               >
                                 {daySlots.map((minutes) => (
                                   <View
                                     key={minutes}
-                                    style={{ height: slotHeight }}
+                                    style={{
+                                      height: dayScale.spanHeight(
+                                        minutes,
+                                        minutes + SLOT_MINUTES,
+                                      ),
+                                    }}
                                     className={`border-b ${
                                       (minutes + SLOT_MINUTES) % 60 === 0
                                         ? "border-gray-200 dark:border-neutral-700"
@@ -2514,7 +2538,7 @@ const Calendar = () => {
                                       minuteAtOffset(
                                         bandOrigin,
                                         y,
-                                        pxPerMinute,
+                                        dayScale,
                                       );
                                     return bookable ? (
                                       <Pressable
@@ -2627,7 +2651,7 @@ const Calendar = () => {
                                       closure.startMinutes,
                                       closure.endMinutes,
                                       dayTimeWindow,
-                                      pxPerMinute,
+                                      dayScale,
                                     );
                                     if (!geometry) return null;
                                     return (
@@ -2662,7 +2686,7 @@ const Calendar = () => {
                                     brk.start,
                                     brk.end,
                                     dayTimeWindow,
-                                    pxPerMinute,
+                                    dayScale,
                                   );
                                   if (!geometry) return null;
                                   return (
@@ -2712,17 +2736,15 @@ const Calendar = () => {
                                     const turnaround =
                                       schedule?.turnaround ?? 0;
                                     if (turnaround <= 0) return null;
-                                    const top =
-                                      (placement.slotIndex +
-                                        placement.slotSpan) *
-                                      slotHeight;
-                                    const bottom =
-                                      (Math.min(
+                                    const top = dayScale.at(
+                                      placementMinutes(placement, dayWindow).to,
+                                    );
+                                    const bottom = dayScale.at(
+                                      Math.min(
                                         dayWindow.end,
                                         placement.endMin + turnaround,
-                                      ) -
-                                        dayWindow.start) *
-                                      pxPerMinute;
+                                      ),
+                                    );
                                     if (bottom <= top) return null;
                                     return (
                                       <View
@@ -2746,7 +2768,8 @@ const Calendar = () => {
                                     <DayBookingBlock
                                       key={placement.item.id}
                                       placement={placement}
-                                      slotHeight={slotHeight}
+                                      scale={dayScale}
+                                      windowStart={dayWindow.start}
                                       onPress={() =>
                                         openBooking(placement.item.id)
                                       }
@@ -2763,8 +2786,7 @@ const Calendar = () => {
                           ref={markerRef}
                           columnWidth={DAY_COL_WIDTH}
                           topOffset={GRID_HEADER_HEIGHT}
-                          windowStart={dayWindow.start}
-                          pxPerMinute={pxPerMinute}
+                          scale={dayScale}
                           spanMinutes={previewSpanMinutes}
                         />
                       </View>
