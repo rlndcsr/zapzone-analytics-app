@@ -5,11 +5,38 @@ import { buildColumns } from "../bookings/spaceScheduleGrid.ts";
 import {
   assignSlotLanes,
   computeSlotWindow,
+  daySlotHeight,
   distinctStartMinutes,
+  MIN_PX_PER_MINUTE,
   placeByColumn,
   SLOT_MINUTES,
   type SlotPlacement,
 } from "./dayGrid.ts";
+
+describe("daySlotHeight — the 3px-a-minute floor", () => {
+  const pxPerMinute = (slot: number) => daySlotHeight(slot, 44) / slot;
+
+  it("never draws a 15- or 30-minute row tighter than the floor", () => {
+    assert.ok(pxPerMinute(15) >= MIN_PX_PER_MINUTE);
+    assert.ok(pxPerMinute(30) >= MIN_PX_PER_MINUTE);
+  });
+
+  it("gives a half-hour booking the same readable height on either grid", () => {
+    const halfHourOn15 = 2 * daySlotHeight(15, 44);
+    const halfHourOn30 = daySlotHeight(30, 44);
+    assert.equal(halfHourOn15, halfHourOn30);
+    assert.ok(halfHourOn15 >= 30 * MIN_PX_PER_MINUTE);
+  });
+
+  it("keeps the base height where it is already taller than the floor", () => {
+    assert.equal(daySlotHeight(5, 44), 44);
+  });
+
+  it("scales a longer booking in proportion to its length", () => {
+    const slot = daySlotHeight(SLOT_MINUTES, 44);
+    assert.equal((120 / SLOT_MINUTES) * slot, 4 * (30 / SLOT_MINUTES) * slot);
+  });
+});
 
 const booking = (
   over: Partial<{

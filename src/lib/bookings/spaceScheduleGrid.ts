@@ -2,7 +2,8 @@ import type { ScheduleBooking } from "../../services/bookingsService";
 import type { DayOff } from "../../services/dayOffsService";
 import { conflictsWith } from "./freeTime.ts";
 
-export const ZOOM_LEVELS = [1, 1.6, 2.4] as const;
+// even the tightest zoom has to leave a short booking room for its details rather than cut them
+export const ZOOM_LEVELS = [2.4, 3.6, 5.2] as const;
 export const DEFAULT_ZOOM_INDEX = 1;
 
 export const UNCATEGORIZED_LABEL = "No category";

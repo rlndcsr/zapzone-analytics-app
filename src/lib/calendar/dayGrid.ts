@@ -13,8 +13,15 @@ import {
   type ScheduleColumn,
 } from "../bookings/spaceScheduleGrid.ts";
 
-/** Height of one row, in minutes. */
 export const SLOT_MINUTES = 15;
+export const MIN_PX_PER_MINUTE = 3;
+
+export function daySlotHeight(slotMinutes: number, base: number): number {
+  return Math.max(
+    base,
+    Math.ceil(MIN_PX_PER_MINUTE * Math.max(5, slotMinutes)),
+  );
+}
 
 /** The window shown when the day holds nothing to size the grid around. */
 const FALLBACK_START = 10 * 60;

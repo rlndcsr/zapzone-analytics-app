@@ -45,6 +45,7 @@ import {
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
   computeSlotWindow,
+  daySlotHeight,
   distinctStartMinutes,
   placeByColumn,
   SLOT_MINUTES,
@@ -163,8 +164,8 @@ const DAY_COL_WIDTH = 148;
 const WEEK_COL_WIDTH = 200;
 /** Tall enough for the space's name, its location and its schedule status. */
 const GRID_HEADER_HEIGHT = 66;
-/** One 15-minute row of the day grid. */
-const SLOT_HEIGHT = 44;
+/** One 15-minute row of the day grid, held to the 3px-a-minute floor. */
+const SLOT_HEIGHT = daySlotHeight(SLOT_MINUTES, 44);
 const PX_PER_MINUTE = SLOT_HEIGHT / SLOT_MINUTES;
 /** A week card is a fixed height so every column's rows stay aligned. */
 const WEEK_CARD_HEIGHT = 104;

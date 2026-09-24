@@ -18,6 +18,7 @@ import {
   nowLineTop,
   positionBookingsByColumn,
   timeToMinutes,
+  ZOOM_LEVELS,
   type PositionedBooking,
   type ScheduleColumn,
 } from "./spaceScheduleGrid.ts";
@@ -304,6 +305,28 @@ describe("positionBookingsByColumn", () => {
     assert.equal(placed.top, (10 * 60 - window.start) * 2);
     assert.equal(placed.height, 60 * 2 - 2);
     assert.equal(placed.clipped, false);
+  });
+
+  it("leaves a short booking room for its details even at the tightest zoom", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 20 }),
+      makeBooking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 30 }),
+      makeBooking({ id: 3, roomId: 1, time: "12:00", durationMinutes: 120 }),
+    ];
+    const map = positionBookingsByColumn({
+      columns,
+      bookings,
+      timeWindow: window,
+      pxPerMinute: ZOOM_LEVELS[0],
+      knownRoomIds,
+    });
+    const height = (id: number) =>
+      map.get("room-1")!.find((p) => p.booking.id === id)!.height;
+    // 30px is where a block stops dropping its package line; 60px is the full time range
+    assert.ok(height(1) >= 30);
+    assert.ok(height(2) >= 60);
+    // longer bookings still scale with their length
+    assert.equal(height(3), 120 * ZOOM_LEVELS[0] - 2);
   });
 
   it("floors a very short booking's placement duration at 15 minutes", () => {
