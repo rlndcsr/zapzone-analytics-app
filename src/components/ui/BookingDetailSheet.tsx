@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Calendar,
   Clock,
   CreditCard,
@@ -13,12 +14,15 @@ import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   ScrollView,
   Text,
   View,
 } from "react-native";
+import type { clashSummary } from "../../lib/bookings/bookingCell";
 import { isBookingSyncInProgress } from "../../lib/bookings/bookingListCache";
+import { phoneDialUrl } from "../../lib/phone";
 import { getToken } from "../../lib/session";
 import {
   fetchBookingDetail,
@@ -145,6 +149,8 @@ type Props = {
   onClose: () => void;
   /** Notifies the parent that this booking changed, so it can refetch its list. */
   onChanged?: () => void;
+  /** What this booking clashes with, when the opening screen knows (the Space Schedule does). */
+  clash?: ReturnType<typeof clashSummary>;
 };
 
 /**
@@ -158,6 +164,7 @@ export function BookingDetailSheet({
   initialMode = "hub",
   onClose,
   onChanged,
+  clash,
 }: Props) {
   const [detail, setDetail] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -258,6 +265,33 @@ export function BookingDetailSheet({
 
           {!loading && !error && detail && (
             <>
+              {/* the clash in words: the coloured ring on the grid can be seen but not read */}
+              {!!clash && (
+                <View
+                  className={`mt-4 flex-row items-start gap-2 rounded-lg border px-3 py-2 ${
+                    clash.doubleBooked
+                      ? "border-rose-200 bg-rose-50 dark:border-rose-900/50 dark:bg-rose-950/40"
+                      : "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/40"
+                  }`}
+                >
+                  <AlertTriangle
+                    size={16}
+                    color={clash.doubleBooked ? "#9f1239" : "#92400e"}
+                    style={{ marginTop: 2 }}
+                  />
+                  <Text
+                    className={`flex-1 text-sm ${
+                      clash.doubleBooked
+                        ? "text-rose-800 dark:text-rose-300"
+                        : "text-amber-800 dark:text-amber-300"
+                    }`}
+                  >
+                    <Text className="font-bold uppercase">{clash.heading}</Text>{" "}
+                    {clash.text}
+                  </Text>
+                </View>
+              )}
+
               {/* Customer */}
               <SectionTitle>Customer Information</SectionTitle>
               <Card>
@@ -273,9 +307,27 @@ export function BookingDetailSheet({
                 <Text className="ml-6 mt-1 text-sm text-gray-500 dark:text-gray-400">
                   {detail.customerEmail || "No email provided"}
                 </Text>
-                <Text className="ml-6 mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                  {detail.customerPhone || "No phone provided"}
-                </Text>
+                {phoneDialUrl(detail.customerPhone) ? (
+                  // calling the late party should be one tap, not a retype
+                  <Pressable
+                    onPress={() => {
+                      const url = phoneDialUrl(detail.customerPhone);
+                      if (url) void Linking.openURL(url);
+                    }}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Call ${detail.customerPhone}`}
+                    hitSlop={8}
+                    className="ml-6 mt-0.5 self-start active:opacity-60"
+                  >
+                    <Text className="text-sm font-medium text-[#0644C7] dark:text-blue-400">
+                      {detail.customerPhone}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text className="ml-6 mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                    {detail.customerPhone || "No phone provided"}
+                  </Text>
+                )}
               </Card>
 
               {/* Directly under the customer, because it is what the desk needs

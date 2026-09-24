@@ -8,6 +8,7 @@ import {
   BASE_CONTENT_HEIGHT,
   cellExtras,
   cellSpanHeight,
+  clashSummary,
   compactTimeRange,
   describeClashes,
   EXTRA_LINE_HEIGHT,
@@ -170,5 +171,33 @@ describe("describeClashes", () => {
       ]),
       "Sam at 10 AM (15 min over), Lee at 11 AM (no gap between them)",
     );
+  });
+});
+
+describe("clashSummary", () => {
+  it("is nothing for a booking that clashes with nothing", () => {
+    assert.equal(clashSummary([]), null);
+  });
+
+  it("says Overlaps when any clash really double-books the space", () => {
+    assert.deepEqual(
+      clashSummary([
+        { name: "Sam", startLabel: "10 AM", overlapMinutes: 15 },
+        { name: "Lee", startLabel: "11 AM", overlapMinutes: 0 },
+      ]),
+      {
+        heading: "Overlaps",
+        doubleBooked: true,
+        text: "Sam at 10 AM (15 min over), Lee at 11 AM (no gap between them)",
+      },
+    );
+  });
+
+  it("says No turnaround when the only problem is the missing reset", () => {
+    assert.deepEqual(clashSummary([{ name: "Lee", startLabel: "11:30 AM", overlapMinutes: 0 }]), {
+      heading: "No turnaround",
+      doubleBooked: false,
+      text: "Lee at 11:30 AM (no gap between them)",
+    });
   });
 });

@@ -128,6 +128,22 @@ export function describeClashes(
     .join(", ");
 }
 
+/**
+ * What an open booking runs into, for reading rather than hovering: "Overlaps" when any clash
+ * really double-books the space, otherwise "No turnaround". Null when it clashes with nothing.
+ */
+export function clashSummary(
+  clashes: readonly { name: string; startLabel: string; overlapMinutes: number }[],
+): { heading: "Overlaps" | "No turnaround"; doubleBooked: boolean; text: string } | null {
+  if (clashes.length === 0) return null;
+  const doubleBooked = clashes.some((clash) => clash.overlapMinutes > 0);
+  return {
+    heading: doubleBooked ? "Overlaps" : "No turnaround",
+    doubleBooked,
+    text: describeClashes(clashes),
+  };
+}
+
 export type CellExtraTone = "overlap" | "gap" | "staff" | "guest" | "honoree" | "muted";
 
 export type CellExtra = { key: string; tone: CellExtraTone; text: string };

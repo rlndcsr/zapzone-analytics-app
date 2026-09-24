@@ -23,6 +23,7 @@ import {
   arrivalFlag,
   balanceSummary,
   cellExtras,
+  clashSummary,
   compactTimeRange,
   describeClashes,
   hasArrived,
@@ -1665,6 +1666,24 @@ const SpaceScheduleScreen = () => {
     [arrangedByColumn, scale],
   );
 
+  // What the open booking runs into, read off the same conflicts the grid draws its ring from
+  const selectedClash = useMemo(() => {
+    if (selectedBookingId == null) return null;
+    for (const list of arrangedByColumn.values()) {
+      const found = list.find((item) => item.booking.id === selectedBookingId);
+      if (found) {
+        return clashSummary(
+          found.conflicts.map((clash) => ({
+            name: clash.booking.customerName,
+            startLabel: minutesToLabel(timeToMinutes(clash.booking.time)),
+            overlapMinutes: clash.overlapMinutes,
+          })),
+        );
+      }
+    }
+    return null;
+  }, [selectedBookingId, arrangedByColumn]);
+
   // Every clashing pair today, derived from every live booking rather than
   // from the currently drawn/filtered blocks — a filter hiding both sides of
   // a clash must not hide the clash itself.
@@ -3210,6 +3229,7 @@ const SpaceScheduleScreen = () => {
         visible={selectedBookingId !== null}
         onClose={() => setSelectedBookingId(null)}
         onChanged={refetch}
+        clash={selectedClash}
       />
     </View>
   );
