@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildColumns } from "../bookings/spaceScheduleGrid.ts";
+import {
+  buildColumns,
+  DETAILED_BLOCK_HEIGHT,
+  MAX_PX_PER_MINUTE,
+  stretchedPxPerMinute,
+} from "../bookings/spaceScheduleGrid.ts";
 import {
   assignSlotLanes,
   computeSlotWindow,
@@ -9,7 +14,9 @@ import {
   distinctStartMinutes,
   MIN_PX_PER_MINUTE,
   placeByColumn,
+  shortestSlotMinutes,
   SLOT_MINUTES,
+  stretchedSlotHeight,
   type SlotPlacement,
 } from "./dayGrid.ts";
 
@@ -331,5 +338,94 @@ describe("the rows of the week grid", () => {
 
   it("folds bookings with no time into a single midnight row", () => {
     assert.deepEqual(distinctStartMinutes([booking({ time: null })]), [0]);
+  });
+});
+
+describe("stretchedSlotHeight — the day stretches for its shortest booking", () => {
+  const spaces = [
+    { id: 1, name: "Room A", capacity: null },
+    { id: 2, name: "Room B", capacity: null },
+  ];
+  const knownRoomIds = new Set([1, 2]);
+  const place = (items: ReturnType<typeof booking>[]) => {
+    const columns = buildColumns({
+      spaces,
+      bookings: items,
+      hideEmptySpaces: false,
+      knownRoomIds,
+    });
+    return placeByColumn({
+      columns,
+      items,
+      window: computeSlotWindow(items),
+      knownRoomIds,
+    });
+  };
+  // what DayBookingBlock draws: whole slots less its 4px inset
+  const blockHeight = (span: number, slot: number) => span * slot - 4;
+  // the calendar block's last line (the status) needs more than this
+  const FULL_DETAIL = 72;
+
+  it("stays at the readable floor on an empty day", () => {
+    assert.equal(stretchedSlotHeight(new Map(), 44), 45);
+    assert.equal(shortestSlotMinutes(new Map()), null);
+  });
+
+  it("stretches a quarter-hour booking to a fully detailed block", () => {
+    const byColumn = place([booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })]);
+    const slot = stretchedSlotHeight(byColumn, 44);
+    assert.ok(slot / SLOT_MINUTES <= MAX_PX_PER_MINUTE);
+    assert.ok(blockHeight(1, slot) > FULL_DETAIL);
+    assert.ok(blockHeight(1, slot) >= DETAILED_BLOCK_HEIGHT - 4);
+  });
+
+  it("leaves a day of half-hour and longer bookings at the floor", () => {
+    const byColumn = place([
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 30 }),
+      booking({ id: 2, roomId: 2, time: "11:00", durationMinutes: 120 }),
+    ]);
+    const slot = stretchedSlotHeight(byColumn, 44);
+    // 88px over 30 minutes is under 3px a minute, so the floor already covers it
+    assert.equal(slot, 45);
+    assert.ok(blockHeight(2, slot) > FULL_DETAIL);
+  });
+
+  it("sizes the day by its shortest booking, and every longer one grows with it", () => {
+    const byColumn = place([
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      booking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 120 }),
+      booking({ id: 3, roomId: 2, time: "10:00", durationMinutes: 60 }),
+    ]);
+    assert.equal(shortestSlotMinutes(byColumn), 15);
+    const slot = stretchedSlotHeight(byColumn, 44);
+    const long = byColumn.get("room-1")!.find((p) => p.item.id === 2)!;
+    const hour = byColumn.get("room-2")![0];
+    assert.equal(long.slotSpan * slot, 8 * slot);
+    assert.equal(long.slotSpan * slot, 2 * hour.slotSpan * slot);
+  });
+
+  it("uses the drawn slot span, so a short booking straddling two slots counts as both", () => {
+    const byColumn = place([booking({ id: 1, roomId: 1, time: "10:10", durationMinutes: 15 })]);
+    assert.equal(shortestSlotMinutes(byColumn), 30);
+  });
+
+  it("keeps both columns and the time gutter on one row height", () => {
+    const byColumn = place([
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      booking({ id: 2, roomId: 2, time: "10:00", durationMinutes: 60 }),
+    ]);
+    const slot = stretchedSlotHeight(byColumn, 44);
+    const a = byColumn.get("room-1")![0];
+    const b = byColumn.get("room-2")![0];
+    // same start → same top in either column, and the gutter row at 10:00 sits there too
+    assert.equal(a.slotIndex * slot, b.slotIndex * slot);
+    assert.equal(a.slotIndex * slot, ((10 * 60 - 10 * 60) / SLOT_MINUTES) * slot);
+  });
+
+  it("never stretches past the cap however short the booking", () => {
+    assert.equal(
+      daySlotHeight(SLOT_MINUTES, 44, stretchedPxPerMinute(5, MIN_PX_PER_MINUTE)),
+      MAX_PX_PER_MINUTE * SLOT_MINUTES,
+    );
   });
 });

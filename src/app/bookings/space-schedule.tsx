@@ -49,6 +49,8 @@ import {
   minutesToLabel,
   nowLineTop,
   positionBookingsByColumn,
+  shortestBookingMinutes,
+  stretchedPxPerMinute,
   timeToMinutes,
   UNCATEGORIZED_LABEL,
   ZOOM_LEVELS,
@@ -1458,8 +1460,6 @@ const SpaceScheduleScreen = () => {
     });
   }, [categoryFilter, statusFilter, searchInput, hideEmptySpaces, zoomIndex]);
 
-  const pxPerMinute = ZOOM_LEVELS[zoomIndex];
-
   // Live "now", venue-timezone-anchored — updates every minute and whenever
   // the app returns to the foreground (web parity: nowTick + visibilitychange).
   const [nowTick, setNowTick] = useState(() => venueNow());
@@ -1606,6 +1606,16 @@ const SpaceScheduleScreen = () => {
       return true;
     });
   }, [activeBookings, effectiveCategory, statusFilter, searchInput]);
+
+  // the whole day stretches so its shortest booking has room for every detail; zoom sits on top
+  const pxPerMinute = useMemo(
+    () =>
+      stretchedPxPerMinute(
+        shortestBookingMinutes(filteredBookings),
+        ZOOM_LEVELS[zoomIndex],
+      ),
+    [filteredBookings, zoomIndex],
+  );
 
   const knownRoomIds = useMemo(
     () => new Set(sortedSpaces.map((s) => s.id)),

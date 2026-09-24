@@ -13,10 +13,14 @@ import {
   computeDaySummary,
   computeSpaceClosures,
   computeTimeWindow,
+  DETAILED_BLOCK_HEIGHT,
   hourMarks,
+  MAX_PX_PER_MINUTE,
   minutesToLabel,
   nowLineTop,
   positionBookingsByColumn,
+  shortestBookingMinutes,
+  stretchedPxPerMinute,
   timeToMinutes,
   ZOOM_LEVELS,
   type PositionedBooking,
@@ -805,5 +809,96 @@ describe("closureBoundaryMinutes / closureLabel", () => {
 
   it("is null when there is no closure at all", () => {
     assert.equal(closureLabel(undefined), null);
+  });
+});
+
+describe("stretchedPxPerMinute — the day stretches for its shortest booking", () => {
+  const columns: ScheduleColumn[] = [
+    { key: "room-1", name: "Room A", capacity: null, roomId: 1, virtual: false },
+    { key: "room-2", name: "Room B", capacity: null, roomId: 2, virtual: false },
+  ];
+  const knownRoomIds = new Set([1, 2]);
+  const window = { start: 9 * 60, end: 17 * 60, total: 8 * 60 };
+  const scaleFor = (bookings: ScheduleBooking[], zoom: number = ZOOM_LEVELS[0]) =>
+    stretchedPxPerMinute(shortestBookingMinutes(bookings), zoom);
+  const place = (bookings: ScheduleBooking[], pxPerMinute: number) =>
+    positionBookingsByColumn({ columns, bookings, timeWindow: window, pxPerMinute, knownRoomIds });
+
+  it("keeps the zoom on an empty day", () => {
+    assert.equal(shortestBookingMinutes([]), null);
+    assert.equal(scaleFor([], ZOOM_LEVELS[1]), ZOOM_LEVELS[1]);
+  });
+
+  it("gives a quarter-hour booking a detailed block", () => {
+    const bookings = [makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })];
+    const scale = scaleFor(bookings);
+    assert.equal(scale, DETAILED_BLOCK_HEIGHT / 15);
+    const [placed] = place(bookings, scale).get("room-1")!;
+    // 60px is where the block shows its full time range, the guest and the package
+    assert.ok(placed.height >= 60);
+    assert.ok(placed.height >= DETAILED_BLOCK_HEIGHT - 2);
+  });
+
+  it("treats a booking shorter than 15 minutes as the 15 minutes it is drawn at", () => {
+    const bookings = [makeBooking({ id: 1, roomId: 1, durationMinutes: 5 })];
+    assert.equal(shortestBookingMinutes(bookings), 15);
+  });
+
+  it("stretches a half-hour day only as far as its half-hour booking needs", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 30 }),
+      makeBooking({ id: 2, roomId: 2, time: "11:00", durationMinutes: 120 }),
+    ];
+    assert.equal(scaleFor(bookings), DETAILED_BLOCK_HEIGHT / 30);
+    assert.equal(scaleFor(bookings, ZOOM_LEVELS[1]), ZOOM_LEVELS[1]);
+  });
+
+  it("leaves a day of hour-long and longer bookings at the zoom", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 60 }),
+      makeBooking({ id: 2, roomId: 2, time: "11:00", durationMinutes: 120 }),
+    ];
+    assert.equal(scaleFor(bookings), ZOOM_LEVELS[0]);
+  });
+
+  it("sizes the day by its shortest booking, with longer ones growing in proportion", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 20 }),
+      makeBooking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 120 }),
+      makeBooking({ id: 3, roomId: 2, time: "10:00", durationMinutes: 60 }),
+    ];
+    const scale = scaleFor(bookings);
+    assert.equal(scale, DETAILED_BLOCK_HEIGHT / 20);
+    const map = place(bookings, scale);
+    const long = map.get("room-1")!.find((p) => p.booking.id === 2)!;
+    const hour = map.get("room-2")![0];
+    assert.equal(long.height, 120 * scale - 2);
+    assert.equal(hour.height, 60 * scale - 2);
+  });
+
+  it("keeps every column and the now-line on the one scale", () => {
+    const bookings = [
+      makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      makeBooking({ id: 2, roomId: 2, time: "10:00", durationMinutes: 90 }),
+    ];
+    const scale = scaleFor(bookings);
+    const map = place(bookings, scale);
+    assert.equal(map.get("room-1")![0].top, map.get("room-2")![0].top);
+    // a now-line at 10:00 lands exactly on both blocks' tops, and the 10:00 hour mark with it
+    assert.equal(nowLineTop(10 * 60, window, scale, true), map.get("room-1")![0].top);
+  });
+
+  it("never stretches the day past the cap", () => {
+    assert.equal(stretchedPxPerMinute(5, ZOOM_LEVELS[0]), MAX_PX_PER_MINUTE);
+    assert.ok(scaleFor([makeBooking({ roomId: 1, durationMinutes: 1 })]) <= MAX_PX_PER_MINUTE);
+  });
+
+  it("still zooms in on top of the stretch", () => {
+    const bookings = [makeBooking({ id: 1, roomId: 1, durationMinutes: 30 })];
+    assert.ok(scaleFor(bookings, ZOOM_LEVELS[2]) > scaleFor(bookings, ZOOM_LEVELS[0]));
+    // a stretch past the zoom wins; a zoom past the stretch wins
+    const short = [makeBooking({ id: 1, roomId: 1, durationMinutes: 20 })];
+    assert.equal(scaleFor(short, ZOOM_LEVELS[0]), DETAILED_BLOCK_HEIGHT / 20);
+    assert.equal(scaleFor(short, ZOOM_LEVELS[2]), ZOOM_LEVELS[2]);
   });
 });

@@ -9,6 +9,7 @@
 import { conflictsWith } from "../bookings/freeTime.ts";
 import {
   columnKeyFor,
+  stretchedPxPerMinute,
   timeToMinutes,
   type ScheduleColumn,
 } from "../bookings/spaceScheduleGrid.ts";
@@ -16,10 +17,16 @@ import {
 export const SLOT_MINUTES = 15;
 export const MIN_PX_PER_MINUTE = 3;
 
-export function daySlotHeight(slotMinutes: number, base: number): number {
+export function daySlotHeight(
+  slotMinutes: number,
+  base: number,
+  pxPerMinute: number = MIN_PX_PER_MINUTE,
+): number {
   return Math.max(
     base,
-    Math.ceil(MIN_PX_PER_MINUTE * Math.max(5, slotMinutes)),
+    Math.round(
+      Math.max(MIN_PX_PER_MINUTE, pxPerMinute) * Math.max(5, slotMinutes),
+    ),
   );
 }
 
@@ -104,6 +111,36 @@ export type SlotPlacement<T> = {
   clipped: boolean;
   conflicts: ItemClash<T>[];
 };
+
+/** The shortest block drawn on the day, in whole-slot minutes, or null for an empty day. */
+export function shortestSlotMinutes(
+  byColumn: ReadonlyMap<string, readonly SlotPlacement<unknown>[]>,
+): number | null {
+  let shortestSpan: number | null = null;
+  for (const placements of byColumn.values()) {
+    for (const p of placements) {
+      if (shortestSpan === null || p.slotSpan < shortestSpan) {
+        shortestSpan = p.slotSpan;
+      }
+    }
+  }
+  return shortestSpan === null ? null : shortestSpan * SLOT_MINUTES;
+}
+
+/**
+ * Row height for the whole day, stretched so the shortest booking on it gets a detailed block.
+ * Every column and the time gutter share it, so they stay in step.
+ */
+export function stretchedSlotHeight(
+  byColumn: ReadonlyMap<string, readonly SlotPlacement<unknown>[]>,
+  base: number,
+): number {
+  return daySlotHeight(
+    SLOT_MINUTES,
+    base,
+    stretchedPxPerMinute(shortestSlotMinutes(byColumn), MIN_PX_PER_MINUTE),
+  );
+}
 
 export function assignSlotLanes<T>(
   items: SlotPlacement<T>[],

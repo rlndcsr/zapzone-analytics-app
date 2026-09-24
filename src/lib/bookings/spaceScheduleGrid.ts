@@ -6,6 +6,40 @@ import { conflictsWith } from "./freeTime.ts";
 export const ZOOM_LEVELS = [2.4, 3.6, 5.2] as const;
 export const DEFAULT_ZOOM_INDEX = 1;
 
+/** What a booked block needs to carry its times, guest, package, party size and balance. */
+export const DETAILED_BLOCK_HEIGHT = 88;
+/** However short the booking, the day is never stretched past this. */
+export const MAX_PX_PER_MINUTE = 6;
+/** A booking is placed as at least this long, however short it is. */
+const MIN_PLACED_MINUTES = 15;
+
+/**
+ * The scale for the whole timeline: stretched until the shortest booking gets a detailed
+ * block, never below `floor` (the zoom or readable minimum) and never past the cap.
+ */
+export function stretchedPxPerMinute(
+  shortestMinutes: number | null,
+  floor: number,
+): number {
+  if (shortestMinutes == null || !(shortestMinutes > 0)) return floor;
+  return Math.min(
+    MAX_PX_PER_MINUTE,
+    Math.max(floor, DETAILED_BLOCK_HEIGHT / shortestMinutes),
+  );
+}
+
+/** The shortest booking as the timeline places it, or null for an empty day. */
+export function shortestBookingMinutes(
+  bookings: readonly Pick<ScheduleBooking, "durationMinutes">[],
+): number | null {
+  let shortest: number | null = null;
+  for (const b of bookings) {
+    const minutes = Math.max(MIN_PLACED_MINUTES, b.durationMinutes);
+    if (shortest === null || minutes < shortest) shortest = minutes;
+  }
+  return shortest;
+}
+
 export const UNCATEGORIZED_LABEL = "No category";
 
 export function timeToMinutes(time: string | null | undefined): number {
@@ -177,7 +211,7 @@ export function positionBookingsByColumn({
     const list = map.get(key);
     if (!list) continue;
     const startMin = timeToMinutes(b.time);
-    const rawEnd = startMin + Math.max(15, b.durationMinutes);
+    const rawEnd = startMin + Math.max(MIN_PLACED_MINUTES, b.durationMinutes);
     const endMin = Math.min(timeWindow.end, rawEnd);
     list.push({
       booking: b,
