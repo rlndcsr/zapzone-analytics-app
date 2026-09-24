@@ -39,6 +39,7 @@ import {
   closureBoundaryMinutes,
   closureLabel,
   columnKeyFor,
+  columnsSpanVenues,
   computeCategoryOptions,
   computeDaySummary,
   computeSpaceClosures,
@@ -65,6 +66,7 @@ import {
 } from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
+import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
 import { useSpaceSchedule } from "../../lib/hooks/useSpaceSchedule";
 import { useWeekBookingCounts } from "../../lib/hooks/useWeekBookingCounts";
@@ -893,6 +895,7 @@ const ScheduleGrid = ({
   onStartPick,
   onHoverEnd,
   onHoverCancel,
+  venueLabelFor,
 }: {
   columns: ScheduleColumn[];
   positionedByColumn: Map<string, PositionedBooking[]>;
@@ -951,6 +954,8 @@ const ScheduleGrid = ({
   onStartPick: () => void;
   onHoverEnd: (column: ScheduleColumn) => void;
   onHoverCancel: () => void;
+  /** Null unless the columns span more than one venue. */
+  venueLabelFor: ((column: ScheduleColumn) => string) | null;
 }) => {
   const headerScrollRef = useRef<ScrollView>(null);
   const bodyHeight = timeWindow.total * pxPerMinute;
@@ -1029,6 +1034,17 @@ const ScheduleGrid = ({
                       </Text>
                     </View>
                   )
+                )}
+                {venueLabelFor && (
+                  <View className="flex-row items-center gap-1 mt-0.5">
+                    <Feather name="map-pin" size={10} color="#9ca3af" />
+                    <Text
+                      className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink"
+                      numberOfLines={1}
+                    >
+                      {venueLabelFor(column)}
+                    </Text>
+                  </View>
                 )}
                 {column.roomId != null &&
                   closuresBySpace.has(column.roomId) && (
@@ -2037,6 +2053,15 @@ const SpaceScheduleScreen = () => {
     [roomLocationById, dayWindow],
   );
 
+  // With every venue selected the same space name repeats, so each column says which venue it is.
+  const { locations } = useLocationOptions();
+  const venueLabelFor = useMemo(() => {
+    if (!columnsSpanVenues(columns.map(columnLocationId))) return null;
+    const names = new Map(locations.map((l) => [l.id, l.name]));
+    return (column: ScheduleColumn) =>
+      names.get(columnLocationId(column) ?? -1) ?? "Unknown venue";
+  }, [columns, columnLocationId, locations]);
+
   /** Every package valid for this room at this minute — auto-selectable when
    *  there's exactly one, narrowed-list material when there's more. */
   const packagesForColumnSlot = useCallback(
@@ -3016,6 +3041,7 @@ const SpaceScheduleScreen = () => {
               onStartPick={startPick}
               onHoverEnd={endHoverSlot}
               onHoverCancel={clearHoverSlot}
+              venueLabelFor={venueLabelFor}
             />
           ) : (
             <ScrollView

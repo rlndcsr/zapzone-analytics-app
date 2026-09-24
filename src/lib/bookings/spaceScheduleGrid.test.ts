@@ -8,6 +8,7 @@ import {
   closureBoundaryMinutes,
   closureLabel,
   columnKeyFor,
+  columnsSpanVenues,
   computeCategoryOptions,
   computeDaySummary,
   computeSpaceClosures,
@@ -192,6 +193,27 @@ describe("buildColumns", () => {
       columns.map((c) => c.key),
       ["unassigned"],
     );
+  });
+});
+
+describe("columnsSpanVenues", () => {
+  it("stays quiet when every column belongs to one venue", () => {
+    assert.equal(columnsSpanVenues([1, 1, 1]), false);
+  });
+
+  it("names venues once the same space name repeats across two venues", () => {
+    // "Party Room" at venue 1 and "Party Room" at venue 2
+    assert.equal(columnsSpanVenues([1, 2]), true);
+  });
+
+  it("counts a virtual column's venue, not just the rooms'", () => {
+    // rooms all at venue 1, a roomless package column at venue 2
+    assert.equal(columnsSpanVenues([1, 1, 2]), true);
+  });
+
+  it("ignores columns whose venue is unknown", () => {
+    assert.equal(columnsSpanVenues([1, null, undefined, 1]), false);
+    assert.equal(columnsSpanVenues([]), false);
   });
 });
 

@@ -91,6 +91,15 @@ export function buildColumns({
   return [...roomColumns, ...virtualColumns];
 }
 
+/** Whether the columns on screen span more than one venue, virtual columns included. */
+export function columnsSpanVenues(
+  locationIds: Iterable<number | null | undefined>,
+): boolean {
+  const ids = new Set<number>();
+  for (const id of locationIds) if (id != null) ids.add(id);
+  return ids.size > 1;
+}
+
 /* ------------------------------------------------------------- placement -- */
 
 /** A real overlap is a double booking; zero minutes means only the turnaround is missing. */

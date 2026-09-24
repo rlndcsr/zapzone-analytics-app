@@ -39,6 +39,7 @@ import {
 import {
   buildColumns,
   columnKeyFor,
+  columnsSpanVenues,
   timeToMinutes,
   type ScheduleColumn,
 } from "../../lib/bookings/spaceScheduleGrid";
@@ -1138,17 +1139,6 @@ const Calendar = () => {
     [spaces],
   );
 
-  /** Location label for a space column, or null for a company-wide space. */
-  const spaceLocationLabel = useCallback(
-    (roomId: number | null): string | null => {
-      if (roomId == null) return null;
-      const locationId = spaceById.get(roomId)?.locationId ?? null;
-      if (locationId == null) return null;
-      return locationNameById.get(locationId) ?? null;
-    },
-    [spaceById, locationNameById],
-  );
-
   const dayBookings = useMemo(
     () => byDate[startDate]?.bookings ?? [],
     [byDate, startDate],
@@ -1184,6 +1174,25 @@ const Calendar = () => {
   // guessed — a failed request can make the grid inert, never wrong.
   const { dayWindow: scheduleWindow } = useScheduleDayWindow(
     viewMode === "day" ? startDate : null,
+  );
+
+  /** The venue a column belongs to — a virtual column's comes from its package. */
+  const columnLocationId = useCallback(
+    (column: ScheduleColumn): number | null => {
+      if (column.roomId != null) {
+        return spaceById.get(column.roomId)?.locationId ?? null;
+      }
+      const packageId = Number(column.key.replace("pkg-", ""));
+      return (
+        scheduleWindow?.packages.find((p) => p.package_id === packageId)
+          ?.location_id ?? null
+      );
+    },
+    [spaceById, scheduleWindow],
+  );
+  const showColumnLocation = useMemo(
+    () => columnsSpanVenues(dayColumns.map(columnLocationId)),
+    [dayColumns, columnLocationId],
   );
 
   // The venue's own clock, ticked while Day view is open, so "Free now" and the
@@ -2428,25 +2437,27 @@ const Calendar = () => {
                                 >
                                   {column.name}
                                 </Text>
-                                {column.virtual ? (
+                                {column.virtual && (
                                   <View className="flex-row items-center gap-1 mt-0.5">
                                     <AlertTriangle size={10} color="#F59E0B" />
                                     <Text className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
                                       No room
                                     </Text>
                                   </View>
-                                ) : (
-                                  !!spaceLocationLabel(column.roomId) && (
-                                    <View className="flex-row items-center gap-1 mt-0.5">
-                                      <MapPin size={10} color="#9ca3af" />
-                                      <Text
-                                        className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink"
-                                        numberOfLines={1}
-                                      >
-                                        {spaceLocationLabel(column.roomId)}
-                                      </Text>
-                                    </View>
-                                  )
+                                )}
+                                {/* which venue this space belongs to, whenever more than one is on screen */}
+                                {showColumnLocation && (
+                                  <View className="flex-row items-center gap-1 mt-0.5">
+                                    <MapPin size={10} color="#9ca3af" />
+                                    <Text
+                                      className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink"
+                                      numberOfLines={1}
+                                    >
+                                      {locationNameById.get(
+                                        columnLocationId(column) ?? -1,
+                                      ) ?? "Unknown"}
+                                    </Text>
+                                  </View>
                                 )}
                                 <DayColumnStatus
                                   status={dayStatuses.get(column.key)}
