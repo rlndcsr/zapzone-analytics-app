@@ -90,6 +90,8 @@ export class ApiError extends Error {
    * the original exception instead, since there is no response to parse.
    */
   readonly body?: unknown;
+  /** The reason the change-reason prompt collected, when this failure came after it. */
+  changeReason?: string;
 
   constructor(
     message: string,
@@ -271,15 +273,21 @@ export async function apiRequest<T>(
       const { summary, destructive } = describeChangeReasonRequest(method, path);
       const reason = await requestChangeReason({ summary, destructive });
       if (reason) {
-        return apiRequest<T>(path, {
-          method,
-          body: withChangeReason(body, reason),
-          signal,
-          token,
-          timeoutMs,
-          publicEndpoint,
-          _reasonRetried: true,
-        });
+        try {
+          return await apiRequest<T>(path, {
+            method,
+            body: withChangeReason(body, reason),
+            signal,
+            token,
+            timeoutMs,
+            publicEndpoint,
+            _reasonRetried: true,
+          });
+        } catch (err) {
+          // the caller never saw the reason; keep it so its own retry need not ask again
+          if (err instanceof ApiError) err.changeReason ??= reason;
+          throw err;
+        }
       }
     }
 

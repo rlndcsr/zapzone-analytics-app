@@ -36,7 +36,9 @@ import { BookingSummaryPanel } from "../../components/ui/BookingSummaryPanel";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { InternalNotesLog } from "../../components/ui/InternalNotesLog";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
-import { mediaUrl } from "../../lib/api";
+import { OverlapOverrideModal } from "../../components/ui/OverlapOverrideModal";
+import { ApiError, mediaUrl } from "../../lib/api";
+import { overlapGateConflicts } from "../../lib/overridePin";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
 import {
   clampAddOnQuantity,
@@ -88,6 +90,7 @@ import {
   updateBooking,
   type AvailableSlot,
   type BookingDetail,
+  type BookingUpdateInput,
   type PackageAvailabilitySchedule,
   type PackageOption,
   type RoomOption,
@@ -100,6 +103,9 @@ import {
 } from "../../services/packagesService";
 
 const PRIMARY = "#0644C7";
+
+/** What the approval dialog says when the server refused the move but named no reason. */
+const NO_FREE_SPACE_CONFLICT = "That space is not free at the new time.";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAYS_FULL = [
@@ -977,6 +983,53 @@ const EditBookingScreen = () => {
     [packageDetail, summaryParticipants],
   );
 
+  // The refused save, kept so an approved retry sends exactly it, with the reason already given.
+  const [overlapGate, setOverlapGate] = useState<{
+    conflicts: string[];
+    input: BookingUpdateInput;
+  } | null>(null);
+
+  const submitUpdate = async (input: BookingUpdateInput) => {
+    if (!detail) return;
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not authenticated", "Please sign in again.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateBooking(token, detail.id, input);
+      markBookingsStale();
+      router.back();
+    } catch (e) {
+      // the move runs into something the page could not see — ask for the manager's PIN rather
+      // than leave staff with an error they cannot act on
+      const conflicts =
+        e instanceof ApiError ? overlapGateConflicts(e.status, e.body) : null;
+      if (conflicts) {
+        setOverlapGate({
+          // never an empty list: the dialog would offer a Continue that saves nothing
+          conflicts: conflicts.length > 0 ? conflicts : [NO_FREE_SPACE_CONFLICT],
+          input: {
+            ...input,
+            // one approval, one save — the server spends the token, so never resend it
+            overlapOverrideToken: undefined,
+            changeReason:
+              input.changeReason ??
+              (e instanceof ApiError ? e.changeReason : undefined),
+          },
+        });
+        return;
+      }
+      Alert.alert(
+        "Save failed",
+        e instanceof Error ? e.message : "Could not update the booking.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!detail || saving) return;
     // The price on screen is stale or unknown — saving now would write a total
@@ -989,65 +1042,48 @@ const EditBookingScreen = () => {
       );
       return;
     }
-    const token = getToken();
-    if (!token) {
-      Alert.alert("Not authenticated", "Please sign in again.");
-      return;
+    // Clamp once more at save: the field may never have blurred, and this is
+    // the value that gets priced and persisted.
+    const participantCount = clampParticipants(participants, packageDetail);
+    if (String(participantCount) !== participants) {
+      setParticipants(String(participantCount));
     }
-    setSaving(true);
-    try {
-      // Clamp once more at save: the field may never have blurred, and this is
-      // the value that gets priced and persisted.
-      const participantCount = clampParticipants(participants, packageDetail);
-      if (String(participantCount) !== participants) {
-        setParticipants(String(participantCount));
-      }
-      const isPackageChanged = packageId !== detail.packageId;
+    const isPackageChanged = packageId !== detail.packageId;
 
-      await updateBooking(token, detail.id, {
-        locationId,
-        packageId,
-        roomId,
-        customerName: fullName.trim(),
-        customerEmail: email.trim(),
-        customerPhone: phone.trim(),
-        date,
-        time,
-        participants: participantCount,
-        status,
-        guestOfHonorName: gohName.trim() || null,
-        guestOfHonorAge: gohAge ? Number(gohAge) : null,
-        guestOfHonorGender: gohGender,
-        customerNotes: customerNotes.trim() || null,
-        // internalNotes is deliberately absent: notes are an append-only log, saved
-        // as you write them through the log below, never as part of this save.
-        sendEmail,
-        ...(addOnsChanged && { additionalAddons: buildAdditionalAddons() }),
-        // A new package does not inherit the old one's attractions.
-        ...(isPackageChanged && { additionalAttractions: [] }),
-        // The money comes from the server's quote or not at all. `amount_paid`
-        // is deliberately absent: it is what the guest has handed over, which
-        // an edit to the booking's contents never changes, and sending the
-        // page-load snapshot back would overwrite anything collected since.
-        ...(priceQuote.quote && {
-          totalAmount: priceQuote.quote.totalAmount,
-          discountAmount: priceQuote.quote.discountAmount,
-          appliedFees:
-            priceQuote.quote.persistFees.length > 0
-              ? priceQuote.quote.persistFees
-              : null,
-        }),
-      });
-      markBookingsStale();
-      router.back();
-    } catch (e) {
-      Alert.alert(
-        "Save failed",
-        e instanceof Error ? e.message : "Could not update the booking.",
-      );
-    } finally {
-      setSaving(false);
-    }
+    await submitUpdate({
+      locationId,
+      packageId,
+      roomId,
+      customerName: fullName.trim(),
+      customerEmail: email.trim(),
+      customerPhone: phone.trim(),
+      date,
+      time,
+      participants: participantCount,
+      status,
+      guestOfHonorName: gohName.trim() || null,
+      guestOfHonorAge: gohAge ? Number(gohAge) : null,
+      guestOfHonorGender: gohGender,
+      customerNotes: customerNotes.trim() || null,
+      // internalNotes is deliberately absent: notes are an append-only log, saved
+      // as you write them through the log below, never as part of this save.
+      sendEmail,
+      ...(addOnsChanged && { additionalAddons: buildAdditionalAddons() }),
+      // A new package does not inherit the old one's attractions.
+      ...(isPackageChanged && { additionalAttractions: [] }),
+      // The money comes from the server's quote or not at all. `amount_paid`
+      // is deliberately absent: it is what the guest has handed over, which
+      // an edit to the booking's contents never changes, and sending the
+      // page-load snapshot back would overwrite anything collected since.
+      ...(priceQuote.quote && {
+        totalAmount: priceQuote.quote.totalAmount,
+        discountAmount: priceQuote.quote.discountAmount,
+        appliedFees:
+          priceQuote.quote.persistFees.length > 0
+            ? priceQuote.quote.persistFees
+            : null,
+      }),
+    });
   };
 
   return (
@@ -1765,6 +1801,21 @@ const EditBookingScreen = () => {
           </View>
         </View>
       )}
+
+      <OverlapOverrideModal
+        visible={!!overlapGate}
+        conflicts={overlapGate?.conflicts ?? []}
+        onlineSlotsLost={[]}
+        locationId={overlapGate?.input.locationId ?? detail?.locationId ?? null}
+        onCancel={() => setOverlapGate(null)}
+        onConfirm={() => setOverlapGate(null)}
+        onApproved={(token) => {
+          const gate = overlapGate;
+          setOverlapGate(null);
+          // the gate is satisfied: send the same save again, reason and all, with the approval
+          if (gate) void submitUpdate({ ...gate.input, overlapOverrideToken: token });
+        }}
+      />
     </View>
   );
 };

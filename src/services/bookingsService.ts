@@ -1905,6 +1905,10 @@ export type BookingUpdateInput = {
   appliedFees?: BookingQuoteFee[] | null;
   amountPaid?: number;
   paymentStatus?: string;
+  /** Sent up front only when retrying with a reason already given, so it is not asked twice. */
+  changeReason?: string;
+  /** A manager's approval, when moving this booking onto a time that is already taken. */
+  overlapOverrideToken?: string;
 };
 
 /** One reason the destination room can't take this booking, from a 409. */
@@ -2008,6 +2012,9 @@ export async function updateBooking(
   if (input.amountPaid !== undefined) body.amount_paid = input.amountPaid;
   if (input.paymentStatus !== undefined)
     body.payment_status = input.paymentStatus;
+  if (input.changeReason) body.change_reason = input.changeReason;
+  if (input.overlapOverrideToken)
+    body.overlap_override_token = input.overlapOverrideToken;
 
   await apiRequest(`/api/bookings/${id}`, { method: "PUT", token, body });
 }
