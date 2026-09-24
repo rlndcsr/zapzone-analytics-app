@@ -35,11 +35,13 @@ import {
 } from "../../components/ui/WaiverFiltersSheet";
 import { WaiversTable } from "../../components/ui/WaiversTable";
 import { WaiverDetailSheet } from "../../components/ui/WaiverDetailSheet";
+import { LaunchKioskSheet } from "../../components/ui/LaunchKioskSheet";
 import {
   WaiversKpiSkeleton,
   WaiversListSkeleton,
 } from "../../components/ui/skeleton/WaiversSkeleton";
 import {
+  clearWaiverCache,
   consumeWaiversStale,
   useWaiverPeriodSummary,
   useWaivers,
@@ -53,7 +55,9 @@ import { getCurrentUser, getToken } from "../../lib/session";
 import {
   checkInWaiver,
   deleteWaiver,
+  fetchTemplates,
   SOURCE_LABELS,
+  type WaiverTemplate,
   type MarketingConsentStatus,
   type Waiver,
   type WaiverSearchFilters,
@@ -346,6 +350,42 @@ const Waivers = () => {
   // Which row has an inline table action (check-in / print / delete) in flight.
   const [busyRowId, setBusyRowId] = useState<number | null>(null);
 
+  // Kiosk launcher. Templates are fetched on tap, not on mount — the desk should
+  // not pay for a list it may never open — and kept, so a second tap reopens the
+  // sheet without asking the API again (same as Check-In's).
+  const [kioskTemplates, setKioskTemplates] = useState<WaiverTemplate[]>([]);
+  const [kioskLoading, setKioskLoading] = useState(false);
+  const [kioskOpen, setKioskOpen] = useState(false);
+
+  const openKiosk = useCallback(async () => {
+    if (kioskTemplates.length > 0) {
+      setKioskOpen(true);
+      return;
+    }
+    const token = getToken();
+    if (!token) {
+      Alert.alert("Not signed in", "Sign in again to open the waiver kiosk.");
+      return;
+    }
+    setKioskLoading(true);
+    try {
+      const list = await fetchTemplates(token);
+      if (list.length === 0) {
+        Alert.alert(
+          "No waiver templates",
+          "No waiver templates exist yet — create one first.",
+        );
+        return;
+      }
+      setKioskTemplates(list);
+      setKioskOpen(true);
+    } catch {
+      Alert.alert("Unable to open kiosk", "Could not load waiver templates.");
+    } finally {
+      setKioskLoading(false);
+    }
+  }, [kioskTemplates.length]);
+
   // Global workspace location (company_admin). Waivers has no backend location
   // field, so — as before — location is applied client-side over the current
   // page, now sourced from the shared store instead of a per-screen filter.
@@ -595,6 +635,7 @@ const Waivers = () => {
       setBusyRowId(w.id);
       try {
         await checkInWaiver(token, w.id);
+        clearWaiverCache();
         await refetch();
         setStatsNonce((n) => n + 1);
       } catch (err) {
@@ -667,6 +708,7 @@ const Waivers = () => {
               setBusyRowId(w.id);
               try {
                 await deleteWaiver(token, w.id);
+                clearWaiverCache();
                 await refetch();
                 setStatsNonce((n) => n + 1);
               } catch (err) {
@@ -753,18 +795,42 @@ const Waivers = () => {
             ))}
           </View>
 
-          <Pressable
-            onPress={() => router.push("/waivers/create-waiver")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text
-              className="text-sm font-semibold text-white"
-              numberOfLines={1}
+          {/* The web page's Launch Kiosk (secondary) beside Assign Waiver. */}
+          <View className="mb-5 flex-row gap-3">
+            <Pressable
+              onPress={() => void openKiosk()}
+              disabled={kioskLoading}
+              accessibilityRole="button"
+              accessibilityLabel="Launch waiver kiosk"
+              className={`flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white py-3.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900 ${
+                kioskLoading ? "opacity-60" : ""
+              }`}
             >
-              Assign Waiver
-            </Text>
-          </Pressable>
+              {kioskLoading ? (
+                <ActivityIndicator size="small" color="#0644C7" />
+              ) : (
+                <Feather name="tablet" size={16} color={headerIcon} />
+              )}
+              <Text
+                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
+                numberOfLines={1}
+              >
+                {kioskLoading ? "Loading…" : "Launch Kiosk"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/waivers/create-waiver")}
+              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+            >
+              <Feather name="plus" size={16} color="#FFFFFF" />
+              <Text
+                className="text-sm font-semibold text-white"
+                numberOfLines={1}
+              >
+                Assign Waiver
+              </Text>
+            </Pressable>
+          </View>
 
           {/* Error state */}
           {!loading && error && (
@@ -1178,9 +1244,18 @@ const Waivers = () => {
         onClose={() => setSelectedId(null)}
         canDelete={canDelete}
         onChanged={() => {
+          clearWaiverCache();
           refetch();
           setStatsNonce((n) => n + 1);
         }}
+      />
+
+      {/* No template in hand here, so the sheet asks which waiver it is. */}
+      <LaunchKioskSheet
+        template={null}
+        templates={kioskTemplates}
+        visible={kioskOpen}
+        onClose={() => setKioskOpen(false)}
       />
     </View>
   );

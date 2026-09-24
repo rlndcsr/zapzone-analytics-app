@@ -356,11 +356,17 @@ export function LaunchKioskSheet({
               placeholder="— select a template —"
               value={pickedId}
               options={choices.map((t) => ({
-                label: t.status === "active" ? t.title : `${t.title} (draft)`,
+                label: `${t.title}${
+                  t.status !== "active" ? " (inactive — preview only)" : ""
+                }${t.isDefault ? " · default" : ""}`,
                 value: t.id,
               }))}
               onSelect={(value) => setPickedId(Number(value))}
             />
+            <Text className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+              The guest signs whichever template you launch — check it matches
+              the activity.
+            </Text>
           </View>
         )}
 

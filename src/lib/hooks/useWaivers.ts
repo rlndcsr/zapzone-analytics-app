@@ -9,7 +9,7 @@ import {
   type WaiverSearchFilters,
   type WaiverStatus,
 } from "../../services/waiversService";
-import { getToken } from "../session";
+import { getCurrentUser, getToken } from "../session";
 
 /*
  * Waiver Records data hook. Unlike useBookings (which loads everything and
@@ -18,11 +18,34 @@ import { getToken } from "../session";
  * filters or page change, exactly like the web admin's WaiversSearch.load().
  */
 
+/*
+ * Paint from cache (the web's WaiverCacheService). Each filter + page combination
+ * is its own entry — "today, completed" is not a subset of "all time, pending" —
+ * so the desk coming back to a page sees its rows at once instead of a spinner,
+ * and the network only replaces them. Keyed by the signed-in user too, so a
+ * switched account never paints the last one's records.
+ */
+type CachedPage = {
+  fetchedAt: number;
+  waivers: Waiver[];
+  total: number;
+  lastPage: number;
+};
+const pageCache = new Map<string, CachedPage>();
+/** Waivers are signed continuously at the desk, so this window is deliberately short. */
+const CACHE_TTL_MS = 60 * 1000;
+
+/** Signing, checking in or deleting a waiver invalidates every cached page at once. */
+export function clearWaiverCache(): void {
+  pageCache.clear();
+}
+
 // Set after a mutation (assign / delete) so the list refetches on next focus.
 let stale = false;
 
 /** Mark the waiver list stale so it refetches on next focus. */
 export function markWaiversStale(): void {
+  clearWaiverCache();
   stale = true;
 }
 
@@ -50,7 +73,12 @@ export function useWaivers({ filters, page, perPage = 5 }: UseWaiversParams) {
   // Serialize the inputs so the effect only refires on a real change.
   const key = JSON.stringify({ filters, page, perPage });
 
-  const sync = useCallback(async () => {
+  /**
+   * `force` is a refresh of rows already on screen (pull-to-refresh, or a
+   * mutation on this screen): it always asks the network, and never drops the
+   * list into a spinner while it does.
+   */
+  const sync = useCallback(async (force = false) => {
     const requestId = ++requestIdRef.current;
     const isCurrent = () => requestId === requestIdRef.current;
 
@@ -61,9 +89,29 @@ export function useWaivers({ filters, page, perPage = 5 }: UseWaiversParams) {
       return;
     }
 
-    setLoading(true);
+    const cacheKey = `${getCurrentUser()?.id ?? "anon"}|${key}`;
+    const cached = pageCache.get(cacheKey);
+
+    if (!force && cached) {
+      setWaivers(cached.waivers);
+      setTotal(cached.total);
+      setLastPage(cached.lastPage);
+      setError(null);
+      setLoading(false);
+      // Fresh enough: nothing to replace it with.
+      if (Date.now() - cached.fetchedAt < CACHE_TTL_MS) return;
+    } else if (!force) {
+      setLoading(true);
+    }
+
     try {
       const res = await fetchWaivers(token, filters, page, perPage);
+      pageCache.set(cacheKey, {
+        fetchedAt: Date.now(),
+        waivers: res.waivers,
+        total: res.total,
+        lastPage: res.lastPage,
+      });
       if (isCurrent()) {
         setWaivers(res.waivers);
         setTotal(res.total);
@@ -72,7 +120,8 @@ export function useWaivers({ filters, page, perPage = 5 }: UseWaiversParams) {
       }
     } catch (err) {
       console.error("Waivers error:", err);
-      if (isCurrent()) {
+      // Rows already painted stay up; only a screen with nothing to show says so.
+      if (isCurrent() && !cached) {
         setError(err instanceof Error ? err.message : "Failed to load waivers");
         setWaivers([]);
       }
@@ -84,13 +133,15 @@ export function useWaivers({ filters, page, perPage = 5 }: UseWaiversParams) {
   }, [key]);
 
   useEffect(() => {
-    sync();
+    void sync();
     return () => {
       requestIdRef.current++;
     };
   }, [sync]);
 
-  return { waivers, total, lastPage, loading, error, refetch: sync };
+  const refetch = useCallback(() => sync(true), [sync]);
+
+  return { waivers, total, lastPage, loading, error, refetch };
 }
 
 const COUNT_STATUSES: WaiverStatus[] = ["completed", "pending", "expired"];

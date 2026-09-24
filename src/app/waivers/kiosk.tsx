@@ -21,6 +21,7 @@ import {
   KioskSavedSignerFields,
 } from "../../components/ui/KioskReturningPanel";
 import { SignaturePad } from "../../components/ui/SignaturePad";
+import { StaffReturnControl } from "../../components/ui/StaffReturnControl";
 import { StatusModal } from "../../components/ui/StatusModal";
 import { useStatusModal } from "../../lib/hooks/useStatusModal";
 import { markWaiversStale } from "../../lib/hooks/useWaivers";
@@ -163,17 +164,7 @@ const KioskShell = ({
           paddingBottom: insets.bottom + 32,
         }}
       >
-        <Pressable
-          onPress={() => router.back()}
-          className="mb-3 flex-row items-center gap-1.5 self-start rounded-full bg-white px-3 py-2 active:opacity-70 dark:bg-neutral-900"
-          accessibilityRole="button"
-          accessibilityLabel="Leave the kiosk"
-        >
-          <Feather name="chevron-left" size={16} color="#374151" />
-          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-            Back
-          </Text>
-        </Pressable>
+        <StaffReturnControl />
 
         <View className="mb-4 items-center rounded-2xl bg-[#1D3FCF] px-5 py-7">
           <View className="mb-3 h-12 w-12 items-center justify-center rounded-xl bg-white/15">
@@ -705,18 +696,9 @@ const WaiverKiosk = () => {
         >
           {/* Blue banner — the web's header block. */}
           {/* Staff need a way out — a customer mid-signature does not, so the
-              control is small and sits above the banner rather than in it. */}
-          <Pressable
-            onPress={() => router.back()}
-            className="mb-3 flex-row items-center gap-1.5 self-start rounded-full bg-white px-3 py-2 active:opacity-70 dark:bg-neutral-900"
-            accessibilityRole="button"
-            accessibilityLabel="Leave the kiosk"
-          >
-            <Feather name="chevron-left" size={16} color="#374151" />
-            <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Back
-            </Text>
-          </Pressable>
+              control is small, sits above the banner rather than in it, and
+              only answers a deliberate hold. */}
+          <StaffReturnControl />
 
           <View className="mb-4 items-center rounded-2xl bg-[#1D3FCF] px-5 py-7">
             <View className="mb-3 h-12 w-12 items-center justify-center rounded-xl bg-white/15">
