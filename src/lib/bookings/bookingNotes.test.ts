@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { noteFlagsOf, noteSummaryOf } from "./bookingNotes.ts";
+import {
+  guestNoteOf,
+  noteFlagsOf,
+  noteSummaryOf,
+  staffNoteOf,
+} from "./bookingNotes.ts";
 
 describe("noteFlagsOf", () => {
   it("is all-false when every note field is empty or missing", () => {
@@ -59,5 +64,18 @@ describe("noteSummaryOf", () => {
       noteSummaryOf({ customerNotes: "hi", internalNotes: "hi" }),
       "has a guest note and a staff note",
     );
+  });
+});
+
+describe("guestNoteOf / staffNoteOf", () => {
+  it("gives the guest their notes and special requests, and never the desk's note", () => {
+    const booking = { customerNotes: " Nut allergy ", specialRequests: "Balloons", internalNotes: "VIP" };
+    assert.equal(guestNoteOf(booking), "Nut allergy\n\nBalloons");
+    assert.equal(staffNoteOf(booking), "VIP");
+  });
+
+  it("is empty when there is nothing to say", () => {
+    assert.equal(guestNoteOf({ customerNotes: "  ", specialRequests: null }), "");
+    assert.equal(staffNoteOf({}), "");
   });
 });

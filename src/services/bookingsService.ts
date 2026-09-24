@@ -53,6 +53,7 @@ export type CalendarBooking = {
   addOnCount: number;
   address: string | null;
   guestOfHonorName: string | null;
+  guestOfHonorAge: number | null;
   customerNotes: string | null;
   specialRequests: string | null;
   /** Staff-only digest of the booking's notes log. Never shown to a guest. */
@@ -181,6 +182,7 @@ type RawBooking = {
   address?: string | null;
   guest_address?: string | null;
   guest_of_honor_name?: string | null;
+  guest_of_honor_age?: number | string | null;
   customer_notes?: string | null;
   notes?: string | null;
   special_requests?: string | null;
@@ -414,6 +416,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     addOnCount: raw.add_ons?.length ?? 0,
     address: raw.address?.trim() || raw.guest_address?.trim() || null,
     guestOfHonorName: raw.guest_of_honor_name?.trim() || null,
+    guestOfHonorAge: Number(raw.guest_of_honor_age) || null,
     customerNotes: raw.customer_notes?.trim() || raw.notes?.trim() || null,
     specialRequests: raw.special_requests?.trim() || null,
     internalNotes: raw.internal_notes?.trim() || null,
@@ -1534,6 +1537,8 @@ export type ScheduleBooking = {
   paymentStatus: string;
   packageName: string;
   customerName: string;
+  guestOfHonorName: string | null;
+  guestOfHonorAge: number | null;
   customerNotes: string | null;
   specialRequests: string | null;
   internalNotes: string | null;
@@ -1553,6 +1558,8 @@ type RawScheduleBooking = {
   amount_paid?: number | string | null;
   payment_status?: string | null;
   guest_name?: string | null;
+  guest_of_honor_name?: string | null;
+  guest_of_honor_age?: number | string | null;
   notes?: string | null;
   special_requests?: string | null;
   internal_notes?: string | null;
@@ -1598,6 +1605,8 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
     paymentStatus: raw.payment_status ?? "pending",
     packageName: raw.package?.name?.trim() || "Booking",
     customerName: customerName(raw.customer, raw.guest_name),
+    guestOfHonorName: raw.guest_of_honor_name?.trim() || null,
+    guestOfHonorAge: Number(raw.guest_of_honor_age) || null,
     customerNotes: raw.notes?.trim() || null,
     specialRequests: raw.special_requests?.trim() || null,
     internalNotes: raw.internal_notes?.trim() || null,

@@ -1,5 +1,11 @@
 import { conflictsWith } from "../bookings/freeTime.ts";
-import { DETAIL_HEIGHT, type StretchSpan } from "../bookings/minuteScale.ts";
+import { cellSpanHeight, guaranteedExtraLines } from "../bookings/bookingCell.ts";
+import {
+  guestNoteOf,
+  staffNoteOf,
+  type NotedBooking,
+} from "../bookings/bookingNotes.ts";
+import type { StretchSpan } from "../bookings/minuteScale.ts";
 import {
   columnKeyFor,
   timeToMinutes,
@@ -94,19 +100,27 @@ export function placementMinutes(
   return { from, to: from + placement.slotSpan * SLOT_MINUTES };
 }
 
-/** The slots each drawn booking covers, each asking for room to carry its details. */
-export function placementStretchSpans(
-  byColumn: ReadonlyMap<string, readonly SlotPlacement<unknown>[]>,
+/** What a day-grid block gives up to its slots: a 2px margin above and below. */
+export const DAY_BLOCK_INSET = 4;
+
+/** The slots each drawn booking covers, each asking for room for its four lines and its extras. */
+export function placementStretchSpans<T extends NotedBooking>(
+  byColumn: ReadonlyMap<string, readonly SlotPlacement<T>[]>,
   window: Pick<SlotWindow, "start">,
 ): StretchSpan[] {
   const spans: StretchSpan[] = [];
   for (const placements of byColumn.values()) {
     for (const placement of placements) {
       const { from, to } = placementMinutes(placement, window);
+      const lines = guaranteedExtraLines({
+        clashing: placement.conflicts.length > 0,
+        staffNote: staffNoteOf(placement.item),
+        guestNote: guestNoteOf(placement.item),
+      });
       spans.push({
         startMinutes: from,
         endMinutes: to,
-        minHeight: DETAIL_HEIGHT,
+        minHeight: cellSpanHeight(lines, DAY_BLOCK_INSET),
       });
     }
   }

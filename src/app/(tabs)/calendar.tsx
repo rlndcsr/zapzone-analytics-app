@@ -45,6 +45,7 @@ import {
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
   computeSlotWindow,
+  DAY_BLOCK_INSET,
   daySlotHeight,
   distinctStartMinutes,
   placeByColumn,
@@ -70,7 +71,22 @@ import {
   type ColumnStatus,
   type SlotTap,
 } from "../../lib/calendar/dayGridSlots";
-import { noteFlagsOf, noteSummaryOf } from "../../lib/bookings/bookingNotes";
+import {
+  guestNoteOf,
+  noteFlagsOf,
+  noteSummaryOf,
+  staffNoteOf,
+} from "../../lib/bookings/bookingNotes";
+import {
+  arrivalFlag,
+  balanceSummary,
+  cellExtras,
+  compactTimeRange,
+  describeClashes,
+  headCount,
+} from "../../lib/bookings/bookingCell";
+import { resolvePaymentState } from "../../lib/payments/paymentState";
+import { BookingCellBody } from "../../components/ui/BookingCellBody";
 import { packageColor } from "../../lib/calendar/packageColors";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
@@ -104,8 +120,6 @@ import {
   BadgeCheck,
   Package,
   Ticket,
-  MessageSquare,
-  StickyNote,
 } from "lucide-react-native";
 
 type ViewMode = "month" | "week" | "day";
@@ -602,41 +616,48 @@ const DayBookingBlock = ({
   placement,
   scale,
   windowStart,
+  capacity,
+  isToday,
+  nowMinutes,
   onPress,
 }: {
   placement: SlotPlacement<CalendarBooking>;
   scale: MinuteScale;
   windowStart: number;
+  /** The space's limit, for the head count; null for a roomless column. */
+  capacity: number | null;
+  isToday: boolean;
+  nowMinutes: number;
   onPress: () => void;
 }) => {
   const booking = placement.item;
   const tone = packageColor(booking.packageName);
   const status = statusStyle(booking.status);
   const slots = placementMinutes(placement, { start: windowStart });
-  const height = scale.spanHeight(slots.from, slots.to) - 4;
+  const height = scale.spanHeight(slots.from, slots.to) - DAY_BLOCK_INSET;
   const doubleBooked = placement.conflicts.some((c) => c.overlapMinutes > 0);
   const clashing = placement.conflicts.length > 0;
-  const noteFlags = noteFlagsOf(booking);
   const noteSummary = noteSummaryOf(booking);
-  // below this the block's own text is already clipped, so an icon would only steal from it
-  const showNotes = (noteFlags.guest || noteFlags.staff) && height >= 20;
-  // a tiny block has room for one badge: the staff note wins, being rarer and written for staff
-  const tightNotes = height < 30 && noteFlags.guest && noteFlags.staff;
-  // one slot, even stretched to carry its package line, is still short on room
-  const short = height < 60;
+  const clashLabel = describeClashes(
+    placement.conflicts.map((c) => ({
+      name: c.item.customerName,
+      startLabel: slotLabel(timeToMinutes(c.item.time)),
+      overlapMinutes: c.overlapMinutes,
+    })),
+  );
   return (
     <Pressable
       onPress={onPress}
       style={{
         position: "absolute",
-        top: scale.at(slots.from) + 2,
+        top: scale.at(slots.from) + DAY_BLOCK_INSET / 2,
         height,
         left: `${(100 / placement.laneCount) * placement.lane}%`,
         width: `${100 / placement.laneCount}%`,
         backgroundColor: tone.bg,
         borderLeftColor: doubleBooked ? "#f43f5e" : clashing ? "#fbbf24" : status.color,
       }}
-      className={`rounded-md border-l-4 px-1.5 overflow-hidden active:opacity-80 ${short ? "py-0.5" : "py-1"} ${
+      className={`rounded-md border-l-4 overflow-hidden active:opacity-80 ${
         doubleBooked ? "ring-2 ring-rose-500" : clashing ? "ring-2 ring-amber-400" : ""
       }`}
       accessibilityRole="button"
@@ -644,68 +665,41 @@ const DayBookingBlock = ({
         clashing ? (doubleBooked ? ", overlaps another booking" : ", no turnaround before the next booking") : ""
       }${noteSummary ? `, ${noteSummary}` : ""}`}
     >
-      {/* one rail in the corner: siblings, so notes and the clash badge can never cover each other */}
-      {(clashing || showNotes) && (
-        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-bl bg-white/70 pl-px">
-          {showNotes && noteFlags.staff && (
-            <View className="rounded bg-amber-100 px-0.5 py-px">
-              <StickyNote size={7} color="#b45309" strokeWidth={2.5} />
-            </View>
-          )}
-          {showNotes && noteFlags.guest && !tightNotes && (
-            <View className="rounded bg-blue-100 px-0.5 py-px">
-              <MessageSquare size={7} color="#1d4ed8" strokeWidth={2.5} />
-            </View>
-          )}
-          {clashing && (
-            <View
-              className={`flex-row items-center gap-0.5 rounded-bl px-1 py-px ${
-                doubleBooked ? "bg-rose-500" : "bg-amber-500"
-              }`}
-            >
-              <AlertTriangle size={7} color="#FFFFFF" />
-              {height >= 18 && !showNotes && (
-                <Text className="text-[7px] font-bold uppercase text-white">
-                  {doubleBooked ? "Overlap" : "No gap"}
-                </Text>
-              )}
-            </View>
-          )}
-        </View>
-      )}
-      {height >= 34 && (
-        <Text
-          className="text-[10px] font-semibold"
-          style={{ color: tone.text }}
-          numberOfLines={1}
-        >
-          {slotLabel(placement.startMin)}–{slotLabel(placement.endMin)}
-          {placement.clipped ? "+" : ""}
-        </Text>
-      )}
-      {height >= 18 && (
-        <Text className="text-xs font-bold text-gray-900" numberOfLines={1}>
-          {booking.customerName}
-        </Text>
-      )}
-      {height >= 36 && (
-        <Text
-          className="text-[10px]"
-          style={{ color: tone.text }}
-          numberOfLines={1}
-        >
-          {booking.roomName || booking.packageName}
-        </Text>
-      )}
-      {height > 72 && (
-        <Text
-          className="text-[10px] font-semibold mt-auto"
-          style={{ color: status.color }}
-          numberOfLines={1}
-        >
-          {status.label}
-        </Text>
-      )}
+      <BookingCellBody
+        contentHeight={height}
+        startLabel={slotLabel(placement.startMin)}
+        timeRange={`${compactTimeRange(slotLabel(placement.startMin), slotLabel(placement.endMin))}${
+          placement.clipped ? "+" : ""
+        }`}
+        name={booking.customerName}
+        packageName={booking.packageName}
+        headCount={headCount(booking.participants, capacity)}
+        balance={balanceSummary(
+          resolvePaymentState({
+            payment_status: booking.paymentStatus,
+            total_amount: booking.totalAmount,
+            amount_paid: booking.amountPaid,
+          }),
+        )}
+        arrival={arrivalFlag({
+          status: booking.status,
+          isToday,
+          nowMinutes,
+          startMin: placement.startMin,
+          endMin: placement.endMin,
+        })}
+        clash={clashing ? { doubleBooked } : null}
+        noteFlags={noteFlagsOf(booking)}
+        extras={cellExtras({
+          clash: clashing ? { doubleBooked, label: clashLabel } : null,
+          staffNote: staffNoteOf(booking),
+          guestNote: guestNoteOf(booking),
+          honoreeName: booking.guestOfHonorName,
+          honoreeAge: booking.guestOfHonorAge,
+        })}
+        textColor={tone.text}
+        nameColor="#111827"
+      />
     </Pressable>
   );
 };
@@ -2770,6 +2764,9 @@ const Calendar = () => {
                                       placement={placement}
                                       scale={dayScale}
                                       windowStart={dayWindow.start}
+                                      capacity={column.capacity}
+                                      isToday={isVenueToday}
+                                      nowMinutes={nowMinutes}
                                       onPress={() =>
                                         openBooking(placement.item.id)
                                       }

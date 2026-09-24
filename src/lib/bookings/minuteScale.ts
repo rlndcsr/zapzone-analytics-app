@@ -1,5 +1,3 @@
-export const DETAIL_HEIGHT = 54;
-
 export type StretchSpan = {
   startMinutes: number;
   endMinutes: number;

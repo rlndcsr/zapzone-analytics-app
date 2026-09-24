@@ -18,7 +18,22 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { noteFlagsOf, noteSummaryOf } from "../../lib/bookings/bookingNotes";
+import { BookingCellBody } from "../../components/ui/BookingCellBody";
+import {
+  arrivalFlag,
+  balanceSummary,
+  cellExtras,
+  compactTimeRange,
+  describeClashes,
+  hasArrived,
+  headCount,
+} from "../../lib/bookings/bookingCell";
+import {
+  guestNoteOf,
+  noteFlagsOf,
+  noteSummaryOf,
+  staffNoteOf,
+} from "../../lib/bookings/bookingNotes";
 import { CalendarDaySkeleton } from "../../components/ui/skeleton/CalendarSkeleton";
 import {
   buildBookingParams,
@@ -39,6 +54,8 @@ import {
 } from "../../lib/bookings/minuteScale";
 import { packagesValidForSlot } from "../../lib/bookings/packageCandidates";
 import {
+  arrangeBookingsByColumn,
+  BLOCK_BORDER,
   bookingStretchSpans,
   buildColumns,
   closureBoundaryMinutes,
@@ -53,7 +70,7 @@ import {
   hourMarks,
   minutesToLabel,
   nowLineTop,
-  positionBookingsByColumn,
+  placeOnScale,
   timeToMinutes,
   UNCATEGORIZED_LABEL,
   ZOOM_LEVELS,
@@ -387,42 +404,42 @@ const ColumnSection = ({
 const GridBookingBlock = ({
   item,
   inProgress,
+  capacity,
+  isToday,
+  nowMinutes,
   onPress,
 }: {
   item: PositionedBooking;
   inProgress: boolean;
+  /** The space's limit, for the head count; null for a roomless column. */
+  capacity: number | null;
+  isToday: boolean;
+  nowMinutes: number;
   onPress: () => void;
 }) => {
   const b = item.booking;
   const pkg = packageColor(b.packageName);
-  const pay = paymentTone(b);
-  const tiny = item.height < 30;
-  const compact = !tiny && item.height < 60;
-  const medium = item.height >= 60 && item.height < 140;
   const laneWidth = 100 / item.laneCount;
-  const needsCheckIn = inProgress && b.status !== "checked-in";
+  const needsCheckIn = inProgress && !hasArrived(b.status);
   const doubleBooked = item.conflicts.some((c) => c.overlapMinutes > 0);
   const clashing = item.conflicts.length > 0;
-  const noteFlags = noteFlagsOf(b);
+  const bordered = doubleBooked || clashing || needsCheckIn || inProgress;
   const noteSummary = noteSummaryOf(b);
-  // below this the block's own text is already clipped, so an icon would only steal from it
-  const showNotes = (noteFlags.guest || noteFlags.staff) && item.height >= 20;
-  // a tiny block has room for one badge: the staff note wins, being rarer and written for staff
-  const tightNotes = tiny && noteFlags.guest && noteFlags.staff;
-  const overlapLabel = item.conflicts
-    .map(
-      (clash) =>
-        `${clash.booking.customerName || "Walk-in"} at ${minutesToLabel(timeToMinutes(clash.booking.time))}` +
-        (clash.overlapMinutes > 0 ? ` (${clash.overlapMinutes} min over)` : " (no gap between them)"),
-    )
-    .join(", ");
+  const overlapLabel = describeClashes(
+    item.conflicts.map((clash) => ({
+      name: clash.booking.customerName,
+      startLabel: minutesToLabel(timeToMinutes(clash.booking.time)),
+      overlapMinutes: clash.overlapMinutes,
+    })),
+  );
+  const startLabel = minutesToLabel(item.startMin);
   return (
     <Pressable
       onPress={onPress}
       accessibilityLabel={
         clashing || noteSummary
           ? [
-              `${b.customerName || "Walk-in"}`,
+              b.customerName,
               clashing ? `${doubleBooked ? "overlaps" : "no turnaround before"} ${overlapLabel}` : null,
               noteSummary,
             ]
@@ -437,199 +454,56 @@ const GridBookingBlock = ({
         left: `${item.lane * laneWidth}%`,
         width: `${laneWidth}%`,
         backgroundColor: pkg.bg,
+        borderWidth: bordered ? BLOCK_BORDER : 0,
       }}
       className={`z-10 rounded-xl overflow-hidden active:opacity-80 ${
         doubleBooked
-          ? "border-2 border-rose-500"
+          ? "border-rose-500"
           : clashing
-            ? "border-2 border-amber-400"
+            ? "border-amber-400"
             : needsCheckIn
-              ? "border-2 border-red-400"
+              ? "border-red-400"
               : inProgress
-                ? "border-2 border-emerald-400"
+                ? "border-emerald-400"
                 : ""
       }`}
     >
-      {/* one rail in the corner: siblings, so notes and the clash badge can never cover each other */}
-      {(clashing || showNotes) && (
-        <View className="absolute top-0 right-0 z-10 flex-row items-center gap-0.5 rounded-tr-lg rounded-bl bg-white/80 pl-px">
-          {showNotes && noteFlags.staff && (
-            <View className="rounded bg-amber-100 px-0.5 py-px">
-              <Feather name="file-text" size={8} color="#b45309" />
-            </View>
-          )}
-          {showNotes && noteFlags.guest && !tightNotes && (
-            <View className="rounded bg-blue-100 px-0.5 py-px">
-              <Feather name="message-square" size={8} color="#1d4ed8" />
-            </View>
-          )}
-          {clashing && (
-            <View
-              className={`flex-row items-center gap-0.5 rounded-bl px-1 py-px ${
-                doubleBooked ? "bg-rose-500" : "bg-amber-500"
-              }`}
-            >
-              <Feather name="alert-triangle" size={8} color="#FFFFFF" />
-              {!tiny && !showNotes && (
-                <Text className="text-[8px] font-bold uppercase text-white">
-                  {doubleBooked ? "Overlap" : "No gap"}
-                </Text>
-              )}
-            </View>
-          )}
-        </View>
-      )}
-      <View
-        className={`h-full ${tiny ? "px-1.5 justify-center" : compact ? "px-2 py-0.5 justify-center" : "p-2"}`}
-      >
-        {tiny ? (
-          // who and when always fit; the package only where there's genuinely room for it too
-          <View>
-            <View className="flex-row items-baseline gap-1">
-              <Text
-                style={{ color: pkg.text }}
-                className="text-[10px] font-bold flex-shrink-0"
-              >
-                {minutesToLabel(item.startMin)}
-              </Text>
-              <Text
-                style={{ color: pkg.text }}
-                className="text-[10px] font-semibold flex-shrink"
-                numberOfLines={1}
-              >
-                {b.customerName || "Walk-in"}
-              </Text>
-            </View>
-            {item.height >= 26 && (
-              <Text
-                style={{ color: pkg.text }}
-                className="text-[9px] opacity-80"
-                numberOfLines={1}
-              >
-                {b.packageName}
-              </Text>
-            )}
-          </View>
-        ) : compact ? (
-          // two tight lines: who and when, then what they booked
-          <View>
-            <View className="flex-row items-center gap-1.5">
-              <View
-                style={{ backgroundColor: statusColor(b.status) }}
-                className="w-1.5 h-1.5 rounded-full"
-              />
-              <Text style={{ color: pkg.text }} className="text-xs opacity-70">
-                {minutesToLabel(item.startMin)}
-              </Text>
-              <Text
-                style={{ color: pkg.text }}
-                className="text-xs font-semibold flex-shrink"
-                numberOfLines={1}
-              >
-                {b.customerName || "Walk-in"}
-              </Text>
-            </View>
-            <Text
-              style={{ color: pkg.text }}
-              className="text-[10px] opacity-80"
-              numberOfLines={1}
-            >
-              {b.packageName}
-            </Text>
-          </View>
-        ) : (
-          <>
-            {!medium && (
-              <View className="flex-row items-center justify-between gap-1 mb-1">
-                <View
-                  style={{ backgroundColor: statusColor(b.status) }}
-                  className="px-1.5 py-0.5 rounded-full"
-                >
-                  <Text className="text-[9px] font-bold uppercase text-white">
-                    {b.status}
-                  </Text>
-                </View>
-                {!!b.referenceNumber && (
-                  <Text
-                    style={{ color: pkg.text }}
-                    className="text-[10px] font-medium opacity-70"
-                  >
-                    #{b.referenceNumber.slice(-6)}
-                  </Text>
-                )}
-              </View>
-            )}
-            <View className="flex-row items-center gap-1.5">
-              <Text
-                style={{ color: pkg.text }}
-                className="text-[11px] font-bold flex-shrink"
-                numberOfLines={1}
-              >
-                {minutesToLabel(item.startMin)} –{" "}
-                {minutesToLabel(item.startMin + b.durationMinutes)}
-              </Text>
-              {needsCheckIn ? (
-                <View className="flex-row items-center gap-0.5 px-1.5 py-px rounded-full bg-red-500 flex-shrink-0">
-                  <Feather name="alert-circle" size={9} color="#FFFFFF" />
-                  <Text className="text-[9px] font-bold uppercase text-white">
-                    Check in
-                  </Text>
-                </View>
-              ) : (
-                inProgress && (
-                  <View className="px-1.5 py-px rounded-full bg-emerald-500 flex-shrink-0">
-                    <Text className="text-[9px] font-bold uppercase text-white">
-                      Now
-                    </Text>
-                  </View>
-                )
-              )}
-            </View>
-            <Text
-              style={{ color: pkg.text }}
-              className="text-[11px] font-semibold"
-              numberOfLines={1}
-            >
-              {b.customerName || "Walk-in"}
-            </Text>
-            {/* the package belongs at this glance-priority whether or not the extras below fit too */}
-            <Text
-              style={{ color: pkg.text }}
-              className="text-[10px] opacity-80"
-              numberOfLines={1}
-            >
-              {b.packageName}
-            </Text>
-            {!medium && (
-              <>
-                <View className="flex-row items-center gap-1 mt-0.5">
-                  <Feather name="users" size={10} color={pkg.text} />
-                  <Text
-                    style={{ color: pkg.text }}
-                    className="text-[10px] opacity-80"
-                  >
-                    {b.participants} {b.participants === 1 ? "guest" : "guests"}
-                  </Text>
-                </View>
-                <View className="flex-1" />
-                <View className="flex-row items-center justify-between">
-                  <Text
-                    style={{ color: pkg.text }}
-                    className="text-[10px] font-bold"
-                  >
-                    {formatMoney(b.totalAmount)}
-                  </Text>
-                  <View className={`px-1 py-0.5 rounded ${pay.bg}`}>
-                    <Text className={`text-[9px] font-medium ${pay.text}`}>
-                      {pay.label}
-                    </Text>
-                  </View>
-                </View>
-              </>
-            )}
-          </>
+      <BookingCellBody
+        contentHeight={item.height - (bordered ? 2 * BLOCK_BORDER : 0)}
+        startLabel={startLabel}
+        timeRange={compactTimeRange(
+          startLabel,
+          minutesToLabel(item.startMin + b.durationMinutes),
         )}
-      </View>
+        name={b.customerName}
+        packageName={b.packageName}
+        headCount={headCount(b.participants, capacity)}
+        balance={balanceSummary(
+          resolvePaymentState({
+            payment_status: b.paymentStatus,
+            total_amount: b.totalAmount,
+            amount_paid: b.amountPaid,
+          }),
+        )}
+        arrival={arrivalFlag({
+          status: b.status,
+          isToday,
+          nowMinutes,
+          startMin: item.startMin,
+          endMin: item.endMin,
+        })}
+        clash={clashing ? { doubleBooked } : null}
+        noteFlags={noteFlagsOf(b)}
+        extras={cellExtras({
+          clash: clashing ? { doubleBooked, label: overlapLabel } : null,
+          staffNote: staffNoteOf(b),
+          guestNote: guestNoteOf(b),
+          honoreeName: b.guestOfHonorName,
+          honoreeAge: b.guestOfHonorAge,
+          referenceNumber: b.referenceNumber,
+        })}
+        textColor={pkg.text}
+      />
       {item.clipped && (
         <View className="absolute bottom-0 inset-x-0 border-b-2 border-dashed border-current opacity-60 items-center">
           {item.height >= 56 && (
@@ -1339,6 +1213,9 @@ const ScheduleGrid = ({
                           nowMinutes >= item.startMin &&
                           nowMinutes < item.endMin
                         }
+                        capacity={column.capacity}
+                        isToday={isVenueToday}
+                        nowMinutes={nowMinutes}
                         onPress={() => onBookingPress(item.booking.id)}
                       />
                     ))}
@@ -1723,18 +1600,6 @@ const SpaceScheduleScreen = () => {
     effectiveLocationId,
   ]);
 
-  // the zoom sets how tall an empty minute is; a booked one grows only as far as its details need
-  const scale = useMemo(
-    () =>
-      buildMinuteScale(
-        timeWindow.start,
-        timeWindow.end,
-        ZOOM_LEVELS[zoomIndex],
-        bookingStretchSpans(filteredBookings),
-      ),
-    [timeWindow, zoomIndex, filteredBookings],
-  );
-
   /**
    * How long a space stays shut after a booking ends — the same gap the
    * server's conflict check enforces. A package with no space attached is
@@ -1749,13 +1614,13 @@ const SpaceScheduleScreen = () => {
     [roomWindows],
   );
 
-  const positionedByColumn = useMemo(
+  // lanes and clashes first, in minutes: how tall a block must be depends on them
+  const arrangedByColumn = useMemo(
     () =>
-      positionBookingsByColumn({
+      arrangeBookingsByColumn({
         columns,
         bookings: filteredBookings,
         timeWindow,
-        scale,
         knownRoomIds,
         // clashes are measured against every live booking, so a filter can't hide one
         activeBookings,
@@ -1765,11 +1630,27 @@ const SpaceScheduleScreen = () => {
       columns,
       filteredBookings,
       timeWindow,
-      scale,
       knownRoomIds,
       activeBookings,
       turnaroundFor,
     ],
+  );
+
+  // the zoom sets how tall an empty minute is; a booked one grows only as far as its lines need
+  const scale = useMemo(
+    () =>
+      buildMinuteScale(
+        timeWindow.start,
+        timeWindow.end,
+        ZOOM_LEVELS[zoomIndex],
+        bookingStretchSpans(arrangedByColumn),
+      ),
+    [timeWindow, zoomIndex, arrangedByColumn],
+  );
+
+  const positionedByColumn = useMemo(
+    () => placeOnScale(arrangedByColumn, scale),
+    [arrangedByColumn, scale],
   );
 
   // Every clashing pair today, derived from every live booking rather than
@@ -1787,11 +1668,10 @@ const SpaceScheduleScreen = () => {
   );
   const positionedForConflicts = useMemo(
     () =>
-      positionBookingsByColumn({
+      arrangeBookingsByColumn({
         columns: columnsForConflicts,
         bookings: activeBookings,
         timeWindow,
-        scale,
         knownRoomIds,
         activeBookings,
         turnaroundFor,
@@ -1800,7 +1680,6 @@ const SpaceScheduleScreen = () => {
       columnsForConflicts,
       activeBookings,
       timeWindow,
-      scale,
       knownRoomIds,
       turnaroundFor,
     ],
@@ -2420,7 +2299,7 @@ const SpaceScheduleScreen = () => {
       if (clash) {
         lines.push(
           "",
-          `Clashes with ${clash.customerName || "Walk-in"}`,
+          `Clashes with ${clash.customerName}`,
           `Their booking: ${minutesToLabel(timeToMinutes(clash.time))} · ${clash.packageName || "No package"}`,
         );
       }
@@ -3017,11 +2896,11 @@ const SpaceScheduleScreen = () => {
                           : "text-amber-800 dark:text-amber-400"
                       }`}
                     >
-                      {row.columnName}: {row.a.customerName || "Walk-in"} at{" "}
+                      {row.columnName}: {row.a.customerName} at{" "}
                       {minutesToLabel(timeToMinutes(row.a.time))}{" "}
                       {row.overlapMinutes > 0
-                        ? `overlaps ${row.b.customerName || "Walk-in"} at ${minutesToLabel(timeToMinutes(row.b.time))} by ${row.overlapMinutes} min`
-                        : `ends as ${row.b.customerName || "Walk-in"} starts at ${minutesToLabel(timeToMinutes(row.b.time))} — no time to reset the space`}
+                        ? `overlaps ${row.b.customerName} at ${minutesToLabel(timeToMinutes(row.b.time))} by ${row.overlapMinutes} min`
+                        : `ends as ${row.b.customerName} starts at ${minutesToLabel(timeToMinutes(row.b.time))} — no time to reset the space`}
                     </Text>
                   ))}
                 </View>

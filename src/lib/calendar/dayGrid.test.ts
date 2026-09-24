@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildMinuteScale, DETAIL_HEIGHT } from "../bookings/minuteScale.ts";
+import { cellSpanHeight, EXTRA_LINE_HEIGHT } from "../bookings/bookingCell.ts";
+import { buildMinuteScale } from "../bookings/minuteScale.ts";
 import { buildColumns } from "../bookings/spaceScheduleGrid.ts";
 import {
   assignSlotLanes,
   computeSlotWindow,
+  DAY_BLOCK_INSET,
   daySlotHeight,
   distinctStartMinutes,
   MIN_PX_PER_MINUTE,
@@ -49,6 +51,9 @@ const booking = (
     packageName: string;
     time: string | null;
     durationMinutes: number;
+    customerNotes: string | null;
+    specialRequests: string | null;
+    internalNotes: string | null;
   }> = {},
 ) => ({
   id: 1,
@@ -57,6 +62,9 @@ const booking = (
   packageName: "Airlock",
   time: "17:30",
   durationMinutes: 60,
+  customerNotes: null as string | null,
+  specialRequests: null as string | null,
+  internalNotes: null as string | null,
   ...over,
 });
 
@@ -344,6 +352,8 @@ describe("the Day grid's variable timeline — only booked slots grow", () => {
   ];
   const knownRoomIds = new Set([1, 2]);
   const SLOT = daySlotHeight(SLOT_MINUTES, 44);
+  // the four-line floor plus the block's margin above and below
+  const FLOOR = cellSpanHeight(0, DAY_BLOCK_INSET);
   const setup = (items: ReturnType<typeof booking>[]) => {
     const window = computeSlotWindow(items, { start: 9 * 60, end: 13 * 60 });
     const byColumn = placeByColumn({
@@ -370,7 +380,7 @@ describe("the Day grid's variable timeline — only booked slots grow", () => {
 
   it("grows only the slot a short booking sits in, and only to the detail height", () => {
     const { row } = setup([booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })]);
-    assert.equal(row(10 * 60), DETAIL_HEIGHT);
+    assert.equal(row(10 * 60), FLOOR);
     // the empty hours either side stay compact
     assert.equal(row(9 * 60 + 45), SLOT);
     assert.equal(row(10 * 60 + 15), SLOT);
@@ -388,8 +398,8 @@ describe("the Day grid's variable timeline — only booked slots grow", () => {
       booking({ id: 1, roomId: 1, time: "09:30", durationMinutes: 15 }),
       booking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 10 }),
     ]);
-    assert.equal(row(9 * 60 + 30), DETAIL_HEIGHT);
-    assert.equal(row(11 * 60), DETAIL_HEIGHT);
+    assert.equal(row(9 * 60 + 30), FLOOR);
+    assert.equal(row(11 * 60), FLOOR);
     assert.equal(row(10 * 60 + 15), SLOT);
   });
 
@@ -402,7 +412,7 @@ describe("the Day grid's variable timeline — only booked slots grow", () => {
     const b = placementMinutes(byColumn.get("room-2")![0], { start: 9 * 60 });
     // Room B's booking starts right where Room A's grown slot ends, in both columns
     assert.equal(scale.at(b.from), scale.at(a.to));
-    assert.equal(scale.at(a.from) + DETAIL_HEIGHT, scale.at(b.from));
+    assert.equal(scale.at(a.from) + FLOOR, scale.at(b.from));
   });
 
   it("lines the stacked gutter rows up with the blocks they sit beside", () => {
@@ -426,13 +436,40 @@ describe("the Day grid's variable timeline — only booked slots grow", () => {
     ]);
     const [first, second] = byColumn.get("room-1")!.map((p) => placementMinutes(p, { start: 9 * 60 }));
     assert.ok(scale.at(first.to) <= scale.at(second.from));
-    assert.equal(scale.spanHeight(second.from, second.to), DETAIL_HEIGHT);
+    assert.equal(scale.spanHeight(second.from, second.to), FLOOR);
+  });
+
+  it("grows a booking with notes a line further for each", () => {
+    const { row } = setup([
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15, internalNotes: "VIP" }),
+      booking({ id: 2, roomId: 1, time: "11:00", durationMinutes: 15, customerNotes: "Nut allergy", internalNotes: "VIP" }),
+    ]);
+    assert.equal(row(10 * 60), FLOOR + EXTRA_LINE_HEIGHT);
+    assert.equal(row(11 * 60), FLOOR + 2 * EXTRA_LINE_HEIGHT);
+  });
+
+  it("grows a half-hour booking once its extras outgrow two plain slots", () => {
+    const { scale, row } = setup([
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 30, internalNotes: "VIP", specialRequests: "Cake" }),
+    ]);
+    // two slots are 90px; four lines and two extras need more, spread across both
+    assert.ok(Math.abs(scale.spanHeight(10 * 60, 10 * 60 + 30) - (FLOOR + 2 * EXTRA_LINE_HEIGHT)) < 1e-9);
+    assert.ok(row(10 * 60) > SLOT);
+    assert.equal(row(9 * 60), SLOT);
+  });
+
+  it("gives both sides of a clash a line for it", () => {
+    const { row } = setup([
+      booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
+      booking({ id: 2, roomId: 1, time: "10:00", durationMinutes: 15 }),
+    ]);
+    assert.equal(row(10 * 60), FLOOR + EXTRA_LINE_HEIGHT);
   });
 
   it("maps a tap inside a grown slot back to the minute under the finger", () => {
     const { scale } = setup([booking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })]);
     // halfway down the grown 10:00 slot is 10:07:30, not the base rate's guess
-    const px = scale.at(10 * 60) + DETAIL_HEIGHT / 2;
+    const px = scale.at(10 * 60) + FLOOR / 2;
     assert.equal(scale.minuteAt(px), 10 * 60 + 7.5);
   });
 });

@@ -1,11 +1,9 @@
 import type { ScheduleBooking } from "../../services/bookingsService";
 import type { DayOff } from "../../services/dayOffsService";
+import { cellSpanHeight, guaranteedExtraLines } from "./bookingCell.ts";
+import { guestNoteOf, staffNoteOf } from "./bookingNotes.ts";
 import { conflictsWith } from "./freeTime.ts";
-import {
-  DETAIL_HEIGHT,
-  type MinuteScale,
-  type StretchSpan,
-} from "./minuteScale.ts";
+import type { MinuteScale, StretchSpan } from "./minuteScale.ts";
 
 // even the tightest zoom has to leave a short booking room for its details rather than cut them
 export const ZOOM_LEVELS = [2.4, 3.6, 5.2] as const;
@@ -14,18 +12,27 @@ export const DEFAULT_ZOOM_INDEX = 1;
 /** A booking is placed as at least this long, however short it is. */
 const MIN_PLACED_MINUTES = 15;
 
-/** The minutes each booking occupies, each asking to be drawn tall enough to carry its details. */
+/** The minutes each booking occupies, each asking for room for its four lines and its extras. */
 export function bookingStretchSpans(
-  bookings: readonly Pick<ScheduleBooking, "time" | "durationMinutes">[],
+  arranged: ReadonlyMap<string, readonly ArrangedBooking[]>,
 ): StretchSpan[] {
-  return bookings.map((b) => {
-    const startMinutes = timeToMinutes(b.time);
-    return {
-      startMinutes,
-      endMinutes: startMinutes + Math.max(MIN_PLACED_MINUTES, b.durationMinutes),
-      minHeight: DETAIL_HEIGHT,
-    };
-  });
+  const spans: StretchSpan[] = [];
+  for (const list of arranged.values()) {
+    for (const item of list) {
+      const lines = guaranteedExtraLines({
+        clashing: item.conflicts.length > 0,
+        staffNote: staffNoteOf(item.booking),
+        guestNote: guestNoteOf(item.booking),
+      });
+      spans.push({
+        startMinutes: item.startMin,
+        endMinutes: item.endMin,
+        // room for the border too, since whether it shows changes with the clock
+        minHeight: cellSpanHeight(lines, BLOCK_GAP + 2 * BLOCK_BORDER),
+      });
+    }
+  }
+  return spans;
 }
 
 export const UNCATEGORIZED_LABEL = "No category";
@@ -128,27 +135,36 @@ export function columnsSpanVenues(
 /** A real overlap is a double booking; zero minutes means only the turnaround is missing. */
 export type BookingClash = { booking: ScheduleBooking; overlapMinutes: number };
 
-export type PositionedBooking = {
+/** A booking in its column, in minutes — its lane and clashes, before the day's scale exists. */
+export type ArrangedBooking = {
   booking: ScheduleBooking;
   startMin: number;
   endMin: number;
   /** Unclamped end — the visible-window clip must never shrink a conflict. */
   endMinRaw: number;
-  top: number;
-  height: number;
   lane: number;
   laneCount: number;
   clipped: boolean;
   conflicts: BookingClash[];
 };
 
-export function assignLanes(items: PositionedBooking[]): PositionedBooking[] {
+export type PositionedBooking = ArrangedBooking & { top: number; height: number };
+
+/** The gap left under each block, so it never touches the one below. */
+export const BLOCK_GAP = 2;
+/** The highlight border a block wears while clashing, running or awaiting check-in. */
+export const BLOCK_BORDER = 2;
+
+/** Lanes are worked out in minutes: a block's height depends on what it says, known only after the scale. */
+export function assignLanes<T extends ArrangedBooking>(items: T[]): T[] {
   const list = [...items].sort(
     (a, b) =>
-      a.top - b.top || b.height - a.height || a.booking.id - b.booking.id,
+      a.startMin - b.startMin ||
+      b.endMin - a.endMin ||
+      a.booking.id - b.booking.id,
   );
   let clusterStart = 0;
-  let clusterMaxBottom = -1;
+  let clusterMaxEnd = -1;
   let laneEnds: number[] = [];
   const finishCluster = (end: number) => {
     const laneCount = Math.max(1, laneEnds.length);
@@ -156,43 +172,72 @@ export function assignLanes(items: PositionedBooking[]): PositionedBooking[] {
       list[i] = { ...list[i], laneCount };
   };
   list.forEach((item, index) => {
-    if (index > 0 && item.top >= clusterMaxBottom) {
+    if (index > 0 && item.startMin >= clusterMaxEnd) {
       finishCluster(index);
       clusterStart = index;
       laneEnds = [];
     }
-    let lane = laneEnds.findIndex((end) => end <= item.top);
+    let lane = laneEnds.findIndex((end) => end <= item.startMin);
     if (lane === -1) {
       lane = laneEnds.length;
       laneEnds.push(0);
     }
-    laneEnds[lane] = item.top + item.height;
+    laneEnds[lane] = item.endMin;
     list[index] = { ...item, lane };
-    clusterMaxBottom = Math.max(clusterMaxBottom, item.top + item.height);
+    clusterMaxEnd = Math.max(clusterMaxEnd, item.endMin);
   });
   finishCluster(list.length);
   return list;
 }
 
-export function positionBookingsByColumn({
-  columns,
-  bookings,
-  timeWindow,
-  scale,
-  knownRoomIds,
-  activeBookings = bookings,
-  turnaroundFor = () => 0,
-}: {
+type ArrangeArgs = {
   columns: ScheduleColumn[];
   bookings: ScheduleBooking[];
   timeWindow: TimeWindow;
-  scale: MinuteScale;
   knownRoomIds: ReadonlySet<number>;
   /** Every live booking, unfiltered — a booking a filter hides can still clash. */
   activeBookings?: ScheduleBooking[];
   turnaroundFor?: (column: ScheduleColumn) => number;
-}): Map<string, PositionedBooking[]> {
+};
+
+/** Put each block on the day's scale, every column reading the same mapping. */
+export function placeOnScale(
+  arranged: ReadonlyMap<string, readonly ArrangedBooking[]>,
+  scale: MinuteScale,
+): Map<string, PositionedBooking[]> {
   const map = new Map<string, PositionedBooking[]>();
+  for (const [key, list] of arranged) {
+    map.set(
+      key,
+      list.map((item) => ({
+        ...item,
+        top: scale.at(item.startMin),
+        height: Math.max(
+          24,
+          scale.spanHeight(item.startMin, item.endMin) - BLOCK_GAP,
+        ),
+      })),
+    );
+  }
+  return map;
+}
+
+export function positionBookingsByColumn({
+  scale,
+  ...args
+}: ArrangeArgs & { scale: MinuteScale }): Map<string, PositionedBooking[]> {
+  return placeOnScale(arrangeBookingsByColumn(args), scale);
+}
+
+export function arrangeBookingsByColumn({
+  columns,
+  bookings,
+  timeWindow,
+  knownRoomIds,
+  activeBookings = bookings,
+  turnaroundFor = () => 0,
+}: ArrangeArgs): Map<string, ArrangedBooking[]> {
+  const map = new Map<string, ArrangedBooking[]>();
   for (const c of columns) map.set(c.key, []);
   for (const b of bookings) {
     const key = columnKeyFor(b, knownRoomIds);
@@ -206,8 +251,6 @@ export function positionBookingsByColumn({
       startMin,
       endMin,
       endMinRaw: rawEnd,
-      top: scale.at(startMin),
-      height: Math.max(24, scale.spanHeight(startMin, endMin) - 2),
       lane: 0,
       laneCount: 1,
       clipped: rawEnd > timeWindow.end,

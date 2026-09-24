@@ -17,14 +17,20 @@ import {
   hourMarks,
   minutesToLabel,
   nowLineTop,
+  arrangeBookingsByColumn,
+  BLOCK_BORDER,
+  BLOCK_GAP,
+  placeOnScale,
   positionBookingsByColumn,
   timeToMinutes,
   ZOOM_LEVELS,
+  type ArrangedBooking,
   type PositionedBooking,
   type ScheduleColumn,
 } from "./spaceScheduleGrid.ts";
 import { minuteAtOffset } from "./freeTime.ts";
-import { buildMinuteScale, DETAIL_HEIGHT } from "./minuteScale.ts";
+import { buildMinuteScale } from "./minuteScale.ts";
+import { BASE_CONTENT_HEIGHT, cellSpanHeight, EXTRA_LINE_HEIGHT } from "./bookingCell.ts";
 
 let nextId = 1;
 function makeBooking(
@@ -46,6 +52,8 @@ function makeBooking(
     paymentStatus: "paid",
     packageName: "Test Package",
     customerName: "Jane Doe",
+    guestOfHonorName: null,
+    guestOfHonorAge: null,
     customerNotes: null,
     specialRequests: null,
     internalNotes: null,
@@ -222,13 +230,12 @@ describe("columnsSpanVenues", () => {
 });
 
 describe("assignLanes — overlap handling", () => {
-  const pb = (id: number, top: number, height: number): PositionedBooking => ({
+  // lanes are worked out in minutes, before the day's scale exists
+  const pb = (id: number, start: number, length: number): ArrangedBooking => ({
     booking: makeBooking({ id }),
-    startMin: 0,
-    endMin: 0,
-    endMinRaw: 0,
-    top,
-    height,
+    startMin: start,
+    endMin: start + length,
+    endMinRaw: start + length,
     lane: 0,
     laneCount: 1,
     clipped: false,
@@ -820,8 +827,12 @@ describe("the variable timeline — only booked minutes grow", () => {
   ];
   const knownRoomIds = new Set([1, 2]);
   const window = { start: 9 * 60, end: 17 * 60, total: 8 * 60 };
+  // the four-line floor, the gap under the block, and room for its highlight border
+  const FLOOR = cellSpanHeight(0, BLOCK_GAP + 2 * BLOCK_BORDER);
+  const arrange = (bookings: ScheduleBooking[]) =>
+    arrangeBookingsByColumn({ columns, bookings, timeWindow: window, knownRoomIds });
   const scaleFor = (bookings: ScheduleBooking[], zoom: number = ZOOM_LEVELS[0]) =>
-    buildMinuteScale(window.start, window.end, zoom, bookingStretchSpans(bookings));
+    buildMinuteScale(window.start, window.end, zoom, bookingStretchSpans(arrange(bookings)));
   const place = (bookings: ScheduleBooking[], zoom: number = ZOOM_LEVELS[0]) =>
     positionBookingsByColumn({
       columns,
@@ -837,15 +848,15 @@ describe("the variable timeline — only booked minutes grow", () => {
 
   it("asks for the detail height across each booking's minutes, 15 at least", () => {
     assert.deepEqual(
-      bookingStretchSpans([makeBooking({ time: "10:00", durationMinutes: 5 })]),
-      [{ startMinutes: 600, endMinutes: 615, minHeight: DETAIL_HEIGHT }],
+      bookingStretchSpans(arrange([makeBooking({ roomId: 1, time: "10:00", durationMinutes: 5 })])),
+      [{ startMinutes: 600, endMinutes: 615, minHeight: FLOOR }],
     );
   });
 
   it("gives a quarter-hour booking room for its time, guest and package", () => {
     const placed = find(place([makeBooking({ id: 1, roomId: 1, durationMinutes: 15 })]), 1);
     // 30px is where the block stops dropping its package line
-    near(placed.height, DETAIL_HEIGHT - 2);
+    near(placed.height, FLOOR - 2);
     assert.ok(placed.height >= 30);
   });
 
@@ -853,7 +864,7 @@ describe("the variable timeline — only booked minutes grow", () => {
     const scale = scaleFor([makeBooking({ id: 1, roomId: 1, time: "12:00", durationMinutes: 15 })]);
     near(scale.spanHeight(9 * 60, 12 * 60), 180 * ZOOM_LEVELS[0]);
     near(scale.spanHeight(12 * 60 + 15, 17 * 60), 285 * ZOOM_LEVELS[0]);
-    near(scale.height, 465 * ZOOM_LEVELS[0] + DETAIL_HEIGHT);
+    near(scale.height, 465 * ZOOM_LEVELS[0] + FLOOR);
   });
 
   it("grows each short booking on its own and leaves a long one at the zoom", () => {
@@ -863,8 +874,8 @@ describe("the variable timeline — only booked minutes grow", () => {
       makeBooking({ id: 3, roomId: 2, time: "15:00", durationMinutes: 90 }),
     ];
     const map = place(bookings);
-    near(find(map, 1).height, DETAIL_HEIGHT - 2);
-    near(find(map, 2).height, DETAIL_HEIGHT - 2);
+    near(find(map, 1).height, FLOOR - 2);
+    near(find(map, 2).height, FLOOR - 2);
     near(find(map, 3).height, 90 * ZOOM_LEVELS[0] - 2);
     near(scaleFor(bookings).spanHeight(11 * 60, 12 * 60), 60 * ZOOM_LEVELS[0]);
   });
@@ -874,8 +885,8 @@ describe("the variable timeline — only booked minutes grow", () => {
       makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 }),
       makeBooking({ id: 2, roomId: 1, time: "10:10", durationMinutes: 15 }),
     ]);
-    assert.ok(find(map, 1).height >= DETAIL_HEIGHT - 2 - 1e-9);
-    assert.ok(find(map, 2).height >= DETAIL_HEIGHT - 2 - 1e-9);
+    assert.ok(find(map, 1).height >= FLOOR - 2 - 1e-9);
+    assert.ok(find(map, 2).height >= FLOOR - 2 - 1e-9);
   });
 
   it("grows the same minutes in every column, so the columns stay aligned", () => {
@@ -884,7 +895,7 @@ describe("the variable timeline — only booked minutes grow", () => {
       makeBooking({ id: 2, roomId: 2, time: "10:15", durationMinutes: 60 }),
     ]);
     // the Room B booking starts exactly where the grown Room A one ends
-    near(find(map, 2).top, find(map, 1).top + DETAIL_HEIGHT);
+    near(find(map, 2).top, find(map, 1).top + FLOOR);
   });
 
   it("never lets a grown booking run into the one below it", () => {
@@ -905,7 +916,7 @@ describe("the variable timeline — only booked minutes grow", () => {
     const map = place(bookings);
     // the 11:00 hour line sits on the 11:00 block, pushed down by the grown 10:00 booking
     assert.equal(scale.at(11 * 60), find(map, 2).top);
-    near(scale.at(11 * 60), 105 * ZOOM_LEVELS[0] + DETAIL_HEIGHT);
+    near(scale.at(11 * 60), 105 * ZOOM_LEVELS[0] + FLOOR);
     assert.equal(nowLineTop(11 * 60, window, scale, true), find(map, 2).top);
     assert.equal(nowLineTop(10 * 60, window, scale, true), find(map, 1).top);
   });
@@ -914,7 +925,7 @@ describe("the variable timeline — only booked minutes grow", () => {
     const scale = scaleFor([makeBooking({ id: 1, roomId: 1, time: "10:00", durationMinutes: 15 })]);
     const bandOrigin = 9 * 60;
     // halfway down the grown booking is 10:07:30
-    near(minuteAtOffset(bandOrigin, scale.at(10 * 60) + DETAIL_HEIGHT / 2, scale), 10 * 60 + 7.5);
+    near(minuteAtOffset(bandOrigin, scale.at(10 * 60) + FLOOR / 2, scale), 10 * 60 + 7.5);
     // an hour past it is back on the zoom's straight line
     near(minuteAtOffset(bandOrigin, scale.at(11 * 60 + 15), scale), 11 * 60 + 15);
   });
@@ -927,6 +938,84 @@ describe("the variable timeline — only booked minutes grow", () => {
     assert.ok(wide.spanHeight(9 * 60, 10 * 60) > tight.spanHeight(9 * 60, 10 * 60));
     // 15 minutes at the widest zoom is already past the detail height, so nothing is grown
     near(wide.spanHeight(10 * 60, 10 * 60 + 15), 15 * ZOOM_LEVELS[2]);
-    near(tight.spanHeight(10 * 60, 10 * 60 + 15), DETAIL_HEIGHT);
+    near(tight.spanHeight(10 * 60, 10 * 60 + 15), FLOOR);
+  });
+});
+
+describe("a booking with more to say asks for more room", () => {
+  const columns: ScheduleColumn[] = [
+    { key: "room-1", name: "Room A", capacity: 8, roomId: 1, virtual: false },
+    { key: "room-2", name: "Room B", capacity: 8, roomId: 2, virtual: false },
+  ];
+  const knownRoomIds = new Set([1, 2]);
+  const window = { start: 9 * 60, end: 17 * 60, total: 8 * 60 };
+  const FLOOR = cellSpanHeight(0, BLOCK_GAP + 2 * BLOCK_BORDER);
+  const arrange = (bookings: ScheduleBooking[]) =>
+    arrangeBookingsByColumn({ columns, bookings, timeWindow: window, knownRoomIds });
+  const spanFor = (bookings: ScheduleBooking[], id: number) => {
+    const arranged = arrange(bookings);
+    const item = [...arranged.values()].flat().find((a) => a.booking.id === id)!;
+    const spans = bookingStretchSpans(arranged);
+    return spans.find((s) => s.startMinutes === item.startMin && s.endMinutes === item.endMin)!
+      .minHeight;
+  };
+  const quarter = (over: Partial<ScheduleBooking>) =>
+    makeBooking({ roomId: 1, time: "10:00", durationMinutes: 15, ...over });
+
+  it("keeps a booking with nothing to add at its four-line floor", () => {
+    assert.equal(spanFor([quarter({ id: 1 })], 1), FLOOR);
+    // the four lines plus padding, the block's gap, and its border
+    assert.equal(FLOOR, BASE_CONTENT_HEIGHT + BLOCK_GAP + 2 * BLOCK_BORDER);
+  });
+
+  it("buys a line for a staff note, and one for a guest note", () => {
+    assert.equal(spanFor([quarter({ id: 1, internalNotes: "VIP" })], 1), FLOOR + EXTRA_LINE_HEIGHT);
+    assert.equal(spanFor([quarter({ id: 1, customerNotes: "Nut allergy" })], 1), FLOOR + EXTRA_LINE_HEIGHT);
+    assert.equal(spanFor([quarter({ id: 1, specialRequests: "Balloons" })], 1), FLOOR + EXTRA_LINE_HEIGHT);
+  });
+
+  it("buys a line for a clash, on both bookings in it", () => {
+    const bookings = [quarter({ id: 1 }), quarter({ id: 2, time: "10:05" })];
+    assert.equal(spanFor(bookings, 1), FLOOR + EXTRA_LINE_HEIGHT);
+    assert.equal(spanFor(bookings, 2), FLOOR + EXTRA_LINE_HEIGHT);
+  });
+
+  it("guarantees all three at once, and nothing for the birthday or the reference", () => {
+    const busy = quarter({
+      id: 1,
+      internalNotes: "VIP",
+      customerNotes: "Nut allergy",
+      guestOfHonorName: "Mia",
+      guestOfHonorAge: 7,
+      referenceNumber: "BK-000123",
+    });
+    const bookings = [busy, quarter({ id: 2, time: "10:05" })];
+    assert.equal(spanFor(bookings, 1), FLOOR + 3 * EXTRA_LINE_HEIGHT);
+  });
+
+  it("grows only the busy booking's minutes, and grows them in every column", () => {
+    const bookings = [
+      quarter({ id: 1, internalNotes: "VIP", customerNotes: "Nut allergy" }),
+      makeBooking({ id: 2, roomId: 2, time: "10:15", durationMinutes: 60 }),
+    ];
+    const arranged = arrange(bookings);
+    const scale = buildMinuteScale(window.start, window.end, ZOOM_LEVELS[0], bookingStretchSpans(arranged));
+    const placed = placeOnScale(arranged, scale);
+    const busy = placed.get("room-1")![0];
+    const next = placed.get("room-2")![0];
+    assert.ok(Math.abs(busy.height - (FLOOR + 2 * EXTRA_LINE_HEIGHT - BLOCK_GAP)) < 1e-9);
+    // Room B's 10:15 booking starts right where Room A's grown one ends
+    assert.ok(Math.abs(next.top - (busy.top + busy.height + BLOCK_GAP)) < 1e-9);
+    // the empty hour before is untouched by either
+    assert.ok(Math.abs(scale.spanHeight(9 * 60, 10 * 60) - 60 * ZOOM_LEVELS[0]) < 1e-9);
+  });
+
+  it("lays out lanes in minutes, so two clashing bookings sit side by side", () => {
+    const arranged = arrange([quarter({ id: 1 }), quarter({ id: 2, time: "10:05" })]);
+    const lanes = arranged.get("room-1")!.map((a) => [a.lane, a.laneCount]);
+    assert.deepEqual(lanes, [
+      [0, 2],
+      [1, 2],
+    ]);
   });
 });
