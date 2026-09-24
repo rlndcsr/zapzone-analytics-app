@@ -1284,6 +1284,14 @@ export type ConnectedWaiver = {
   id: number;
   status: WaiverStatus;
   adultName: string;
+  adultEmail: string | null;
+  adultPhone: string | null;
+  /**
+   * Who the row is for, as the web panel's `waiverName` puts it: the signer's
+   * name, else their email, else their phone — a waiver sent out but not yet
+   * signed often has only the address it went to.
+   */
+  displayName: string;
   template: string | null;
   selectedDate: string | null;
   submittedAt: string | null;
@@ -1302,13 +1310,21 @@ export type ConnectedWaiver = {
 /** Connected-waiver summary + list for one entity. */
 export type EntityWaivers = {
   waivers: ConnectedWaiver[];
-  summary: { total: number; completed: number; pending: number };
+  summary: {
+    total: number;
+    completed: number;
+    pending: number;
+    /** Waivers whose participant has been checked in. */
+    checkedIn: number;
+  };
 };
 
 type RawConnectedWaiver = {
   id: number;
   status?: string | null;
   adult_name?: string | null;
+  adult_email?: string | null;
+  adult_phone?: string | null;
   template?: string | null;
   selected_date?: string | null;
   submitted_at?: string | null;
@@ -1858,7 +1874,12 @@ export async function fetchEntityWaivers(
     success: boolean;
     data: {
       waivers?: RawConnectedWaiver[];
-      summary?: { total?: number; completed?: number; pending?: number };
+      summary?: {
+        total?: number;
+        completed?: number;
+        pending?: number;
+        checked_in?: number;
+      };
     };
   }>(`/api/waivers/for?${params.toString()}`, { token, signal });
 
@@ -1866,6 +1887,13 @@ export async function fetchEntityWaivers(
     id: w.id,
     status: (w.status ?? "pending") as WaiverStatus,
     adultName: w.adult_name?.trim() || "Unnamed",
+    adultEmail: w.adult_email?.trim() || null,
+    adultPhone: w.adult_phone?.trim() || null,
+    displayName:
+      w.adult_name?.trim() ||
+      w.adult_email?.trim() ||
+      w.adult_phone?.trim() ||
+      "Awaiting signature",
     template: w.template?.trim() || null,
     selectedDate: w.selected_date ?? null,
     submittedAt: w.submitted_at ?? null,
@@ -1881,8 +1909,25 @@ export async function fetchEntityWaivers(
       total: s.total ?? waivers.length,
       completed: s.completed ?? 0,
       pending: s.pending ?? 0,
+      checkedIn: s.checked_in ?? waivers.filter((w) => w.checkedIn).length,
     },
   };
+}
+
+/**
+ * POST /api/waivers/check-in-all — check in every signed, not-yet-checked-in
+ * waiver connected to one entity (the web panel's "Check In All (n)").
+ */
+export async function checkInAllWaivers(
+  token: string,
+  type: WaiverEntityType,
+  id: number,
+): Promise<number> {
+  const res = await apiRequest<{ data?: { checked_in?: number } }>(
+    "/api/waivers/check-in-all",
+    { method: "POST", token, body: { type, id } },
+  );
+  return Number(res?.data?.checked_in ?? 0);
 }
 
 /* ------------------------------------------------------- Post-waiver ads -- */

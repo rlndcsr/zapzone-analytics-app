@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
+import { WaiverConnectionCard } from "../../components/ui/WaiverConnectionCard";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { OrderQRSheet } from "../../components/ui/OrderQRSheet";
 import { getToken } from "../../lib/session";
@@ -137,13 +137,16 @@ function LineCard({
   waivers,
   onCheckIn,
   onEdit,
+  onWaiversChanged,
 }: {
   line: TicketOrderLine;
   order: TicketOrderDetail;
   busy: number | "all" | null;
-  waivers: EntityWaivers | null;
+  /** `undefined` while loading; `null` when the fetch failed (shown as none, like the web). */
+  waivers: EntityWaivers | null | undefined;
   onCheckIn: () => void;
   onEdit: () => void;
+  onWaiversChanged: () => Promise<void>;
 }) {
   const time = fmtTime(line.scheduledTime);
   const unpaid = line.amountPaid < line.totalAmount;
@@ -152,8 +155,10 @@ function LineCard({
     busy !== null || order.status === "cancelled" || unpaid;
 
   return (
-    <View className="mb-3 rounded-2xl border border-gray-100 bg-gray-50 p-4 dark:border-neutral-800 dark:bg-neutral-800/40">
-      <View className="flex-row items-start gap-3">
+    <View className="mb-4 rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/40">
+      {/* One row, as on the web: what it is, then what it costs and where it
+          stands. */}
+      <View className="flex-row items-center gap-3">
         <View className="h-9 w-9 items-center justify-center rounded-lg bg-[#0644C7]/10">
           <Feather
             name={line.type === "event" ? "calendar" : "tag"}
@@ -163,7 +168,7 @@ function LineCard({
         </View>
         <View className="min-w-0 flex-1">
           <Text
-            className="text-sm font-semibold text-gray-900 dark:text-white"
+            className="text-sm font-medium text-gray-900 dark:text-white"
             numberOfLines={2}
           >
             {line.position}. {line.name}
@@ -174,12 +179,8 @@ function LineCard({
               : `${line.quantity} ${line.quantity === 1 ? "ticket" : "tickets"}`}
             {line.scheduledDate ? ` · ${line.scheduledDate}` : ""}
             {time ? ` at ${time}` : ""}
+            {line.referenceNumber ? ` · ${line.referenceNumber}` : ""}
           </Text>
-          {!!line.referenceNumber && (
-            <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-              {line.referenceNumber}
-            </Text>
-          )}
           {line.discountLabels.map((label, i) => (
             <Text
               key={i}
@@ -197,55 +198,49 @@ function LineCard({
             </Text>
           ))}
         </View>
-        <View className="items-end">
-          <Text className="text-sm font-bold text-gray-900 dark:text-white">
-            {money(line.totalAmount)}
-          </Text>
-          {unpaid && (
-            <Text className="text-[11px] text-yellow-700 dark:text-yellow-400">
-              {money(line.totalAmount - line.amountPaid)} due
+        <View className="flex-row items-center gap-2">
+          <View className="items-end">
+            <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+              {money(line.totalAmount)}
             </Text>
+            {unpaid && (
+              <Text className="text-[11px] text-yellow-700 dark:text-yellow-400">
+                {money(line.totalAmount - line.amountPaid)} due
+              </Text>
+            )}
+          </View>
+          {line.checkedInAt ? (
+            <View className="flex-row items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 dark:bg-green-900/40">
+              <Feather name="check-circle" size={12} color="#16A34A" />
+              <Text className="text-[11px] font-medium text-green-800 dark:text-green-300">
+                Checked In
+              </Text>
+            </View>
+          ) : (
+            <View className={`rounded-full px-2.5 py-1 ${status.wrap}`}>
+              <Text className={`text-[11px] font-medium ${status.text}`}>
+                {status.label}
+              </Text>
+            </View>
           )}
         </View>
       </View>
 
-      <View className="mt-3 flex-row items-center gap-2">
-        {line.checkedInAt ? (
-          <View className="flex-row items-center gap-1 rounded-full bg-green-100 px-3 py-1 dark:bg-green-900/40">
-            <Feather name="check-circle" size={12} color="#16A34A" />
-            <Text className="text-[11px] font-medium text-green-800 dark:text-green-300">
-              Checked In
-            </Text>
-          </View>
-        ) : (
-          <View className={`rounded-full px-3 py-1 ${status.wrap}`}>
-            <Text className={`text-[11px] font-medium ${status.text}`}>
-              {status.label}
-            </Text>
-          </View>
-        )}
-      </View>
-
-      <View className="mt-3 flex-row gap-2">
+      <View className="mt-3 flex-row flex-wrap items-center gap-3">
         {!line.checkedInAt && (
           <Pressable
             onPress={onCheckIn}
             disabled={checkInDisabled}
             accessibilityRole="button"
             accessibilityLabel={`Check in ${line.name}`}
-            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-[#0644C7] py-2.5 active:opacity-90 ${
+            className={`min-h-[34px] flex-row items-center justify-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-1.5 active:opacity-90 ${
               checkInDisabled ? "opacity-50" : ""
             }`}
           >
             {busy === line.id ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
-              <>
-                <Feather name="check-circle" size={14} color="#FFFFFF" />
-                <Text className="text-xs font-semibold text-white">
-                  Check In
-                </Text>
-              </>
+              <Text className="text-xs font-semibold text-white">Check In</Text>
             )}
           </Pressable>
         )}
@@ -253,14 +248,14 @@ function LineCard({
           onPress={onEdit}
           accessibilityRole="button"
           accessibilityLabel={`Edit schedule and notes for ${line.name}`}
-          className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white py-2.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900"
+          className="min-h-[34px] flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900"
         >
-          <Feather name="edit-2" size={14} color="#374151" />
+          <Feather name="edit-2" size={13} color="#374151" />
           <Text
-            className="text-xs font-semibold text-gray-700 dark:text-gray-200"
+            className="text-xs font-medium text-gray-700 dark:text-gray-200"
             numberOfLines={1}
           >
-            Edit Schedule
+            Edit Schedule & Notes
           </Text>
         </Pressable>
       </View>
@@ -274,12 +269,14 @@ function LineCard({
 
       {line.type === "attraction" && (
         <View className="mt-3">
-          <ConnectedWaiversPanel
-            sourceType="attraction_purchase"
-            sourceId={line.id}
-            entityLabel="ticket"
-            waivers={waivers}
-            loading={waivers === null}
+          <WaiverConnectionCard
+            type="attraction_purchase"
+            id={line.id}
+            waivers={waivers ?? null}
+            loading={waivers === undefined}
+            onChanged={onWaiversChanged}
+            compact
+            emptyMessage="Covered by this order's waiver — one signature per visit day (see the ticket holding it)."
           />
         </View>
       )}
@@ -467,6 +464,18 @@ export default function OrderDetailsScreen() {
       ],
     );
   }, [order, load]);
+
+  /** After a waiver check-in on one ticket, re-read only that ticket's waivers. */
+  const reloadLineWaivers = useCallback(async (lineId: number) => {
+    const token = getToken();
+    if (!token) return;
+    try {
+      const fresh = await fetchEntityWaivers(token, "attraction_purchase", lineId);
+      setWaivers((current) => ({ ...current, [lineId]: fresh }));
+    } catch {
+      // keep what is on screen; the check-in itself already succeeded
+    }
+  }, []);
 
   const openLineEdit = useCallback((line: TicketOrderLine) => {
     router.push({
@@ -731,9 +740,10 @@ export default function OrderDetailsScreen() {
                   line={line}
                   order={order}
                   busy={checkingIn}
-                  waivers={waivers[line.id] ?? null}
+                  waivers={waivers[line.id]}
                   onCheckIn={() => void checkIn([line.id])}
                   onEdit={() => openLineEdit(line)}
+                  onWaiversChanged={() => reloadLineWaivers(line.id)}
                 />
               ))
             )}

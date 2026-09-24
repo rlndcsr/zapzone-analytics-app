@@ -1368,6 +1368,16 @@ const EditBookingScreen = () => {
               />
             </View>
 
+            {/* Internal notes — under the customer, as on the web and every
+                other screen. The log prints its own heading and staff-only
+                line, so it takes no section header of its own. */}
+            <View className="mt-7 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-2xl p-3">
+              {/* A note saves as you write it, not with the booking — so it
+                  survives this screen being left without saving, and a save
+                  that fails never takes a note down with it. */}
+              <InternalNotesLog bookingId={bookingId} />
+            </View>
+
             {/* Booking Details: date */}
             <SectionHeader icon={CalendarIcon} title="Booking Details" />
             <FieldLabel>Date</FieldLabel>
@@ -1605,24 +1615,6 @@ const EditBookingScreen = () => {
               textAlignVertical="top"
               className={`${inputClass} min-h-[80px]`}
             />
-
-            {/* Internal Staff Notes */}
-            <View className="flex-row items-center gap-2 mt-7 mb-3">
-              <Text className="text-base font-bold text-gray-900 dark:text-white">
-                Internal Staff Notes
-              </Text>
-              <View className="px-2 py-0.5 rounded-full bg-amber-100">
-                <Text className="text-[10px] font-semibold text-amber-700">
-                  Staff Only
-                </Text>
-              </View>
-            </View>
-            <View className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-2xl p-3">
-              {/* A note saves as you write it, not with the booking — so it
-                  survives this screen being left without saving, and a save
-                  that fails never takes a note down with it. */}
-              <InternalNotesLog bookingId={bookingId} />
-            </View>
 
             {/* Email Notification */}
             <SectionHeader icon={Bell} title="Email Notification" />

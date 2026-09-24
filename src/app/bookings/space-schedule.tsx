@@ -716,32 +716,51 @@ const GridColumnBackground = ({
                 top: scale.at(start),
                 height: scale.spanHeight(start, end),
               }}
-              className="bg-red-50/90 dark:bg-red-950/50 border border-dashed border-red-200 dark:border-red-900/40 rounded items-center justify-center z-10"
+              className="bg-red-50/90 dark:bg-red-950/50 border border-dashed border-red-200 dark:border-red-900/40 rounded items-center justify-center z-10 overflow-hidden"
+              accessibilityLabel={`Closed ${minutesToLabel(start)} – ${minutesToLabel(end)}`}
             >
-              <Text className="text-[10px] font-medium text-red-500">
-                Closed
-              </Text>
+              {/* A short closure keeps its box; the word only goes in where
+                  it fits, so it never spills over the rows around it. */}
+              {scale.spanHeight(start, end) >= 12 && (
+                <Text className="text-[10px] font-medium text-red-500">
+                  Closed
+                </Text>
+              )}
             </View>
           );
         })}
-      {breaks.map((brk, i) => (
-        <View
-          key={`break-${i}`}
-          style={{
-            position: "absolute",
-            left: 2,
-            right: 2,
-            top: scale.at(brk.start),
-            height: scale.spanHeight(brk.start, brk.end),
-          }}
-          className="z-[4] bg-gray-300/70 dark:bg-neutral-700 border-2 border-dashed border-gray-400 dark:border-neutral-600 rounded items-center justify-center"
-        >
-          <Feather name="coffee" size={14} color="#4B5563" />
-          <Text className="text-[9px] font-semibold text-gray-700 dark:text-gray-300 mt-0.5">
-            Break
-          </Text>
-        </View>
-      ))}
+      {breaks.map((brk, i) => {
+        const breakHeight = scale.spanHeight(brk.start, brk.end);
+        return (
+          <View
+            key={`break-${i}`}
+            style={{
+              position: "absolute",
+              left: 2,
+              right: 2,
+              top: scale.at(brk.start),
+              height: breakHeight,
+            }}
+            className="z-[4] bg-gray-300/70 dark:bg-neutral-700 border-2 border-dashed border-gray-400 dark:border-neutral-600 rounded items-center justify-center overflow-hidden"
+            accessibilityLabel={`On break ${minutesToLabel(brk.start)} – ${minutesToLabel(brk.end)}`}
+          >
+            {/* A short break still fits inside its own box: icon and word
+                when both fit, the icon alone when only it does, else the
+                dashed box says it. Same thresholds as the web. */}
+            {breakHeight >= 34 && (
+              <>
+                <Feather name="coffee" size={14} color="#4B5563" />
+                <Text className="text-[9px] font-semibold text-gray-700 dark:text-gray-300 mt-0.5">
+                  Break
+                </Text>
+              </>
+            )}
+            {breakHeight >= 16 && breakHeight < 34 && (
+              <Feather name="coffee" size={14} color="#4B5563" />
+            )}
+          </View>
+        );
+      })}
       {column.virtual && (
         <View className="absolute inset-0 bg-amber-50/20 dark:bg-amber-900/5" />
       )}
