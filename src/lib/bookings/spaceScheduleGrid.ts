@@ -154,6 +154,8 @@ export type PositionedBooking = ArrangedBooking & { top: number; height: number 
 export const BLOCK_GAP = 2;
 /** The highlight border a block wears while clashing, running or awaiting check-in. */
 export const BLOCK_BORDER = 2;
+/** A turnaround strip at least this tall says when the space is free again. */
+export const TURNAROUND_LABEL_MIN_HEIGHT = 12;
 
 /** Lanes are worked out in minutes: a block's height depends on what it says, known only after the scale. */
 export function assignLanes<T extends ArrangedBooking>(items: T[]): T[] {

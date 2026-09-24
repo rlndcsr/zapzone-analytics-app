@@ -682,7 +682,7 @@ const CreatePackage = () => {
     attractionSel,
     "No attractions selected",
   );
-  const previewSpaces = namesOf(rooms, roomSel, "No rooms selected");
+  const previewSpaces = namesOf(rooms, roomSel, "No spaces selected");
   const previewAddOns = namesOf(addOns, addonOrder, "No add-ons selected");
 
   const handleSubmit = async () => {
@@ -1309,7 +1309,7 @@ const CreatePackage = () => {
                   <View className="flex-row gap-3">
                     <View className="flex-1">
                       <TextField
-                        label="Interval (min)"
+                        label="Start every (min)"
                         value={s.interval}
                         onChangeText={(t) =>
                           patchSchedule(s.key, { interval: t })
@@ -2006,7 +2006,7 @@ const CreatePackage = () => {
               </Text>
               {/* Always listed, even on a per-player package: the form hides
                   the Space picker there, but the preview still reports the
-                  state as "No rooms selected" rather than omitting the row. */}
+                  state as "No spaces selected" rather than omitting the row. */}
               <Text className="text-xs text-gray-600 dark:text-gray-300">
                 <Text className="font-bold text-gray-900 dark:text-white">
                   SPACE:{" "}

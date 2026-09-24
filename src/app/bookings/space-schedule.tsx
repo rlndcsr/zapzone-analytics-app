@@ -72,6 +72,7 @@ import {
   nowLineTop,
   placeOnScale,
   timeToMinutes,
+  TURNAROUND_LABEL_MIN_HEIGHT,
   UNCATEGORIZED_LABEL,
   ZOOM_LEVELS,
   type PositionedBooking,
@@ -355,7 +356,7 @@ const ColumnSection = ({
         <View className="flex-row items-center gap-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 px-2.5 py-1 rounded-full">
           <Feather name="alert-circle" size={12} color="#B45309" />
           <Text className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-            No room assigned
+            No space assigned
           </Text>
         </View>
       ) : (
@@ -904,7 +905,7 @@ const ScheduleGrid = ({
                 {column.virtual ? (
                   <View className="mt-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40">
                     <Text className="text-[9px] font-semibold text-amber-700 dark:text-amber-400">
-                      No room assigned
+                      No space assigned
                     </Text>
                   </View>
                 ) : (
@@ -1189,6 +1190,7 @@ const ScheduleGrid = ({
                         item.endMin + turnaround,
                       );
                       if (turnaround <= 0 || to <= item.endMin) return null;
+                      const stripHeight = scale.spanHeight(item.endMin, to);
                       return (
                         <View
                           key={`reset-${item.booking.id}`}
@@ -1198,10 +1200,20 @@ const ScheduleGrid = ({
                             left: 0,
                             right: 0,
                             top: scale.at(item.endMin),
-                            height: scale.spanHeight(item.endMin, to),
+                            height: stripHeight,
                           }}
-                          className="z-[3] border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
-                        />
+                          className="z-[3] items-center justify-center overflow-hidden border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
+                        >
+                          {/* a tablet never fires a tooltip, so the band has to say what it is */}
+                          {stripHeight >= TURNAROUND_LABEL_MIN_HEIGHT && (
+                            <Text
+                              className="px-1 text-[8px] font-medium text-amber-700 dark:text-amber-400"
+                              numberOfLines={1}
+                            >
+                              Free {minutesToLabel(to)}
+                            </Text>
+                          )}
+                        </View>
                       );
                     })}
                     {(positionedByColumn.get(column.key) ?? []).map((item) => (
@@ -3175,7 +3187,7 @@ const SpaceScheduleScreen = () => {
           <View className="flex-row items-center gap-2.5 mb-2">
             <View className="px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40">
               <Text className="text-[9px] font-semibold text-amber-700 dark:text-amber-400">
-                No room
+                No space
               </Text>
             </View>
             <Text className="text-sm text-gray-600 dark:text-gray-300">

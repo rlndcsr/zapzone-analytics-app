@@ -382,8 +382,8 @@ const SpaceCard = ({
             numberOfLines={1}
           >
             {space.bookingInterval > 0
-              ? `${space.bookingInterval} min between bookings`
-              : "back-to-back bookings"}
+              ? `${space.bookingInterval} min turnaround`
+              : "No turnaround"}
           </Text>
         )}
       </View>
@@ -714,8 +714,8 @@ const Space = () => {
     const minutes = Number.parseInt(agInterval.trim(), 10);
     if (!Number.isFinite(minutes) || minutes < 0) {
       Alert.alert(
-        "Invalid interval",
-        "Enter the minutes between bookings — 0 or more.",
+        "Invalid turnaround",
+        "Enter the turnaround in minutes — 0 or more.",
       );
       return;
     }
@@ -803,7 +803,7 @@ const Space = () => {
               className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] px-3 py-3 rounded-xl active:opacity-90"
             >
               <Feather name="plus" size={15} color="#FFFFFF" />
-              <Text className="text-xs font-semibold text-white">Create Room</Text>
+              <Text className="text-xs font-semibold text-white">Create Space</Text>
             </Pressable>
           </View>
 
@@ -1045,7 +1045,7 @@ const Space = () => {
 
           <View className="pt-3 border-t border-gray-100 dark:border-neutral-800 mb-3">
             <Text className="text-sm font-bold text-gray-900 dark:text-white mb-3">
-              Stagger Booking Settings
+              Turnaround &amp; area spacing
             </Text>
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
               Area Group
@@ -1058,11 +1058,12 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-3">
-              Rooms in the same group share stagger rules.
+              Spaces in the same area are checked together, using the largest
+              turnaround set on any of them.
             </Text>
 
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
-              Booking Interval (min)
+              Turnaround (min)
             </Text>
             <TextInput
               value={fInterval}
@@ -1073,9 +1074,11 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-              Minutes between bookings — the gap after one booking ends before
-              the next can start in this space. 0 is a real setting: the next
-              booking may start the moment the last one ends.
+              How long this space stays closed after a booking ends, before the
+              next one can start. It is never added to the length the customer
+              is shown — a 2 hour party is still advertised as 2 hours. 0 is a
+              real setting: the next booking may start the moment the last one
+              ends.
             </Text>
           </View>
 
@@ -1133,7 +1136,7 @@ const Space = () => {
                       active ? "text-white" : "text-gray-600 dark:text-gray-300"
                     }`}
                   >
-                    {mode === "single" ? "Single Room" : "Multiple Rooms"}
+                    {mode === "single" ? "Single Space" : "Multiple Spaces"}
                   </Text>
                 </Pressable>
               );
@@ -1326,7 +1329,7 @@ const Space = () => {
 
           <View className="pt-3 border-t border-gray-100 dark:border-neutral-800 mb-3">
             <Text className="text-sm font-bold text-gray-900 dark:text-white mb-3">
-              Stagger Booking Settings{createMode === "multiple" ? " (applies to all)" : ""}
+              Turnaround &amp; area spacing{createMode === "multiple" ? " (applies to all)" : ""}
             </Text>
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
               Area Group
@@ -1339,10 +1342,12 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-3">
-              Rooms in the same group share stagger rules.
+              {createMode === "multiple"
+                ? "Spaces in the same area are checked together, using the largest turnaround set on any of them."
+                : "Spaces in the same area are checked together."}
             </Text>
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
-              Booking Interval (min)
+              Turnaround (min)
             </Text>
             <TextInput
               value={cInterval}
@@ -1353,8 +1358,9 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-              Minutes between bookings — the gap after one booking ends before
-              the next can start. 0 means back-to-back.
+              {createMode === "multiple"
+                ? "How long each space stays closed after a booking ends. If these spaces share an area, it also means bookings across the area must start at least this far apart."
+                : "How long this space stays closed after a booking ends, before the next one can start. It is never added to the length the customer is shown — a 2 hour party is still advertised as 2 hours."}
             </Text>
           </View>
 
@@ -1379,8 +1385,8 @@ const Space = () => {
               ) : (
                 <Text className="text-sm font-semibold text-white">
                   {createMode === "multiple"
-                    ? `Create ${createCount} Room${createCount === 1 ? "" : "s"}`
-                    : "Create Room"}
+                    ? `Create ${createCount} Space${createCount === 1 ? "" : "s"}`
+                    : "Create Space"}
                 </Text>
               )}
             </Pressable>
@@ -1404,7 +1410,7 @@ const Space = () => {
       >
         <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
           <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Update the booking interval for all rooms in an area group.
+            Set one turnaround for every space in an area group.
           </Text>
 
           {areaGroups.size === 0 ? (
@@ -1470,7 +1476,7 @@ const Space = () => {
               )}
 
               <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
-                Booking Interval (minutes)
+                Turnaround for every space in this group (min)
               </Text>
               <TextInput
                 value={agInterval}
@@ -1481,8 +1487,11 @@ const Space = () => {
                 className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
               />
               <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-4">
-                Minutes between bookings for spaces in this group. 0 means the
-                next booking may start the moment the last one ends.
+                Written to every space in this area. It sets how long each space
+                stays closed after a booking, and how far apart bookings across
+                the area must start. Set to 0 to let two spaces in the area start
+                at the same time — two bookings in the SAME space can still never
+                overlap.
               </Text>
 
               <View className="flex-row gap-3">

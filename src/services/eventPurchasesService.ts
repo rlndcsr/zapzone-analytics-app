@@ -413,6 +413,8 @@ export type EventPurchaseDetail = {
    * "Event Features". Empty when the event defines none.
    */
   eventFeatures: string[];
+  /** The event's time slot length (`events.interval_minutes`), or null when absent. */
+  eventIntervalMinutes: number | null;
   addOns: EventPurchaseAddonLine[];
   appliedFees: EventAppliedFee[];
   appliedDiscounts: EventAppliedDiscount[];
@@ -436,7 +438,11 @@ type RawEventPurchaseDetail = RawEventPurchase & {
   special_requests?: string | null;
   location?: { name?: string | null } | null;
   /** `show()` loads the whole event, so its `features` array rides along. */
-  event?: { name?: string | null; features?: string[] | null } | null;
+  event?: {
+    name?: string | null;
+    features?: string[] | null;
+    interval_minutes?: number | string | null;
+  } | null;
   add_ons?: RawEventAddonLine[] | null;
   applied_fees?:
     { fee_name?: string | null; fee_amount?: number | string | null }[] | null;
@@ -479,6 +485,10 @@ function mapDetail(raw: RawEventPurchaseDetail): EventPurchaseDetail {
       .filter((f): f is string => typeof f === "string")
       .map((f) => f.trim())
       .filter(Boolean),
+    eventIntervalMinutes:
+      raw.event?.interval_minutes != null
+        ? Number(raw.event.interval_minutes)
+        : null,
     addOns: (raw.add_ons ?? []).map((a, i) => ({
       id: a.id ?? i,
       name: a.name?.trim() || "Add-on",

@@ -6,6 +6,7 @@ import {
   bookingDurationMinutes,
   buildCalendarEventDraft,
   EVENT_DURATION_MINUTES,
+  eventDurationMinutes,
 } from "./calendarEvent.ts";
 
 describe("buildCalendarEventDraft", () => {
@@ -167,8 +168,17 @@ describe("attractionDurationMinutes", () => {
   });
 });
 
-describe("EVENT_DURATION_MINUTES", () => {
-  it("is a fixed two hours, matching the absence of a duration field on events", () => {
+describe("eventDurationMinutes", () => {
+  it("ends the invite when the event's time slot ends", () => {
+    assert.equal(eventDurationMinutes(45), 45);
+    assert.equal(eventDurationMinutes(90), 90);
+  });
+
+  it("falls back to two hours only when the event names no slot length", () => {
     assert.equal(EVENT_DURATION_MINUTES, 120);
+    assert.equal(eventDurationMinutes(null), 120);
+    assert.equal(eventDurationMinutes(undefined), 120);
+    assert.equal(eventDurationMinutes(0), 120);
+    assert.equal(eventDurationMinutes(Number.NaN), 120);
   });
 });

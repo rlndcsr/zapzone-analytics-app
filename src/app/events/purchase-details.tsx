@@ -24,7 +24,7 @@ import { EventPurchaseQRSheet } from "../../components/ui/EventPurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
   buildCalendarEventDraft,
-  EVENT_DURATION_MINUTES,
+  eventDurationMinutes,
 } from "../../lib/calendarEvent";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
@@ -326,12 +326,12 @@ const EventPurchaseDetailsScreen = () => {
   const paidInFull = detail.amountPaid >= detail.totalAmount;
 
   // Null when the ticket has no valid purchase date/time — no midnight
-  // fallback. Events carry no duration field, so this is always two hours.
+  // fallback. The invite ends when the event's time slot does.
   const calendarDraft = buildCalendarEventDraft({
     title: `Zap Zone: ${detail.eventName}`,
     date: detail.purchaseDate,
     time: detail.purchaseTime,
-    durationMinutes: EVENT_DURATION_MINUTES,
+    durationMinutes: eventDurationMinutes(detail.eventIntervalMinutes),
     location: detail.locationName,
     description: `Event ticket${
       detail.referenceNumber ? ` — Ref: ${detail.referenceNumber}` : ""

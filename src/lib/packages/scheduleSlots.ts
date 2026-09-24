@@ -5,7 +5,7 @@
  * preview the same slots.
  *
  * The schedule's own interval decides the start times — full stop. A space's
- * booking interval is a separate thing: how long that space stays shut after a
+ * turnaround is a separate thing: how long that space stays shut after a
  * booking ends before it can be used again. It never drives or thins this grid.
  */
 
@@ -82,7 +82,7 @@ export function generateScheduleSlots({
   return slots;
 }
 
-/** A selected space's booking interval in minutes; 0/null means it sets none. */
+/** A selected space's turnaround in minutes (its `booking_interval`); 0/null means none. */
 export type SpaceInterval = number | null | undefined;
 
 const usableIntervals = (spaceIntervals: SpaceInterval[]): number[] =>
@@ -105,7 +105,9 @@ export function scheduleIntervalMessage({
   if (!interval || !durationMinutes) return null;
 
   const usable = usableIntervals(spaceIntervals);
-  const turnaround = usable.length > 0 ? Math.min(...usable) : null;
+  // quote the LARGEST: where spaces share an area the server enforces the biggest turnaround there
+  const longest = usable.length > 0 ? Math.max(...usable) : null;
+  const shortest = usable.length > 0 ? Math.min(...usable) : null;
 
   // Only a warning when no space is attached at all — a space's own interval
   // is what stops two bookings overlapping in it, not the schedule interval.
@@ -119,11 +121,17 @@ export function scheduleIntervalMessage({
   }
 
   const spaceNote =
-    turnaround === null
+    longest === null
       ? ""
-      : spaceIntervals.length > 1
-        ? ` Once a booking is taken, that space reopens ${turnaround} min after it ends, and spaces sharing an area group also hold that ${turnaround} min apart from each other.`
-        : ` Once a booking is taken, that space reopens ${turnaround} min after it ends.`;
+      : ` Once a booking is taken, that space stays closed for its turnaround${
+          longest === shortest
+            ? ` of ${longest} min`
+            : ` — up to ${longest} min across the spaces you picked`
+        } before it can take another.${
+          usable.length > 1
+            ? " Spaces sharing an area also hold their start times that far apart."
+            : ""
+        }`;
 
   return { text: `A start every ${interval} min.${spaceNote}`, overlapWarning: false };
 }

@@ -2505,8 +2505,8 @@ const CreateBookingScreen = () => {
                     ) : displayedSlots.length === 0 ? (
                       <View className="rounded-lg bg-gray-50 p-4 dark:bg-neutral-800/50">
                         <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
-                          No available time slots for the selected date. Space
-                          will be auto-assigned.
+                          No start times left on this date. Please try another
+                          day.
                         </Text>
                       </View>
                     ) : (
@@ -3077,7 +3077,7 @@ const CreateBookingScreen = () => {
                 />
                 <ReviewRow
                   label="Space:"
-                  value={slot?.roomName || "Auto-assigned"}
+                  value={slot?.roomName || "We’ll assign one for you"}
                 />
                 <ReviewRow
                   label="Duration:"

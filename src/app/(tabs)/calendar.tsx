@@ -41,6 +41,7 @@ import {
   columnKeyFor,
   columnsSpanVenues,
   timeToMinutes,
+  TURNAROUND_LABEL_MIN_HEIGHT,
   type ScheduleColumn,
 } from "../../lib/bookings/spaceScheduleGrid";
 import {
@@ -2462,7 +2463,7 @@ const Calendar = () => {
                                   <View className="flex-row items-center gap-1 mt-0.5">
                                     <AlertTriangle size={10} color="#F59E0B" />
                                     <Text className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                                      No room
+                                      No space
                                     </Text>
                                   </View>
                                 )}
@@ -2751,8 +2752,18 @@ const Calendar = () => {
                                           top,
                                           height: bottom - top,
                                         }}
-                                        className="border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
-                                      />
+                                        className="items-center justify-center overflow-hidden border-y border-amber-200 bg-amber-100/70 dark:border-amber-900/40 dark:bg-amber-900/20"
+                                      >
+                                        {/* a tablet never fires a tooltip, so the band has to say what it is */}
+                                        {bottom - top >= TURNAROUND_LABEL_MIN_HEIGHT && (
+                                          <Text
+                                            className="px-1 text-[8px] font-medium text-amber-700 dark:text-amber-400"
+                                            numberOfLines={1}
+                                          >
+                                            Free {slotLabel(placement.endMin + turnaround)}
+                                          </Text>
+                                        )}
+                                      </View>
                                     );
                                   },
                                 )}

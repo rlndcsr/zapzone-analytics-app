@@ -574,13 +574,17 @@ const CreateEventScreen = () => {
             <ErrorText error={errors.time} />
 
             <View className="mt-4">
-              <FieldLabel>Interval (minutes)</FieldLabel>
+              <FieldLabel>Time slot length (min)</FieldLabel>
               <SelectRow
                 icon="repeat"
                 value={`${intervalMinutes} minutes`}
-                placeholder="Select interval"
+                placeholder="Select time slot length"
                 onPress={openIntervalSheet}
               />
+              <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                Each session is this long, and the next one starts as soon as
+                it ends.
+              </Text>
             </View>
 
             {/* What leaving either time empty means for the customer site. */}
@@ -756,7 +760,7 @@ const CreateEventScreen = () => {
               value={locationName ?? "Not set"}
               muted={!locationName}
             />
-            <PreviewLine icon="repeat" label="Interval" value={`${intervalMinutes} min`} />
+            <PreviewLine icon="repeat" label="Time slot" value={`${intervalMinutes} min`} />
             {!!maxBookingsPerSlot && (
               <PreviewLine icon="users" label="Capacity" value={`${maxBookingsPerSlot} per slot`} />
             )}
@@ -878,7 +882,7 @@ const CreateEventScreen = () => {
       <BottomSheet
         visible={sheet?.kind === "interval"}
         onClose={() => setSheet(null)}
-        title="Interval (minutes)"
+        title="Time slot length (min)"
       >
         <ScrollView
           className="px-4 pb-6"

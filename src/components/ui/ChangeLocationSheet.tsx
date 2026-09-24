@@ -188,7 +188,7 @@ export function ChangeLocationSheet({
   const roomPlaceholder = loadingRooms
     ? "Loading rooms..."
     : locationId != null && rooms.length === 0
-      ? "No rooms at this location"
+      ? "No spaces at this location"
       : roomRequired
         ? "Select a room"
         : "Keep unassigned";

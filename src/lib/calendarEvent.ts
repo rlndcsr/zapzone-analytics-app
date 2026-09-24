@@ -108,3 +108,13 @@ export function attractionDurationMinutes(
 }
 
 export const EVENT_DURATION_MINUTES = 120;
+
+/** An event ticket runs one time slot, so the invite ends when the slot does. */
+export function eventDurationMinutes(
+  intervalMinutes: number | null | undefined,
+): number {
+  const minutes = Number(intervalMinutes);
+  return Number.isFinite(minutes) && minutes > 0
+    ? minutes
+    : EVENT_DURATION_MINUTES;
+}

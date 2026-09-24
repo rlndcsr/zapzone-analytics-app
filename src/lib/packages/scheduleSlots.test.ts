@@ -160,24 +160,32 @@ describe("describing the interval below the schedule field", () => {
     assert.equal(msg?.overlapWarning, false);
   });
 
-  it("explains a single space's reopen gap, distinct from the schedule cadence", () => {
+  it("explains a single space's turnaround, distinct from the schedule cadence", () => {
     const msg = scheduleIntervalMessage({ interval: 30, durationMinutes: 60, spaceIntervals: [45] });
     assert.equal(
       msg?.text,
-      "A start every 30 min. Once a booking is taken, that space reopens 45 min after it ends.",
+      "A start every 30 min. Once a booking is taken, that space stays closed for its turnaround of 45 min before it can take another.",
     );
   });
 
-  it("credits the shortest interval and mentions the group for several spaces", () => {
+  it("quotes the largest turnaround across several spaces — the one the server enforces", () => {
     const msg = scheduleIntervalMessage({ interval: 30, durationMinutes: 60, spaceIntervals: [45, 60] });
     assert.equal(
       msg?.text,
-      "A start every 30 min. Once a booking is taken, that space reopens 45 min after it ends, and spaces sharing an area group also hold that 45 min apart from each other.",
+      "A start every 30 min. Once a booking is taken, that space stays closed for its turnaround — up to 60 min across the spaces you picked before it can take another. Spaces sharing an area also hold their start times that far apart.",
     );
   });
 
-  it("ignores a space with no interval of its own when picking the reopen gap", () => {
+  it("names one figure when every picked space has the same turnaround", () => {
+    const msg = scheduleIntervalMessage({ interval: 30, durationMinutes: 60, spaceIntervals: [15, 15] });
+    assert.match(msg?.text ?? "", /turnaround of 15 min before it can take another\. Spaces sharing an area/);
+  });
+
+  it("ignores a space with no turnaround of its own", () => {
     const msg = scheduleIntervalMessage({ interval: 30, durationMinutes: 60, spaceIntervals: [0, 20] });
-    assert.match(msg?.text ?? "", /reopens 20 min/);
+    assert.equal(
+      msg?.text,
+      "A start every 30 min. Once a booking is taken, that space stays closed for its turnaround of 20 min before it can take another.",
+    );
   });
 });
