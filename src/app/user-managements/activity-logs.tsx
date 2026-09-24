@@ -133,6 +133,9 @@ function actionIcon(action: string): FeatherName {
   return "clock";
 }
 
+/** The backend's action name for a package time slot being given back. */
+const RELEASED_SLOT_ACTION = "Package Time Slot Deleted";
+
 /**
  * Compose the row's sentence the way the web's `formatActivityDescription`
  * does for a generic action: "<Action> <resourceType> \"<resourceName>\" #<id>",
@@ -196,6 +199,10 @@ function activityDescription(log: ActivityLogEntry): string {
     case "reported":
       description = `Generated report for ${resourceType} "${resourceName}" ${resourceId}`;
       break;
+    case RELEASED_SLOT_ACTION:
+      // these rows carry a booking and a customer: a HELD slot given back, not a schedule rule removed
+      description = "A booked time slot was released";
+      break;
     default:
       description =
         `${action.charAt(0).toUpperCase()}${action.slice(1)} ${resourceType} "${resourceName}" ${resourceId}`.trim();
@@ -212,9 +219,18 @@ function activityDescription(log: ActivityLogEntry): string {
     details.push(`Amount: $${parseFloat(String(get("amount"))).toFixed(2)}`);
   if (get("quantity")) details.push(`Qty: ${get("quantity")}`);
   if (get("status")) details.push(`Status: ${get("status")}`);
+  const slot = get("time_slot_details") as
+    | { start_time?: string; end_time?: string }
+    | undefined;
+  if (log.action === RELEASED_SLOT_ACTION && slot?.start_time && slot?.end_time)
+    details.push(`Time: ${slot.start_time} - ${slot.end_time}`);
 
   if (details.length > 0) description += ` • ${details.join(" • ")}`;
-  if (log.description && !description.includes(log.description))
+  if (
+    log.description &&
+    log.action !== RELEASED_SLOT_ACTION &&
+    !description.includes(log.description)
+  )
     description += ` • ${log.description}`;
 
   return description.trim();

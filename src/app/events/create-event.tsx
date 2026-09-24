@@ -607,7 +607,7 @@ const CreateEventScreen = () => {
               containerClassName="mb-4"
             />
             <InputField
-              label="Max Bookings per Slot"
+              label="Max groups per time slot"
               value={maxBookingsPerSlot}
               onChangeText={setMaxBookingsPerSlot}
               placeholder="Unlimited"
@@ -618,7 +618,7 @@ const CreateEventScreen = () => {
               Leave empty for unlimited capacity per slot.
             </Text>
             <InputField
-              label="Max Tickets per Slot"
+              label="Max people per time slot"
               value={maxTicketsPerSlot}
               onChangeText={setMaxTicketsPerSlot}
               placeholder="Unlimited"

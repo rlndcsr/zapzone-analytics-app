@@ -93,7 +93,7 @@ type Column = {
  * Columns mirror the web `/events` default-visible set, in order and label:
  * Event (name over location and date type) · Date · Time · Price · Status ·
  * Actions. The web's `defaultVisible: false` columns (Event #, Location,
- * Description, Date Type, Schedule, Time slot, Max Per Slot, Add-ons,
+ * Description, Date Type, Schedule, Time slot, Max groups, Add-ons,
  * Created, Updated) are omitted here too. Actions carries Delete only — the app
  * has no Edit Event screen for the web table's pencil to open.
  */

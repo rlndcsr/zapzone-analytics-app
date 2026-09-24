@@ -23,5 +23,6 @@ export function packagePriceForParticipants(input: PackagePriceInput): number {
 
 export function participantLabelFor(label?: string | null): string {
   const trimmed = (label || "").trim();
-  return trimmed === "" ? "player" : trimmed.toLowerCase();
+  // one fallback across the booking flow, where the venue has not named its guests
+  return trimmed === "" ? "participant" : trimmed.toLowerCase();
 }

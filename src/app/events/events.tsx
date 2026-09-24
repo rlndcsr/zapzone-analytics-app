@@ -150,10 +150,11 @@ const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
 
 const EventCard = ({ event }: { event: EventRow }) => {
   const timeRange = formatTimeRange(event.timeStart, event.timeEnd);
+  // a count of separate parties, not people — say so beside the people icon
   const capacityLabel =
     event.maxBookingsPerSlot == null
-      ? "Unlimited/slot"
-      : `${event.maxBookingsPerSlot}/slot`;
+      ? "Unlimited groups/slot"
+      : `${event.maxBookingsPerSlot} group${event.maxBookingsPerSlot === 1 ? "" : "s"}/slot`;
 
   return (
     <View

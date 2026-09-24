@@ -47,9 +47,9 @@ describe("the package line", () => {
     });
   });
 
-  it("falls back to 'player' when the package names no participant label", () => {
+  it("falls back to 'participant' when the package names no participant label", () => {
     const line = packageSummaryLine(perPerson({ participantLabel: "" }), 2);
-    assert.equal(line?.hint, "(2 × $25.00 per player)");
+    assert.equal(line?.hint, "(2 × $25.00 per participant)");
   });
 
   it("drops the hint for a flat package that has no real minimum", () => {

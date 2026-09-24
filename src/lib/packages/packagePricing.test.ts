@@ -100,10 +100,10 @@ describe("the participant label", () => {
     assert.equal(participantLabelFor("Guest"), "guest");
   });
 
-  it("falls back to 'player' when blank or unset", () => {
-    assert.equal(participantLabelFor(""), "player");
-    assert.equal(participantLabelFor("   "), "player");
-    assert.equal(participantLabelFor(null), "player");
-    assert.equal(participantLabelFor(undefined), "player");
+  it("falls back to 'participant' when blank or unset", () => {
+    assert.equal(participantLabelFor(""), "participant");
+    assert.equal(participantLabelFor("   "), "participant");
+    assert.equal(participantLabelFor(null), "participant");
+    assert.equal(participantLabelFor(undefined), "participant");
   });
 });

@@ -14,7 +14,7 @@ import {
  */
 export type SummaryLine = {
   label: string;
-  /** The small grey note after the label — "(4 × $25.00 per player)". */
+  /** The small grey note after the label — "(4 × $25.00 per participant)". */
   hint?: string | null;
   amount: number;
 };

@@ -141,7 +141,7 @@ const LINK_TEXT = "text-sm font-medium text-[#0644C7]";
  * what lets the Columns sheet offer 23 switches over 13 rendered columns. A
  * grouped column drops out entirely once all of its lines are switched off.
  *
- * Order matches the web header row: Conf # · Date/Time · Customer ·
+ * Order matches the web header row: ID · Confirmation # · Date/Time · Customer ·
  * Package/Room · [Location] · Duration · Guests · Status · Payment · Pay
  * Status · Paid · Total · Actions, with the default-hidden extras appended.
  */
@@ -155,7 +155,7 @@ function buildColumns(
   if (vis("id")) {
     columns.push({
       key: "id",
-      label: "Conf #",
+      label: "ID",
       width: 90,
       render: (b) => (
         <View className="flex-row">
@@ -170,7 +170,7 @@ function buildColumns(
   if (vis("reference")) {
     columns.push({
       key: "reference",
-      label: "Reference #",
+      label: "Confirmation #",
       width: 160,
       render: (b) => (
         <Text numberOfLines={1} className={CELL_TEXT}>
@@ -588,15 +588,16 @@ function buildColumns(
 }
 /**
  * Column grouping + default visibility for the "Toggle Columns" sheet, matching
- * the web's groups, order, and starting state: Reference #, Address, Guest of
+ * the web's groups, order, and starting state: ID, Address, Guest of
  * Honor, Notes, Special Requests, Created and Updated start hidden.
  */
 const COLUMN_META: Record<
   string,
   { group: string; lockVisible?: boolean; defaultHidden?: boolean }
 > = {
-  id: { group: "Identifiers" },
-  reference: { group: "Identifiers", defaultHidden: true },
+  // the internal row id is not something to read out to a guest; the reference number is theirs
+  id: { group: "Identifiers", defaultHidden: true },
+  reference: { group: "Identifiers" },
   date: { group: "Date & Time" },
   time: { group: "Date & Time" },
   duration: { group: "Date & Time" },
@@ -623,7 +624,8 @@ const COLUMN_META: Record<
 
 /** Web labels for the toggle list where they differ from the header label. */
 const TOGGLE_LABELS: Record<string, string> = {
-  id: "Confirmation #",
+  id: "ID",
+  reference: "Confirmation #",
   customerName: "Name",
   customerEmail: "Email",
   customerPhone: "Phone",
