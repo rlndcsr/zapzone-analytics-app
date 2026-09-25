@@ -15,13 +15,12 @@ import {
 } from "../../services/metricsService";
 import {
   computeAvgBooking,
-  countNewBookings,
   dashboardNeedsAvgBooking,
   dashboardNeedsBookings,
   getDashboardConfig,
-  getNewBookingsCutoff,
   withDerivedMetrics,
 } from "../dashboard/dashboardConfig";
+import { filterNewBookings } from "../dashboard/dashboardTimeframe";
 import { getCurrentUser, getToken } from "../session";
 
 type BookingsCache = {
@@ -167,8 +166,12 @@ export function useDashboardMetrics({
               user.location_id ?? undefined,
               force,
             );
-            const cutoff = getNewBookingsCutoff(timeframe, dateFrom);
-            derived.newBookings = countNewBookings(bookings, cutoff);
+            derived.newBookings = filterNewBookings(
+              bookings,
+              timeframe,
+              dateFrom,
+              dateTo,
+            ).length;
           } catch (bookingsErr) {
             console.warn("New bookings derivation failed:", bookingsErr);
           }

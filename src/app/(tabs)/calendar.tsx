@@ -80,6 +80,7 @@ import {
 } from "../../lib/bookings/bookingNotes";
 import {
   arrivalFlag,
+  BALANCE_CELL_COLORS,
   balanceSummary,
   cellExtras,
   compactTimeRange,
@@ -632,8 +633,16 @@ const DayBookingBlock = ({
   onPress: () => void;
 }) => {
   const booking = placement.item;
-  const tone = packageColor(booking.packageName);
-  const status = statusStyle(booking.status);
+  // Coloured by what is owed, not by package: green once paid, yellow while
+  // money is still due — the same verdict as the balance line inside it.
+  const balance = balanceSummary(
+    resolvePaymentState({
+      payment_status: booking.paymentStatus,
+      total_amount: booking.totalAmount,
+      amount_paid: booking.amountPaid,
+    }),
+  );
+  const tone = BALANCE_CELL_COLORS[balance.tone];
   const slots = placementMinutes(placement, { start: windowStart });
   const height = scale.spanHeight(slots.from, slots.to) - DAY_BLOCK_INSET;
   const doubleBooked = placement.conflicts.some((c) => c.overlapMinutes > 0);
@@ -656,7 +665,7 @@ const DayBookingBlock = ({
         left: `${(100 / placement.laneCount) * placement.lane}%`,
         width: `${100 / placement.laneCount}%`,
         backgroundColor: tone.bg,
-        borderLeftColor: doubleBooked ? "#f43f5e" : clashing ? "#fbbf24" : status.color,
+        borderLeftColor: doubleBooked ? "#f43f5e" : clashing ? "#fbbf24" : tone.bar,
       }}
       className={`rounded-md border-l-4 overflow-hidden active:opacity-80 ${
         doubleBooked ? "ring-2 ring-rose-500" : clashing ? "ring-2 ring-amber-400" : ""
@@ -675,13 +684,7 @@ const DayBookingBlock = ({
         name={booking.customerName}
         packageName={booking.packageName}
         headCount={headCount(booking.participants, capacity)}
-        balance={balanceSummary(
-          resolvePaymentState({
-            payment_status: booking.paymentStatus,
-            total_amount: booking.totalAmount,
-            amount_paid: booking.amountPaid,
-          }),
-        )}
+        balance={balance}
         arrival={arrivalFlag({
           status: booking.status,
           isToday,

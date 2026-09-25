@@ -71,6 +71,21 @@ export function balanceSummary(payment: PaymentStateView): {
   return { text: "Paid", tone: "paid" };
 }
 
+/**
+ * A day-grid block's colours, from the same tone as its balance line: green
+ * when nothing is owed, yellow while money is still due, grey once refunded or
+ * voided. `bar` is the thick left edge; `bg` fills the block; `text` is the
+ * small print on it.
+ */
+export const BALANCE_CELL_COLORS: Record<
+  BalanceTone,
+  { bg: string; bar: string; text: string }
+> = {
+  paid: { bg: "#DCFCE7", bar: "#22C55E", text: "#166534" }, // green-100 / 500 / 800
+  owed: { bg: "#FEF9C3", bar: "#EAB308", text: "#854D0E" }, // yellow-100 / 500 / 800
+  terminal: { bg: "#F3F4F6", bar: "#9CA3AF", text: "#374151" }, // gray-100 / 400 / 700
+};
+
 /** The party against the space's limit, when the space has one. */
 export function headCount(
   participants: number,

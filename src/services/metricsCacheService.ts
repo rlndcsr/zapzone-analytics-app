@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from "expo-file-system";
+import { venueTodayKey } from "../lib/dashboard/dashboardTimeframe";
 import type { DashboardData } from "./metricsService";
 
 // Port of the web admin's MetricsCacheService (zappoint
@@ -47,9 +48,11 @@ class MetricsCacheService {
     locationId,
     timeframe,
   }: CacheScope): string {
-    return `metrics_${dashboardType}_${userId}_${locationId || "all"}_${
-      timeframe || "last_30d"
-    }`;
+    const resolved = timeframe || "last_30d";
+    // "Today" is a different window after the venue's midnight, so yesterday's
+    // cached "today" must not answer for it (web parity: the same suffix).
+    const daySuffix = resolved === "today" ? `_${venueTodayKey()}` : "";
+    return `metrics_${dashboardType}_${userId}_${locationId || "all"}_${resolved}${daySuffix}`;
   }
 
   private isCacheValid(timestamp: number): boolean {

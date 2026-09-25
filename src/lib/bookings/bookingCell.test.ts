@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { resolvePaymentState } from "../payments/paymentState.ts";
 import {
   arrivalFlag,
+  BALANCE_CELL_COLORS,
   balanceSummary,
   BASE_CONTENT_HEIGHT,
   cellExtras,
@@ -44,6 +45,23 @@ describe("balanceSummary — what is still owed, never the total", () => {
 
   it("names a refund or a void rather than doing the arithmetic", () => {
     assert.deepEqual(balanceSummary(view(250, 250, "refunded")), { text: "Refunded", tone: "terminal" });
+  });
+});
+
+describe("BALANCE_CELL_COLORS — the block says what the balance line says", () => {
+  const toneOf = (total: number, paid: number, status: string) =>
+    balanceSummary(
+      resolvePaymentState({ total_amount: total, amount_paid: paid, payment_status: status }),
+    ).tone;
+
+  it("is green when paid and yellow while money is due", () => {
+    assert.equal(BALANCE_CELL_COLORS[toneOf(250, 250, "paid")].bar, "#22C55E");
+    assert.equal(BALANCE_CELL_COLORS[toneOf(250, 100, "partial")].bar, "#EAB308");
+    assert.equal(BALANCE_CELL_COLORS[toneOf(250, 0, "pending")].bar, "#EAB308");
+  });
+
+  it("is grey once refunded, even with amounts on it", () => {
+    assert.equal(BALANCE_CELL_COLORS[toneOf(250, 250, "refunded")].bar, "#9CA3AF");
   });
 });
 

@@ -524,7 +524,13 @@ export async function fetchDashboardBookings({
   locationId,
   signal,
 }: FetchParams): Promise<CalendarBooking[]> {
-  const params = new URLSearchParams({ per_page: "500" });
+  // Newest-created first: New Bookings is about when a booking was made, and
+  // the default order (booking_date) would hand back the furthest-future ones.
+  const params = new URLSearchParams({
+    per_page: "500",
+    sort_by: "created_at",
+    sort_order: "desc",
+  });
   if (locationId != null) params.append("location_id", String(locationId));
 
   const res = await apiRequest<BookingsListResponse>(

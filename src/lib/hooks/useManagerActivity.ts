@@ -9,7 +9,10 @@ import {
   type RecentPurchase,
   type TimeframeType,
 } from "../../services/metricsService";
-import { filterNewBookings, getNewBookingsCutoff } from "../dashboard/dashboardConfig";
+import {
+  filterNewBookings,
+  timeframeLabel as labelFor,
+} from "../dashboard/dashboardTimeframe";
 import { getCurrentUser, getToken } from "../session";
 
 // The web New Bookings table caps at 10 rows (`newBookings.slice(0, 10)`).
@@ -84,15 +87,14 @@ export function useManagerActivity({
         }),
       ]);
 
-      const cutoff = getNewBookingsCutoff(timeframe, dateFrom);
-      const filtered = filterNewBookings(bookings, cutoff);
+      const filtered = filterNewBookings(bookings, timeframe, dateFrom, dateTo);
 
       if (isCurrent()) {
         setNewBookings(filtered.slice(0, NEW_BOOKINGS_LIMIT));
         setNewBookingsCount(filtered.length);
         setRecentPurchases(metrics.recentPurchases ?? []);
         setRecentEventPurchases(metrics.recentEventPurchases ?? []);
-        setTimeframeLabel(metrics.timeframe?.description ?? "");
+        setTimeframeLabel(labelFor(timeframe));
         setError(null);
       }
     } catch (err) {

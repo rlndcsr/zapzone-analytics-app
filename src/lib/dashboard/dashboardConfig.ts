@@ -2,7 +2,6 @@ import type {
   BreakdownKey,
   DashboardData,
   DashboardTotals,
-  TimeframeType,
 } from "../../services/metricsService";
 
 // Role-based dashboard config: the web renders a component per role, mobile
@@ -439,63 +438,8 @@ export function dashboardNeedsAvgBooking(config: DashboardConfig): boolean {
   return config.cards.includes("avgBooking");
 }
 
-export function getNewBookingsCutoff(
-  timeframe: TimeframeType,
-  customDateFrom?: string,
-  now: Date = new Date(),
-): Date | null {
-  switch (timeframe) {
-    case "today": {
-      const d = new Date(now);
-      d.setHours(0, 0, 0, 0);
-      return d;
-    }
-    case "last_24h": {
-      const d = new Date(now);
-      d.setDate(now.getDate() - 1);
-      return d;
-    }
-    case "last_7d": {
-      const d = new Date(now);
-      d.setDate(now.getDate() - 7);
-      return d;
-    }
-    case "last_30d": {
-      const d = new Date(now);
-      d.setDate(now.getDate() - 30);
-      return d;
-    }
-    case "custom":
-      return customDateFrom ? new Date(customDateFrom) : null;
-    case "all_time":
-    default:
-      return null; // no cutoff — every booking counts as new
-  }
-}
-
-/**
- * Bookings created within the timeframe — the web's `newBookings` (no cutoff =
- * all-time; missing/invalid `createdAt` excluded). Generic to keep the row type.
- */
-export function filterNewBookings<T extends { createdAt: string | null }>(
-  bookings: T[],
-  cutoff: Date | null,
-): T[] {
-  if (!cutoff) return bookings;
-  return bookings.filter((b) => {
-    if (!b.createdAt) return false;
-    const created = new Date(b.createdAt);
-    return !Number.isNaN(created.getTime()) && created >= cutoff;
-  });
-}
-
-/** Count of new bookings — `filterNewBookings(...).length`. */
-export function countNewBookings(
-  bookings: { createdAt: string | null }[],
-  cutoff: Date | null,
-): number {
-  return filterNewBookings(bookings, cutoff).length;
-}
+// New Bookings (created within the timeframe, venue day, not cancelled) lives
+// in ./dashboardTimeframe — filterNewBookings.
 
 export function computeAvgBooking(metrics: DashboardTotals): number {
   const total = metrics.totalBookings ?? 0;

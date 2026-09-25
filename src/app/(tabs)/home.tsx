@@ -672,7 +672,9 @@ const Home = () => {
       ? `${formatShortDate(customStartDate)} – ${formatShortDate(customEndDate)}`
       : currentDateLabel;
 
-  const timeframeLabel = data?.timeframe?.description ?? currentDateLabel;
+  // The picker's own name for the window, as on the web — never the server's
+  // description, which could name a different window from the one chosen.
+  const timeframeLabel = currentDateLabel;
 
   const currentMetric: MetricCardDef | undefined = selectedMetric
     ? METRIC_CARDS[selectedMetric as keyof typeof METRIC_CARDS]
