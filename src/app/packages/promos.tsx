@@ -37,7 +37,7 @@ import {
   type PromoRow,
   type PromoUpdateInput,
 } from "../../services/promosService";
-import { firstFieldError } from "../../lib/api";
+import { ApiError, firstFieldError } from "../../lib/api";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
 import { getCurrentUser, getToken } from "../../lib/session";
 
@@ -309,6 +309,19 @@ function TypeToggle({
 const apiErrorMessage = (err: unknown, fallback: string): string =>
   firstFieldError(err) || (err instanceof Error && err.message) || fallback;
 
+/**
+ * A code refused as taken comes back with one that is free (the API's
+ * `suggested_code`), so the form can offer it instead of leaving staff to guess.
+ */
+const suggestedCodeFrom = (err: unknown): string | null => {
+  if (!(err instanceof ApiError)) return null;
+  const suggestion = (err.body as { suggested_code?: unknown } | null)
+    ?.suggested_code;
+  return typeof suggestion === "string" && suggestion.length > 0
+    ? suggestion
+    : null;
+};
+
 const Promos = () => {
   const router = useRouter();
   const { colorScheme } = useColorScheme();
@@ -438,6 +451,9 @@ const Promos = () => {
       setShowCreate(false);
       await refetch();
     } catch (err) {
+      // Fill in the free code the server offered, so the next tap works.
+      const suggestion = suggestedCodeFrom(err);
+      if (suggestion) setCCode(suggestion);
       Alert.alert(
         "Create failed",
         apiErrorMessage(err, "Could not create the promo code."),

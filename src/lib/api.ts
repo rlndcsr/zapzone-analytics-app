@@ -1,5 +1,6 @@
 // TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
 import { authDebug } from "./debug/authDebug";
+import { isReportingEndpoint, reportClientError } from "./errorReporting";
 import {
   resolveFirstMediaPath,
   resolveMediaPath,
@@ -228,14 +229,17 @@ export async function apiRequest<T>(
     }
     // Say WHICH failure happened — a slow server and a dead connection need
     // different fixes, so don't collapse them into one message.
-    throw new ApiError(
-      timedOut
-        ? `Request timed out after ${Math.round(timeoutMs / 1000)}s. Please try again.`
-        : "Network error. Please check your connection and try again.",
-      0,
-      undefined,
-      err,
-    );
+    const transportMessage = timedOut
+      ? `Request timed out after ${Math.round(timeoutMs / 1000)}s. Please try again.`
+      : "Network error. Please check your connection and try again.";
+    if (!isReportingEndpoint(path)) {
+      reportClientError({
+        kind: "api",
+        message: transportMessage,
+        action: `${method} ${path.split("?")[0]}`,
+      });
+    }
+    throw new ApiError(transportMessage, 0, undefined, err);
   } finally {
     clearTimeout(timeoutId);
     signal?.removeEventListener("abort", onCallerAbort);
@@ -252,6 +256,19 @@ export async function apiRequest<T>(
       status: response.status,
       authenticated: !!token,
     });
+    // Report the failure with the server's own request id, so the phone's
+    // account and the server's account of it line up. The reporter throttles.
+    if (!isReportingEndpoint(path)) {
+      reportClientError({
+        kind: "api",
+        status: response.status,
+        message:
+          (typeof data?.message === "string" && data.message) ||
+          `Request failed with status ${response.status}`,
+        action: `${method} ${path.split("?")[0]}`,
+        requestId: response.headers.get("x-request-id"),
+      });
+    }
     // 401 → tear down once (idempotent) and swallow silently, so parallel 401s
     // cause no banners and one logout. 403 (role denial) still surfaces below.
     if (response.status === 401 && !publicEndpoint) {

@@ -155,8 +155,11 @@ export async function fetchPromoList(
 ): Promise<PromoRow[]> {
   return fetchAllPages<PromoRow>(
     async (page) => {
+      // status=all: every status but deleted. With no status the API returns
+      // active codes only, so the Inactive filter could never show anything
+      // and a deactivated code blocking a new one stayed invisible.
       const res = await apiRequest<PromosResponse>(
-        `/api/promos?per_page=${PER_PAGE}&page=${page}`,
+        `/api/promos?status=all&per_page=${PER_PAGE}&page=${page}`,
         { token, signal },
       );
       return {

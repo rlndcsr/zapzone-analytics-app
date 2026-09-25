@@ -1,5 +1,5 @@
 import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
+import { Stack, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useColorScheme } from "nativewind";
@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { AppUpdateGate } from "../components/AppUpdateGate";
 import { AuthGuard } from "../components/AuthGuard";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { ChangeReasonHost } from "../components/ui/ChangeReasonHost";
 import {
   AUTH_SCREEN_OPTIONS,
@@ -21,6 +22,10 @@ import { restoreSavedAccounts } from "../lib/accounts/savedAccountsStore";
 // TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
 import { authDebug } from "../lib/debug/authDebug";
 import { restoreTimeframeSelection } from "../lib/dashboard/timeframeStore";
+import {
+  installGlobalErrorReporting,
+  setReportingPage,
+} from "../lib/errorReporting";
 import { applyMontserratDefault, montserratFonts } from "../lib/fonts";
 import { restoreActiveLocation } from "../lib/location/activeLocationStore";
 import { restoreSession } from "../lib/session";
@@ -30,6 +35,10 @@ import { validateStoredSession } from "../services/auth";
 SplashScreen.preventAutoHideAsync();
 
 applyMontserratDefault();
+
+// Uncaught errors and unhandled rejections reach the backend's log (see
+// lib/errorReporting.ts) — installed once, before anything can throw.
+installGlobalErrorReporting();
 
 export const unstable_settings = {
   initialRouteName: "splash",
@@ -42,6 +51,12 @@ export default function RootLayout() {
   authDebug("RootLayout render", { sessionRestored, fontsLoaded });
 
   const { colorScheme } = useColorScheme();
+
+  // A report names the screen it came from, like the web's location.pathname.
+  const pathname = usePathname();
+  useEffect(() => {
+    setReportingPage(pathname);
+  }, [pathname]);
 
   useEffect(() => {
     authDebug("RootLayout hydration START");
@@ -66,34 +81,38 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <StatusBar style="auto" />
-      <AuthGuard />
-      {/* Registers this device for push once an eligible staff account is live. */}
-      <PushDeviceRegistrar />
-      {/* Opens the destination behind a tapped push notification, once the
+      {/* A render error anywhere below lands here: reported, and the person
+          sees "This page stopped working" instead of a blank screen. */}
+      <ErrorBoundary>
+        <StatusBar style="auto" />
+        <AuthGuard />
+        {/* Registers this device for push once an eligible staff account is live. */}
+        <PushDeviceRegistrar />
+        {/* Opens the destination behind a tapped push notification, once the
           session is restored and the navigator has settled. */}
-      <PushNotificationRouter />
+        <PushNotificationRouter />
 
-      <Stack
-        screenOptions={stackScreenOptions(colorScheme)}
-        screenLayout={screenEnterLayout}
-      >
-        {/* The auth boundary cross-fades rather than sliding: these three are
+        <Stack
+          screenOptions={stackScreenOptions(colorScheme)}
+          screenLayout={screenEnterLayout}
+        >
+          {/* The auth boundary cross-fades rather than sliding: these three are
             router.replace() hand-offs between full-screen surfaces, not pushes. */}
-        <Stack.Screen name="splash" options={AUTH_SCREEN_OPTIONS} />
-        <Stack.Screen name="index" options={AUTH_SCREEN_OPTIONS} />
-        <Stack.Screen name="(tabs)" options={AUTH_SCREEN_OPTIONS} />
+          <Stack.Screen name="splash" options={AUTH_SCREEN_OPTIONS} />
+          <Stack.Screen name="index" options={AUTH_SCREEN_OPTIONS} />
+          <Stack.Screen name="(tabs)" options={AUTH_SCREEN_OPTIONS} />
 
-        <Stack.Screen
-          name="switch-account"
-          options={{ ...AUTH_SCREEN_OPTIONS, gestureEnabled: false }}
-        />
-      </Stack>
+          <Stack.Screen
+            name="switch-account"
+            options={{ ...AUTH_SCREEN_OPTIONS, gestureEnabled: false }}
+          />
+        </Stack>
 
-      <AppUpdateGate />
-      {/* Prompts for a reason whenever a booking mutation comes back 422
+        <AppUpdateGate />
+        {/* Prompts for a reason whenever a booking mutation comes back 422
           asking for one, then retries — see lib/changeReasonPrompt.ts. */}
-      <ChangeReasonHost />
+        <ChangeReasonHost />
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }
