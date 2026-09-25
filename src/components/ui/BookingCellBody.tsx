@@ -1,5 +1,5 @@
-import { AlertTriangle, MessageSquare, StickyNote } from "lucide-react-native";
-import { Text, View } from "react-native";
+import { AlertTriangle, Info, MessageSquare, StickyNote } from "lucide-react-native";
+import { Pressable, Text, View } from "react-native";
 
 import {
   BALANCE_TONE_CLASS,
@@ -32,6 +32,7 @@ export function BookingCellBody({
   extras,
   textColor,
   nameColor = textColor,
+  onInfo,
 }: {
   /** The block's height inside any border. */
   contentHeight: number;
@@ -47,6 +48,12 @@ export function BookingCellBody({
   extras: CellExtra[];
   textColor: string;
   nameColor?: string;
+  /**
+   * Shows an info icon at the end of the time line that opens the booking's
+   * summary — the touch stand-in for the web's hover card. It is its own
+   * press target, so it never opens the full booking the block itself opens.
+   */
+  onInfo?: () => void;
 }) {
   const small = { color: textColor, lineHeight: SMALL_LINE_HEIGHT };
 
@@ -111,6 +118,17 @@ export function BookingCellBody({
             <View className="rounded bg-blue-100 px-0.5 py-px">
               <MessageSquare size={8} color="#1d4ed8" strokeWidth={2.5} />
             </View>
+          )}
+          {!!onInfo && (
+            <Pressable
+              onPress={onInfo}
+              hitSlop={10}
+              className="active:opacity-60"
+              accessibilityRole="button"
+              accessibilityLabel={`Summary of ${name}'s booking`}
+            >
+              <Info size={12} color={textColor} strokeWidth={2.5} />
+            </Pressable>
           )}
         </View>
       </View>

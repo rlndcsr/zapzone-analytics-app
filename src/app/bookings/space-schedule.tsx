@@ -16,6 +16,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
+import {
+  BookingSummaryPopup,
+  type BookingSummary,
+} from "../../components/ui/BookingSummaryPopup";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { BookingCellBody } from "../../components/ui/BookingCellBody";
@@ -410,6 +414,7 @@ const GridBookingBlock = ({
   isToday,
   nowMinutes,
   onPress,
+  onInfo,
 }: {
   item: PositionedBooking;
   inProgress: boolean;
@@ -418,6 +423,8 @@ const GridBookingBlock = ({
   isToday: boolean;
   nowMinutes: number;
   onPress: () => void;
+  /** Opens the booking's summary (the web's hover card) without leaving the grid. */
+  onInfo: () => void;
 }) => {
   const b = item.booking;
   const pkg = packageColor(b.packageName);
@@ -505,6 +512,7 @@ const GridBookingBlock = ({
           referenceNumber: b.referenceNumber,
         })}
         textColor={pkg.text}
+        onInfo={onInfo}
       />
       {item.clipped && (
         <View className="absolute bottom-0 inset-x-0 border-b-2 border-dashed border-current opacity-60 items-center">
@@ -780,6 +788,7 @@ const ScheduleGrid = ({
   isVenueToday,
   nowMinutes,
   onBookingPress,
+  onBookingInfo,
   refreshControl,
   bottomInset,
   scrollRef,
@@ -811,6 +820,7 @@ const ScheduleGrid = ({
   isVenueToday: boolean;
   nowMinutes: number;
   onBookingPress: (id: number) => void;
+  onBookingInfo: (id: number) => void;
   refreshControl: React.ReactElement<
     React.ComponentProps<typeof RefreshControl>
   >;
@@ -1249,6 +1259,7 @@ const ScheduleGrid = ({
                         isToday={isVenueToday}
                         nowMinutes={nowMinutes}
                         onPress={() => onBookingPress(item.booking.id)}
+                        onInfo={() => onBookingInfo(item.booking.id)}
                       />
                     ))}
                   </View>
@@ -1684,6 +1695,51 @@ const SpaceScheduleScreen = () => {
     () => placeOnScale(arrangedByColumn, scale),
     [arrangedByColumn, scale],
   );
+
+  // The booking whose summary is open (its block's info icon), and what it says.
+  const [infoBookingId, setInfoBookingId] = useState<number | null>(null);
+  const infoSummary = useMemo<BookingSummary | null>(() => {
+    if (infoBookingId == null) return null;
+    for (const list of arrangedByColumn.values()) {
+      const found = list.find((item) => item.booking.id === infoBookingId);
+      if (!found) continue;
+      const b = found.booking;
+      const payment = resolvePaymentState({
+        payment_status: b.paymentStatus,
+        total_amount: b.totalAmount,
+        amount_paid: b.amountPaid,
+      });
+      return {
+        status: b.status,
+        reference: b.referenceNumber,
+        timeLabel: `${minutesToLabel(found.startMin)} – ${minutesToLabel(
+          found.startMin + b.durationMinutes,
+        )}`,
+        guestName: b.customerName,
+        packageName: b.packageName || "No package",
+        participants: Number(b.participants) || 0,
+        amount: Number(b.totalAmount) || 0,
+        paymentLabel: payment.label,
+        paymentClass: payment.pillClass,
+        overlap:
+          found.conflicts.length > 0
+            ? {
+                doubleBooked: found.conflicts.some((c) => c.overlapMinutes > 0),
+                label: describeClashes(
+                  found.conflicts.map((clash) => ({
+                    name: clash.booking.customerName,
+                    startLabel: minutesToLabel(timeToMinutes(clash.booking.time)),
+                    overlapMinutes: clash.overlapMinutes,
+                  })),
+                ),
+              }
+            : null,
+        guestNote: guestNoteOf(b),
+        staffNote: staffNoteOf(b),
+      };
+    }
+    return null;
+  }, [infoBookingId, arrangedByColumn]);
 
   // What the open booking runs into, read off the same conflicts the grid draws its ring from
   const selectedClash = useMemo(() => {
@@ -2970,6 +3026,7 @@ const SpaceScheduleScreen = () => {
               isVenueToday={isVenueToday}
               nowMinutes={nowMinutes}
               onBookingPress={setSelectedBookingId}
+              onBookingInfo={setInfoBookingId}
               refreshControl={refreshControl}
               bottomInset={insets.bottom + 24}
               scrollRef={scrollRef}
@@ -3241,6 +3298,17 @@ const SpaceScheduleScreen = () => {
           <View style={{ height: 8 }} />
         </View>
       </BottomSheet>
+
+      {/* A block's info icon: the web's hover card, then on to the full booking. */}
+      <BookingSummaryPopup
+        summary={infoSummary}
+        onClose={() => setInfoBookingId(null)}
+        onOpenDetails={() => {
+          const id = infoBookingId;
+          setInfoBookingId(null);
+          if (id != null) setSelectedBookingId(id);
+        }}
+      />
 
       {/* Booking detail (shared) */}
       <BookingDetailSheet
