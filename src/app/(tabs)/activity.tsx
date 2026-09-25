@@ -19,6 +19,7 @@ import {
   PurchaseRowsSkeleton,
 } from "../../components/ui/skeleton/ActivityScreenSkeleton";
 import { usePulse } from "../../components/ui/skeleton/SkeletonBlock";
+import { timeframeLabel as labelForTimeframe } from "../../lib/dashboard/dashboardTimeframe";
 import { useTimeframeSelection } from "../../lib/dashboard/timeframeStore";
 import { useManagerActivity } from "../../lib/hooks/useManagerActivity";
 import { useNotifications } from "../../lib/hooks/useNotifications";
@@ -412,7 +413,7 @@ const Activity = () => {
               <Section
                 icon="tag"
                 title="Recent Ticket Purchases"
-                empty="No ticket purchases found for this week"
+                empty={`No ticket purchases found for ${labelForTimeframe(timeframe).toLowerCase()}`}
                 isEmpty={recentPurchases.length === 0}
                 loading={loading}
                 pulse={pulse}

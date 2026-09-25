@@ -73,12 +73,14 @@ import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSke
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
   composeSubtitle,
+  metricUncounted,
   formatMetricValue,
   getCardSubtitleFn,
   getDashboardConfig,
   METRIC_CARDS,
   type MetricCardDef,
   resolveMetricValue,
+  UNCOUNTED_SUBTITLE,
 } from "../../lib/dashboard/dashboardConfig";
 import {
   METRIC_CARD_PADDING,
@@ -219,10 +221,13 @@ const MetricCard = ({
   layoutKey: number;
   index: number;
 }) => {
-  const raw = resolveMetricValue(data?.metrics, metric);
+  // The server could not count it: say so, rather than show a 0 that reads as none.
+  const uncounted = metricUncounted(data, metric);
+  const raw = uncounted ? null : resolveMetricValue(data?.metrics, metric);
   const value = raw != null ? formatMetricValue(raw, metric.format) : "—";
-  const subtitle =
-    raw != null
+  const subtitle = uncounted
+    ? UNCOUNTED_SUBTITLE
+    : raw != null
       ? composeSubtitle(
           subtitleFn ? subtitleFn(data!.metrics) : "",
           timeframeLabel,
@@ -679,13 +684,20 @@ const Home = () => {
   const currentMetric: MetricCardDef | undefined = selectedMetric
     ? METRIC_CARDS[selectedMetric as keyof typeof METRIC_CARDS]
     : undefined;
+  // An uncountable card has no split to show either.
+  const currentUncounted = currentMetric
+    ? metricUncounted(data, currentMetric)
+    : false;
   const currentBreakdown =
-    currentMetric?.breakdownKey && dashboardConfig.showBreakdowns
+    !currentUncounted &&
+    currentMetric?.breakdownKey &&
+    dashboardConfig.showBreakdowns
       ? (data?.breakdowns?.[currentMetric.breakdownKey] ?? [])
       : [];
   // Extra sections above the main breakdown; empty ones are dropped.
   const currentSecondaryBreakdowns = useMemo(() => {
     if (
+      currentUncounted ||
       !currentMetric?.secondaryBreakdowns ||
       !dashboardConfig.showBreakdowns
     ) {
@@ -697,7 +709,7 @@ const Home = () => {
         items: data?.breakdowns?.[section.key] ?? [],
       }))
       .filter((section) => section.items.length > 0);
-  }, [currentMetric, dashboardConfig.showBreakdowns, data]);
+  }, [currentMetric, currentUncounted, dashboardConfig.showBreakdowns, data]);
   const isBreakdownEmpty = currentBreakdown.length === 0;
   const currentTotal = currentMetric
     ? resolveMetricValue(data?.metrics, currentMetric)

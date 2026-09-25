@@ -385,6 +385,25 @@ export function getCardSubtitleFn(
  * Compose a card's sub-line "<metric part> • <timeframe>" (just the timeframe
  * when empty); `timeframe` is the backend label, like the web.
  */
+/** What an uncountable card says instead of a number (the web's wording). */
+export const UNCOUNTED_SUBTITLE = "Could not be counted — see the server log";
+
+/**
+ * True when the server says it could not count this card's figures — today
+ * only waivers (`metrics.waiverMetricsAvailable === false`, set when the waiver
+ * query throws). The card then shows "—" rather than a 0 nobody can tell apart
+ * from a real zero. A missing flag (older server, attendant endpoint) means
+ * counted, as on the web.
+ */
+export function metricUncounted(
+  data: DashboardData | null | undefined,
+  card: MetricCardDef,
+): boolean {
+  if (card.key !== "waivers") return false;
+  const metrics = data?.metrics as Record<string, unknown> | undefined;
+  return metrics?.waiverMetricsAvailable === false;
+}
+
 export function composeSubtitle(metricPart: string, timeframe: string): string {
   const part = metricPart.trim();
   return part ? `${part} • ${timeframe}` : timeframe;
