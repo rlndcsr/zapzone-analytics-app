@@ -37,6 +37,7 @@ import {
   type PromoRow,
   type PromoUpdateInput,
 } from "../../services/promosService";
+import { firstFieldError } from "../../lib/api";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
 import { getCurrentUser, getToken } from "../../lib/session";
 
@@ -300,6 +301,14 @@ function TypeToggle({
   );
 }
 
+/**
+ * The server's own reason — the first field error when it gave one (the code is
+ * taken, the dates are backwards, that location is not yours), else its
+ * message. Laravel's message alone reads "… (and 1 more error)".
+ */
+const apiErrorMessage = (err: unknown, fallback: string): string =>
+  firstFieldError(err) || (err instanceof Error && err.message) || fallback;
+
 const Promos = () => {
   const router = useRouter();
   const { colorScheme } = useColorScheme();
@@ -431,7 +440,7 @@ const Promos = () => {
     } catch (err) {
       Alert.alert(
         "Create failed",
-        err instanceof Error ? err.message : "Could not create the promo code.",
+        apiErrorMessage(err, "Could not create the promo code."),
       );
     } finally {
       setCreating(false);
@@ -490,19 +499,33 @@ const Promos = () => {
     }
     // Targeting always goes up (an empty list clears the restriction), while the
     // other fields are only sent when filled — the API validates `sometimes`.
+    // A total of 0 means "no limit", which the API spells null (it requires at
+    // least 1); a per-user limit is never sent below 1.
+    const totalLimit = Number(eLimit);
+    const perUserLimit = Number(ePerUser);
     const input: PromoUpdateInput = {
       type: eType,
       value: Number(eValue) || 0,
       status: eStatus,
       description: eDesc.trim() || null,
-      usage_limit_total: eLimit.trim() ? Number(eLimit) : null,
+      usage_limit_total:
+        eLimit.trim() && Number.isFinite(totalLimit) && totalLimit > 0
+          ? totalLimit
+          : null,
       location_ids: eTargeting.locationIds,
       package_ids: eTargeting.packageIds,
       attraction_ids: eTargeting.attractionIds,
       event_ids: eTargeting.eventIds,
       ...(start ? { start_date: start } : null),
       ...(end ? { end_date: end } : null),
-      ...(ePerUser.trim() ? { usage_limit_per_user: Number(ePerUser) } : null),
+      ...(ePerUser.trim()
+        ? {
+            usage_limit_per_user:
+              Number.isFinite(perUserLimit) && perUserLimit > 0
+                ? perUserLimit
+                : 1,
+          }
+        : null),
     };
     setSaving(true);
     try {
@@ -512,7 +535,7 @@ const Promos = () => {
     } catch (err) {
       Alert.alert(
         "Save failed",
-        err instanceof Error ? err.message : "Could not update the promo code.",
+        apiErrorMessage(err, "Could not update the promo code."),
       );
     } finally {
       setSaving(false);
@@ -534,7 +557,7 @@ const Promos = () => {
           } catch (err) {
             Alert.alert(
               "Delete failed",
-              err instanceof Error ? err.message : "Could not delete.",
+              apiErrorMessage(err, "Could not delete."),
             );
           }
         },
@@ -604,7 +627,7 @@ const Promos = () => {
     } catch (err) {
       Alert.alert(
         "Generation failed",
-        err instanceof Error ? err.message : "Could not generate the codes.",
+        apiErrorMessage(err, "Could not generate the codes."),
       );
     } finally {
       setGenerating(false);
@@ -1024,6 +1047,7 @@ const Promos = () => {
 
           <TargetingSelector
             label="Where this promo applies"
+            lockToOwnLocation
             value={cTargeting}
             onChange={setCTargeting}
             disabled={creating}
@@ -1142,6 +1166,7 @@ const Promos = () => {
 
           <TargetingSelector
             label="Where this promo applies"
+            lockToOwnLocation
             value={eTargeting}
             onChange={setETargeting}
             disabled={saving}

@@ -51,6 +51,9 @@ type Option = { id: number; name: string };
 
 type GroupKey = keyof TargetingValue;
 
+/** The roles the backend lets choose a promo's locations (PromoController::MULTI_LOCATION_ROLES). */
+const MULTI_LOCATION_ROLES = ["company_admin", "admin"];
+
 const plural = (count: number, noun: string) =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
 
@@ -220,16 +223,40 @@ export function TargetingSelector({
   value,
   onChange,
   disabled,
+  lockToOwnLocation = false,
 }: {
   label: string;
   value: TargetingValue;
   onChange: (value: TargetingValue) => void;
   disabled?: boolean;
+  /**
+   * Promo codes: anyone who is not a company admin can only make codes for
+   * their own location — the backend enforces it — so the form names that
+   * location instead of pretending to offer a choice, and pins the value to it.
+   * Gift cards leave this off: their API does not enforce the rule yet.
+   */
+  lockToOwnLocation?: boolean;
 }) {
   const activeLocation = useActiveLocation();
   const scopeLocationId =
     activeLocation.id === "all" ? undefined : activeLocation.id;
-  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+  const currentUser = getCurrentUser();
+  const isCompanyAdmin = currentUser?.role === "company_admin";
+  const lockedToOwn =
+    lockToOwnLocation &&
+    !MULTI_LOCATION_ROLES.includes(String(currentUser?.role));
+  const showLocationGroup = lockToOwnLocation ? !lockedToOwn : isCompanyAdmin;
+  const ownLocationId = currentUser?.location_id ?? null;
+  const ownLocationName = currentUser?.location?.name?.trim() || "Your location";
+
+  // Pin the value to the one location this code can work at, so the payload
+  // and the "Applies to" line say what the server will store.
+  useEffect(() => {
+    if (!lockedToOwn || ownLocationId == null) return;
+    const current = value.locationIds;
+    if (current.length === 1 && current[0] === ownLocationId) return;
+    onChange({ ...value, locationIds: [ownLocationId] });
+  }, [lockedToOwn, ownLocationId, value, onChange]);
 
   const [locations, setLocations] = useState<Option[]>([]);
   const [packages, setPackages] = useState<Option[]>([]);
@@ -256,7 +283,7 @@ export function TargetingSelector({
     }
     setLoading(true);
     Promise.all([
-      isCompanyAdmin ? fetchLocations(token).catch(() => []) : [],
+      showLocationGroup ? fetchLocations(token).catch(() => []) : [],
       fetchPackages(token, scopeLocationId).catch(() => []),
       fetchAttractions({
         token,
@@ -282,7 +309,7 @@ export function TargetingSelector({
     return () => {
       active = false;
     };
-  }, [isCompanyAdmin, scopeLocationId]);
+  }, [showLocationGroup, scopeLocationId]);
 
   const summary = useMemo(() => targetingSummary(value), [value]);
 
@@ -339,8 +366,25 @@ export function TargetingSelector({
         </Text>
       </View>
 
-      {isCompanyAdmin &&
+      {showLocationGroup &&
         group("locationIds", "map-pin", "Locations", "All locations", locations)}
+      {lockedToOwn && (
+        <View className="rounded-xl border border-gray-200 dark:border-neutral-700 p-3 mb-3">
+          <View className="flex-row items-center gap-2 mb-1">
+            <Feather name="map-pin" size={14} color="#6B7280" />
+            <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Locations
+            </Text>
+          </View>
+          <Text className="text-sm text-gray-700 dark:text-gray-200">
+            {ownLocationName}
+          </Text>
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            This code only works at your location. Ask a company admin for one
+            that covers more than one location.
+          </Text>
+        </View>
+      )}
       {group("packageIds", "package", "Packages", "All packages", packages)}
       {group(
         "attractionIds",
