@@ -732,14 +732,16 @@ export async function fetchEventPurchaseForEdit(
 export type UpdateEventOrderLineInput = {
   purchase_date: string;
   purchase_time: string;
-  notes?: string;
-  special_requests?: string;
+  /** Null clears it; the endpoint only applies its rules to keys that arrive. */
+  notes?: string | null;
+  special_requests?: string | null;
 };
 
 export type UpdateEventPurchaseInput = {
-  guest_name?: string;
-  guest_email?: string;
-  guest_phone?: string;
+  // nullable on this endpoint, unlike the attraction purchase's guest_name/email
+  guest_name?: string | null;
+  guest_email?: string | null;
+  guest_phone?: string | null;
   quantity: number;
   purchase_date: string;
   purchase_time: string;
@@ -751,8 +753,8 @@ export type UpdateEventPurchaseInput = {
   discount_amount: number;
   applied_fees: AppliedFee[] | null;
   applied_discounts: AppliedDiscount[] | null;
-  notes?: string;
-  special_requests?: string;
+  notes?: string | null;
+  special_requests?: string | null;
   /** Always sent; the endpoint `sync()`s the pivot from this list. */
   add_ons: EventPurchaseAddonInput[];
 };

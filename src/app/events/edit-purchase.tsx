@@ -677,13 +677,13 @@ const EditEventPurchaseScreen = () => {
       ? {
           purchase_date: purchaseDate,
           purchase_time: purchaseTime,
-          notes: notes || undefined,
-          special_requests: specialRequests || undefined,
+          notes: notes || null,
+          special_requests: specialRequests || null,
         }
       : {
-      guest_name: guestName || undefined,
-      guest_email: guestEmail || undefined,
-      guest_phone: guestPhone || undefined,
+      guest_name: guestName || null,
+      guest_email: guestEmail || null,
+      guest_phone: guestPhone || null,
       quantity,
       purchase_date: purchaseDate,
       purchase_time: purchaseTime,
@@ -695,8 +695,8 @@ const EditEventPurchaseScreen = () => {
       discount_amount: discountNum,
       applied_fees: fees.length > 0 ? fees : null,
       applied_discounts: discounts.length > 0 ? discounts : null,
-      notes: notes || undefined,
-      special_requests: specialRequests || undefined,
+      notes: notes || null,
+      special_requests: specialRequests || null,
       add_ons: addOns,
     };
 
