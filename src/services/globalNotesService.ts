@@ -72,9 +72,11 @@ export async function fetchGlobalNotes(
 }
 
 export type GlobalNoteInput = {
-  title?: string;
+  /** Null clears it; left out, the stored title stays. */
+  title?: string | null;
   content: string;
-  package_ids?: number[];
+  /** Null makes the note global; an empty list would match no package. */
+  package_ids?: number[] | null;
   is_active?: boolean;
   display_order?: number;
 };

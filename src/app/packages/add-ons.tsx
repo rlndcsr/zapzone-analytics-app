@@ -249,7 +249,8 @@ const AddOns = () => {
     setFName(addOn.name);
     setFPrice(String(addOn.price));
     setFMin(addOn.minQuantity != null ? String(addOn.minQuantity) : "1");
-    setFMax(addOn.maxQuantity != null ? String(addOn.maxQuantity) : "5");
+    // no maximum reopens as an empty box, or the next save would write 5 back
+    setFMax(addOn.maxQuantity != null ? String(addOn.maxQuantity) : "");
     setFDescription(addOn.description);
     setFForce(addOn.isForced);
     setFormTarget(addOn);
@@ -299,7 +300,8 @@ const AddOns = () => {
       name: fName.trim(),
       price: Number(fPrice) || 0,
       min_quantity: Number(fMin) || 0,
-      max_quantity: Number(fMax) || 0,
+      // blank is no maximum, sent as null — a 0 would fail the API's min:1 rule
+      max_quantity: maxQty,
       description: fDescription.trim() || null,
       is_force_add_on: fForce,
       location_id: fLocationId,

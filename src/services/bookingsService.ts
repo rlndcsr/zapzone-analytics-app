@@ -6,6 +6,7 @@ import {
 import { compareCheckInRows } from "../lib/checkin/checkInOrder";
 import { fetchAllPages } from "../lib/fetchAllPages";
 import { cardLabelFromPayments } from "../lib/payments/cardLabel";
+import { roomIsAvailable } from "../lib/rooms";
 import { normalizeCategory } from "../lib/venueCategories";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
@@ -1355,9 +1356,10 @@ export type SpaceRow = {
 export type RoomInput = {
   name: string;
   capacity: number | null;
-  is_active: boolean;
+  is_available: boolean;
   area_group: string | null;
-  booking_interval: number | null;
+  /** Left out on an edit to keep the stored turnaround. */
+  booking_interval?: number | null;
   location_id?: number | null;
   break_time: { days: string[]; start_time: string; end_time: string }[];
 };
@@ -1384,11 +1386,7 @@ function mapSpaceRow(r: RawRoom): SpaceRow {
     areaGroup,
     bookingInterval:
       r.booking_interval != null ? Number(r.booking_interval) : null,
-    isActive:
-      r.is_active === true ||
-      r.is_active === 1 ||
-      (r.status ? r.status.toLowerCase() === "active" : false) ||
-      (r.is_active == null && r.status == null),
+    isActive: roomIsAvailable(r),
     locationId:
       r.location_id != null
         ? Number(r.location_id)
@@ -1516,7 +1514,7 @@ export async function updateAreaGroupInterval(
     await updateRoom(token, room.id, {
       name: room.name,
       capacity: room.capacity,
-      is_active: room.isActive,
+      is_available: room.isActive,
       area_group: room.areaGroup,
       booking_interval: bookingInterval,
       location_id: room.locationId ?? undefined,

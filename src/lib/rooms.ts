@@ -16,3 +16,34 @@ export function sortRoomsNumerically<T extends { name: string }>(
     return a.name.localeCompare(b.name);
   });
 }
+
+/**
+ * An edited space's turnaround. An empty box says nothing about what it should be, so it
+ * leaves the stored value alone; anything else is saved as typed, 0 included.
+ */
+export function turnaroundUpdate(value: string): { booking_interval?: number } {
+  const trimmed = value.trim();
+  if (trimmed === "") return {};
+  const minutes = Number.parseInt(trimmed, 10);
+  return Number.isFinite(minutes) && minutes >= 0 ? { booking_interval: minutes } : {};
+}
+
+/** A cleared Area Group box ungroups the space, so it has to be sent as null, not dropped. */
+export function areaGroupValue(value: string): string | null {
+  return value.trim() || null;
+}
+
+/** Whether a space is bookable. `is_available` is the column; the others are older shapes. */
+export function roomIsAvailable(raw: {
+  is_available?: boolean | number | null;
+  is_active?: boolean | number | null;
+  status?: string | null;
+}): boolean {
+  if (raw.is_available != null) return raw.is_available === true || raw.is_available === 1;
+  return (
+    raw.is_active === true ||
+    raw.is_active === 1 ||
+    (raw.status ? raw.status.toLowerCase() === "active" : false) ||
+    (raw.is_active == null && raw.status == null)
+  );
+}

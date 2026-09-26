@@ -33,6 +33,7 @@ import {
   type LocationOption,
 } from "../../services/locationsService";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
+import { areaGroupValue, turnaroundUpdate } from "../../lib/rooms";
 import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
@@ -589,9 +590,10 @@ const Space = () => {
     const input: RoomInput = {
       name,
       capacity: fCapacity.trim() ? Number(fCapacity) : null,
-      is_active: fAvailable,
-      area_group: fAreaGroup.trim() || null,
-      booking_interval: readIntervalInput(fInterval),
+      is_available: fAvailable,
+      area_group: areaGroupValue(fAreaGroup),
+      // an empty box keeps the stored turnaround rather than writing 15 over it
+      ...turnaroundUpdate(fInterval),
       location_id: editTarget.locationId ?? undefined,
       break_time: breaksToPayload(fBreaks),
     };
@@ -622,7 +624,7 @@ const Space = () => {
     }
     const base: Omit<RoomInput, "name"> = {
       capacity: cCapacity.trim() ? Number(cCapacity) : null,
-      is_active: cAvailable,
+      is_available: cAvailable,
       area_group: cAreaGroup.trim() || null,
       booking_interval: readIntervalInput(cInterval),
       location_id: cLocationId,
@@ -1058,8 +1060,9 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-3">
-              Spaces in the same area are checked together, using the largest
-              turnaround set on any of them.
+              Spaces in the same area are checked together. Clear this box to
+              ungroup this space, so its times stop being staggered against the
+              others.
             </Text>
 
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">

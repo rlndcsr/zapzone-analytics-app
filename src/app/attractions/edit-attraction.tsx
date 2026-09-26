@@ -386,7 +386,8 @@ const EditAttractionScreen = () => {
       duration: Number.isNaN(durationNum) ? 0 : durationNum,
       duration_unit: durationUnit,
       availability: schedules,
-      image: images.length > 0 ? images : undefined,
+      // an empty list removes the last picture; leaving the key out would keep it
+      image: images,
       is_active: isActive,
       addon_ids: addonIds,
       add_ons_order: selectedAddOns,

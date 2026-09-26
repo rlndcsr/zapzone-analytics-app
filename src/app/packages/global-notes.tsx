@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { globalNotePayload } from "../../lib/packages/globalNotePayload";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createGlobalNote,
@@ -155,12 +156,7 @@ const GlobalNotesScreen = () => {
     }
     setSaving(true);
     try {
-      const payload = {
-        title: form.title.trim() || undefined,
-        content,
-        is_active: form.isActive,
-        package_ids: form.global ? [] : form.packageIds,
-      };
+      const payload = globalNotePayload(form);
       if (form.id != null) {
         await updateGlobalNote(token, form.id, payload);
       } else {

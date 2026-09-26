@@ -40,7 +40,8 @@ export type AddOnInput = {
   name: string;
   price: number;
   min_quantity: number;
-  max_quantity: number;
+  /** Null is no maximum. */
+  max_quantity: number | null;
   description: string | null;
   is_force_add_on: boolean;
   location_id: number;
