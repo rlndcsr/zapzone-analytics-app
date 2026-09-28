@@ -198,7 +198,7 @@ const DayBookingCard = ({
 );
 
 /** One attraction purchase — purple-tinted card, as on the web. */
-const AttractionPurchaseCard = ({
+export const AttractionPurchaseCard = ({
   purchase,
   onPress,
 }: {
@@ -264,7 +264,7 @@ const AttractionPurchaseCard = ({
 );
 
 /** One event registration — amber-tinted card, as on the web. */
-const EventPurchaseCard = ({
+export const EventPurchaseCard = ({
   purchase,
   onPress,
 }: {

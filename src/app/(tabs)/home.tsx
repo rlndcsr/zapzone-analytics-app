@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import {
   AlertTriangle,
   BarChart3,
@@ -39,6 +39,7 @@ import React, {
 } from "react";
 import {
   Animated,
+  AppState,
   Dimensions,
   Easing,
   Modal,
@@ -68,6 +69,7 @@ import {
   PillDivider,
   PillSegment,
 } from "../../components/ui/FilterPill";
+import { CategoryActivityPanel } from "../../components/ui/CategoryActivityPanel";
 import { LocationConcernsPanel } from "../../components/ui/LocationConcernsPanel";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
@@ -107,6 +109,9 @@ import type {
   DashboardData,
   RecentEventPurchase,
 } from "../../services/metricsService";
+
+/** How often Recent Purchases re-asks the backend while it is on screen. */
+const LIVE_REFRESH_MS = 30_000;
 
 type DateFilterType =
   "today" | "last_24h" | "last_7d" | "last_30d" | "all_time" | "custom";
@@ -628,7 +633,8 @@ const Home = () => {
   } = useTimeframeSelection();
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [showCustomRange, setShowCustomRange] = useState(false);
-  const { id: selectedLocation } = useActiveLocation();
+  const { id: selectedLocation, name: selectedLocationName } =
+    useActiveLocation();
 
   const slideAnim = useRef(
     new Animated.Value(Dimensions.get("window").height),
@@ -676,26 +682,87 @@ const Home = () => {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, loading, error, refetch } = useDashboardMetrics({
-    timeframe: dateFilter,
-    locationId: selectedLocation,
-    dateFrom: customStartDate,
-    dateTo: customEndDate,
-  });
+  const { data, loading, error, refetch, refreshSilently } =
+    useDashboardMetrics({
+      timeframe: dateFilter,
+      locationId: selectedLocation,
+      dateFrom: customStartDate,
+      dateTo: customEndDate,
+    });
   const {
     totalCount: unreadNotificationsCount,
     refresh: refreshNotifications,
   } = useNotifications("unread");
 
-  // Bumped on pull-to-refresh so the Customer Concerns panel reloads with the page.
-  const [concernsRefresh, setConcernsRefresh] = useState(0);
+  // Bumped on pull-to-refresh (and on coming back to the screen) so the panels
+  // that load on their own reload with the page.
+  const [panelsRefresh, setPanelsRefresh] = useState(0);
   const concernsLocationId = dashboardConfig.showConcerns
     ? (getCurrentUser()?.location_id ?? null)
     : null;
 
+  // Activity by Category: the picked location for a company admin (none = all
+  // of them), everyone else their own — the web's scope and wording, with
+  // "above" for the location picker the web keeps in its sidebar.
+  const isCompanyAdmin = dashboardConfig.role === "company_admin";
+  const activityLocationId = isCompanyAdmin
+    ? selectedLocation === "all"
+      ? null
+      : selectedLocation
+    : (getCurrentUser()?.location_id ?? null);
+  const activityScopeLabel = isCompanyAdmin
+    ? selectedLocation === "all"
+      ? "All locations combined — pick one above to see a single store"
+      : `${selectedLocationName || "Selected location"} only`
+    : dashboardConfig.role === "location_manager" && data?.locationDetails?.name
+      ? `${data.locationDetails.name} only`
+      : "Your location only";
+
+  // Live Recent Purchases: while this screen is on show and the app is in the
+  // foreground, re-ask the backend every LIVE_REFRESH_MS, and at once on coming
+  // back to the screen or the app. A purchase clears the backend's dashboard
+  // cache, so each ask returns the newest rows; an idle one is a cache hit.
+  const [screenFocused, setScreenFocused] = useState(false);
+  const [appActive, setAppActive] = useState(
+    AppState.currentState === "active",
+  );
+  const focusedOnceRef = useRef(false);
+  // Read through a ref so a new timeframe (a new refreshSilently) does not
+  // count as coming back to the screen.
+  const refreshSilentlyRef = useRef(refreshSilently);
+  refreshSilentlyRef.current = refreshSilently;
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      // The first focus is the mount, whose own load is already running.
+      if (focusedOnceRef.current) {
+        refreshSilentlyRef.current();
+        setPanelsRefresh((n) => n + 1);
+      }
+      focusedOnceRef.current = true;
+      return () => setScreenFocused(false);
+    }, []),
+  );
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      const active = state === "active";
+      setAppActive(active);
+      if (active && screenFocused) {
+        refreshSilently();
+        setPanelsRefresh((n) => n + 1);
+      }
+    });
+    return () => sub.remove();
+  }, [refreshSilently, screenFocused]);
+  useEffect(() => {
+    if (!screenFocused || !appActive) return;
+    const id = setInterval(refreshSilently, LIVE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [screenFocused, appActive, refreshSilently]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setConcernsRefresh((n) => n + 1);
+    setPanelsRefresh((n) => n + 1);
     try {
       await Promise.all([refetch(), refreshNotifications()]);
     } finally {
@@ -969,7 +1036,15 @@ const Home = () => {
             </Pressable>
           )}
 
-          {/* Recent Event Purchases */}
+          {/* Activity by Category — straight under the cards, as on every web
+              dashboard. Loads on its own, by the day the activity happens. */}
+          <CategoryActivityPanel
+            locationId={activityLocationId}
+            scopeLabel={activityScopeLabel}
+            refreshSignal={panelsRefresh}
+          />
+
+          {/* Recent Event Purchases — kept live by the refresh above. */}
           {!loading &&
             !error &&
             (data?.recentEventPurchases?.length ?? 0) > 0 && (
@@ -982,7 +1057,7 @@ const Home = () => {
             <LocationConcernsPanel
               locationId={concernsLocationId}
               locationName={data?.locationDetails?.name}
-              refreshSignal={concernsRefresh}
+              refreshSignal={panelsRefresh}
             />
           )}
         </View>

@@ -83,10 +83,29 @@ export function useDashboardMetrics({
     setData(next);
   }, []);
 
+  // Visible loads (first paint, timeframe change, pull-to-refresh) in flight —
+  // counted, since a superseded one can still be finishing.
+  // A silent refresh never starts over one: it would become the current request
+  // and the visible load would then never clear its own skeleton.
+  const visibleLoadsRef = useRef(0);
+  const silentLoadRef = useRef(false);
+
+  /**
+   * `force` skips the device cache (pull-to-refresh). `silent` is a background
+   * refresh for live data: straight to the network, no skeleton, and whatever
+   * is on screen stays if it fails.
+   */
   const loadMetrics = useCallback(
-    async (force = false) => {
+    async ({
+      force = false,
+      silent = false,
+    }: { force?: boolean; silent?: boolean } = {}) => {
+      if (silent && (visibleLoadsRef.current > 0 || silentLoadRef.current))
+        return;
       const requestId = ++requestIdRef.current;
       const isCurrent = () => requestId === requestIdRef.current;
+      if (silent) silentLoadRef.current = true;
+      else visibleLoadsRef.current += 1;
 
       try {
         const token = getToken();
@@ -108,7 +127,7 @@ export function useDashboardMetrics({
           return;
         }
 
-        setLoading(true);
+        if (!silent) setLoading(true);
 
         const config = getDashboardConfig(user.role);
 
@@ -122,7 +141,7 @@ export function useDashboardMetrics({
           locationId,
           timeframe,
         };
-        if (!force) {
+        if (!force && !silent) {
           const cached = await metricsCacheService.getCachedMetrics(cacheScope);
           if (cached && isCurrent()) {
             applyData(cached.data);
@@ -205,7 +224,9 @@ export function useDashboardMetrics({
           }
         }
       } finally {
-        if (isCurrent()) setLoading(false);
+        if (silent) silentLoadRef.current = false;
+        else visibleLoadsRef.current -= 1;
+        if (isCurrent() && !silent) setLoading(false);
       }
     },
     [timeframe, locationId, dateFrom, dateTo, applyData],
@@ -219,7 +240,19 @@ export function useDashboardMetrics({
   }, [loadMetrics]);
 
   // Pull-to-refresh forces a fresh bookings fetch alongside the metrics reload.
-  const refetch = useCallback(() => loadMetrics(true), [loadMetrics]);
+  const refetch = useCallback(
+    () => loadMetrics({ force: true }),
+    [loadMetrics],
+  );
 
-  return { data, loading, error, refetch };
+  // Live refresh: the backend drops its dashboard cache whenever a purchase or
+  // booking is written, so this returns the newest rows (Recent Purchases) and
+  // costs a cache hit when nothing changed. The bookings list keeps its own
+  // five-minute cache rather than being re-pulled on every tick.
+  const refreshSilently = useCallback(
+    () => loadMetrics({ silent: true }),
+    [loadMetrics],
+  );
+
+  return { data, loading, error, refetch, refreshSilently };
 }

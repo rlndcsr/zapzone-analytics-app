@@ -29,6 +29,11 @@ export type CalendarBooking = {
   amountPaid: number;
   packageName: string;
   packageCategory: string;
+  /**
+   * The package's own `category`, ignoring its display label — what the
+   * dashboard's Activity by Category buckets on, as the web does.
+   */
+  packageCategoryRaw?: string;
   customerName: string;
   customerEmail: string | null;
   customerPhone: string | null;
@@ -387,6 +392,7 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     packageName: raw.package?.name?.trim() || "Booking",
     packageCategory:
       raw.package?.display_label?.trim() || raw.package?.category?.trim() || "",
+    packageCategoryRaw: raw.package?.category?.trim() || "",
     customerName: customerName(raw.customer, raw.guest_name),
     customerEmail:
       raw.customer?.email?.trim() || raw.guest_email?.trim() || null,
@@ -483,6 +489,50 @@ export async function fetchBookingsInRange({
     },
     { maxPages: SYNC_MAX_PAGES },
   );
+}
+
+/** Most pages one day's bookings may span (100 a page), as on the web. */
+const DAY_MAX_PAGES = 20;
+
+/**
+ * Every booking scheduled for one day, earliest first and in any status —
+ * the web's `fetchDayBookings(dateKey, locationId, { allStatuses: true })`,
+ * which the dashboard's Activity by Category counts from (it needs completed
+ * bookings on past days, and reports cancelled ones rather than hiding them).
+ */
+export async function fetchDayBookings({
+  token,
+  date,
+  locationId,
+  signal,
+}: FetchParams & { date: string }): Promise<CalendarBooking[]> {
+  const rows = await fetchAllPages<CalendarBooking>(
+    async (page) => {
+      const params = new URLSearchParams({
+        booking_date: date,
+        per_page: String(PER_PAGE),
+        page: String(page),
+        sort_by: "booking_time",
+        sort_order: "asc",
+      });
+      if (locationId != null) params.append("location_id", String(locationId));
+      const res = await apiRequest<BookingsListResponse>(
+        `/api/bookings?${params.toString()}`,
+        { token, signal },
+      );
+      return {
+        items: (res?.data?.bookings ?? []).map((raw) =>
+          mapBooking(raw, toDateKey(raw.booking_date) ?? date),
+        ),
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: DAY_MAX_PAGES },
+  );
+
+  // Time is not unique, so offset paging can repeat a row across pages.
+  const seen = new Set<number>();
+  return rows.filter((b) => (seen.has(b.id) ? false : (seen.add(b.id), true)));
 }
 
 /** Every booking, paged newest-first. Callers filter by date and cache it. */
