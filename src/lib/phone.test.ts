@@ -31,9 +31,24 @@ describe("localPhoneDigits / isCompletePhone", () => {
   });
 
   it("refuses anything that is not ten local digits", () => {
-    for (const typed of ["", "586", "810-588-974", "28105889748", "810 588 97481", null, undefined]) {
+    for (const typed of ["", "555", "586", "810-588-974", "28105889748", "810 588 97481", null, undefined]) {
       assert.equal(isCompletePhone(typed), false, String(typed));
     }
+  });
+
+  it("accepts a dialable number written in international form", () => {
+    assert.equal(isCompletePhone("+41 78 700 9926"), true);
+    assert.equal(isCompletePhone("+44 20 7946 0958"), true);
+    // eight digits is the floor, seven is not enough
+    assert.equal(isCompletePhone("+354 1234 5"), true);
+    assert.equal(isCompletePhone("+354 1234"), false);
+    assert.equal(isCompletePhone(" +41 78 700 9926 "), true);
+  });
+
+  it("needs the + to take a number as international", () => {
+    // 11 digits that are neither 10 local nor a leading-1 US number
+    assert.equal(isCompletePhone("41 78 700 9926"), false);
+    assert.equal(isCompletePhone("+555"), false);
   });
 });
 
@@ -42,6 +57,11 @@ describe("formatPhoneForDisplay", () => {
     for (const typed of TYPED) {
       assert.equal(formatPhoneForDisplay(typed), "(810) 588-9748", typed);
     }
+  });
+
+  it("leaves an international number as typed, never as a US one", () => {
+    assert.equal(formatPhoneForDisplay("+41 78 700 9926"), "+41 78 700 9926");
+    assert.equal(formatPhoneForDisplay("+44 20 7946 0958"), "+44 20 7946 0958");
   });
 
   it("leaves anything incomplete exactly as typed", () => {

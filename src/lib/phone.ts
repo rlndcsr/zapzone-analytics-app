@@ -9,9 +9,12 @@ export function localPhoneDigits(value?: string | null): string {
   return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
 }
 
-/** Exactly ten local digits, whatever punctuation surrounds them. */
-export const isCompletePhone = (value?: string | null): boolean =>
-  localPhoneDigits(value).length === 10;
+/** Ten local digits, or a number written in international form (+…) with at least eight digits. */
+export function isCompletePhone(value?: string | null): boolean {
+  const raw = String(value ?? "").trim();
+  if (localPhoneDigits(raw).length === 10) return true;
+  return raw.startsWith("+") && raw.replace(/\D+/g, "").length >= 8;
+}
 
 /** "(810) 588-9748" for a complete number; anything else is returned exactly as given. */
 export function formatPhoneForDisplay(value?: string | null): string {
