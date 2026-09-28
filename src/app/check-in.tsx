@@ -330,6 +330,7 @@ export default function CheckInWaiversScreen() {
     deskLocationId == null
       ? "All Locations"
       : activeLocation.name || `Location #${deskLocationId}`;
+  const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [detailsOnly, setDetailsOnly] = useState(false);
@@ -478,8 +479,21 @@ export default function CheckInWaiversScreen() {
     booking.cancelReview();
   };
 
+  // Sequence-guarded and keyed to date + location (web parity: loadBookings),
+  // so a slow reply — the reload after a check-in has no abort signal — can
+  // neither overwrite a newer one nor leave another scope's rows on screen.
+  const dayRequestRef = useRef(0);
+  const dayScopeRef = useRef("");
   const loadDay = useCallback(
     async (signal?: AbortSignal) => {
+      const request = ++dayRequestRef.current;
+      const isCurrent = () =>
+        request === dayRequestRef.current && !signal?.aborted;
+      const scopeKey = `${selectedDate}|${deskLocationId ?? "all"}`;
+      if (dayScopeRef.current !== scopeKey) {
+        setDayBookings([]);
+        setDayBookingCount({ fetched: 0, total: 0 });
+      }
       const token = getToken();
       if (!token) return;
       setLoadingDay(true);
@@ -491,19 +505,17 @@ export default function CheckInWaiversScreen() {
           userId: getCurrentUser()?.id,
           signal,
         });
-        if (!signal?.aborted) {
+        if (isCurrent()) {
+          dayScopeRef.current = scopeKey;
           setDayBookings(day.rows);
           setDayBookingCount({ fetched: day.fetched, total: day.total });
         }
       } catch {
-        // Leave the last good list on screen; the empty state would read as
-        // "no bookings today", which a failed request does not prove.
-        if (!signal?.aborted) {
-          setDayBookings([]);
-          setDayBookingCount({ fetched: 0, total: 0 });
-        }
+        // Leave this day's last good list on screen; the empty state would
+        // read as "no bookings today", which a failed request does not prove.
+        // Another day's or location's rows were already cleared above.
       } finally {
-        if (!signal?.aborted) setLoadingDay(false);
+        if (isCurrent()) setLoadingDay(false);
       }
     },
     [selectedDate, deskLocationId],
@@ -761,6 +773,11 @@ export default function CheckInWaiversScreen() {
               <Text className="font-semibold text-gray-700 dark:text-gray-200">
                 {scopeLabel}
               </Text>
+              {/* The web points at its sidebar; here the workspace picker is
+                  on the dashboard. */}
+              {deskLocationId == null && isCompanyAdmin
+                ? " — pick a location on the dashboard to narrow this down"
+                : ""}
             </Text>
           </View>
         </View>

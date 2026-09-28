@@ -98,6 +98,8 @@ export type Waiver = {
   locationId: number | null;
   locationName: string | null;
   minorsCount: number;
+  /** "First Last" of each minor covered — the desk's filter box searches them. */
+  minorNames: string[];
   bookingId: number | null;
   bookingReference: string | null;
   eventId: number | null;
@@ -356,6 +358,9 @@ function mapWaiver(raw: RawWaiver): Waiver {
     locationId: raw.location?.id ?? null,
     locationName: raw.location?.name?.trim() || null,
     minorsCount: raw.minors?.length ?? 0,
+    minorNames: (raw.minors ?? [])
+      .map((m) => `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim())
+      .filter(Boolean),
     bookingId: raw.booking?.id ?? null,
     bookingReference: raw.booking?.reference_number ?? null,
     eventId: raw.event?.id ?? null,

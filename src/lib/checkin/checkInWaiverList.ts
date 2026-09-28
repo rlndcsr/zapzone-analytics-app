@@ -87,9 +87,9 @@ export const DESK_WAIVER_LABEL: Record<DeskWaiverState, string> = {
 
 /**
  * The filter box over the loaded waivers: every word must match the signer,
- * email, phone, reference, template, location or booking — and a word with
- * enough digits also matches the phone digit-for-digit, so 5864416556 finds
- * a number stored as 586-441-6556.
+ * email, phone, reference, template, location, booking or a minor covered —
+ * and a word with enough digits also matches the phone digit-for-digit, so
+ * 5864416556 finds a number stored as 586-441-6556.
  */
 export function filterDeskWaivers(waivers: Waiver[], search: string): Waiver[] {
   const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -104,6 +104,7 @@ export function filterDeskWaivers(waivers: Waiver[], search: string): Waiver[] {
       w.templateTitle,
       w.locationName,
       w.bookingReference,
+      ...w.minorNames,
     ]
       .filter(Boolean)
       .join(" ")

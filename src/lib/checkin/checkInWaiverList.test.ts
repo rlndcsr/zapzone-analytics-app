@@ -28,6 +28,7 @@ const waiver = (o: Partial<Waiver>): Waiver =>
     templateTitle: "General Activity Waiver & Release of Liability",
     locationName: "Farmington | Escape Room",
     minorsCount: 0,
+    minorNames: [],
     bookingId: 9,
     bookingReference: "BK20260925UIDQMZ",
     eventName: null,
@@ -152,6 +153,21 @@ describe("filterDeskWaivers", () => {
     assert.deepEqual(
       filterDeskWaivers(list, "57").map((w) => w.id),
       [],
+    );
+  });
+
+  it("finds a waiver by a minor it covers", () => {
+    const withMinors = [
+      ...list,
+      waiver({ id: 3, minorsCount: 2, minorNames: ["Ava Baria", "Leo Baria"] }),
+    ];
+    assert.deepEqual(
+      filterDeskWaivers(withMinors, "leo").map((w) => w.id),
+      [3],
+    );
+    assert.deepEqual(
+      filterDeskWaivers(withMinors, "ava baria").map((w) => w.id),
+      [3],
     );
   });
 });
