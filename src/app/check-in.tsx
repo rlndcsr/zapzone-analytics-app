@@ -45,6 +45,9 @@ import {
   waiverSignerName,
   waiverTruncationNote,
 } from "../lib/checkin/checkInWaiverList";
+import { deskDateLabel, deskTodayKey } from "../lib/checkin/deskDate";
+import { shiftDateKey } from "../lib/dashboard/activityCategories";
+import { formatShortDate } from "../lib/date/calendar";
 import { resolveScannedCode } from "../lib/checkin/resolveScannedCode";
 import { formatDateTimeET } from "../lib/date/venueTime";
 import { useDeskWaivers } from "../lib/hooks/useDeskWaivers";
@@ -105,14 +108,6 @@ function fmtTime(raw: string | null | undefined): string | null {
   const meridian = hour >= 12 ? "PM" : "AM";
   hour = hour % 12 || 12;
   return `${hour}:${m[2]} ${meridian}`;
-}
-
-const pad2 = (n: number) => String(n).padStart(2, "0");
-
-/** Local calendar day as YYYY-MM-DD — the venue day, not a UTC one. */
-function todayKey(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 /** The desk reconciles days that have already happened, so the past is valid. */
@@ -306,7 +301,7 @@ export default function CheckInWaiversScreen() {
   /** Re-entrancy latch — a camera can fire the same code many times a second. */
   const processingRef = useRef(false);
 
-  const [selectedDate, setSelectedDate] = useState(todayKey);
+  const [selectedDate, setSelectedDate] = useState(() => deskTodayKey());
   const [search, setSearch] = useState("");
   const [dayBookings, setDayBookings] = useState<CalendarBooking[]>([]);
   /** How much of the day the booking page covered (any status). */
@@ -1126,29 +1121,57 @@ export default function CheckInWaiversScreen() {
                     Date
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() => setDatePickerOpen(true)}
-                  className="flex-row items-center gap-2 rounded-lg border border-gray-200 px-3 py-2.5 active:opacity-70 dark:border-neutral-700"
-                  accessibilityRole="button"
-                  accessibilityLabel="Change date"
-                >
-                  <Feather name="calendar" size={16} color="#9CA3AF" />
-                  <Text className="flex-1 text-sm text-gray-900 dark:text-white">
-                    {fmtDate(selectedDate)}
-                  </Text>
-                  <Feather name="chevron-down" size={16} color="#9CA3AF" />
-                </Pressable>
-                {selectedDate !== todayKey() && (
+                {/* ‹ day · calendar · day ›, the weekday spelled out beneath (web parity). */}
+                <View className="flex-row items-center gap-2">
                   <Pressable
-                    onPress={() => setSelectedDate(todayKey())}
-                    className="mt-2 self-start active:opacity-70"
+                    onPress={() => setSelectedDate(shiftDateKey(selectedDate, -1))}
+                    className="h-10 w-10 items-center justify-center rounded-lg border border-gray-200 active:opacity-70 dark:border-neutral-700"
                     accessibilityRole="button"
+                    accessibilityLabel="Previous day"
                   >
-                    <Text className="text-xs font-semibold text-[#0644C7]">
-                      Back to today
-                    </Text>
+                    <Feather name="chevron-left" size={18} color="#4B5563" />
                   </Pressable>
-                )}
+                  <Pressable
+                    onPress={() => setDatePickerOpen(true)}
+                    className="h-10 flex-1 flex-row items-center gap-2 rounded-lg border border-gray-200 px-3 active:opacity-70 dark:border-neutral-700"
+                    accessibilityRole="button"
+                    accessibilityLabel="Change date"
+                  >
+                    <Feather name="calendar" size={16} color="#9CA3AF" />
+                    <Text className="flex-1 text-sm text-gray-900 dark:text-white">
+                      {formatShortDate(selectedDate)}
+                    </Text>
+                    <Feather name="chevron-down" size={16} color="#9CA3AF" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setSelectedDate(shiftDateKey(selectedDate, 1))}
+                    className="h-10 w-10 items-center justify-center rounded-lg border border-gray-200 active:opacity-70 dark:border-neutral-700"
+                    accessibilityRole="button"
+                    accessibilityLabel="Next day"
+                  >
+                    <Feather name="chevron-right" size={18} color="#4B5563" />
+                  </Pressable>
+                </View>
+                <View className="mt-2 flex-row items-center justify-between gap-2">
+                  <Text
+                    className="flex-1 text-xs text-gray-500 dark:text-gray-400"
+                    numberOfLines={1}
+                  >
+                    {deskDateLabel(selectedDate)}
+                  </Text>
+                  {selectedDate !== deskTodayKey() && (
+                    <Pressable
+                      onPress={() => setSelectedDate(deskTodayKey())}
+                      hitSlop={8}
+                      className="active:opacity-70"
+                      accessibilityRole="button"
+                    >
+                      <Text className="text-xs font-semibold text-[#0644C7]">
+                        Back to today
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
 
                 <View className="mb-2 mt-4 flex-row items-center gap-2">
                   <Feather name="search" size={14} color="#6B7280" />
