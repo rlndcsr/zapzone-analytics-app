@@ -62,6 +62,7 @@ import {
   packageSummaryLine,
   type SummaryLine,
 } from "../../lib/bookings/bookingSummaryLines";
+import { guestOfHonorPayload } from "../../lib/bookings/guestOfHonorPayload";
 import { toKey } from "../../lib/date/calendar";
 import { venueToday } from "../../lib/date/venueTime";
 import {
@@ -178,6 +179,8 @@ const STATUS_OPTIONS = [
   { label: "Cancelled", value: "cancelled" },
 ];
 const GENDER_OPTIONS = [
+  // the web's empty "Select" option: picking it clears the gender
+  { label: "None", value: "" },
   { label: "Male", value: "male" },
   { label: "Female", value: "female" },
   { label: "Other", value: "other" },
@@ -1061,9 +1064,11 @@ const EditBookingScreen = () => {
       time,
       participants: participantCount,
       status,
-      guestOfHonorName: gohName.trim() || null,
-      guestOfHonorAge: gohAge ? Number(gohAge) : null,
-      guestOfHonorGender: gohGender,
+      ...guestOfHonorPayload(!!packageDetail?.hasGuestOfHonor, {
+        name: gohName,
+        age: gohAge,
+        gender: gohGender,
+      }),
       customerNotes: customerNotes.trim() || null,
       // internalNotes is deliberately absent: notes are an append-only log, saved
       // as you write them through the log below, never as part of this save.
@@ -1570,39 +1575,44 @@ const EditBookingScreen = () => {
               </>
             )}
 
-            {/* Guest of Honor */}
-            <SectionHeader icon={User} title="Guest of Honor" />
-            <FieldLabel>Name</FieldLabel>
-            <TextInput
-              value={gohName}
-              onChangeText={setGohName}
-              placeholder="Guest of honor name"
-              placeholderTextColor="#9ca3af"
-              className={inputClass}
-            />
-            <View className="flex-row gap-3 mt-3">
-              <View className="flex-1">
-                <FieldLabel>Age</FieldLabel>
+            {/* Guest of Honor — only for a package that has one; the save leaves these
+                fields alone otherwise, so editing them here would do nothing */}
+            {packageDetail?.hasGuestOfHonor && (
+              <>
+                <SectionHeader icon={User} title="Guest of Honor" />
+                <FieldLabel>Name</FieldLabel>
                 <TextInput
-                  value={gohAge}
-                  onChangeText={setGohAge}
-                  placeholder="Age"
+                  value={gohName}
+                  onChangeText={setGohName}
+                  placeholder="Guest of honor name"
                   placeholderTextColor="#9ca3af"
-                  keyboardType="number-pad"
                   className={inputClass}
                 />
-              </View>
-              <View className="flex-1">
-                <SelectField
-                  label="Gender"
-                  value={gohGender}
-                  placeholder="Select"
-                  options={GENDER_OPTIONS}
-                  onSelect={(v) => setGohGender(String(v))}
-                  onOpen={setActiveSelect}
-                />
-              </View>
-            </View>
+                <View className="flex-row gap-3 mt-3">
+                  <View className="flex-1">
+                    <FieldLabel>Age</FieldLabel>
+                    <TextInput
+                      value={gohAge}
+                      onChangeText={setGohAge}
+                      placeholder="Age"
+                      placeholderTextColor="#9ca3af"
+                      keyboardType="number-pad"
+                      className={inputClass}
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <SelectField
+                      label="Gender"
+                      value={gohGender}
+                      placeholder="Select"
+                      options={GENDER_OPTIONS}
+                      onSelect={(v) => setGohGender(String(v) || null)}
+                      onOpen={setActiveSelect}
+                    />
+                  </View>
+                </View>
+              </>
+            )}
 
             {/* Customer Notes */}
             <SectionHeader icon={User} title="Customer Notes" />

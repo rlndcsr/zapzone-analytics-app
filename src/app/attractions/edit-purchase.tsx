@@ -31,6 +31,7 @@ import {
   fullDayOffDatesFor,
   generateTimeSlots,
 } from "../../lib/attractions/dayOffAvailability";
+import { purchaseTextFields } from "../../lib/attractions/purchaseEditPayload";
 import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
@@ -722,24 +723,25 @@ const EditPurchaseScreen = () => {
       special_pricing_id: d.special_pricing_id,
     }));
 
+    const text = purchaseTextFields({ guestName, guestEmail, guestPhone, notes });
     const body: UpdateAttractionPurchaseInput | UpdateOrderLineInput = isOrderLine
       ? {
           scheduled_date: scheduledDate,
           scheduled_time: scheduledTime,
-          notes: notes || undefined,
+          notes: text.notes,
         }
       : {
       attraction_id: attractionId ?? undefined,
-      guest_name: guestName || undefined,
-      guest_email: guestEmail || undefined,
-      guest_phone: guestPhone || undefined,
+      guest_name: text.guest_name,
+      guest_email: text.guest_email,
+      guest_phone: text.guest_phone,
       quantity,
       scheduled_date: scheduledDate,
       scheduled_time: scheduledTime,
       status,
       payment_method: paymentMethod,
       amount_paid: amountPaidNum,
-      notes: notes || undefined,
+      notes: text.notes,
       applied_fees: fees.length > 0 ? fees : null,
       applied_discounts: discounts.length > 0 ? discounts : null,
       discount_amount: discountNum,

@@ -624,16 +624,18 @@ export async function fetchAttractionPurchaseForEdit(
  */
 export type UpdateAttractionPurchaseInput = {
   attraction_id?: number;
+  // not nullable on this endpoint (a null is a 422), unlike guest_phone and notes
   guest_name?: string;
   guest_email?: string;
-  guest_phone?: string;
+  guest_phone?: string | null;
   quantity: number;
   scheduled_date: string;
   scheduled_time: string;
   status: EditablePurchaseStatus;
   payment_method: AttractionPaymentMethod;
   amount_paid: number;
-  notes?: string;
+  /** Null clears it; the endpoint only applies its rules to keys that arrive. */
+  notes?: string | null;
   applied_fees: PayloadAppliedFee[] | null;
   applied_discounts: PayloadAppliedDiscount[] | null;
   discount_amount: number;
@@ -649,7 +651,8 @@ export type UpdateAttractionPurchaseInput = {
 export type UpdateOrderLineInput = {
   scheduled_date: string;
   scheduled_time: string;
-  notes?: string;
+  /** Null clears it; the endpoint only applies its rules to keys that arrive. */
+  notes?: string | null;
 };
 
 /** PUT /api/attraction-purchases/{id} — save an edited purchase. */
