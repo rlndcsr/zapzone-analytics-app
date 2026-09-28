@@ -68,18 +68,25 @@ import {
   PillDivider,
   PillSegment,
 } from "../../components/ui/FilterPill";
+import { LocationConcernsPanel } from "../../components/ui/LocationConcernsPanel";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { MetricCardsSkeleton } from "../../components/ui/skeleton/MetricCardsSkeleton";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import {
-  composeSubtitle,
+  type BreakdownSectionDef,
+  cardSubtitle,
+  type DashboardConfig,
   metricUncounted,
   formatMetricValue,
+  getCardInfo,
+  getCardSections,
   getCardSubtitleFn,
   getDashboardConfig,
   METRIC_CARDS,
   type MetricCardDef,
   resolveMetricValue,
+  sectionShowsTotal,
+  sectionTotal,
   UNCOUNTED_SUBTITLE,
 } from "../../lib/dashboard/dashboardConfig";
 import {
@@ -203,6 +210,7 @@ const LayoutToggleIcon = ({ gridColumns }: { gridColumns: 1 | 2 }) => {
 const MetricCard = ({
   metric,
   data,
+  config,
   interactive,
   subtitleFn,
   timeframeLabel,
@@ -213,6 +221,7 @@ const MetricCard = ({
 }: {
   metric: MetricCardDef;
   data: DashboardData | null;
+  config: DashboardConfig;
   interactive: boolean;
   subtitleFn?: (metrics: DashboardData["metrics"]) => string;
   timeframeLabel: string;
@@ -228,7 +237,8 @@ const MetricCard = ({
   const subtitle = uncounted
     ? UNCOUNTED_SUBTITLE
     : raw != null
-      ? composeSubtitle(
+      ? cardSubtitle(
+          config,
           subtitleFn ? subtitleFn(data!.metrics) : "",
           timeframeLabel,
         )
@@ -282,9 +292,11 @@ const BreakdownSectionLabel = ({ label }: { label: string }) => (
 const BreakdownRow = ({
   item,
   nested = false,
+  formatValue = String,
 }: {
   item: BreakdownItem;
   nested?: boolean;
+  formatValue?: (value: number) => string;
 }) => (
   <View
     className={`flex-row items-center justify-between px-2 ${
@@ -308,7 +320,7 @@ const BreakdownRow = ({
           : "text-sm font-semibold text-gray-900 dark:text-white"
       }
     >
-      {item.count}{" "}
+      {formatValue(item.count)}{" "}
       <Text
         className={`font-normal text-gray-400 dark:text-gray-500 ${
           nested ? "text-xs" : "text-sm"
@@ -347,6 +359,64 @@ const BreakdownSection = ({
     ))}
   </View>
 );
+
+const formatSectionValue = (value: number, section: BreakdownSectionDef) =>
+  section.format === "currency"
+    ? formatMetricValue(value, "currency")
+    : value.toLocaleString("en-US");
+
+/**
+ * One block of a manager / attendant breakdown (web parity: a section of
+ * MetricCardGrid's popover) — its rows, and a total of those rows when they
+ * are a real partition of more than one.
+ */
+const RoleBreakdownSection = ({
+  section,
+  isLast,
+}: {
+  section: BreakdownSectionDef;
+  isLast: boolean;
+}) => {
+  const format = (value: number) => formatSectionValue(value, section);
+  return (
+    <View
+      className={
+        isLast
+          ? ""
+          : "pb-3 mb-3 border-b border-gray-100 dark:border-neutral-800"
+      }
+    >
+      <BreakdownSectionLabel label={section.title} />
+      {section.items.map((item, index) => (
+        <View key={`${item.label}-${index}`}>
+          <BreakdownRow item={item} formatValue={format} />
+          {!!item.items?.length && (
+            <View className="ml-4 pl-3 mb-1 border-l border-gray-100 dark:border-neutral-800">
+              {item.items.map((sub, subIndex) => (
+                <BreakdownRow
+                  key={`${sub.label}-${subIndex}`}
+                  item={sub}
+                  nested
+                  formatValue={format}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+      ))}
+      {sectionShowsTotal(section) && (
+        <View className="flex-row items-center justify-between px-2 pt-2.5 mt-1 border-t border-gray-100 dark:border-neutral-800">
+          <Text className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+            {section.totalLabel ?? "Total"}
+          </Text>
+          <Text className="text-sm font-bold text-gray-900 dark:text-white">
+            {format(sectionTotal(section))}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+};
 
 const formatMoney = (value: number | string | null | undefined) => {
   const n = Number(value ?? 0);
@@ -617,8 +687,15 @@ const Home = () => {
     refresh: refreshNotifications,
   } = useNotifications("unread");
 
+  // Bumped on pull-to-refresh so the Customer Concerns panel reloads with the page.
+  const [concernsRefresh, setConcernsRefresh] = useState(0);
+  const concernsLocationId = dashboardConfig.showConcerns
+    ? (getCurrentUser()?.location_id ?? null)
+    : null;
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setConcernsRefresh((n) => n + 1);
     try {
       await Promise.all([refetch(), refreshNotifications()]);
     } finally {
@@ -684,6 +761,27 @@ const Home = () => {
   const currentMetric: MetricCardDef | undefined = selectedMetric
     ? METRIC_CARDS[selectedMetric as keyof typeof METRIC_CARDS]
     : undefined;
+  // A card opens only when it has something to show: for a role with sections,
+  // at least one non-empty section (the web's `canExpand`).
+  const isCardInteractive = (metric: MetricCardDef): boolean => {
+    const sections = getCardSections(dashboardConfig, metric, data);
+    if (sections) return sections.length > 0;
+    return dashboardConfig.showBreakdowns && !!metric.breakdownKey;
+  };
+
+  // Manager / attendant: the card's own sections (null for the company sheet).
+  const currentSections = currentMetric
+    ? getCardSections(dashboardConfig, currentMetric, data)
+    : null;
+  // A breakdown whose sections all empty out (a refresh, a new timeframe) closes
+  // rather than lingering as a blank sheet.
+  const currentSectionsEmpty =
+    currentSections !== null && currentSections.length === 0;
+  useEffect(() => {
+    if (currentSectionsEmpty) closeModal();
+    // closeModal is recreated each render; the flag is the only trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSectionsEmpty]);
   // An uncountable card has no split to show either.
   const currentUncounted = currentMetric
     ? metricUncounted(data, currentMetric)
@@ -839,9 +937,8 @@ const Home = () => {
                   <MetricCard
                     metric={metric}
                     data={data}
-                    interactive={
-                      dashboardConfig.showBreakdowns && !!metric.breakdownKey
-                    }
+                    config={dashboardConfig}
+                    interactive={isCardInteractive(metric)}
                     subtitleFn={getCardSubtitleFn(dashboardConfig, metric)}
                     timeframeLabel={timeframeLabel}
                     onPress={openModal}
@@ -878,6 +975,16 @@ const Home = () => {
             (data?.recentEventPurchases?.length ?? 0) > 0 && (
               <RecentEventPurchases rows={data!.recentEventPurchases!} />
             )}
+
+          {/* Customer Concerns for the manager's own location, at the foot —
+              it loads on its own, so a slow metrics call never holds it up. */}
+          {concernsLocationId != null && (
+            <LocationConcernsPanel
+              locationId={concernsLocationId}
+              locationName={data?.locationDetails?.name}
+              refreshSignal={concernsRefresh}
+            />
+          )}
         </View>
       </ScrollView>
 
@@ -956,53 +1063,70 @@ const Home = () => {
                     the breakdown popover, above the rows. */}
                 <View className="pb-4 mb-3 border-b border-gray-100 dark:border-neutral-800">
                   <Text className="text-xs leading-5 text-gray-500 dark:text-gray-400 px-2">
-                    {currentMetric.info}
+                    {getCardInfo(dashboardConfig, currentMetric)}
                   </Text>
                 </View>
 
-                <ScrollView
-                  style={{ maxHeight: breakdownMaxHeight }}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {currentSecondaryBreakdowns.map((section) => (
-                    <View
-                      key={section.label}
-                      className="pb-3 mb-3 border-b border-gray-100 dark:border-neutral-800"
-                    >
-                      <BreakdownSection
-                        label={section.label}
-                        items={section.items}
+                {currentSections ? (
+                  <ScrollView
+                    style={{ maxHeight: breakdownMaxHeight }}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {currentSections.map((section, index) => (
+                      <RoleBreakdownSection
+                        key={section.title}
+                        section={section}
+                        isLast={index === currentSections.length - 1}
                       />
-                    </View>
-                  ))}
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <>
+                    <ScrollView
+                      style={{ maxHeight: breakdownMaxHeight }}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {currentSecondaryBreakdowns.map((section) => (
+                        <View
+                          key={section.label}
+                          className="pb-3 mb-3 border-b border-gray-100 dark:border-neutral-800"
+                        >
+                          <BreakdownSection
+                            label={section.label}
+                            items={section.items}
+                          />
+                        </View>
+                      ))}
 
-                  {isBreakdownEmpty ? (
-                    <View className="justify-center items-center py-12">
-                      <BarChart3 size={32} color="#9ca3af" />
-                      <Text className="text-gray-400 dark:text-gray-500 text-base font-medium mt-3">
-                        No breakdown available
-                      </Text>
-                    </View>
-                  ) : (
-                    <BreakdownSection
-                      label={currentMetric.breakdownSectionLabel}
-                      items={currentBreakdown}
-                    />
-                  )}
-                </ScrollView>
-
-                {!isBreakdownEmpty && (
-                  <View className="flex-row items-center justify-between mt-3 pt-4 border-t border-gray-100 dark:border-neutral-800">
-                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      Total
-                    </Text>
-                    <Text className="text-xl font-bold text-gray-900 dark:text-white">
-                      {formatMetricValue(
-                        currentTotal ?? 0,
-                        currentMetric.format,
+                      {isBreakdownEmpty ? (
+                        <View className="justify-center items-center py-12">
+                          <BarChart3 size={32} color="#9ca3af" />
+                          <Text className="text-gray-400 dark:text-gray-500 text-base font-medium mt-3">
+                            No breakdown available
+                          </Text>
+                        </View>
+                      ) : (
+                        <BreakdownSection
+                          label={currentMetric.breakdownSectionLabel}
+                          items={currentBreakdown}
+                        />
                       )}
-                    </Text>
-                  </View>
+                    </ScrollView>
+
+                    {!isBreakdownEmpty && (
+                      <View className="flex-row items-center justify-between mt-3 pt-4 border-t border-gray-100 dark:border-neutral-800">
+                        <Text className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                          Total
+                        </Text>
+                        <Text className="text-xl font-bold text-gray-900 dark:text-white">
+                          {formatMetricValue(
+                            currentTotal ?? 0,
+                            currentMetric.format,
+                          )}
+                        </Text>
+                      </View>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -1023,8 +1147,11 @@ const Home = () => {
       >
         <View className="px-5 pb-8">
           <Text className="text-sm leading-6 text-gray-600 dark:text-gray-300">
-            {infoMetric
-              ? METRIC_CARDS[infoMetric as keyof typeof METRIC_CARDS]?.info
+            {infoMetric && METRIC_CARDS[infoMetric as keyof typeof METRIC_CARDS]
+              ? getCardInfo(
+                  dashboardConfig,
+                  METRIC_CARDS[infoMetric as keyof typeof METRIC_CARDS],
+                )
               : ""}
           </Text>
         </View>

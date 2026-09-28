@@ -134,6 +134,16 @@ export type DashboardData = {
   recentPurchases?: RecentPurchase[];
   /** Recent event purchases (drives the manager Activity screen). */
   recentEventPurchases?: RecentEventPurchase[];
+  /** The scoped location (location_manager / attendant responses only). */
+  locationDetails?: { id: number; name: string | null } | null;
+  /**
+   * Built on the device from the bookings list, not returned by the endpoint —
+   * the split behind the client-derived New Bookings card.
+   */
+  derivedBreakdowns?: {
+    newBookingsByStatus: BreakdownItem[];
+    newBookingsByPackage: BreakdownItem[];
+  };
 };
 
 export type DashboardMetricsParams = {

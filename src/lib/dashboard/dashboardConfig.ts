@@ -1,8 +1,15 @@
 import type {
+  BreakdownItem,
   BreakdownKey,
   DashboardData,
   DashboardTotals,
 } from "../../services/metricsService";
+import {
+  bookingStatusLabel,
+  buildBreakdown,
+  countBreakdown,
+  rescaleBreakdown,
+} from "./breakdowns.ts";
 
 // Role-based dashboard config: the web renders a component per role, mobile
 // drives one screen from this so role logic (cards, endpoint, etc.) lives here.
@@ -59,21 +66,17 @@ const attractionOrdersPart: SubtitleFn = (m) => `${m.totalPurchases} orders`;
 // Waivers sub-line: "N signed · M pending" (web wording).
 const signedPendingPart: SubtitleFn = (m) =>
   `${m.completedWaivers ?? 0} signed · ${m.pendingWaivers ?? 0} pending`;
+// The manager dashboard's own separator for the same line.
+const managerSignedPendingPart: SubtitleFn = (m) =>
+  `${m.completedWaivers ?? 0} signed • ${m.pendingWaivers ?? 0} pending`;
 
-// Manager Total Revenue: "Bkgs: $X • Tix: $Y[ • Events: $Z]" (rounded).
-const managerRevenuePart: SubtitleFn = (m) => {
+// Total Revenue (manager and attendant): "Bkgs: $X • Tix: $Y[ • Events: $Z]" (rounded).
+const revenuePart: SubtitleFn = (m) => {
   const base = `Bkgs: $${Math.round(amount(m, "bookingRevenue"))} • Tix: $${Math.round(
     amount(m, "purchaseRevenue"),
   )}`;
   const events = amount(m, "eventPurchaseRevenue");
   return events > 0 ? `${base} • Events: $${Math.round(events)}` : base;
-};
-
-// Attendant Total Revenue: "Bookings: $X.XX[ • Events: $Z.ZZ]".
-const attendantRevenuePart: SubtitleFn = (m) => {
-  const base = `Bookings: $${amount(m, "bookingRevenue").toFixed(2)}`;
-  const events = amount(m, "eventPurchaseRevenue");
-  return events > 0 ? `${base} • Events: $${events.toFixed(2)}` : base;
 };
 
 // Manager Avg Booking: "N tickets sold[ • M event tickets]".
@@ -84,13 +87,10 @@ const avgBookingPart: SubtitleFn = (m) => {
     : base;
 };
 
-// Attendant Ticket Sales: "Revenue: $X.XX[ • M event tickets]".
-const ticketSalesPart: SubtitleFn = (m) => {
-  const base = `Revenue: $${amount(m, "purchaseRevenue").toFixed(2)}`;
-  return m.totalEventTickets > 0
-    ? `${base} • ${m.totalEventTickets} event tickets`
-    : base;
-};
+// Attendant Ticket Sales: "N tickets • $X.XX" — the card counts orders, the
+// sub-line the tickets inside them and what they took.
+const ticketSalesPart: SubtitleFn = (m) =>
+  `${m.totalAttractionTickets ?? 0} tickets • $${amount(m, "purchaseRevenue").toFixed(2)}`;
 
 /**
  * Catalog of every KPI card used by any role. Roles reference these by key, so
@@ -184,7 +184,7 @@ export const METRIC_CARDS = {
     icon: "checked.png",
     color: "#059669",
     gradient: ["#059669", "#34D399"],
-    info: "Package bookings marked \"confirmed\" in the selected period (includes those later checked in or completed). The breakdown compares confirmed packages with event and attraction purchases for the same period.",
+    info: "Package bookings that were confirmed, including those that have since checked in or completed. The subtitle shows how many of them are fully completed.",
   },
   // Company-admin variant of `confirmed`: counts ALL confirmed sales combined
   // (bookings + event tickets + attraction tickets), matching the web's
@@ -230,11 +230,11 @@ export const METRIC_CARDS = {
     title: "Total Revenue",
     valueField: "totalRevenue",
     format: "currency",
-    subtitle: managerRevenuePart,
+    subtitle: revenuePart,
     icon: "dollar-sign.png",
     color: "#16A34A",
     gradient: ["#16A34A", "#4ADE80"],
-    info: "Combined revenue for the selected period: package booking payments plus attraction and event ticket sales. Cancelled bookings and cancelled or refunded purchases are excluded.",
+    info: "Money actually collected (amount paid) on package bookings, attraction orders, and event orders placed in the period. Cancelled/refunded orders are excluded. Outstanding balances are not included.",
   },
 
   newBookings: {
@@ -242,11 +242,11 @@ export const METRIC_CARDS = {
     title: "New Bookings",
     valueField: "newBookings",
     format: "number",
-    subtitle: () => "Created",
+    subtitle: () => "Created in this period",
     icon: "sparkles.png",
     color: "#2563EB",
     gradient: ["#2563EB", "#60A5FA"],
-    info: "Package bookings created during the selected period, counted by the date the booking was made (not the party date).",
+    info: "Bookings created within the selected timeframe, based on the loaded booking list.",
   },
   pending: {
     key: "pending",
@@ -257,7 +257,7 @@ export const METRIC_CARDS = {
     icon: "alert-triangle.png",
     color: "#D97706",
     gradient: ["#D97706", "#FBBF24"],
-    info: "Package bookings awaiting confirmation (status \"pending\") in the selected period.",
+    info: "Bookings still sitting at pending for this location in the period. They are included in Total Bookings.",
   },
   avgBooking: {
     key: "avgBooking",
@@ -268,7 +268,7 @@ export const METRIC_CARDS = {
     icon: "trending-up.png",
     color: "#1E40AF",
     gradient: ["#1E40AF", "#3B82F6"],
-    info: "Average revenue per package booking in the selected period — total non-cancelled booking payments divided by the number of bookings.",
+    info: "Average collected per package booking: booking revenue divided by the number of non-cancelled bookings in the period.",
   },
   ticketSales: {
     key: "ticketSales",
@@ -279,11 +279,29 @@ export const METRIC_CARDS = {
     icon: "ticket.png",
     color: "#9333EA",
     gradient: ["#9333EA", "#C084FC"],
-    info: "Attraction ticket purchases in the selected period, counted by purchase date. Revenue shown is from completed attraction purchases.",
+    info: "Attraction orders placed in the period, counted by purchase date. Cancelled and refunded orders are excluded. The card counts orders; the breakdown counts the tickets inside them.",
   },
 } satisfies Record<string, MetricCardDef>;
 
 export type MetricCardKey = keyof typeof METRIC_CARDS;
+
+/**
+ * One titled block of a card's breakdown (web parity: MetricBreakdownSection in
+ * components/admin/dashboard/MetricCardGrid.tsx). Its total is the sum of its
+ * own rows, printed only when it has more than one row and `showTotal` is not
+ * false.
+ */
+export type BreakdownSectionDef = {
+  title: string;
+  items: BreakdownItem[];
+  /** Label of the total row; "Total" when omitted. */
+  totalLabel?: string;
+  format?: MetricFormat;
+  /** False where the rows overlap and a sum would mean nothing (waiver status). */
+  showTotal?: boolean;
+};
+
+export type SectionsFn = (data: DashboardData) => BreakdownSectionDef[];
 
 /** Everything the screen needs to know to render one role's dashboard. */
 export type DashboardConfig = {
@@ -293,10 +311,122 @@ export type DashboardConfig = {
   subtitle: string;
   cards: MetricCardKey[];
   showLocationSelector: boolean;
+  /** Company-admin breakdown sheet: `breakdownKey` + `secondaryBreakdowns`, with
+   *  the card's own value as the total. Roles with `cardSections` leave it off. */
   showBreakdowns: boolean;
+  /**
+   * Per-card breakdown sections (manager / attendant). A card with no section
+   * that has rows does not open. When set, it replaces `showBreakdowns`.
+   */
+  cardSections?: Partial<Record<MetricCardKey, SectionsFn>>;
+  /** Append the picked timeframe to every card's sub-line. Off where the
+   *  picker already names the period once (manager / attendant on the web). */
+  timeframeOnCards: boolean;
+  /** Customer Concerns panel for the user's own location, at the foot. */
+  showConcerns: boolean;
   metricsSource: MetricsSource;
   subtitleOverrides?: Partial<Record<MetricCardKey, SubtitleFn>>;
+  infoOverrides?: Partial<Record<MetricCardKey, string>>;
 };
+
+// Breakdown sections — the same blocks, titles and total labels as the web
+// manager / attendant dashboards.
+
+const packageSections: SectionsFn = (d) => [
+  { title: "By status", items: d.breakdowns?.packageStatusBreakdown ?? [] },
+  { title: "By package", items: d.breakdowns?.packageBreakdown ?? [] },
+];
+
+const newBookingSections: SectionsFn = (d) => [
+  {
+    title: "By status",
+    items: d.derivedBreakdowns?.newBookingsByStatus ?? [],
+  },
+  {
+    title: "By package",
+    items: d.derivedBreakdowns?.newBookingsByPackage ?? [],
+  },
+];
+
+// Keyed on the status slug, not the display label.
+const confirmedSections: SectionsFn = (d) => [
+  {
+    title: "How far along",
+    items: rescaleBreakdown(d.breakdowns?.packageStatusBreakdown, [
+      "confirmed",
+      "checked-in",
+      "completed",
+    ]),
+  },
+];
+
+const revenueSourceSection = (d: DashboardData): BreakdownSectionDef => ({
+  title: "Where it came from",
+  items: buildBreakdown([
+    { label: "Package bookings", count: amount(d.metrics, "bookingRevenue") },
+    { label: "Attraction tickets", count: amount(d.metrics, "purchaseRevenue") },
+    { label: "Event tickets", count: amount(d.metrics, "eventPurchaseRevenue") },
+  ]),
+  format: "currency",
+  totalLabel: "Collected",
+});
+
+const managerRevenueSections: SectionsFn = (d) => [
+  revenueSourceSection(d),
+  {
+    title: "Attraction tickets sold",
+    items: d.breakdowns?.attractionBreakdown ?? [],
+    totalLabel: "Tickets",
+  },
+  {
+    title: "Event tickets sold",
+    items: d.breakdowns?.eventBreakdown ?? [],
+    totalLabel: "Tickets",
+  },
+];
+
+const attendantRevenueSections: SectionsFn = (d) => [revenueSourceSection(d)];
+
+const ticketSalesSections: SectionsFn = (d) => [
+  {
+    title: "Attraction tickets by category",
+    items: d.breakdowns?.attractionBreakdown ?? [],
+    totalLabel: "Tickets",
+  },
+  {
+    title: "Event tickets",
+    items: d.breakdowns?.eventBreakdown ?? [],
+    totalLabel: "Tickets",
+  },
+];
+
+const customerSections: SectionsFn = (d) => [
+  { title: "New vs returning", items: d.breakdowns?.customerBreakdown ?? [] },
+];
+
+// Waiver statuses overlap — a checked-in waiver is also a completed one — so
+// that block alone prints no total. An uncounted card has nothing to open.
+const waiverSections: SectionsFn = (d) =>
+  metricUncounted(d, METRIC_CARDS.waivers)
+    ? []
+    : [
+        {
+          title: "By status",
+          items: d.breakdowns?.waiverStatusBreakdown ?? [],
+          showTotal: false,
+        },
+        { title: "By source", items: d.breakdowns?.waiverBreakdown ?? [] },
+        {
+          title: "Adult age brackets (signed)",
+          items: d.breakdowns?.waiverAgeBreakdown ?? [],
+          totalLabel: "Adults with a birthdate",
+        },
+        {
+          title: "Minor age brackets (at signing)",
+          items: d.breakdowns?.waiverMinorAgeBreakdown ?? [],
+          totalLabel: "Minors with a birthdate",
+        },
+      ];
 
 /**
  * Role → dashboard mapping. Mirrors the three web dashboard components. To add
@@ -318,6 +448,8 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
     ],
     showLocationSelector: true,
     showBreakdowns: true,
+    timeframeOnCards: true,
+    showConcerns: false,
     metricsSource: "dashboard",
     subtitleOverrides: {
       packages: confirmedPendingPart,
@@ -333,12 +465,27 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
       "customers",
       "confirmed",
       "avgBooking",
+      "waivers",
     ],
     showLocationSelector: false,
     showBreakdowns: false,
+    cardSections: {
+      packages: packageSections,
+      newBookings: newBookingSections,
+      revenue: managerRevenueSections,
+      customers: customerSections,
+      confirmed: confirmedSections,
+      waivers: waiverSections,
+    },
+    timeframeOnCards: false,
+    showConcerns: true,
     metricsSource: "dashboard",
     subtitleOverrides: {
-      customers: () => "",
+      waivers: managerSignedPendingPart,
+    },
+    infoOverrides: {
+      waivers:
+        "Waivers covering visit days in this period, counted on the day they cover — the same rule the Waiver Records page uses, so the numbers agree. Open the card for the split by status, by source, the adult age brackets, and the minors’ ages as of the waiver date.",
     },
   },
   attendant: {
@@ -354,10 +501,16 @@ export const ROLE_DASHBOARDS: Record<string, DashboardConfig> = {
     ],
     showLocationSelector: false,
     showBreakdowns: false,
-    metricsSource: "attendant",
-    subtitleOverrides: {
-      revenue: attendantRevenuePart,
+    cardSections: {
+      packages: packageSections,
+      newBookings: newBookingSections,
+      confirmed: confirmedSections,
+      revenue: attendantRevenueSections,
+      ticketSales: ticketSalesSections,
     },
+    timeframeOnCards: false,
+    showConcerns: false,
+    metricsSource: "attendant",
   },
 };
 
@@ -380,6 +533,35 @@ export function getCardSubtitleFn(
 ): SubtitleFn | undefined {
   return config.subtitleOverrides?.[card.key as MetricCardKey] ?? card.subtitle;
 }
+
+/** What a card counts, in the role's own words (role override → catalog). */
+export function getCardInfo(config: DashboardConfig, card: MetricCardDef): string {
+  return config.infoOverrides?.[card.key as MetricCardKey] ?? card.info;
+}
+
+/**
+ * The breakdown sections a card opens under a role, empty ones dropped (so a
+ * card whose every section is empty does not open). `null` when the role does
+ * not use sections at all — the company-admin sheet then applies.
+ */
+export function getCardSections(
+  config: DashboardConfig,
+  card: MetricCardDef,
+  data: DashboardData | null | undefined,
+): BreakdownSectionDef[] | null {
+  if (!config.cardSections) return null;
+  const build = config.cardSections[card.key as MetricCardKey];
+  if (!build || !data) return [];
+  return build(data).filter((section) => section.items.length > 0);
+}
+
+/** A section's total: the sum of its own rows. */
+export const sectionTotal = (section: BreakdownSectionDef): number =>
+  section.items.reduce((sum, item) => sum + item.count, 0);
+
+/** Whether a section prints a total row — only a real partition of 2+ rows. */
+export const sectionShowsTotal = (section: BreakdownSectionDef): boolean =>
+  section.items.length > 1 && section.showTotal !== false;
 
 /**
  * Compose a card's sub-line "<metric part> • <timeframe>" (just the timeframe
@@ -407,6 +589,21 @@ export function metricUncounted(
 export function composeSubtitle(metricPart: string, timeframe: string): string {
   const part = metricPart.trim();
   return part ? `${part} • ${timeframe}` : timeframe;
+}
+
+/**
+ * A card's sub-line under a role: "<metric part> • <timeframe>" where the role
+ * shows the period on every card, otherwise the metric part alone (null when
+ * there is none, so no empty line is drawn).
+ */
+export function cardSubtitle(
+  config: DashboardConfig,
+  metricPart: string,
+  timeframe: string,
+): string | null {
+  if (config.timeframeOnCards) return composeSubtitle(metricPart, timeframe);
+  const part = metricPart.trim();
+  return part || null;
 }
 
 /**
@@ -466,9 +663,33 @@ export function computeAvgBooking(metrics: DashboardTotals): number {
   return total > 0 ? revenue / total : 0;
 }
 
+export type DerivedMetrics = {
+  newBookings?: number;
+  avgBooking?: number;
+  newBookingBreakdowns?: NonNullable<DashboardData["derivedBreakdowns"]>;
+};
+
+/**
+ * New Bookings split by status and by package, as the web builds it from the
+ * same list: a blank status is pending, a booking without a package is "Other".
+ */
+export function newBookingBreakdowns(
+  bookings: { status?: string | null; packageNameRaw?: string | null }[],
+): NonNullable<DashboardData["derivedBreakdowns"]> {
+  return {
+    newBookingsByStatus: countBreakdown(bookings, (b) =>
+      bookingStatusLabel(b.status),
+    ),
+    newBookingsByPackage: countBreakdown(
+      bookings,
+      (b) => b.packageNameRaw || "Other",
+    ),
+  };
+}
+
 export function withDerivedMetrics(
   data: DashboardData,
-  derived: { newBookings?: number; avgBooking?: number },
+  derived: DerivedMetrics,
 ): DashboardData {
   return {
     ...data,
@@ -479,5 +700,8 @@ export function withDerivedMetrics(
         ? { newBookings: derived.newBookings }
         : {}),
     },
+    ...(derived.newBookingBreakdowns
+      ? { derivedBreakdowns: derived.newBookingBreakdowns }
+      : {}),
   };
 }

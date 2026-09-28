@@ -17,7 +17,9 @@ import {
   computeAvgBooking,
   dashboardNeedsAvgBooking,
   dashboardNeedsBookings,
+  type DerivedMetrics,
   getDashboardConfig,
+  newBookingBreakdowns,
   withDerivedMetrics,
 } from "../dashboard/dashboardConfig";
 import { filterNewBookings } from "../dashboard/dashboardTimeframe";
@@ -153,7 +155,7 @@ export function useDashboardMetrics({
           });
         }
 
-        const derived: { newBookings?: number; avgBooking?: number } = {};
+        const derived: DerivedMetrics = {};
 
         if (dashboardNeedsAvgBooking(config)) {
           derived.avgBooking = computeAvgBooking(result.metrics);
@@ -166,12 +168,14 @@ export function useDashboardMetrics({
               user.location_id ?? undefined,
               force,
             );
-            derived.newBookings = filterNewBookings(
+            const created = filterNewBookings(
               bookings,
               timeframe,
               dateFrom,
               dateTo,
-            ).length;
+            );
+            derived.newBookings = created.length;
+            derived.newBookingBreakdowns = newBookingBreakdowns(created);
           } catch (bookingsErr) {
             console.warn("New bookings derivation failed:", bookingsErr);
           }

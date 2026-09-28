@@ -126,6 +126,8 @@ type FetchParams = {
   locationId?: number;
   page?: number;
   perPage?: number;
+  /** Only concerns not yet resolved ("new" and "contacted"). */
+  openOnly?: boolean;
   signal?: AbortSignal;
 };
 
@@ -135,6 +137,7 @@ export async function fetchCheckoutConcerns({
   locationId,
   page = 1,
   perPage = 100,
+  openOnly = false,
   signal,
 }: FetchParams): Promise<ConcernPage> {
   const params = new URLSearchParams({
@@ -142,6 +145,7 @@ export async function fetchCheckoutConcerns({
     per_page: String(perPage),
   });
   if (locationId != null) params.append("location_id", String(locationId));
+  if (openOnly) params.append("open_only", "1");
 
   const res = await apiRequest<ConcernListResponse>(
     `/api/checkout-concerns?${params.toString()}`,

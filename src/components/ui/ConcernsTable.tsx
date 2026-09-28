@@ -32,7 +32,7 @@ const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 type FeatherIconName = ComponentProps<typeof Feather>["name"];
 
 /** Why the guest is in the list — same labels and tints as the web badges. */
-const KIND_META: Record<
+export const KIND_META: Record<
   ConcernKind,
   { label: string; icon: FeatherIconName; bg: string; fg: string }
 > = {
@@ -102,7 +102,7 @@ export const formatReceived = (iso: string): string =>
   iso ? formatDateTimeET(iso, { month: "short" }) : "—";
 
 /** Tappable phone / email line — opens the dialer or mail app. */
-const ContactLine = ({
+export const ContactLine = ({
   icon,
   value,
   url,
