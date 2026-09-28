@@ -622,7 +622,7 @@ const WaiverKiosk = () => {
             accessibilityRole="button"
           >
             <Text className="text-center text-lg font-semibold text-white">
-              New Customer
+              New Guest
             </Text>
           </Pressable>
           <Pressable
@@ -631,7 +631,7 @@ const WaiverKiosk = () => {
             accessibilityRole="button"
           >
             <Text className="text-center text-lg font-semibold text-[#0644C7] dark:text-blue-300">
-              Returning Customer
+              Returning Guest
             </Text>
           </Pressable>
         </View>
@@ -646,7 +646,7 @@ const WaiverKiosk = () => {
         subtitle={
           profile
             ? "Please review your saved information"
-            : "Returning customer"
+            : "Returning guest"
         }
         insets={insets}
       >
