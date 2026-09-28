@@ -209,17 +209,21 @@ export async function searchAttractionPurchases({
   token,
   term,
   limit = 25,
+  locationId,
   signal,
 }: {
   token: string;
   term: string;
   limit?: number;
+  /** Narrow to the active location, as the web's guest search does. */
+  locationId?: number;
   signal?: AbortSignal;
 }): Promise<PurchaseRow[]> {
   const params = new URLSearchParams({
     search: term,
     per_page: String(limit),
   });
+  if (locationId != null) params.append("location_id", String(locationId));
   const res = await apiRequest<PurchasesListResponse>(
     `/api/attraction-purchases?${params.toString()}`,
     { token, signal },

@@ -27,13 +27,28 @@ import { VerifyOrderDetails } from "../components/checkin/VerifyOrderDetails";
 import { VerifyTicketDetails } from "../components/checkin/VerifyTicketDetails";
 import { BottomSheet } from "../components/ui/BottomSheet";
 import { CheckInBookingsTable } from "../components/ui/CheckInBookingsTable";
+import { CheckInWaiversTable } from "../components/ui/CheckInWaiversTable";
 import { DatePickerSheet } from "../components/ui/DatePickerSheet";
 import { LaunchKioskSheet } from "../components/ui/LaunchKioskSheet";
 import { Pagination } from "../components/ui/Pagination";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../components/ui/ViewToggle";
 import { useAppUpdateNoticeInset } from "../lib/hooks/useAppUpdateNotice";
+import {
+  DESK_WAIVER_LABEL,
+  deskWaiverState,
+  filterDeskWaivers,
+  matchesDeskBookingSearch,
+  peopleCovered,
+  visitDateLabel,
+  waiverLinkLabel,
+  waiverSignerName,
+  waiverTruncationNote,
+} from "../lib/checkin/checkInWaiverList";
 import { resolveScannedCode } from "../lib/checkin/resolveScannedCode";
+import { formatDateTimeET } from "../lib/date/venueTime";
+import { useDeskWaivers } from "../lib/hooks/useDeskWaivers";
+import { useActiveLocation } from "../lib/location/activeLocationStore";
 import { resolvePaymentState } from "../lib/payments/paymentState";
 import {
   useBookingCheckIn,
@@ -50,8 +65,13 @@ import {
 } from "../services/bookingsService";
 import {
   fetchTemplates,
+  type Waiver,
   type WaiverTemplate,
 } from "../services/waiversService";
+
+/** Which list the desk last looked at — kept for the session, as the web's
+ *  sessionStorage does. The page opens on Waivers. */
+let lastListTab: "waivers" | "bookings" = "waivers";
 
 const PRIMARY = "#0644C7";
 
@@ -289,7 +309,27 @@ export default function CheckInWaiversScreen() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [search, setSearch] = useState("");
   const [dayBookings, setDayBookings] = useState<CalendarBooking[]>([]);
+  /** How much of the day the booking page covered (any status). */
+  const [dayBookingCount, setDayBookingCount] = useState({ fetched: 0, total: 0 });
   const [loadingDay, setLoadingDay] = useState(false);
+  const [listTab, setListTabState] = useState<"waivers" | "bookings">(
+    () => lastListTab,
+  );
+  const setListTab = (tab: "waivers" | "bookings") => {
+    lastListTab = tab;
+    setListTabState(tab);
+  };
+
+  // The workspace location a company admin picked; everyone else is pinned to
+  // their own by the server. Every list on this screen carries it, as the web's
+  // does — a company admin with one location picked must not see them all.
+  const activeLocation = useActiveLocation();
+  const deskLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
+  const scopeLabel =
+    deskLocationId == null
+      ? "All Locations"
+      : activeLocation.name || `Location #${deskLocationId}`;
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [detailsOnly, setDetailsOnly] = useState(false);
@@ -444,23 +484,48 @@ export default function CheckInWaiversScreen() {
       if (!token) return;
       setLoadingDay(true);
       try {
-        const rows = await fetchBookingsForCheckIn({
+        const day = await fetchBookingsForCheckIn({
           token,
           date: selectedDate,
+          locationId: deskLocationId,
           userId: getCurrentUser()?.id,
           signal,
         });
-        if (!signal?.aborted) setDayBookings(rows);
+        if (!signal?.aborted) {
+          setDayBookings(day.rows);
+          setDayBookingCount({ fetched: day.fetched, total: day.total });
+        }
       } catch {
         // Leave the last good list on screen; the empty state would read as
         // "no bookings today", which a failed request does not prove.
-        if (!signal?.aborted) setDayBookings([]);
+        if (!signal?.aborted) {
+          setDayBookings([]);
+          setDayBookingCount({ fetched: 0, total: 0 });
+        }
       } finally {
         if (!signal?.aborted) setLoadingDay(false);
       }
     },
-    [selectedDate],
+    [selectedDate, deskLocationId],
   );
+
+  // The day's waivers — unsigned first — with row Check In / Undo.
+  // (The hook reads this callback through a ref, so a new one each render is fine.)
+  const deskWaivers = useDeskWaivers(
+    selectedDate,
+    deskLocationId,
+    (tone: ResultTone, message: string) => entity.setNotice({ tone, message }),
+  );
+  const reloadWaivers = deskWaivers.reload;
+
+  // A record that was open may have been checked in (or not); whenever the desk
+  // leaves one, re-read the waivers so the rows agree — the web reloads on close.
+  const hadSurfaceRef = useRef(false);
+  useEffect(() => {
+    const open = entity.surface != null;
+    if (hadSurfaceRef.current && !open) reloadWaivers();
+    hadSurfaceRef.current = open;
+  }, [entity.surface, reloadWaivers]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -471,8 +536,12 @@ export default function CheckInWaiversScreen() {
   // A finished check-in leaves the row below stale, so refresh the day once the
   // result surface appears.
   useEffect(() => {
-    if (booking.phase === "result") loadDay();
-  }, [booking.phase, loadDay]);
+    if (booking.phase === "result") {
+      loadDay();
+      // A booking check-in can also check in its guests' waivers.
+      reloadWaivers();
+    }
+  }, [booking.phase, loadDay, reloadWaivers]);
 
   useEffect(() => {
     if (booking.phase === "idle" || booking.phase === "result") {
@@ -480,44 +549,50 @@ export default function CheckInWaiversScreen() {
     }
   }, [booking.phase]);
 
-  const visibleBookings = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return dayBookings;
-    // The same five fields the web filters on, which are also the five the rows
-    // display — filtering on a name the desk cannot see would look broken.
-    return dayBookings.filter(
-      (b) =>
-        b.guestName?.toLowerCase().includes(term) ||
-        b.guestEmail?.toLowerCase().includes(term) ||
-        b.guestPhone?.includes(term) ||
-        b.referenceNumber?.toLowerCase().includes(term) ||
-        b.packageNameRaw?.toLowerCase().includes(term),
-    );
-  }, [dayBookings, search]);
+  // The web's booking search: every word, across guest, customer, reference,
+  // package, room and location, with phones matched digit-for-digit.
+  const visibleBookings = useMemo(
+    () => dayBookings.filter((b) => matchesDeskBookingSearch(b, search)),
+    [dayBookings, search],
+  );
+  const visibleWaivers = useMemo(
+    () => filterDeskWaivers(deskWaivers.day.waivers, search),
+    [deskWaivers.day.waivers, search],
+  );
+  const bookingTruncated = dayBookingCount.fetched < dayBookingCount.total;
 
-  /* The day's list is fetched whole (one 100-row page) and paged here, so the
-     desk scrolls a short list rather than a wall of rows. Same wiring and the
-     same shared pager every other list in the app uses. */
+  /* Each tab's list is fetched for the day and paged here, so the desk scrolls
+     a short list rather than a wall of rows. Same wiring and the same shared
+     pager every other list in the app uses. */
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
+  const listLength =
+    listTab === "waivers" ? visibleWaivers.length : visibleBookings.length;
 
   const pagedBookings = useMemo(
     () => visibleBookings.slice((page - 1) * perPage, page * perPage),
     [visibleBookings, page, perPage],
+  );
+  const pagedWaivers = useMemo(
+    () => visibleWaivers.slice((page - 1) * perPage, page * perPage),
+    [visibleWaivers, page, perPage],
   );
 
   // Any change to what is being listed puts the desk back on the first page —
   // otherwise a filter that leaves three rows strands it on an empty page 4.
   useEffect(() => {
     setPage(1);
-  }, [search, selectedDate, perPage]);
+  }, [search, selectedDate, perPage, listTab, deskLocationId]);
 
   // The day reloads after every check-in, and can come back shorter. Pull the
   // desk back to the last real page rather than leaving it on an empty one.
   useEffect(() => {
-    const lastPage = Math.max(1, Math.ceil(visibleBookings.length / perPage));
+    const lastPage = Math.max(1, Math.ceil(listLength / perPage));
     setPage((current) => Math.min(current, lastPage));
-  }, [visibleBookings.length, perPage]);
+  }, [listLength, perPage]);
+
+  const openWaiverDetails = (waiver: Waiver) =>
+    guestHandlers.onWaiver(waiver.referenceNumber);
 
   /* ------------------------------------------------------- upload an image -- */
 
@@ -679,6 +754,13 @@ export default function CheckInWaiversScreen() {
             <Text className="text-xs text-gray-500 dark:text-gray-400">
               One place to check anyone in — scan a booking, attraction ticket,
               bulk order, membership or waiver code, or find the guest by name.
+            </Text>
+            {/* The location every list below is scoped to (web parity). */}
+            <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Showing{" "}
+              <Text className="font-semibold text-gray-700 dark:text-gray-200">
+                {scopeLabel}
+              </Text>
             </Text>
           </View>
         </View>
@@ -1054,7 +1136,7 @@ export default function CheckInWaiversScreen() {
                 <View className="mb-2 mt-4 flex-row items-center gap-2">
                   <Feather name="search" size={14} color="#6B7280" />
                   <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                    Filter today’s bookings
+                    Filter the list below
                   </Text>
                 </View>
                 <View className="flex-row items-center rounded-lg border border-gray-200 px-3 dark:border-neutral-700">
@@ -1062,7 +1144,7 @@ export default function CheckInWaiversScreen() {
                   <TextInput
                     value={search}
                     onChangeText={setSearch}
-                    placeholder="Narrow the list below by name, email, phone or reference…"
+                    placeholder="Narrow the waivers and bookings below by name, email, phone or reference…"
                     placeholderTextColor="#9CA3AF"
                     className="ml-2 flex-1 py-2.5 text-sm text-gray-900 dark:text-white"
                   />
@@ -1098,7 +1180,9 @@ export default function CheckInWaiversScreen() {
                       onChangeText={setGuestQuery}
                       onSubmitEditing={runGuestSearch}
                       returnKeyType="search"
-                      placeholder="Name, phone or email — any date, any location"
+                      placeholder={`Name, phone or email — any date${
+                        deskLocationId != null ? `, ${scopeLabel} only` : ", any location"
+                      }`}
                       placeholderTextColor="#9CA3AF"
                       className="flex-1 py-2.5 text-sm text-gray-900 dark:text-white"
                     />
@@ -1154,156 +1238,434 @@ export default function CheckInWaiversScreen() {
                 />
               )}
 
-              {/* Today's bookings */}
-              {!loadingDay && visibleBookings.length > 0 && (
-                <View className="mb-2 flex-row items-center">
-                  {/* The range, not just the total — with a pager below, a bare
-                      count reads as "this is all of them". */}
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    Showing {(page - 1) * perPage + 1}–
-                    {Math.min(page * perPage, visibleBookings.length)} of{" "}
-                    {visibleBookings.length} booking
-                    {visibleBookings.length === 1 ? "" : "s"}
-                  </Text>
-                  <View className="ml-auto">
-                    <ViewToggle mode={viewMode} onChange={setViewMode} />
-                  </View>
-                </View>
-              )}
+              {/* The day's lists — the web's Waivers and Bookings tabs, opening
+                  on Waivers. A count with "+" means the day holds more than
+                  was loaded. */}
+              <View className="mb-3 flex-row items-end gap-1 border-b border-gray-200 dark:border-neutral-800">
+                {(
+                  [
+                    {
+                      key: "waivers" as const,
+                      label: "Waivers",
+                      count: `${visibleWaivers.length}${
+                        deskWaivers.day.truncated && !search.trim() ? "+" : ""
+                      }`,
+                    },
+                    {
+                      key: "bookings" as const,
+                      label: "Bookings",
+                      count: `${visibleBookings.length}${
+                        bookingTruncated && !search.trim() ? "+" : ""
+                      }`,
+                    },
+                  ]
+                ).map((t) => {
+                  const active = listTab === t.key;
+                  return (
+                    <Pressable
+                      key={t.key}
+                      onPress={() => setListTab(t.key)}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}
+                      className={`-mb-px flex-row items-center gap-2 rounded-t-lg border-b-2 px-4 py-2 ${
+                        active
+                          ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
+                          : "border-transparent"
+                      }`}
+                    >
+                      <Text
+                        className={`text-sm font-medium ${
+                          active
+                            ? "text-[#0644C7] dark:text-blue-300"
+                            : "text-gray-500 dark:text-gray-400"
+                        }`}
+                      >
+                        {t.label}
+                      </Text>
+                      <View className="rounded-full bg-gray-100 px-1.5 py-0.5 dark:bg-neutral-800">
+                        <Text className="text-xs text-gray-600 dark:text-gray-300">
+                          {t.count}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-              {loadingDay || visibleBookings.length === 0 ? (
-                <View
-                  className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm dark:bg-neutral-900"
-                  style={CARD_SHADOW}
-                >
-                  {loadingDay ? (
-                    <View className="flex-row items-center justify-center gap-3 py-12">
+              {listTab === "waivers" ? (
+                <>
+                  {!(deskWaivers.loading && deskWaivers.day.waivers.length === 0) &&
+                    visibleWaivers.length > 0 && (
+                      <View className="mb-2 flex-row items-center">
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          Showing {(page - 1) * perPage + 1}–
+                          {Math.min(page * perPage, visibleWaivers.length)} of{" "}
+                          {visibleWaivers.length} waiver
+                          {visibleWaivers.length === 1 ? "" : "s"}
+                        </Text>
+                        <View className="ml-auto">
+                          <ViewToggle mode={viewMode} onChange={setViewMode} />
+                        </View>
+                      </View>
+                    )}
+
+                  {deskWaivers.loading && deskWaivers.day.waivers.length === 0 ? (
+                    <View
+                      className="mb-4 flex-row items-center justify-center gap-3 overflow-hidden rounded-xl bg-white py-12 shadow-sm dark:bg-neutral-900"
+                      style={CARD_SHADOW}
+                    >
                       <ActivityIndicator color={PRIMARY} />
                       <Text className="text-sm text-gray-600 dark:text-gray-300">
-                        Loading bookings…
+                        Loading waivers…
                       </Text>
                     </View>
-                  ) : (
-                    <Text className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                      {dayBookings.length === 0
-                        ? "No bookings found for selected date"
-                        : "No bookings match your filter"}
-                    </Text>
-                  )}
-                </View>
-              ) : viewMode === "table" ? (
-                <CheckInBookingsTable
-                  rows={pagedBookings}
-                  handlers={{
-                    onCheckIn: (b) => openBooking(b.referenceNumber, false),
-                    onDetails: (b) => openBooking(b.referenceNumber, true),
-                    busy: booking.busy,
-                  }}
-                />
-              ) : (
-                <View
-                  className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm dark:bg-neutral-900"
-                  style={CARD_SHADOW}
-                >
-                  {pagedBookings.map((b, i) => (
+                  ) : visibleWaivers.length === 0 ? (
                     <View
-                      key={b.id}
-                      className={
-                        i > 0
-                          ? "border-t border-gray-100 px-4 py-3.5 dark:border-neutral-800"
-                          : "px-4 py-3.5"
-                      }
+                      className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm dark:bg-neutral-900"
+                      style={CARD_SHADOW}
                     >
-                      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        #{b.referenceNumber ?? "—"}
+                      <Text className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                        {deskWaivers.day.waivers.length === 0
+                          ? "No waivers found for selected date"
+                          : `No waivers match “${search.trim()}”`}
                       </Text>
-                      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {b.guestName || "Guest"}
-                      </Text>
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        Email: {b.guestEmail || "N/A"}
-                      </Text>
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        Phone: {b.guestPhone || "N/A"}
-                      </Text>
-
-                      <View className="mt-2 flex-row items-start justify-between gap-3">
-                        <View className="flex-1">
-                          <Text
-                            className="text-sm text-gray-900 dark:text-white"
-                            numberOfLines={2}
+                    </View>
+                  ) : viewMode === "table" ? (
+                    <CheckInWaiversTable
+                      rows={pagedWaivers}
+                      handlers={{
+                        onCheckIn: deskWaivers.checkIn,
+                        onUndo: deskWaivers.undo,
+                        onDetails: openWaiverDetails,
+                        busyId: deskWaivers.busyId,
+                        showLocation: deskLocationId == null,
+                      }}
+                    />
+                  ) : (
+                    <View
+                      className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm dark:bg-neutral-900"
+                      style={CARD_SHADOW}
+                    >
+                      {pagedWaivers.map((w, i) => {
+                        const state = deskWaiverState(w);
+                        const people = peopleCovered(w);
+                        const link = waiverLinkLabel(w);
+                        const rowBusy = deskWaivers.busyId === w.id;
+                        return (
+                          <View
+                            key={w.id}
+                            className={
+                              i > 0
+                                ? "border-t border-gray-100 px-4 py-3.5 dark:border-neutral-800"
+                                : "px-4 py-3.5"
+                            }
                           >
-                            {b.packageNameRaw || "N/A"}
-                          </Text>
-                          <Text className="text-xs text-gray-500 dark:text-gray-400">
-                            {money(b.totalAmount)}
-                          </Text>
-                        </View>
-                        <View className="items-end">
-                          <Text className="text-sm text-gray-900 dark:text-white">
-                            {fmtTime(b.time) ?? "—"}
-                          </Text>
-                          <Text className="text-xs text-gray-500 dark:text-gray-400">
-                            {formatDuration(b.duration, b.durationUnit)}
-                          </Text>
-                          <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                            {b.participants} participant
-                            {b.participants === 1 ? "" : "s"}
-                          </Text>
-                        </View>
+                            <Text className="font-mono text-xs font-medium text-gray-500 dark:text-gray-400">
+                              {w.referenceNumber || `#${w.id}`}
+                            </Text>
+                            <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                              {waiverSignerName(w)}
+                            </Text>
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              Email: {w.adultEmail || "N/A"}
+                            </Text>
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              Phone: {w.adultPhone || "N/A"}
+                            </Text>
+
+                            <View className="mt-2 flex-row items-start justify-between gap-3">
+                              <View className="flex-1">
+                                <Text
+                                  className="text-sm text-gray-900 dark:text-white"
+                                  numberOfLines={2}
+                                >
+                                  {w.templateTitle || "Waiver"}
+                                </Text>
+                                {!!link && (
+                                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                                    {link}
+                                  </Text>
+                                )}
+                                {deskLocationId == null && !!w.locationName && (
+                                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                                    {w.locationName}
+                                  </Text>
+                                )}
+                              </View>
+                              <View className="items-end">
+                                <Text className="text-sm text-gray-900 dark:text-white">
+                                  {visitDateLabel(w.selectedDate)}
+                                </Text>
+                                <Text className="text-xs text-gray-500 dark:text-gray-400">
+                                  {people.count} {people.detail}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              {w.submittedAt
+                                ? `Signed ${formatDateTimeET(w.submittedAt)}`
+                                : "Not signed yet"}
+                            </Text>
+
+                            <View className="mt-2.5 flex-row items-center gap-2">
+                              <StatusBadge
+                                status={
+                                  state === "checked-in"
+                                    ? "checked-in"
+                                    : state === "signed"
+                                      ? "confirmed"
+                                      : "not-signed"
+                                }
+                                palette="checkin"
+                                label={DESK_WAIVER_LABEL[state]}
+                              />
+                              <View className="flex-1" />
+                              {rowBusy && <ActivityIndicator size="small" color={PRIMARY} />}
+                              {state === "signed" && (
+                                <Pressable
+                                  onPress={() => deskWaivers.checkIn(w)}
+                                  disabled={rowBusy}
+                                  className={`flex-row items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 active:opacity-90 ${
+                                    rowBusy ? "opacity-50" : ""
+                                  }`}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Check in this waiver"
+                                >
+                                  <Feather name="check-circle" size={14} color="#FFFFFF" />
+                                  <Text className="text-xs font-semibold text-white">
+                                    Check In
+                                  </Text>
+                                </Pressable>
+                              )}
+                              {state === "checked-in" && (
+                                <Pressable
+                                  onPress={() => deskWaivers.undo(w)}
+                                  disabled={rowBusy}
+                                  className={`rounded-lg border border-gray-200 bg-white px-3 py-2 active:opacity-90 dark:border-neutral-700 dark:bg-neutral-900 ${
+                                    rowBusy ? "opacity-50" : ""
+                                  }`}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Undo this waiver's check-in"
+                                >
+                                  <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                    Undo
+                                  </Text>
+                                </Pressable>
+                              )}
+                              <Pressable
+                                onPress={() => openWaiverDetails(w)}
+                                className="flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90"
+                                accessibilityRole="button"
+                                accessibilityLabel="View waiver details"
+                              >
+                                <Feather name="eye" size={14} color="#FFFFFF" />
+                                <Text className="text-xs font-semibold text-white">
+                                  Details
+                                </Text>
+                              </Pressable>
+                            </View>
+                            {state === "checked-in" && (
+                              <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                Checked in {formatDateTimeET(w.checkedInAt)}
+                              </Text>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {/* A capped day says how much it loaded, and never lets a
+                      missing unsigned waiver pass silently. */}
+                  {!deskWaivers.loading && deskWaivers.day.truncated && (
+                    <View className="mb-3 flex-row items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+                      <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300">
+                        {waiverTruncationNote(deskWaivers.day)}
+                      </Text>
+                      <Pressable
+                        onPress={() => router.push("/waivers/waivers")}
+                        accessibilityRole="link"
+                        className="active:opacity-70"
+                      >
+                        <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                          Open Waiver Records
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <>
+                {!loadingDay && visibleBookings.length > 0 && (
+                  <View className="mb-2 flex-row items-center">
+                    {/* The range, not just the total — with a pager below, a bare
+                        count reads as "this is all of them". */}
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      Showing {(page - 1) * perPage + 1}–
+                      {Math.min(page * perPage, visibleBookings.length)} of{" "}
+                      {visibleBookings.length} booking
+                      {visibleBookings.length === 1 ? "" : "s"}
+                    </Text>
+                    <View className="ml-auto">
+                      <ViewToggle mode={viewMode} onChange={setViewMode} />
+                    </View>
+                  </View>
+                )}
+  
+                {loadingDay || visibleBookings.length === 0 ? (
+                  <View
+                    className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm dark:bg-neutral-900"
+                    style={CARD_SHADOW}
+                  >
+                    {loadingDay ? (
+                      <View className="flex-row items-center justify-center gap-3 py-12">
+                        <ActivityIndicator color={PRIMARY} />
+                        <Text className="text-sm text-gray-600 dark:text-gray-300">
+                          Loading bookings…
+                        </Text>
                       </View>
-
-                      <View className="mt-2.5 flex-row items-center gap-2">
-                        {/* Same pill as the table view above it — the card
-                            layout is this screen's narrow rendering of the
-                            same row, so a view-mode toggle must not repaint
-                            the status. */}
-                        <StatusBadge
-                          status={b.status}
-                          palette="checkin"
-                          label={
-                            b.status === "checked-in" ? "Checked In" : b.status
-                          }
-                        />
-                        <View className="flex-1" />
-                        {b.status === "confirmed" && !!b.referenceNumber && (
+                    ) : (
+                      <Text className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                        {dayBookings.length === 0
+                          ? "No bookings found for selected date"
+                          : "No bookings match your filter"}
+                      </Text>
+                    )}
+                  </View>
+                ) : viewMode === "table" ? (
+                  <CheckInBookingsTable
+                    rows={pagedBookings}
+                    handlers={{
+                      onCheckIn: (b) => openBooking(b.referenceNumber, false),
+                      onDetails: (b) => openBooking(b.referenceNumber, true),
+                      busy: booking.busy,
+                    }}
+                  />
+                ) : (
+                  <View
+                    className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm dark:bg-neutral-900"
+                    style={CARD_SHADOW}
+                  >
+                    {pagedBookings.map((b, i) => (
+                      <View
+                        key={b.id}
+                        className={
+                          i > 0
+                            ? "border-t border-gray-100 px-4 py-3.5 dark:border-neutral-800"
+                            : "px-4 py-3.5"
+                        }
+                      >
+                        <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                          #{b.referenceNumber ?? "—"}
+                        </Text>
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {b.guestName || "Guest"}
+                        </Text>
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          Email: {b.guestEmail || "N/A"}
+                        </Text>
+                        <Text className="text-xs text-gray-500 dark:text-gray-400">
+                          Phone: {b.guestPhone || "N/A"}
+                        </Text>
+  
+                        <View className="mt-2 flex-row items-start justify-between gap-3">
+                          <View className="flex-1">
+                            <Text
+                              className="text-sm text-gray-900 dark:text-white"
+                              numberOfLines={2}
+                            >
+                              {b.packageNameRaw || "N/A"}
+                            </Text>
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              {money(b.totalAmount)}
+                            </Text>
+                          </View>
+                          <View className="items-end">
+                            <Text className="text-sm text-gray-900 dark:text-white">
+                              {fmtTime(b.time) ?? "—"}
+                            </Text>
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              {formatDuration(b.duration, b.durationUnit)}
+                            </Text>
+                            <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                              {b.participants} participant
+                              {b.participants === 1 ? "" : "s"}
+                            </Text>
+                          </View>
+                        </View>
+  
+                        <View className="mt-2.5 flex-row items-center gap-2">
+                          {/* Same pill as the table view above it — the card
+                              layout is this screen's narrow rendering of the
+                              same row, so a view-mode toggle must not repaint
+                              the status. */}
+                          <StatusBadge
+                            status={b.status}
+                            palette="checkin"
+                            label={
+                              b.status === "checked-in" ? "Checked In" : b.status
+                            }
+                          />
+                          <View className="flex-1" />
+                          {b.status === "confirmed" && !!b.referenceNumber && (
+                            <Pressable
+                              onPress={() => openBooking(b.referenceNumber, false)}
+                              disabled={booking.busy}
+                              className="flex-row items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 active:opacity-90"
+                              accessibilityRole="button"
+                              accessibilityLabel="Check in this booking"
+                            >
+                              <Feather name="check-circle" size={14} color="#FFFFFF" />
+                              <Text className="text-xs font-semibold text-white">
+                                Check In
+                              </Text>
+                            </Pressable>
+                          )}
                           <Pressable
-                            onPress={() => openBooking(b.referenceNumber, false)}
-                            disabled={booking.busy}
-                            className="flex-row items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 active:opacity-90"
+                            onPress={() => openBooking(b.referenceNumber, true)}
+                            className="flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90"
                             accessibilityRole="button"
-                            accessibilityLabel="Check in this booking"
+                            accessibilityLabel="View booking details"
                           >
-                            <Feather name="check-circle" size={14} color="#FFFFFF" />
+                            <Feather name="eye" size={14} color="#FFFFFF" />
                             <Text className="text-xs font-semibold text-white">
-                              Check In
+                              Details
                             </Text>
                           </Pressable>
-                        )}
-                        <Pressable
-                          onPress={() => openBooking(b.referenceNumber, true)}
-                          className="flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90"
-                          accessibilityRole="button"
-                          accessibilityLabel="View booking details"
-                        >
-                          <Feather name="eye" size={14} color="#FFFFFF" />
-                          <Text className="text-xs font-semibold text-white">
-                            Details
-                          </Text>
-                        </Pressable>
+                        </View>
                       </View>
+                    ))}
+                  </View>
+                )}
+                  {!loadingDay && bookingTruncated && (
+                    <View className="mb-3 flex-row items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+                      <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300">
+                        Loaded {dayBookingCount.fetched} of {dayBookingCount.total}{" "}
+                        bookings for this day.
+                      </Text>
+                      <Pressable
+                        onPress={() => router.push("/bookings/bookings")}
+                        accessibilityRole="link"
+                        className="active:opacity-70"
+                      >
+                        <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                          Open Bookings
+                        </Text>
+                      </Pressable>
                     </View>
-                  ))}
-                </View>
+                  )}
+                </>
               )}
 
-              {/* Pager sits under whichever layout is showing, so switching
-                  between table and cards keeps the same page. */}
-              {!loadingDay && (
+              {/* Pager sits under whichever list and layout is showing, so
+                  switching between table and cards keeps the same page. */}
+              {!(listTab === "waivers"
+                ? deskWaivers.loading && deskWaivers.day.waivers.length === 0
+                : loadingDay) && (
                 <Pagination
                   page={page}
                   perPage={perPage}
-                  total={visibleBookings.length}
+                  total={listLength}
                   options={PER_PAGE_OPTIONS}
                   onPageChange={setPage}
                   onPerPageChange={setPerPage}

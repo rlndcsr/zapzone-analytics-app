@@ -468,7 +468,13 @@ function appendVisitPeriod(
 }
 
 export type WaiverSearchFilters = {
-  status?: WaiverStatus;
+  /**
+   * Omitted = signed only (the server's default). "all" = every status — what
+   * a guest search needs, since the guest may not have signed yet.
+   */
+  status?: WaiverStatus | "all";
+  /** Narrow to one venue (the active location); omitted = every venue in scope. */
+  locationId?: number;
   /** `all=1` ignores the date filter (browse across all dates). */
   all?: boolean;
   /**
@@ -514,6 +520,8 @@ function buildWaiverParams(
   });
   appendVisitPeriod(params, filters);
   if (filters.status) params.append("status", filters.status);
+  if (filters.locationId != null)
+    params.append("location_id", String(filters.locationId));
   if (filters.search?.trim()) params.append("search", filters.search.trim());
   if (filters.adultName?.trim())
     params.append("adult_name", filters.adultName.trim());
@@ -1852,6 +1860,21 @@ export async function scanWaiver(
  */
 export async function checkInWaiver(token: string, id: number): Promise<void> {
   await apiRequest(`/api/waivers/${id}/check-in`, {
+    method: "POST",
+    token,
+    body: {},
+  });
+}
+
+/**
+ * POST /api/waivers/{id}/undo-check-in — revert a waiver's check-in (the web
+ * desk's Undo, `waiverService.undoCheckIn`).
+ */
+export async function undoWaiverCheckIn(
+  token: string,
+  id: number,
+): Promise<void> {
+  await apiRequest(`/api/waivers/${id}/undo-check-in`, {
     method: "POST",
     token,
     body: {},

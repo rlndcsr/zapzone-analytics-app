@@ -115,15 +115,35 @@ export function useGuestLookup(): UseGuestLookup {
     const [bookings, waivers, tickets, orders, events] = await Promise.allSettled([
       searchBookings({ token, term, locationId, limit: PER_SOURCE, signal }),
       // `all: true` drops the date scope — the guest in front of you may be
-      // here on a waiver signed weeks ago.
-      fetchWaivers(token, { search: term, all: true }, 1, PER_SOURCE, signal),
-      searchAttractionPurchases({ token, term, limit: PER_SOURCE, signal }),
+      // here on a waiver signed weeks ago. `status: "all"` because the server
+      // otherwise returns signed waivers only, and an unsigned guest is exactly
+      // who the desk is looking for.
+      fetchWaivers(
+        token,
+        { search: term, all: true, status: "all", locationId },
+        1,
+        PER_SOURCE,
+        signal,
+      ),
+      searchAttractionPurchases({
+        token,
+        term,
+        limit: PER_SOURCE,
+        locationId,
+        signal,
+      }),
       listTicketOrders(
         token,
         { locationId, perPage: PER_SOURCE, search: term },
         signal,
       ),
-      searchEventPurchases({ token, term, limit: PER_SOURCE, signal }),
+      searchEventPurchases({
+        token,
+        term,
+        limit: PER_SOURCE,
+        locationId,
+        signal,
+      }),
     ]);
 
     if (signal.aborted || !mountedRef.current) return;

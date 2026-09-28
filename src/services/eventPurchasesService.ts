@@ -165,17 +165,21 @@ export async function searchEventPurchases({
   token,
   term,
   limit = 25,
+  locationId,
   signal,
 }: {
   token: string;
   term: string;
   limit?: number;
+  /** Narrow to the active location, as the web's guest search does. */
+  locationId?: number;
   signal?: AbortSignal;
 }): Promise<EventPurchaseRow[]> {
   const params = new URLSearchParams({
     search: term,
     per_page: String(limit),
   });
+  if (locationId != null) params.append("location_id", String(locationId));
   const res = await apiRequest<unknown>(
     `/api/event-purchases?${params.toString()}`,
     { token, signal },

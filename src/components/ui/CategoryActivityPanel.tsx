@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import {
   DoorOpen,
   Hammer,
+  Info,
   Layers,
   PartyPopper,
   Sparkles,
@@ -12,7 +13,6 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   Text,
@@ -484,6 +484,7 @@ export function CategoryActivityPanel({
   const [dateKey, setDateKey] = useState(todayKey);
   const [openBucket, setOpenBucket] = useState<ActivityBucketKey | null>(null);
   const [pickingDate, setPickingDate] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [bookingId, setBookingId] = useState<number | null>(null);
   const [changes, setChanges] = useState(0);
 
@@ -547,21 +548,27 @@ export function CategoryActivityPanel({
       className="mt-6 bg-white dark:bg-neutral-900 rounded-2xl border border-gray-100 dark:border-neutral-800 p-4"
       style={CARD_SHADOW}
     >
-      {/* Title */}
+      {/* Title. Android sized a text box that fitted its words exactly for a
+          narrower face than the bold Montserrat it draws, so "Category" wrapped
+          onto a second line the one-line box then clipped. Filling the row
+          (flex-1) leaves the words spare room; simple line breaking avoids the
+          high-quality breaker's own trailing-word drops with custom fonts. */}
       <View className="flex-row items-center gap-2">
         <Layers size={18} color="#6B7280" strokeWidth={2} />
-        <Text className="text-base font-bold text-gray-900 dark:text-white">
+        <Text
+          className="flex-1 text-base font-bold text-gray-900 dark:text-white"
+          textBreakStrategy="simple"
+        >
           Activity by Category
         </Text>
+        {/* Same ⓘ and sheet as the metric cards above. */}
         <Pressable
-          onPress={() =>
-            Alert.alert("Activity by Category", ACTIVITY_PANEL_INFO)
-          }
+          onPress={() => setShowInfo(true)}
           hitSlop={10}
           accessibilityRole="button"
           accessibilityLabel="About Activity by Category"
         >
-          <Feather name="info" size={14} color="#9CA3AF" />
+          <Info size={14} color="#9CA3AF" strokeWidth={2} />
         </Pressable>
         {loading && <ActivityIndicator size="small" color="#9CA3AF" />}
       </View>
@@ -666,6 +673,18 @@ export function CategoryActivityPanel({
             onEvent={openEvent}
           />
         )}
+      </BottomSheet>
+
+      <BottomSheet
+        visible={showInfo}
+        onClose={() => setShowInfo(false)}
+        title="Activity by Category"
+      >
+        <View className="px-5 pb-8">
+          <Text className="text-sm leading-6 text-gray-600 dark:text-gray-300">
+            {ACTIVITY_PANEL_INFO}
+          </Text>
+        </View>
       </BottomSheet>
 
       <DatePickerSheet

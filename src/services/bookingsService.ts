@@ -659,7 +659,7 @@ export async function fetchBookingsForCheckIn({
   locationId?: number | null;
   userId?: number;
   signal?: AbortSignal;
-}): Promise<CalendarBooking[]> {
+}): Promise<CheckInDay> {
   const params = new URLSearchParams({
     booking_date: date,
     per_page: "100",
@@ -672,14 +672,30 @@ export async function fetchBookingsForCheckIn({
     { token, signal },
   );
 
+  const page = res?.data?.bookings ?? [];
   const out: CalendarBooking[] = [];
-  for (const raw of res?.data?.bookings ?? []) {
+  for (const raw of page) {
     if (raw.status !== "confirmed" && raw.status !== "checked-in") continue;
     out.push(mapBooking(raw, toDateKey(raw.booking_date) ?? date));
   }
 
-  return out.sort(compareCheckInRows);
+  return {
+    rows: out.sort(compareCheckInRows),
+    fetched: page.length,
+    total: res?.data?.pagination?.total ?? page.length,
+  };
 }
+
+/** One day at the check-in desk: the rows to show, and how much of the day
+ *  they came from — so a 100-row page never reads as the whole day. */
+export type CheckInDay = {
+  /** Confirmed and checked-in bookings, in desk order. */
+  rows: CalendarBooking[];
+  /** Bookings the page returned, any status. */
+  fetched: number;
+  /** Bookings the day holds, any status (`pagination.total`). */
+  total: number;
+};
 
 /** Full detail for one booking (GET /api/bookings/{id}). */
 export async function fetchBookingDetail(
