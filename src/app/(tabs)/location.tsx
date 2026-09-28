@@ -420,17 +420,10 @@ const Location = () => {
       >
         <View className="px-5 pt-0">
           {/* Welcome Section */}
-          <View className="bg-white dark:bg-neutral-900 font-montserrat rounded-2xl p-5 mt-6 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Location Overview
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Multi-location booking performance at a glance
-            </Text>
-          </View>
+         
 
           {/* Filters Row */}
-          <View className="flex-row gap-3 mb-5">
+          <View className="flex-row gap-3 mb-5 mt-5">
             <Pressable
               onPress={() => setShowLocationDropdown(true)}
               className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"

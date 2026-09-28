@@ -330,6 +330,49 @@ export async function createEvent(
 }
 
 /**
+ * Payload for PUT /api/events/{id} — mirrors what the web Edit Event page
+ * sends. Differs from create where editing can empty something:
+ *  - `time_start` / `time_end` / `interval_minutes` go as null for an event with
+ *    no set times (the customer site then shows Call to Book);
+ *  - `image` is a new base64 data URL, null to remove the picture, or absent to
+ *    keep the stored one;
+ *  - `end_date` is absent for a one-time event (the API clears it itself);
+ *  - `add_on_ids` is always sent, so an empty list really detaches every add-on.
+ */
+export type UpdateEventInput = {
+  location_id?: number;
+  name: string;
+  description: string | null;
+  image?: string | null;
+  date_type: EventDateType;
+  start_date: string;
+  end_date?: string;
+  time_start: string | null;
+  time_end: string | null;
+  interval_minutes: number | null;
+  max_bookings_per_slot: number | null;
+  max_tickets_per_slot: number | null;
+  price: number;
+  features: string[];
+  add_on_ids: number[];
+  add_ons_order: number[];
+  is_active: boolean;
+};
+
+/** PUT /api/events/{id} — update an event (same endpoint as the web). */
+export async function updateEvent(
+  token: string,
+  id: number,
+  input: UpdateEventInput,
+): Promise<void> {
+  await apiRequest<unknown>(`/api/events/${id}`, {
+    method: "PUT",
+    token,
+    body: input,
+  });
+}
+
+/**
  * PATCH /api/events/{id}/toggle-status — flips an event's active flag, the same
  * endpoint the web Events table's status dropdown calls. The backend answers
  * with the bare updated model (no `{ data }` envelope), so read `is_active` off

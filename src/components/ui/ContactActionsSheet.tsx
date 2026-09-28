@@ -14,6 +14,7 @@ import {
 import { getToken } from "../../lib/session";
 import {
   addContactTag,
+  CONTACT_NEEDS_EMAIL_OR_PHONE,
   createContact,
   deleteContact,
   removeContactTag,
@@ -233,7 +234,12 @@ export function ContactActionsSheet({
   });
 
   const save = async () => {
-    if (!email.trim()) return Alert.alert("Missing email", "Email is required.");
+    // A new contact needs an email (the web's create form); an edit may empty
+    // it, as long as a phone is left.
+    if (mode === "create" && !email.trim())
+      return Alert.alert("Missing email", "Email is required.");
+    if (mode !== "create" && !email.trim() && !phone.trim())
+      return Alert.alert("Missing contact details", CONTACT_NEEDS_EMAIL_OR_PHONE);
     const token = getToken();
     if (!token) return Alert.alert("Not signed in", "Please sign in again.");
     if (mode === "create" && !companyId)
@@ -386,7 +392,7 @@ export function ContactActionsSheet({
           <View className="flex-1">
             <TextField
               label="Email"
-              required
+              required={mode === "create"}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -604,7 +610,14 @@ export function ContactActionsSheet({
           <Section title="Personal Information">
             <Field label="First Name" value={contact.firstName} />
             <Field label="Last Name" value={contact.lastName} />
-            <Field label="Email" value={contact.email} />
+            <Field label="Email" value={contact.email}>
+              {/* An edit can empty it now, so say so as the web does. */}
+              {contact.email.trim() ? undefined : (
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
+                  No email on file
+                </Text>
+              )}
+            </Field>
             <Field label="Phone" value={contact.phone} />
             <Field label="Date of Birth" value={fmtDate(contact.dateOfBirth)} />
             <Field label="SMS Consent">

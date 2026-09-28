@@ -313,11 +313,20 @@ export type ContactInput = {
   tags?: string[];
 };
 
+/** The API's refusal when an edit would leave a contact with no email and no phone. */
+export const CONTACT_NEEDS_EMAIL_OR_PHONE =
+  "A contact needs either an email address or a phone number, so this one cannot lose both.";
+
+/**
+ * Every field the forms edit is nullable on the contacts table and in
+ * ContactController::update, so an emptied box goes as an explicit null — an
+ * omitted key would be a silent no-op that leaves the old value in place.
+ */
 function inputToBody(input: Partial<ContactInput>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   if (input.companyId != null) body.company_id = input.companyId;
   if (input.locationId != null) body.location_id = input.locationId;
-  if (input.email != null) body.email = input.email;
+  if (input.email != null) body.email = input.email || null;
   if (input.firstName != null) body.first_name = input.firstName || null;
   if (input.lastName != null) body.last_name = input.lastName || null;
   if (input.phone != null) body.phone = input.phone || null;

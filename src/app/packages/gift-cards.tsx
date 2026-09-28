@@ -24,7 +24,9 @@ import {
   targetingPayload,
   type TargetingValue,
 } from "../../components/ui/TargetingSelector";
+import { firstFieldError } from "../../lib/api";
 import { venueDateKey } from "../../lib/date/venueTime";
+import { giftCardExpiryError } from "../../lib/giftCards/giftCardExpiry";
 import {
   describeSellResult,
   GIFT_CARD_SELL_MAX,
@@ -182,6 +184,7 @@ function Field({
   multiline,
   prefix,
   autoCapitalize,
+  hint,
 }: {
   label: string;
   value: string;
@@ -191,6 +194,8 @@ function Field({
   multiline?: boolean;
   prefix?: string;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  /** A line of guidance under the box. */
+  hint?: string;
 }) {
   return (
     <View className="mb-4">
@@ -219,6 +224,11 @@ function Field({
           style={multiline ? { minHeight: 72, textAlignVertical: "top" } : undefined}
         />
       </View>
+      {!!hint && (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          {hint}
+        </Text>
+      )}
     </View>
   );
 }
@@ -312,14 +322,12 @@ const GiftCards = () => {
       );
       return;
     }
-    // Only a well-formed date is judged here; anything else is left to the API.
-    const expiry = cExpiry.trim();
-    const todayKey = venueDateKey(new Date().toISOString());
-    if (/^\d{4}-\d{2}-\d{2}$/.test(expiry) && todayKey && expiry < todayKey) {
-      Alert.alert(
-        "Invalid expiry",
-        "Expiry date cannot be in the past. Leave it blank or pick a future date.",
-      );
+    const expiryError = giftCardExpiryError(
+      cExpiry,
+      venueDateKey(new Date().toISOString()),
+    );
+    if (expiryError) {
+      Alert.alert("Invalid expiry", expiryError);
       return;
     }
     const input: GiftCardInput = {
@@ -343,9 +351,13 @@ const GiftCards = () => {
       setShowCreate(false);
       await refetch();
     } catch (err) {
+      // What the server actually said (e.g. its expiry rule), not a generic line.
       Alert.alert(
         "Create failed",
-        err instanceof Error ? err.message : "Could not create the gift card.",
+        firstFieldError(err) ??
+          (err instanceof Error && err.message
+            ? err.message
+            : "Could not create the gift card."),
       );
     } finally {
       setCreating(false);
@@ -753,6 +765,7 @@ const GiftCards = () => {
             value={cExpiry}
             onChangeText={setCExpiry}
             placeholder="YYYY-MM-DD"
+            hint="Leave blank for a card that never expires."
           />
           <Field
             label="Description"

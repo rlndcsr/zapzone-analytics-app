@@ -79,6 +79,7 @@ const StatusPill = ({
 type RowContext = {
   busy: boolean;
   onToggle: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 };
 
@@ -94,8 +95,8 @@ type Column = {
  * Event (name over location and date type) · Date · Time · Price · Status ·
  * Actions. The web's `defaultVisible: false` columns (Event #, Location,
  * Description, Date Type, Schedule, Time slot, Max groups, Add-ons,
- * Created, Updated) are omitted here too. Actions carries Delete only — the app
- * has no Edit Event screen for the web table's pencil to open.
+ * Created, Updated) are omitted here too. Actions carries the web's two: Edit
+ * (the pencil, opening Edit Event) and Delete.
  */
 function buildColumns(fmt: EventFormatters): Column[] {
   return [
@@ -170,9 +171,18 @@ function buildColumns(fmt: EventFormatters): Column[] {
     {
       key: "actions",
       label: "Actions",
-      width: 100,
+      width: 120,
       render: (e, ctx) => (
         <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={ctx.onEdit}
+            disabled={ctx.busy}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${e.name}`}
+            className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 items-center justify-center active:opacity-70"
+          >
+            <Feather name="edit-2" size={15} color="#0644C7" />
+          </Pressable>
           <Pressable
             onPress={ctx.onDelete}
             disabled={ctx.busy}
@@ -206,7 +216,7 @@ export type EventFormatters = {
  * (fixed per-column widths keep header + rows aligned) and reads the same
  * `EventRow[]` page as the cards, so switching layout never refetches.
  * Rows are deliberately NOT tappable: a whole-row target is too easy to hit
- * while scrolling sideways, and the row's two real actions (the status pill and
+ * while scrolling sideways, and the row's real actions (the status pill, Edit and
  * Delete) own their own touches — the same call the Special Pricing and
  * Attractions tables make.
  */
@@ -215,6 +225,7 @@ export const EventsTable = memo(function EventsTable({
   formatters,
   busyId,
   onToggleStatus,
+  onEdit,
   onDelete,
 }: {
   events: EventRow[];
@@ -222,6 +233,7 @@ export const EventsTable = memo(function EventsTable({
   /** Id of the row with a toggle/delete request in flight, or null. */
   busyId: number | null;
   onToggleStatus: (event: EventRow) => void;
+  onEdit: (event: EventRow) => void;
   onDelete: (event: EventRow) => void;
 }) {
   const columns = buildColumns(formatters);
@@ -259,12 +271,13 @@ export const EventsTable = memo(function EventsTable({
             ))}
           </View>
 
-          {/* Rows — inert containers; the status pill and Delete are the only
-              touch targets. */}
+          {/* Rows — inert containers; the status pill, Edit and Delete are the
+              only touch targets. */}
           {events.map((event, i) => {
             const ctx: RowContext = {
               busy: busyId === event.id,
               onToggle: () => onToggleStatus(event),
+              onEdit: () => onEdit(event),
               onDelete: () => onDelete(event),
             };
             return (

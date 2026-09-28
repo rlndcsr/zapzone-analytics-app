@@ -22,9 +22,11 @@ import {
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { PRIMARY, Section } from "../../components/ui/attractionFormKit";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
+import { firstFieldError } from "../../lib/api";
 import { markContactsStale } from "../../lib/contactsStale";
 import { getToken } from "../../lib/session";
 import {
+  CONTACT_NEEDS_EMAIL_OR_PHONE,
   fetchContact,
   updateContact,
   type ContactStatus,
@@ -150,8 +152,10 @@ const EditCustomer = () => {
   }, [contactId]);
 
   const handleSubmit = async () => {
-    if (!email.trim())
-      return Alert.alert("Missing email", "Email is required.");
+    // Any field can be emptied, but not both ways of reaching the contact — the
+    // API refuses that with this same sentence.
+    if (!email.trim() && !phone.trim())
+      return Alert.alert("Missing contact details", CONTACT_NEEDS_EMAIL_OR_PHONE);
     if (dateOfBirth.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth.trim()))
       return Alert.alert("Invalid date", "Use the format YYYY-MM-DD.");
     const token = getToken();
@@ -182,7 +186,10 @@ const EditCustomer = () => {
     } catch (err) {
       Alert.alert(
         "Update failed",
-        err instanceof Error ? err.message : "Could not update the customer.",
+        firstFieldError(err) ??
+          (err instanceof Error && err.message
+            ? err.message
+            : "Could not update the customer."),
       );
     } finally {
       setSubmitting(false);
@@ -264,7 +271,6 @@ const EditCustomer = () => {
                 <View>
                   <TextField
                     label="Email"
-                    required
                     value={email}
                     onChangeText={setEmail}
                     placeholder="name@example.com"

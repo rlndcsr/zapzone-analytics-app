@@ -148,7 +148,13 @@ const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
   </View>
 );
 
-const EventCard = ({ event }: { event: EventRow }) => {
+const EventCard = ({
+  event,
+  onEdit,
+}: {
+  event: EventRow;
+  onEdit: () => void;
+}) => {
   const timeRange = formatTimeRange(event.timeStart, event.timeEnd);
   // a count of separate parties, not people — say so beside the people icon
   const capacityLabel =
@@ -188,7 +194,18 @@ const EventCard = ({ event }: { event: EventRow }) => {
             </View>
           )}
         </View>
-        <StatusBadge status={event.status} />
+        <View className="flex-row items-center gap-2">
+          <StatusBadge status={event.status} />
+          <Pressable
+            onPress={onEdit}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${event.name}`}
+            className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 items-center justify-center active:opacity-70"
+          >
+            <Feather name="edit-2" size={15} color="#0644C7" />
+          </Pressable>
+        </View>
       </View>
 
       {/* Description */}
@@ -533,6 +550,12 @@ const Events = () => {
   );
 
   // Delete action — same confirm-then-DELETE flow the web table's trash uses.
+  // The web table's pencil → Edit Event. The list refreshes on return, since a
+  // save marks events stale.
+  const handleEdit = useCallback((event: EventRow) => {
+    router.push(`/events/edit-event?id=${event.id}`);
+  }, []);
+
   const handleDelete = useCallback(
     (event: EventRow) => {
       Alert.alert(
@@ -860,11 +883,16 @@ const Events = () => {
                     formatters={formatters}
                     busyId={busyId}
                     onToggleStatus={handleToggleStatus}
+                    onEdit={handleEdit}
                     onDelete={handleDelete}
                   />
                 ) : (
                   paged.map((event) => (
-                    <EventCard key={event.id} event={event} />
+                    <EventCard
+                      key={event.id}
+                      event={event}
+                      onEdit={() => handleEdit(event)}
+                    />
                   ))
                 )}
 
