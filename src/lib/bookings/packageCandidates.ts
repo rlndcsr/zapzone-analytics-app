@@ -1,3 +1,5 @@
+import { isSpanBlockedByClosure } from "../dayOffClosure.ts";
+
 export type PackageClosureDayOff = {
   /** YYYY-MM-DD (venue-local). */
   date: string;
@@ -13,11 +15,12 @@ const sameCalendarDate = (a: Date, b: Date) =>
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
 
-const toMinutes = (clock: string): number | null => {
-  const [h, m] = clock.split(":").map(Number);
-  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
-};
-
+/**
+ * Whether a start/end in minutes runs into a closure that reaches this package
+ * on this date (web parity: the package calendars' isTimeSlotRestricted).
+ * Every closure on the date counts, not just the first, and each is read as
+ * the window the venue is shut — see dayOffClosure.
+ */
 export function isPackageTimeSlotRestricted(
   dayOffs: PackageClosureDayOff[],
   packageId: number,
@@ -29,8 +32,7 @@ export function isPackageTimeSlotRestricted(
   const target = new Date(`${dateKey.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(target.getTime())) return false;
 
-  const closure = dayOffs.find((off) => {
-    if (!off.timeStart && !off.timeEnd) return false;
+  const closures = dayOffs.filter((off) => {
     if (off.packageIds.length > 0) {
       if (!off.packageIds.includes(packageId)) return false;
     } else if (off.roomIds.length > 0) {
@@ -58,18 +60,9 @@ export function isPackageTimeSlotRestricted(
     }
     return offDate >= today && sameCalendarDate(offDate, target);
   });
-  if (!closure) return false;
+  if (closures.length === 0) return false;
 
-  if (closure.timeStart) {
-    const closesAt = toMinutes(closure.timeStart);
-    if (closesAt != null && (startMinutes >= closesAt || endMinutes > closesAt))
-      return true;
-  }
-  if (closure.timeEnd) {
-    const opensAt = toMinutes(closure.timeEnd);
-    if (opensAt != null && startMinutes < opensAt) return true;
-  }
-  return false;
+  return isSpanBlockedByClosure(startMinutes, endMinutes, closures);
 }
 
 export type SchedulePackageCandidate = {

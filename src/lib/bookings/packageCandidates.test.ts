@@ -172,7 +172,9 @@ describe("isPackageTimeSlotRestricted", () => {
     );
   });
 
-  it("ignores a full-day day-off — that is a different concern than a time-restricted one", () => {
+  it("blocks every time on a day the package is closed all day", () => {
+    // DayOff::isTimeBlocked refuses any time under a full-day closure, so a
+    // start kept here would only be refused on save.
     const dayOffs: PackageClosureDayOff[] = [
       {
         date: "2026-01-10",
@@ -185,7 +187,69 @@ describe("isPackageTimeSlotRestricted", () => {
     ];
     assert.equal(
       isPackageTimeSlotRestricted(dayOffs, 5, "2026-01-10", 17 * 60, 18 * 60, today),
+      true,
+    );
+  });
+
+  it("blocks only the window of a closure with both times set, not the whole day", () => {
+    const dayOffs: PackageClosureDayOff[] = [
+      {
+        date: "2026-01-10",
+        timeStart: "10:00",
+        timeEnd: "14:00",
+        isRecurring: false,
+        packageIds: [5],
+        roomIds: [],
+      },
+    ];
+    const restricted = (start: number, end: number) =>
+      isPackageTimeSlotRestricted(dayOffs, 5, "2026-01-10", start, end, today);
+    assert.equal(restricted(9 * 60, 10 * 60), false);
+    assert.equal(restricted(11 * 60, 12 * 60), true);
+    assert.equal(restricted(13 * 60, 15 * 60), true);
+    assert.equal(restricted(14 * 60, 15 * 60), false);
+    assert.equal(restricted(17 * 60, 18 * 60), false);
+  });
+
+  it("blocks nothing for a backwards closure", () => {
+    const dayOffs: PackageClosureDayOff[] = [
+      {
+        date: "2026-01-10",
+        timeStart: "14:00",
+        timeEnd: "10:00",
+        isRecurring: false,
+        packageIds: [5],
+        roomIds: [],
+      },
+    ];
+    assert.equal(
+      isPackageTimeSlotRestricted(dayOffs, 5, "2026-01-10", 11 * 60, 12 * 60, today),
       false,
+    );
+  });
+
+  it("checks every closure on the date, not only the first", () => {
+    const dayOffs: PackageClosureDayOff[] = [
+      {
+        date: "2026-01-10",
+        timeStart: null,
+        timeEnd: "09:00",
+        isRecurring: false,
+        packageIds: [5],
+        roomIds: [],
+      },
+      {
+        date: "2026-01-10",
+        timeStart: "17:00",
+        timeEnd: null,
+        isRecurring: false,
+        packageIds: [],
+        roomIds: [],
+      },
+    ];
+    assert.equal(
+      isPackageTimeSlotRestricted(dayOffs, 5, "2026-01-10", 17 * 60, 18 * 60, today),
+      true,
     );
   });
 

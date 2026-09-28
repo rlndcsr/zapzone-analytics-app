@@ -1,4 +1,5 @@
-import { WEEKDAY_NAMES_LOWER, pad, toKey } from "../date/calendar";
+import { WEEKDAY_NAMES_LOWER, pad, toKey } from "../date/calendar.ts";
+import { isSlotBlockedByClosure, type Closure } from "../dayOffClosure.ts";
 
 import type { AvailabilitySchedule } from "../../services/attractionsService";
 import type { DayOff } from "../../services/dayOffsService";
@@ -13,8 +14,7 @@ import type { DayOff } from "../../services/dayOffsService";
  * in the UI) so the calendar only renders state it is handed.
  */
 
-/** One time-restricted closure on a date. Both null ⇒ full-day (never here). */
-export type Closure = { timeStart: string | null; timeEnd: string | null };
+export type { Closure };
 
 export type DayOffAvailability = {
   /** YYYY-MM-DD dates that are fully blocked (not selectable). */
@@ -32,38 +32,17 @@ const timeToMinutes = (time: string): number => {
   return h * 60 + (m || 0);
 };
 
-const addMinutesToTime = (time: string, minutes: number): string => {
+export const addMinutesToTime = (time: string, minutes: number): string => {
   const total = timeToMinutes(time) + minutes;
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 };
 
-/**
- * Whether a [slotStart, slotEnd) hour overlaps any closure. Mirrors the web
- * `isSlotBlockedByDayOff`: no times = whole day; only start = closes from then
- * on; only end = closed before then; both = blocks the [start, end) window.
- */
+/** Whether a [slotStart, slotEnd) hour runs into any closure (see dayOffClosure). */
 export const isSlotBlockedByDayOff = (
   slotStart: string,
   slotEnd: string,
   closures: Closure[],
-): boolean => {
-  const start = timeToMinutes(slotStart);
-  const end = timeToMinutes(slotEnd);
-  return closures.some(({ timeStart, timeEnd }) => {
-    if (!timeStart && !timeEnd) return true;
-    if (timeStart && !timeEnd) {
-      const close = timeToMinutes(timeStart);
-      return start >= close || end > close;
-    }
-    if (!timeStart && timeEnd) {
-      const open = timeToMinutes(timeEnd);
-      return start < open;
-    }
-    const rangeStart = timeToMinutes(timeStart as string);
-    const rangeEnd = timeToMinutes(timeEnd as string);
-    return start < rangeEnd && end > rangeStart;
-  });
-};
+): boolean => isSlotBlockedByClosure(slotStart, slotEnd, closures);
 
 /** Hourly "HH:MM" slots in [startTime, endTime). Mirrors web generateTimeSlots. */
 export const generateTimeSlots = (
@@ -125,19 +104,28 @@ export const availableTimeSlotsForDate = (
       );
 };
 
+/** What an edit screen's calendar needs from the location's day-offs. */
+export type EditDayOffSets = {
+  /** YYYY-MM-DD dates closed all day (not selectable). */
+  fullDayOffDates: Set<string>;
+  /** Timed closures keyed by date — those dates stay selectable, with limited hours. */
+  partialClosuresByDate: Record<string, Closure[]>;
+};
+
 /**
- * Full-day blocks only, using the same scope + recurrence rules as
- * {@link computeDayOffAvailability}. This is the web edit-purchase rule: a
- * time-restricted day-off is skipped outright there (no limited-hours state and
- * no slot trimming), so an edited purchase keeps every hour the web offers.
+ * The web edit-purchase rule, using the same scope + recurrence rules as
+ * {@link computeDayOffAvailability}: a closure without times takes the date
+ * off the calendar, a timed one leaves it selectable and trims its hours.
+ * Unlike the purchase flow, no limited day is promoted to a full one.
  * `applies` decides scoping for the entity being rescheduled.
  */
-function fullDayBlocks(
+function editDayOffSets(
   dayOffs: DayOff[],
   today: Date,
   applies: (off: DayOff) => boolean,
-): Set<string> {
-  const blocked = new Set<string>();
+): EditDayOffSets {
+  const fullDayOffDates = new Set<string>();
+  const partialClosuresByDate: Record<string, Closure[]> = {};
 
   for (const off of dayOffs) {
     const isLocationWide =
@@ -146,12 +134,12 @@ function fullDayBlocks(
       off.attractionIds.length === 0 &&
       off.eventIds.length === 0;
     if (!isLocationWide && !applies(off)) continue;
-    if (off.timeStart || off.timeEnd) continue;
 
     const normalized = off.date.substring(0, 10);
     const offDate = new Date(`${normalized}T00:00:00`);
     if (Number.isNaN(offDate.getTime())) continue;
 
+    const targetDates: string[] = [];
     if (off.isRecurring) {
       const curr = new Date(
         today.getFullYear(),
@@ -163,18 +151,30 @@ function fullDayBlocks(
         offDate.getMonth(),
         offDate.getDate(),
       );
-      if (curr >= today) blocked.add(toKey(curr));
-      blocked.add(toKey(next));
+      if (curr >= today) targetDates.push(toKey(curr));
+      targetDates.push(toKey(next));
     } else if (offDate >= today) {
-      blocked.add(normalized);
+      targetDates.push(normalized);
+    }
+
+    const hasTimeRestriction = !!(off.timeStart || off.timeEnd);
+    for (const dateStr of targetDates) {
+      if (hasTimeRestriction) {
+        (partialClosuresByDate[dateStr] ??= []).push({
+          timeStart: off.timeStart,
+          timeEnd: off.timeEnd,
+        });
+      } else {
+        fullDayOffDates.add(dateStr);
+      }
     }
   }
 
-  return blocked;
+  return { fullDayOffDates, partialClosuresByDate };
 }
 
-/** Full-day blocks for an attraction — the web EditPurchase calendar's set. */
-export function fullDayOffDatesFor({
+/** Day-off sets for an attraction — the web EditPurchase calendar's. */
+export function attractionEditDayOffs({
   dayOffs,
   attractionId,
   today,
@@ -182,17 +182,17 @@ export function fullDayOffDatesFor({
   dayOffs: DayOff[];
   attractionId: number;
   today: Date;
-}): Set<string> {
-  return fullDayBlocks(dayOffs, today, (off) =>
+}): EditDayOffSets {
+  return editDayOffSets(dayOffs, today, (off) =>
     off.attractionIds.includes(attractionId),
   );
 }
 
 /**
- * Full-day blocks for an event — the web EditEventPurchase calendar's set.
- * Same rules, scoped by `event_ids` instead of `attraction_ids`.
+ * Day-off sets for an event — the web EditEventPurchase calendar's. Same
+ * rules, scoped by `event_ids` instead of `attraction_ids`.
  */
-export function eventFullDayOffDatesFor({
+export function eventEditDayOffs({
   dayOffs,
   eventId,
   today,
@@ -200,8 +200,8 @@ export function eventFullDayOffDatesFor({
   dayOffs: DayOff[];
   eventId: number;
   today: Date;
-}): Set<string> {
-  return fullDayBlocks(dayOffs, today, (off) => off.eventIds.includes(eventId));
+}): EditDayOffSets {
+  return editDayOffSets(dayOffs, today, (off) => off.eventIds.includes(eventId));
 }
 
 /**

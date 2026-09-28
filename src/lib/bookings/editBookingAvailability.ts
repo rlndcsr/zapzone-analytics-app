@@ -1,4 +1,9 @@
 import { pad, toKey } from "../date/calendar.ts";
+import {
+  isSlotBlockedByClosure,
+  isSpanBlockedByClosure,
+  type Closure,
+} from "../dayOffClosure.ts";
 
 import type { AvailableSlot } from "../../services/bookingsService";
 import type { DayOff } from "../../services/dayOffsService";
@@ -24,8 +29,7 @@ import type { DayOff } from "../../services/dayOffsService";
  * only the walk-in staff picked, and stop advance notice gating admin").
  */
 
-/** One closure on a date. Both null ⇒ the whole day is closed. */
-export type Closure = { timeStart: string | null; timeEnd: string | null };
+export type { Closure };
 
 export type PackageClosures = {
   /** YYYY-MM-DD dates closed for the whole location — not selectable. */
@@ -126,13 +130,10 @@ export function packageClosures(
 }
 
 /**
- * Whether a [start, end) start time falls inside one of a date's closures.
- *
- * The web reads the two fields the way the venue means them: `timeStart` is
- * when the venue closes early (nothing may start at or after it, and nothing
- * may run past it), `timeEnd` is when it opens late (nothing may start before
- * it). A closure with neither is a whole day, which the backend already keeps
- * out of availability; it is treated as closed here too rather than as open.
+ * Whether a [start, end) booking runs into one of a date's closures, read the
+ * way the backend reads them (see dayOffClosure). A closure with neither time
+ * is a whole day, which the backend already keeps out of availability; it is
+ * treated as closed here too rather than as open.
  */
 export function isSlotClosed(
   closures: Closure[] | undefined,
@@ -140,22 +141,7 @@ export function isSlotClosed(
   endTime: string,
 ): boolean {
   if (!closures || closures.length === 0) return false;
-  const start = toMinutes(startTime);
-  const end = toMinutes(endTime);
-
-  return closures.some(({ timeStart, timeEnd }) => {
-    if (!timeStart && !timeEnd) return true;
-    if (timeStart) {
-      const closesAt = toMinutes(timeStart);
-      if (start >= closesAt) return true;
-      if (end > closesAt) return true;
-    }
-    if (timeEnd) {
-      const opensAt = toMinutes(timeEnd);
-      if (start < opensAt) return true;
-    }
-    return false;
-  });
+  return isSlotBlockedByClosure(startTime, endTime, closures);
 }
 
 /**
@@ -212,25 +198,40 @@ export type CurrentSlotSeed = {
   time: string;
   durationMinutes: number;
   roomId: number | null;
+  /** YYYY-MM-DD the booking is saved on; its start only belongs on that day. */
+  date?: string;
 };
 
 /**
  * Availability no longer offers starts that have already gone by, so a booking
  * edited later the same day would lose its own time from the list. Put it back
- * where it belongs in the order, exactly once.
+ * where it belongs in the order, exactly once — but only on the booking's own
+ * date, and never inside a closure: a time the venue is now shut would only
+ * be refused on save.
  */
 export function withCurrentTimeSlot(
   slots: AvailableSlot[],
   selectedTime: string,
   current: CurrentSlotSeed | null,
+  { selectedDate, closures }: { selectedDate?: string; closures?: Closure[] } = {},
 ): AvailableSlot[] {
   if (!selectedTime || !current) return slots;
   if (current.time !== selectedTime) return slots;
+  if (current.date && selectedDate !== undefined && current.date !== selectedDate)
+    return slots;
   if (slots.some((slot) => slot.startTime === selectedTime)) return slots;
 
-  const endTotal =
-    (toMinutes(selectedTime) + Math.max(0, current.durationMinutes)) %
-    (24 * 60);
+  const startMinutes = toMinutes(selectedTime);
+  const duration = Math.max(0, current.durationMinutes);
+  if (
+    closures &&
+    closures.length > 0 &&
+    isSpanBlockedByClosure(startMinutes, startMinutes + duration, closures)
+  ) {
+    return slots;
+  }
+
+  const endTotal = (startMinutes + duration) % (24 * 60);
 
   const seeded: AvailableSlot = {
     startTime: selectedTime,

@@ -63,6 +63,7 @@ import {
   BLOCK_BORDER,
   bookingStretchSpans,
   buildColumns,
+  closedMinuteRanges,
   closureBoundaryMinutes,
   closureLabel,
   columnKeyFor,
@@ -80,6 +81,7 @@ import {
   TURNAROUND_LABEL_MIN_HEIGHT,
   UNCATEGORIZED_LABEL,
   ZOOM_LEVELS,
+  type ClosedMinuteRange,
   type PositionedBooking,
   type ScheduleColumn,
   type SpaceClosure,
@@ -534,6 +536,7 @@ const GridColumnBackground = ({
   column,
   breaks,
   closure,
+  closedRanges,
   timeWindow,
   scale,
   meta,
@@ -550,6 +553,8 @@ const GridColumnBackground = ({
   column: ScheduleColumn;
   breaks: { start: number; end: number }[];
   closure: SpaceClosure | undefined;
+  /** Timed closures from both the day-offs and the day window, merged. */
+  closedRanges: ClosedMinuteRange[];
   timeWindow: TimeWindow;
   scale: MinuteScale;
   meta: {
@@ -704,15 +709,9 @@ const GridColumnBackground = ({
         </View>
       )}
       {!closure?.fullDay &&
-        closure?.ranges.map((r, i) => {
-          const start = Math.max(
-            r.timeStart ? timeToMinutes(r.timeStart) : timeWindow.start,
-            timeWindow.start,
-          );
-          const end = Math.min(
-            r.timeEnd ? timeToMinutes(r.timeEnd) : timeWindow.end,
-            timeWindow.end,
-          );
+        closedRanges.map((range, i) => {
+          const start = Math.max(range.start, timeWindow.start);
+          const end = Math.min(range.end, timeWindow.end);
           if (end <= start) return null;
           return (
             <View
@@ -781,6 +780,7 @@ const ScheduleGrid = ({
   positionedByColumn,
   breaksByRoom,
   closuresBySpace,
+  closedRangesFor,
   timeWindow,
   scale,
   nowTop,
@@ -813,6 +813,8 @@ const ScheduleGrid = ({
   positionedByColumn: Map<string, PositionedBooking[]>;
   breaksByRoom: Map<number, { start: number; end: number }[]>;
   closuresBySpace: Map<number, SpaceClosure>;
+  /** Every closed stretch of a space, from the day-offs and the day window. */
+  closedRangesFor: (roomId: number | null) => ClosedMinuteRange[];
   timeWindow: TimeWindow;
   scale: MinuteScale;
   nowTop: number | null;
@@ -960,7 +962,7 @@ const ScheduleGrid = ({
                   </View>
                 )}
                 {column.roomId != null &&
-                  closuresBySpace.has(column.roomId) && (
+                  closureLabel(closuresBySpace.get(column.roomId)) != null && (
                     <View className="mt-0.5 px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40">
                       <Text
                         className="text-[9px] font-semibold text-red-600 dark:text-red-400"
@@ -977,7 +979,7 @@ const ScheduleGrid = ({
                   if (
                     state.kind === "closed" &&
                     column.roomId != null &&
-                    closuresBySpace.has(column.roomId)
+                    closureLabel(closuresBySpace.get(column.roomId)) != null
                   ) {
                     return null;
                   }
@@ -1183,6 +1185,7 @@ const ScheduleGrid = ({
                           ? closuresBySpace.get(column.roomId)
                           : undefined
                       }
+                      closedRanges={closedRangesFor(column.roomId)}
                       timeWindow={timeWindow}
                       scale={scale}
                       meta={
@@ -1544,6 +1547,9 @@ const SpaceScheduleScreen = () => {
         dayOffs,
         selectedDate,
         spaceIds: sortedSpaces.map((s) => s.id),
+        spaceLocationIds: new Map(
+          sortedSpaces.map((s) => [s.id, s.locationId ?? null]),
+        ),
       }),
     [dayOffs, selectedDate, sortedSpaces],
   );
@@ -1576,6 +1582,11 @@ const SpaceScheduleScreen = () => {
         bookable: boolean;
         reason: string | null;
         interval: number | null;
+        closedRanges: {
+          startMinutes: number;
+          endMinutes: number;
+          reason: string | null;
+        }[];
       }
     >();
     for (const entry of dayWindow?.rooms ?? []) {
@@ -1586,6 +1597,11 @@ const SpaceScheduleScreen = () => {
         bookable: entry.bookable !== false,
         reason: entry.reason,
         interval: entry.interval_minutes ?? null,
+        closedRanges: (entry.closed_ranges ?? []).map((r) => ({
+          startMinutes: r.start_minutes,
+          endMinutes: r.end_minutes,
+          reason: r.reason,
+        })),
       });
     }
     return map;
@@ -1884,36 +1900,52 @@ const SpaceScheduleScreen = () => {
     return map;
   }, [activeBookings, knownRoomIds, roomWindows]);
 
+  /**
+   * A space's timed closures from both channels — the day-offs fetched for the
+   * location and the day window's own `closed_ranges`. The All-locations view
+   * has no day-off fetch, so without the second it would show no closure.
+   */
+  const closedRangesFor = useCallback(
+    (
+      roomId: number | null,
+      bounds: { start: number; end: number } = timeWindow,
+    ): ClosedMinuteRange[] => {
+      if (roomId == null) return [];
+      const closure = spaceClosures.get(roomId);
+      if (closure?.fullDay) return [];
+      return closedMinuteRanges({
+        closure,
+        serverRanges: roomWindows.get(roomId)?.closedRanges ?? [],
+        window: bounds,
+      });
+    },
+    [spaceClosures, roomWindows, timeWindow],
+  );
+
   /** Breaks and closures. The server buffers neither, so neither may the grid. */
   const hardRangesFor = useCallback(
     (
       column: ScheduleColumn,
       meta: { open: number | null; close: number | null },
-    ): TimeRange[] => {
-      const closure =
-        column.roomId != null ? spaceClosures.get(column.roomId) : undefined;
-      return [
-        ...(column.roomId != null
-          ? (roomBreaks.get(column.roomId) ?? []).map((b) => ({
-              startMinutes: b.start,
-              endMinutes: b.end,
-              reason: "On break",
-            }))
-          : []),
-        ...(closure && !closure.fullDay
-          ? closure.ranges.map((r) => ({
-              startMinutes: r.timeStart
-                ? timeToMinutes(r.timeStart)
-                : (meta.open ?? timeWindow.start),
-              endMinutes: r.timeEnd
-                ? timeToMinutes(r.timeEnd)
-                : (meta.close ?? timeWindow.end),
-              reason: "Closed",
-            }))
-          : []),
-      ];
-    },
-    [roomBreaks, spaceClosures, timeWindow],
+    ): TimeRange[] => [
+      ...(column.roomId != null
+        ? (roomBreaks.get(column.roomId) ?? []).map((b) => ({
+            startMinutes: b.start,
+            endMinutes: b.end,
+            reason: "On break",
+          }))
+        : []),
+      // an open-ended closure runs to the space's own open / close
+      ...closedRangesFor(column.roomId, {
+        start: meta.open ?? timeWindow.start,
+        end: meta.close ?? timeWindow.end,
+      }).map((r) => ({
+        startMinutes: r.start,
+        endMinutes: r.end,
+        reason: r.reason,
+      })),
+    ],
+    [roomBreaks, closedRangesFor, timeWindow],
   );
 
   const blockedRangesFor = useCallback(
@@ -2071,7 +2103,13 @@ const SpaceScheduleScreen = () => {
     (column: ScheduleColumn, minute: number): number[] => {
       if (column.virtual) {
         const id = Number(column.key.replace("pkg-", ""));
-        return Number.isInteger(id) && id > 0 ? [id] : [];
+        if (!Number.isInteger(id) || id <= 0) return [];
+        // A room-less package column is shut wherever its own closure runs.
+        const entry = dayWindow?.packages.find((p) => p.package_id === id);
+        const closedNow = (entry?.closed_ranges ?? []).some(
+          (r) => minute >= r.start_minutes && minute < r.end_minutes,
+        );
+        return closedNow ? [] : [id];
       }
       if (column.roomId == null) return [];
       const candidates = (dayWindow?.packages ?? []).map((entry) => ({
@@ -3019,6 +3057,7 @@ const SpaceScheduleScreen = () => {
               positionedByColumn={positionedByColumn}
               breaksByRoom={roomBreaks}
               closuresBySpace={spaceClosures}
+              closedRangesFor={closedRangesFor}
               timeWindow={timeWindow}
               scale={scale}
               nowTop={nowTop}

@@ -5,6 +5,7 @@ import type { ScheduleBooking } from "../../services/bookingsService.ts";
 import {
   assignLanes,
   buildColumns,
+  closedMinuteRanges,
   closureBoundaryMinutes,
   closureLabel,
   columnKeyFor,
@@ -766,6 +767,31 @@ describe("computeSpaceClosures", () => {
     const map = computeSpaceClosures({ dayOffs, selectedDate, spaceIds: [1] });
     assert.equal(map.size, 0);
   });
+
+  it("keeps a venue-wide closure off another venue's spaces", () => {
+    const dayOffs = [
+      {
+        date: "2026-09-15",
+        isRecurring: false,
+        timeStart: "10:00",
+        timeEnd: "14:00",
+        isLocationWide: true,
+        roomIds: [],
+        locationId: 3,
+      },
+    ];
+    const map = computeSpaceClosures({
+      dayOffs,
+      selectedDate,
+      spaceIds: [1, 2],
+      spaceLocationIds: new Map([
+        [1, 3],
+        [2, 4],
+      ]),
+    });
+    assert.ok(map.has(1));
+    assert.ok(!map.has(2));
+  });
 });
 
 describe("closureBoundaryMinutes / closureLabel", () => {
@@ -817,6 +843,83 @@ describe("closureBoundaryMinutes / closureLabel", () => {
 
   it("is null when there is no closure at all", () => {
     assert.equal(closureLabel(undefined), null);
+  });
+
+  it("leaves out a backwards range, and says nothing when that was all there was", () => {
+    assert.equal(
+      closureLabel({
+        fullDay: false,
+        ranges: [{ timeStart: "14:00", timeEnd: "10:00" }],
+      }),
+      null,
+    );
+    assert.equal(
+      closureLabel({
+        fullDay: false,
+        ranges: [
+          { timeStart: "14:00", timeEnd: "10:00" },
+          { timeStart: "17:00", timeEnd: null },
+        ],
+      }),
+      "Closed after 5 PM",
+    );
+  });
+});
+
+describe("closedMinuteRanges", () => {
+  const window = { start: 8 * 60, end: 22 * 60 };
+
+  it("draws the day-offs' closures, open ends running to the window's edge", () => {
+    assert.deepEqual(
+      closedMinuteRanges({
+        closure: {
+          fullDay: false,
+          ranges: [
+            { timeStart: "10:00", timeEnd: "14:00" },
+            { timeStart: "18:00", timeEnd: null },
+            { timeStart: null, timeEnd: "09:00" },
+          ],
+        },
+        serverRanges: [],
+        window,
+      }),
+      [
+        { start: 600, end: 840, reason: "Closed" },
+        { start: 1080, end: 1320, reason: "Closed" },
+        { start: 480, end: 540, reason: "Closed" },
+      ],
+    );
+  });
+
+  it("uses the day window's own ranges when there are no day-offs — the All-locations view", () => {
+    assert.deepEqual(
+      closedMinuteRanges({
+        closure: undefined,
+        serverRanges: [{ startMinutes: 600, endMinutes: 840, reason: "Staff training" }],
+        window,
+      }),
+      [{ start: 600, end: 840, reason: "Staff training" }],
+    );
+  });
+
+  it("draws the same closure once when both channels carry it", () => {
+    const out = closedMinuteRanges({
+      closure: { fullDay: false, ranges: [{ timeStart: "10:00", timeEnd: "14:00" }] },
+      serverRanges: [{ startMinutes: 600, endMinutes: 840, reason: null }],
+      window,
+    });
+    assert.equal(out.length, 1);
+  });
+
+  it("drops a backwards range and an empty one", () => {
+    assert.deepEqual(
+      closedMinuteRanges({
+        closure: { fullDay: false, ranges: [{ timeStart: "14:00", timeEnd: "10:00" }] },
+        serverRanges: [{ startMinutes: 700, endMinutes: 700, reason: null }],
+        window,
+      }),
+      [],
+    );
   });
 });
 

@@ -226,7 +226,12 @@ export function packageIdsForSlot({
 }): number[] {
   if (column.roomId == null) {
     const entry = packagesForColumn(column, dayWindow)[0];
-    return entry ? [entry.package_id] : [];
+    if (!entry) return [];
+    // A room-less package column is shut wherever its own closure runs.
+    const closedNow = (entry.closed_ranges ?? []).some(
+      (r) => minute >= r.start_minutes && minute < r.end_minutes,
+    );
+    return closedNow ? [] : [entry.package_id];
   }
   const candidates = (dayWindow?.packages ?? []).map((entry) => ({
     packageId: entry.package_id,

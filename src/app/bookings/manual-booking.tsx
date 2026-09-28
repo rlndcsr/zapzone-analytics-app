@@ -37,6 +37,8 @@ import {
 } from "../../lib/addOnQuantity";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { packageIsCallToBook } from "../../lib/callToBook";
+import { bookingDurationMinutes } from "../../lib/bookings/editBookingAvailability";
+import { isPackageTimeSlotRestricted } from "../../lib/bookings/packageCandidates";
 import {
   clampParticipants,
   participantLimitsLabel,
@@ -76,6 +78,10 @@ import {
   type AuthorizeNetPublicKey,
 } from "../../services/paymentsService";
 import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
+import {
+  fetchDayOffsByLocation,
+  type DayOff,
+} from "../../services/dayOffsService";
 import {
   buildAppliedDiscounts,
   buildAppliedFees,
@@ -634,6 +640,48 @@ const ManualBookingScreen = () => {
 
   const effectiveLocationId =
     pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
+
+  // Flexible mode takes any typed time, so the venue's timed closures are
+  // loaded to warn when that time would be refused (web ManualBooking).
+  const [flexibleDayOffs, setFlexibleDayOffs] = useState<DayOff[]>([]);
+  useEffect(() => {
+    if (bookingMode !== "flexible" || effectiveLocationId == null) {
+      setFlexibleDayOffs([]);
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchDayOffsByLocation(token, effectiveLocationId, controller.signal)
+      .then(setFlexibleDayOffs)
+      .catch(() => {
+        if (!controller.signal.aborted) setFlexibleDayOffs([]);
+      });
+    return () => controller.abort();
+  }, [bookingMode, effectiveLocationId]);
+
+  const flexibleClosureWarning = useMemo(() => {
+    if (bookingMode !== "flexible" || !pkg || !scheduledDate || !scheduledTime)
+      return null;
+    const [h, m] = scheduledTime.split(":").map(Number);
+    if (!Number.isFinite(h)) return null;
+    const start = h * 60 + (Number.isFinite(m) ? m : 0);
+    const end = start + bookingDurationMinutes(pkg.duration, pkg.durationUnit);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (
+      !isPackageTimeSlotRestricted(
+        flexibleDayOffs,
+        pkg.id,
+        scheduledDate,
+        start,
+        end,
+        today,
+      )
+    )
+      return null;
+    return "The venue is closed at this time, so this booking will be refused on save.";
+  }, [bookingMode, pkg, scheduledDate, scheduledTime, flexibleDayOffs]);
 
   /**
    * Call to Book: no usable schedule on the selected package. `schedules` is
@@ -1675,6 +1723,11 @@ const ManualBookingScreen = () => {
                     </View>
                     <Feather name="chevron-down" size={16} color="#9ca3af" />
                   </Pressable>
+                  )}
+                  {!!flexibleClosureWarning && (
+                    <Text className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">
+                      {flexibleClosureWarning}
+                    </Text>
                   )}
                 </View>
 

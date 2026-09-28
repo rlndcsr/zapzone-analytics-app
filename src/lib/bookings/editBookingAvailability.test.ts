@@ -180,6 +180,21 @@ describe("isSlotClosed", () => {
       true,
     );
   });
+
+  it("a closure with both times shuts only the window between them", () => {
+    const closures = [{ timeStart: "10:00", timeEnd: "14:00" }];
+    assert.equal(isSlotClosed(closures, "08:00", "10:00"), false);
+    assert.equal(isSlotClosed(closures, "11:00", "12:00"), true);
+    assert.equal(isSlotClosed(closures, "13:00", "15:00"), true);
+    assert.equal(isSlotClosed(closures, "14:00", "16:00"), false);
+    assert.equal(isSlotClosed(closures, "17:00", "19:00"), false);
+  });
+
+  it("a backwards closure shuts nothing", () => {
+    const closures = [{ timeStart: "14:00", timeEnd: "10:00" }];
+    assert.equal(isSlotClosed(closures, "11:00", "12:00"), false);
+    assert.equal(isSlotClosed(closures, "15:00", "16:00"), false);
+  });
 });
 
 describe("bookingWindowEndKey", () => {
@@ -269,6 +284,38 @@ describe("withCurrentTimeSlot", () => {
     assert.equal(withCurrentTimeSlot(slots, "14:00", current), slots);
     assert.equal(withCurrentTimeSlot(slots, "", current), slots);
     assert.equal(withCurrentTimeSlot(slots, "12:00", null), slots);
+  });
+
+  it("only puts the start back on the booking's own date", () => {
+    const seed = { ...current, date: "2026-09-25" };
+    const slots = [slot("14:00", "15:00")];
+    assert.equal(
+      withCurrentTimeSlot(slots, "12:00", seed, { selectedDate: "2026-09-26" }),
+      slots,
+    );
+    assert.equal(
+      withCurrentTimeSlot(slots, "12:00", seed, { selectedDate: "2026-09-25" })
+        .length,
+      2,
+    );
+  });
+
+  it("does not put the start back inside a closure", () => {
+    const slots = [slot("16:00", "17:00")];
+    const seed = { time: "12:00", durationMinutes: 60, roomId: 7 };
+    assert.equal(
+      withCurrentTimeSlot(slots, "12:00", seed, {
+        closures: [{ timeStart: "11:00", timeEnd: "13:00" }],
+      }),
+      slots,
+    );
+    // a closure that is over before the booking starts leaves it in
+    assert.equal(
+      withCurrentTimeSlot(slots, "12:00", seed, {
+        closures: [{ timeStart: "09:00", timeEnd: "11:00" }],
+      }).length,
+      2,
+    );
   });
 
   it("wraps an end time past midnight", () => {

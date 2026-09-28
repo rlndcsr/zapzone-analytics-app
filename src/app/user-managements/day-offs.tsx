@@ -20,6 +20,7 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { SelectField, type SelectOption } from "../../components/ui/FormControls";
 import { Pagination } from "../../components/ui/Pagination";
 import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
+import { closureRangeIsValid, describeClosure } from "../../lib/dayOffClosure";
 import { useDayOffs } from "../../lib/hooks/useDayOffs";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -174,6 +175,14 @@ function isPastYmd(dateStr: string): boolean {
 }
 
 const timeRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+const BACKWARDS_CLOSURE = '"Closed Until" has to be later than "Closed From"';
+
+/** Both times set, with the reopening at or before the closing. */
+const closureRangeIsInvalid = (start: string, end: string): boolean =>
+  !!start &&
+  !!end &&
+  !closureRangeIsValid({ timeStart: start, timeEnd: end });
 
 /* ------------------------------------------------------------- components -- */
 
@@ -396,6 +405,82 @@ function PickerField({
   );
 }
 
+/**
+ * The Partial Day Closure fields (web parity): Closed From, then Closed Until,
+ * the window between them being when the venue is shut — with the closure in
+ * plain English beneath, or why it cannot be saved.
+ */
+function ClosureTimeFields({
+  timeStart,
+  timeEnd,
+  onPickStart,
+  onPickEnd,
+  onClearStart,
+  onClearEnd,
+}: {
+  timeStart: string;
+  timeEnd: string;
+  onPickStart: () => void;
+  onPickEnd: () => void;
+  onClearStart: () => void;
+  onClearEnd: () => void;
+}) {
+  return (
+    <>
+      <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+        These times mark the window that is{" "}
+        <Text className="font-medium">closed</Text>. Leave both empty to close
+        the whole day. Set only &quot;Closed Until&quot; for a delayed opening
+        — that is the time it reopens.
+      </Text>
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+            Closed From
+          </Text>
+          <PickerField
+            icon="clock"
+            value={prettyTime(timeStart)}
+            placeholder="--:-- --"
+            onPress={onPickStart}
+            onClear={onClearStart}
+          />
+          <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+            Blank means closed from opening time
+          </Text>
+        </View>
+        <View className="flex-1">
+          <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+            Closed Until
+          </Text>
+          <PickerField
+            icon="clock"
+            value={prettyTime(timeEnd)}
+            placeholder="--:-- --"
+            onPress={onPickEnd}
+            onClear={onClearEnd}
+          />
+          <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+            Reopens at this time; blank means closed for the rest of the day
+          </Text>
+        </View>
+      </View>
+      {closureRangeIsInvalid(timeStart, timeEnd) ? (
+        <Text className="text-xs text-red-600 dark:text-red-400 mt-2">
+          {BACKWARDS_CLOSURE}.
+        </Text>
+      ) : (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          {describeClosure({
+            timeStart: timeStart || null,
+            timeEnd: timeEnd || null,
+          })}
+        </Text>
+      )}
+    </>
+  );
+}
+
 /** The web's six-tile "What should be blocked?" grid. */
 function ScopeGrid({
   scope,
@@ -605,8 +690,8 @@ type FormState = {
   reason: string;
   locationId: number | null;
   isRecurring: boolean;
-  /** Partial-day (empty = full day). timeStart = close starting at,
-   *  timeEnd = delayed opening until — matches the web's field inversion. */
+  /** Partial-day (empty = full day): the window the venue is shut —
+   *  timeStart = Closed From, timeEnd = Closed Until (when it reopens). */
   timeStart: string;
   timeEnd: string;
   scope: BlockingScope;
@@ -699,8 +784,8 @@ const DayOffs = () => {
   });
   const [bulkReason, setBulkReason] = useState("");
   const [bulkIsRecurring, setBulkIsRecurring] = useState(false);
-  // Partial-day closure (empty = full day). timeEnd = delayed opening until,
-  // timeStart = close starting at (matches the web field/name inversion).
+  // Partial-day closure (empty = full day): timeStart = Closed From,
+  // timeEnd = Closed Until (when it reopens).
   const [bulkTimeStart, setBulkTimeStart] = useState("");
   const [bulkTimeEnd, setBulkTimeEnd] = useState("");
   const [bulkLocationId, setBulkLocationId] = useState<number | null>(
@@ -863,11 +948,15 @@ const DayOffs = () => {
       return;
     }
     if (form.timeStart && !timeRe.test(form.timeStart)) {
-      Alert.alert("Invalid time", '"Close Starting At" must be in 24-hour HH:mm format.');
+      Alert.alert("Invalid time", '"Closed From" must be in 24-hour HH:mm format.');
       return;
     }
     if (form.timeEnd && !timeRe.test(form.timeEnd)) {
-      Alert.alert("Invalid time", '"Delayed Opening Until" must be in 24-hour HH:mm format.');
+      Alert.alert("Invalid time", '"Closed Until" must be in 24-hour HH:mm format.');
+      return;
+    }
+    if (closureRangeIsInvalid(form.timeStart, form.timeEnd)) {
+      Alert.alert("Invalid time", BACKWARDS_CLOSURE);
       return;
     }
 
@@ -1097,11 +1186,15 @@ const DayOffs = () => {
       return;
     }
     if (bulkTimeStart && !timeRe.test(bulkTimeStart)) {
-      Alert.alert("Invalid time", '"Close Starting At" must be in 24-hour HH:mm format.');
+      Alert.alert("Invalid time", '"Closed From" must be in 24-hour HH:mm format.');
       return;
     }
     if (bulkTimeEnd && !timeRe.test(bulkTimeEnd)) {
-      Alert.alert("Invalid time", '"Delayed Opening Until" must be in 24-hour HH:mm format.');
+      Alert.alert("Invalid time", '"Closed Until" must be in 24-hour HH:mm format.');
+      return;
+    }
+    if (closureRangeIsInvalid(bulkTimeStart, bulkTimeEnd)) {
+      Alert.alert("Invalid time", BACKWARDS_CLOSURE);
       return;
     }
 
@@ -1598,42 +1691,14 @@ const DayOffs = () => {
                 (Optional)
               </Text>
             </Text>
-            <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-              Leave both empty for full day closure. Set one or both for partial
-              closures.
-            </Text>
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Delayed Opening Until
-                </Text>
-                <PickerField
-                  icon="clock"
-                  value={prettyTime(form.timeEnd)}
-                  placeholder="--:-- --"
-                  onPress={() => setSheet("formTimeEnd")}
-                  onClear={() => setForm((f) => ({ ...f, timeEnd: "" }))}
-                />
-                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                  Closed until this time
-                </Text>
-              </View>
-              <View className="flex-1">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Close Starting At
-                </Text>
-                <PickerField
-                  icon="clock"
-                  value={prettyTime(form.timeStart)}
-                  placeholder="--:-- --"
-                  onPress={() => setSheet("formTimeStart")}
-                  onClear={() => setForm((f) => ({ ...f, timeStart: "" }))}
-                />
-                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                  Closed from this time
-                </Text>
-              </View>
-            </View>
+            <ClosureTimeFields
+              timeStart={form.timeStart}
+              timeEnd={form.timeEnd}
+              onPickStart={() => setSheet("formTimeStart")}
+              onPickEnd={() => setSheet("formTimeEnd")}
+              onClearStart={() => setForm((f) => ({ ...f, timeStart: "" }))}
+              onClearEnd={() => setForm((f) => ({ ...f, timeEnd: "" }))}
+            />
           </SectionCard>
 
           {/* Recurring */}
@@ -1695,7 +1760,7 @@ const DayOffs = () => {
       <TimePickerSheet
         visible={sheet === "formTimeEnd"}
         value={form.timeEnd}
-        title="Delayed Opening Until"
+        title="Closed Until"
         onClose={() => setSheet("form")}
         onSelect={(time) => {
           setForm((f) => ({ ...f, timeEnd: time }));
@@ -1705,7 +1770,7 @@ const DayOffs = () => {
       <TimePickerSheet
         visible={sheet === "formTimeStart"}
         value={form.timeStart}
-        title="Close Starting At"
+        title="Closed From"
         onClose={() => setSheet("form")}
         onSelect={(time) => {
           setForm((f) => ({ ...f, timeStart: time }));
@@ -1872,42 +1937,14 @@ const DayOffs = () => {
                 (Optional)
               </Text>
             </Text>
-            <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-              Leave both empty for full day closure. Set one or both for partial
-              closures.
-            </Text>
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Delayed Opening Until
-                </Text>
-                <PickerField
-                  icon="clock"
-                  value={prettyTime(bulkTimeEnd)}
-                  placeholder="--:-- --"
-                  onPress={() => setSheet("bulkTimeEnd")}
-                  onClear={() => setBulkTimeEnd("")}
-                />
-                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                  Closed until this time
-                </Text>
-              </View>
-              <View className="flex-1">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Close Starting At
-                </Text>
-                <PickerField
-                  icon="clock"
-                  value={prettyTime(bulkTimeStart)}
-                  placeholder="--:-- --"
-                  onPress={() => setSheet("bulkTimeStart")}
-                  onClear={() => setBulkTimeStart("")}
-                />
-                <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                  Closed from this time
-                </Text>
-              </View>
-            </View>
+            <ClosureTimeFields
+              timeStart={bulkTimeStart}
+              timeEnd={bulkTimeEnd}
+              onPickStart={() => setSheet("bulkTimeStart")}
+              onPickEnd={() => setSheet("bulkTimeEnd")}
+              onClearStart={() => setBulkTimeStart("")}
+              onClearEnd={() => setBulkTimeEnd("")}
+            />
           </SectionCard>
 
           {/* Recurring */}
@@ -1947,7 +1984,7 @@ const DayOffs = () => {
       <TimePickerSheet
         visible={sheet === "bulkTimeEnd"}
         value={bulkTimeEnd}
-        title="Delayed Opening Until"
+        title="Closed Until"
         onClose={() => setSheet("bulk")}
         onSelect={(time) => {
           setBulkTimeEnd(time);
@@ -1957,7 +1994,7 @@ const DayOffs = () => {
       <TimePickerSheet
         visible={sheet === "bulkTimeStart"}
         value={bulkTimeStart}
-        title="Close Starting At"
+        title="Closed From"
         onClose={() => setSheet("bulk")}
         onSelect={(time) => {
           setBulkTimeStart(time);

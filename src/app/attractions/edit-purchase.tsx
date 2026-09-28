@@ -28,8 +28,11 @@ import { InputField } from "../../components/ui/InputField";
 import { ScheduleCalendar } from "../../components/ui/ScheduleCalendar";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import {
-  fullDayOffDatesFor,
+  addMinutesToTime,
+  attractionEditDayOffs,
   generateTimeSlots,
+  isSlotBlockedByDayOff,
+  type Closure,
 } from "../../lib/attractions/dayOffAvailability";
 import { purchaseTextFields } from "../../lib/attractions/purchaseEditPayload";
 import {
@@ -343,6 +346,7 @@ const EditPurchaseScreen = () => {
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [dayOffDates, setDayOffDates] = useState<Set<string>>(new Set());
+  const [partialDayOffs, setPartialDayOffs] = useState<Record<string, Closure[]>>({});
   const [selectedAddOns, setSelectedAddOns] = useState<Record<number, number>>({});
   const [appliedFees, setAppliedFees] = useState<FeeDraft[]>([]);
   const [appliedDiscounts, setAppliedDiscounts] = useState<DiscountDraft[]>([]);
@@ -615,18 +619,29 @@ const EditPurchaseScreen = () => {
     const token = getToken();
     if (!token || locationId == null || attractionId == null) {
       setDayOffDates(new Set());
+      setPartialDayOffs({});
       return;
     }
     const controller = new AbortController();
     fetchDayOffsByLocation(token, locationId, controller.signal)
-      .then((dayOffs) =>
-        setDayOffDates(fullDayOffDatesFor({ dayOffs, attractionId, today })),
-      )
+      .then((dayOffs) => {
+        const sets = attractionEditDayOffs({ dayOffs, attractionId, today });
+        setDayOffDates(sets.fullDayOffDates);
+        setPartialDayOffs(sets.partialClosuresByDate);
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setDayOffDates(new Set());
+        if (controller.signal.aborted) return;
+        setDayOffDates(new Set());
+        setPartialDayOffs({});
       });
     return () => controller.abort();
   }, [locationId, attractionId, today]);
+
+  // Days with a timed closure stay pickable, marked as limited hours.
+  const partialDayOffDates = useMemo(
+    () => new Set(Object.keys(partialDayOffs)),
+    [partialDayOffs],
+  );
 
   // The purchase's own visit date is never blocked by a day-off added later.
   const effectiveDayOffDates = useMemo(() => {
@@ -642,8 +657,13 @@ const EditPurchaseScreen = () => {
     const daySlot = attractionAvailability.find((s) =>
       s.days.map((d) => d.toLowerCase()).includes(weekday),
     );
+    // An hour the venue is shut for is not offered.
+    const closures = partialDayOffs[scheduledDate] ?? [];
     let slots = daySlot
-      ? generateTimeSlots(daySlot.start_time, daySlot.end_time, 60)
+      ? generateTimeSlots(daySlot.start_time, daySlot.end_time, 60).filter(
+          (slot) =>
+            !isSlotBlockedByDayOff(slot, addMinutesToTime(slot, 60), closures),
+        )
       : [];
     // The saved time survives even if it falls outside the current window.
     if (
@@ -660,6 +680,7 @@ const EditPurchaseScreen = () => {
     attractionAvailability,
     originalScheduledDate,
     originalScheduledTime,
+    partialDayOffs,
   ]);
 
   /* --- Save ---------------------------------------------------------------- */
@@ -1019,6 +1040,7 @@ const EditPurchaseScreen = () => {
               <ScheduleCalendar
                 availability={scheduleAvailability}
                 dayOffDates={effectiveDayOffDates}
+                limitedDates={partialDayOffDates}
                 scheduledDate={scheduledDate}
                 scheduledTime={scheduledTime}
                 availableTimeSlots={availableTimeSlots}

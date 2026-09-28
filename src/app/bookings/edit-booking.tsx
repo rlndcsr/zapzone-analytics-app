@@ -774,9 +774,13 @@ const EditBookingScreen = () => {
       time: originalTime,
       durationMinutes: bookingDurationMinutes(detail.duration, detail.durationUnit),
       roomId: detail.roomId,
+      date: originalDate,
     } : null;
-    return withCurrentTimeSlot(filtered, time, current);
-  }, [availableSlots, closuresByDate, date, time, originalTime, detail]);
+    return withCurrentTimeSlot(filtered, time, current, {
+      selectedDate: date,
+      closures,
+    });
+  }, [availableSlots, closuresByDate, date, time, originalTime, originalDate, detail]);
 
   // Package catalog plus any add-on the booking already carries that the package
   // no longer offers (kept selectable, flat-priced) — the web's availableAddOns.

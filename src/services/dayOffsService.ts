@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { closureRangeIsValid, describeClosure } from "../lib/dayOffClosure";
 
 /*
  * Day-off (blocked dates) API client — mirrors the web admin's day-off service
@@ -30,7 +31,7 @@ export type DayOff = {
   isLocationWide: boolean;
   /** "Entire Location" | "N Attractions" | "N Events" | "N Resources" | … */
   scopeLabel: string;
-  /** "Full Day" | "Close Early" | "Delayed Opening" | "9:00 AM – 5:00 PM". */
+  /** "Full Day" | "Closed from 4:00 PM" | "Closed until 12:00 PM" | "Closed 10:00 AM - 2:00 PM". */
   durationLabel: string;
 };
 
@@ -65,25 +66,12 @@ type DayOffsListResponse = {
 
 /* ---------------------------------------------------------------- helpers -- */
 
-/** "14:30:00" | "14:30" → "2:30 PM". */
-function prettyTime(t: string | null): string | null {
-  if (!t) return null;
-  const [hStr, mStr] = t.split(":");
-  const h = Number(hStr);
-  const m = Number(mStr ?? 0);
-  if (Number.isNaN(h)) return t;
-  const period = h >= 12 ? "PM" : "AM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
-}
-
+/** The closure in the web's words; a backwards range is flagged, since it blocks nothing. */
 function durationLabel(start: string | null, end: string | null): string {
-  const s = prettyTime(start);
-  const e = prettyTime(end);
-  if (!s && !e) return "Full Day";
-  if (s && !e) return `Close Early (from ${s})`;
-  if (!s && e) return `Delayed Opening (until ${e})`;
-  return `${s} – ${e}`;
+  const closure = { timeStart: start || null, timeEnd: end || null };
+  if (!closure.timeStart && !closure.timeEnd) return "Full Day";
+  const label = describeClosure(closure);
+  return closureRangeIsValid(closure) ? label : `${label} (invalid range)`;
 }
 
 /**

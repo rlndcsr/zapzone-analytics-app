@@ -30,7 +30,7 @@ import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
 } from "../../lib/addOnQuantity";
-import { eventFullDayOffDatesFor } from "../../lib/attractions/dayOffAvailability";
+import { eventEditDayOffs } from "../../lib/attractions/dayOffAvailability";
 import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
 import { WEEKDAY_NAMES_LOWER, formatFullDate } from "../../lib/date/calendar";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
@@ -341,6 +341,9 @@ const EditEventPurchaseScreen = () => {
   const [purchaseTime, setPurchaseTime] = useState("");
   const [availableTimeSlots, setAvailableTimeSlots] = useState<string[]>([]);
   const [dayOffDates, setDayOffDates] = useState<Set<string>>(new Set());
+  const [partialDayOffDates, setPartialDayOffDates] = useState<Set<string>>(
+    new Set(),
+  );
   const [selectedAddOns, setSelectedAddOns] = useState<Record<number, number>>({});
   const [appliedFees, setAppliedFees] = useState<FeeDraft[]>([]);
   const [appliedDiscounts, setAppliedDiscounts] = useState<DiscountDraft[]>([]);
@@ -578,15 +581,22 @@ const EditEventPurchaseScreen = () => {
     const token = getToken();
     if (!token || locationId == null || eventId == null) {
       setDayOffDates(new Set());
+      setPartialDayOffDates(new Set());
       return;
     }
     const controller = new AbortController();
     fetchDayOffsByLocation(token, locationId, controller.signal)
-      .then((dayOffs) =>
-        setDayOffDates(eventFullDayOffDatesFor({ dayOffs, eventId, today })),
-      )
+      .then((dayOffs) => {
+        const sets = eventEditDayOffs({ dayOffs, eventId, today });
+        setDayOffDates(sets.fullDayOffDates);
+        // A timed closure keeps the day pickable, marked as limited hours
+        // (web parity — the times still come from the event's slot endpoint).
+        setPartialDayOffDates(new Set(Object.keys(sets.partialClosuresByDate)));
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setDayOffDates(new Set());
+        if (controller.signal.aborted) return;
+        setDayOffDates(new Set());
+        setPartialDayOffDates(new Set());
       });
     return () => controller.abort();
   }, [locationId, eventId, today]);
@@ -963,6 +973,7 @@ const EditEventPurchaseScreen = () => {
               <ScheduleCalendar
                 availability={scheduleAvailability}
                 dayOffDates={effectiveDayOffDates}
+                limitedDates={partialDayOffDates}
                 scheduledDate={purchaseDate}
                 scheduledTime={purchaseTime}
                 availableTimeSlots={availableTimeSlots}

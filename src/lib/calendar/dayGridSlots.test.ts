@@ -15,6 +15,7 @@ import {
   hardBlocksFor,
   nextBookableFrom,
   nextBookingMinuteFrom,
+  packageIdsForSlot,
   resolveSlotTap,
   resolveWalkInTap,
   usableFreeUntil,
@@ -175,6 +176,35 @@ describe("resolving a space column's operating window", () => {
     assert.equal(schedule.close, AT(20));
     assert.equal(schedule.turnaround, 0);
     assert.equal(schedule.bookable, true);
+  });
+
+  it("closes a roomless package column where the server says it is closed", () => {
+    const column: ScheduleColumn = {
+      key: "pkg-7",
+      name: "Escape Room",
+      capacity: null,
+      roomId: null,
+      virtual: true,
+    };
+    const dayWindow = window({
+      packages: [
+        pkg({
+          room_ids: [],
+          closed_ranges: [
+            { start_minutes: AT(17), end_minutes: AT(18), reason: "Closed" },
+          ],
+        }),
+      ],
+    });
+    // the band and the offer agree: shut inside the range, open either side
+    const { schedule } = setup(dayWindow, [], [], column);
+    assert.deepEqual(schedule.closedRanges, [
+      { startMinutes: AT(17), endMinutes: AT(18), reason: "Closed" },
+    ]);
+    assert.deepEqual(packageIdsForSlot({ column, dayWindow, minute: AT(16, 30) }), [7]);
+    assert.deepEqual(packageIdsForSlot({ column, dayWindow, minute: AT(17) }), []);
+    assert.deepEqual(packageIdsForSlot({ column, dayWindow, minute: AT(17, 45) }), []);
+    assert.deepEqual(packageIdsForSlot({ column, dayWindow, minute: AT(18) }), [7]);
   });
 });
 

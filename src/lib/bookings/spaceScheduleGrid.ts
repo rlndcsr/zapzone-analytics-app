@@ -1,5 +1,6 @@
 import type { ScheduleBooking } from "../../services/bookingsService";
 import type { DayOff } from "../../services/dayOffsService";
+import { closureRangeIsValid } from "../dayOffClosure.ts";
 import { cellSpanHeight, guaranteedExtraLines } from "./bookingCell.ts";
 import { guestNoteOf, staffNoteOf } from "./bookingNotes.ts";
 import { conflictsWith } from "./freeTime.ts";
@@ -409,8 +410,9 @@ export function computeSpaceClosures({
   dayOffs,
   selectedDate,
   spaceIds,
+  spaceLocationIds,
 }: {
-  dayOffs: Pick<
+  dayOffs: (Pick<
     DayOff,
     | "date"
     | "isRecurring"
@@ -418,9 +420,11 @@ export function computeSpaceClosures({
     | "timeEnd"
     | "isLocationWide"
     | "roomIds"
-  >[];
+  > & { locationId?: number | null })[];
   selectedDate: Date;
   spaceIds: number[];
+  /** Each space's location — a venue-wide closure never reaches another venue's space. */
+  spaceLocationIds?: ReadonlyMap<number, number | null>;
 }): Map<number, SpaceClosure> {
   const map = new Map<number, SpaceClosure>();
   const selY = selectedDate.getFullYear();
@@ -436,9 +440,16 @@ export function computeSpaceClosures({
   });
 
   for (const spaceId of spaceIds) {
-    const forSpace = relevant.filter(
-      (d) => d.isLocationWide || d.roomIds.includes(spaceId),
-    );
+    const spaceLocationId = spaceLocationIds?.get(spaceId) ?? null;
+    const forSpace = relevant.filter((d) => {
+      if (d.roomIds.includes(spaceId)) return true;
+      if (!d.isLocationWide) return false;
+      return (
+        d.locationId == null ||
+        spaceLocationId == null ||
+        d.locationId === spaceLocationId
+      );
+    });
     if (forSpace.length === 0) continue;
     const fullDay = forSpace.some((d) => !d.timeStart && !d.timeEnd);
     const ranges = forSpace
@@ -461,11 +472,16 @@ export function closureBoundaryMinutes(
   return out;
 }
 
-/** Human label for a closure — "Closed all day" or the specific window(s). */
+/**
+ * Human label for a closure — "Closed all day" or the specific window(s). A
+ * backwards range blocks nothing, so it is left out; with nothing left there
+ * is no label at all.
+ */
 export function closureLabel(closure: SpaceClosure | undefined): string | null {
   if (!closure) return null;
   if (closure.fullDay) return "Closed all day";
   const parts = closure.ranges
+    .filter(closureRangeIsValid)
     .map((r) => {
       if (r.timeStart && r.timeEnd)
         return `${minutesToLabel(timeToMinutes(r.timeStart))}–${minutesToLabel(timeToMinutes(r.timeEnd))}`;
@@ -475,5 +491,48 @@ export function closureLabel(closure: SpaceClosure | undefined): string | null {
       return "";
     })
     .filter(Boolean);
-  return parts.length ? `Closed ${parts.join(", ")}` : "Closed";
+  return parts.length ? `Closed ${parts.join(", ")}` : null;
+}
+
+/** A closed stretch of a space's day, in minutes since midnight. */
+export type ClosedMinuteRange = { start: number; end: number; reason: string };
+
+/**
+ * Every stretch a space is closed, merged from both places a closure arrives:
+ * the day-offs fetched for the location, and the `closed_ranges` the day
+ * window carries per room. The All-locations view only has the second — its
+ * own day-off fetch is skipped — so reading either alone loses closures. An
+ * open-ended day-off runs to the edge of the visible window; a backwards
+ * range blocks nothing; the same stretch from both sources is drawn once.
+ */
+export function closedMinuteRanges({
+  closure,
+  serverRanges,
+  window,
+}: {
+  closure: SpaceClosure | undefined;
+  serverRanges: { startMinutes: number; endMinutes: number; reason: string | null }[];
+  window: { start: number; end: number };
+}): ClosedMinuteRange[] {
+  const out: ClosedMinuteRange[] = [];
+  const seen = new Set<string>();
+  const push = (start: number, end: number, reason: string) => {
+    if (!(end > start)) return;
+    const key = `${start}-${end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ start, end, reason });
+  };
+  for (const r of closure?.ranges ?? []) {
+    if (!closureRangeIsValid(r)) continue;
+    push(
+      r.timeStart ? timeToMinutes(r.timeStart) : window.start,
+      r.timeEnd ? timeToMinutes(r.timeEnd) : window.end,
+      "Closed",
+    );
+  }
+  for (const r of serverRanges) {
+    push(r.startMinutes, r.endMinutes, r.reason ?? "Closed");
+  }
+  return out;
 }
