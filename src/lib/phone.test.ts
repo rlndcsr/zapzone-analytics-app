@@ -1,7 +1,56 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { phoneDialUrl } from "./phone.ts";
+import {
+  formatPhoneForDisplay,
+  isCompletePhone,
+  localPhoneDigits,
+  phoneDialUrl,
+} from "./phone.ts";
+
+const TYPED = [
+  "8105889748",
+  "810-588-9748",
+  "1 810 588 9748",
+  "(810)5889748",
+  "810.588.9748",
+];
+
+describe("localPhoneDigits / isCompletePhone", () => {
+  it("reads every common way of typing ten digits as the same number", () => {
+    for (const typed of TYPED) {
+      assert.equal(localPhoneDigits(typed), "8105889748", typed);
+      assert.equal(isCompletePhone(typed), true, typed);
+    }
+  });
+
+  it("drops a leading 1 only from an 11-digit number", () => {
+    assert.equal(localPhoneDigits("18105889748"), "8105889748");
+    assert.equal(localPhoneDigits("28105889748"), "28105889748");
+    assert.equal(localPhoneDigits("1810588974"), "1810588974");
+  });
+
+  it("refuses anything that is not ten local digits", () => {
+    for (const typed of ["", "586", "810-588-974", "28105889748", "810 588 97481", null, undefined]) {
+      assert.equal(isCompletePhone(typed), false, String(typed));
+    }
+  });
+});
+
+describe("formatPhoneForDisplay", () => {
+  it("settles a complete number to one format", () => {
+    for (const typed of TYPED) {
+      assert.equal(formatPhoneForDisplay(typed), "(810) 588-9748", typed);
+    }
+  });
+
+  it("leaves anything incomplete exactly as typed", () => {
+    assert.equal(formatPhoneForDisplay("810-588"), "810-588");
+    assert.equal(formatPhoneForDisplay("  586 "), "  586 ");
+    assert.equal(formatPhoneForDisplay(""), "");
+    assert.equal(formatPhoneForDisplay(null), "");
+  });
+});
 
 describe("phoneDialUrl", () => {
   it("dials only the digits of a formatted number", () => {

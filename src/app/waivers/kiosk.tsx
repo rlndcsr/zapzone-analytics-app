@@ -25,6 +25,11 @@ import { StaffReturnControl } from "../../components/ui/StaffReturnControl";
 import { StatusModal } from "../../components/ui/StatusModal";
 import { useStatusModal } from "../../lib/hooks/useStatusModal";
 import { markWaiversStale } from "../../lib/hooks/useWaivers";
+import {
+  formatPhoneForDisplay,
+  isCompletePhone,
+  localPhoneDigits,
+} from "../../lib/phone";
 import { getToken } from "../../lib/session";
 import {
   fetchKioskForm,
@@ -433,6 +438,8 @@ const WaiverKiosk = () => {
     if (!lastName.trim()) return "Enter the signer's last name.";
     if (!email.trim()) return "Enter an email address.";
     if (!phone.trim()) return "Enter a phone number.";
+    // A returning guest's phone is the masked one on file, which they cannot edit.
+    if (!profile && !isCompletePhone(phone)) return "Enter a 10-digit phone number";
     if (!toIsoDate(dobYear, dobMonth, dobDay))
       return "Enter the signer's full date of birth.";
     for (const m of minors) {
@@ -472,7 +479,9 @@ const WaiverKiosk = () => {
         adult_first_name: firstName.trim(),
         adult_last_name: lastName.trim(),
         adult_email: email.trim(),
-        adult_phone: phone.trim(),
+        adult_phone: profile
+          ? phone.trim()
+          : localPhoneDigits(phone) || phone.trim(),
         adult_dob: toIsoDate(dobYear, dobMonth, dobDay),
         typed_legal_name: typedName.trim(),
         signature_image: signature,
@@ -790,6 +799,8 @@ const WaiverKiosk = () => {
                 label=""
                 value={phone}
                 onChangeText={setPhone}
+                onBlur={() => setPhone((current) => formatPhoneForDisplay(current) || current)}
+                placeholder="(555) 123-4567"
                 keyboardType="phone-pad"
                 containerClassName="mb-3"
               />

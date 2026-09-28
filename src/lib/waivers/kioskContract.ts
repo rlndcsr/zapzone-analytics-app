@@ -1,3 +1,5 @@
+import { isCompletePhone } from "../phone.ts";
+
 export type KioskSettings = {
   inactivityTimeoutSeconds: number;
   disableAutofill: boolean;
@@ -180,8 +182,7 @@ export function classifyLookupFailure(
  * country code is stripped — the same shape the web kiosk's lookup requires.
  */
 export function isValidKioskPhone(raw: string): boolean {
-  const digits = raw.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
-  return digits.length === 10;
+  return isCompletePhone(raw);
 }
 
 export function minorCapReached(

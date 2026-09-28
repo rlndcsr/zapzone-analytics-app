@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 
+import { formatPhoneForDisplay } from "../../lib/phone";
 import {
   isValidKioskPhone,
   lookupReturningCustomer,
@@ -213,53 +214,24 @@ export function KioskReturningPanel({
   /* ---------------------------------------------------------- lookup -- */
 
   if (!profile) {
-    if (outcome === "needs_staff") {
+    // One screen for both, so it never discloses whether the number is on file (web parity).
+    if (outcome === "not_found" || outcome === "needs_staff") {
       return (
         <Card>
           <View className="items-center">
-            <View className="mb-4 h-12 w-12 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-900/30">
-              <Feather name="alert-triangle" size={22} color="#F59E0B" />
-            </View>
-            <Text className="text-center text-base font-semibold text-gray-900 dark:text-white">
-              Please see the front desk
+            <Text className="text-center text-lg font-bold text-gray-900 dark:text-white">
+              Number Not Found
             </Text>
             <Text className="mt-2 text-center text-sm leading-5 text-gray-500 dark:text-gray-400">
-              We need a Location Manager or Admin to help with this phone number
-              before you can continue. They will get you signed in right away.
+              We could not find a waiver on file for that phone number.
+              Double-check the number, or start a new waiver — it only takes a
+              minute.
             </Text>
           </View>
           <View className="mt-5">
-            <SecondaryButton label="Try a different number" onPress={retry} />
-            <SecondaryButton
-              label="Continue as a new customer"
-              onPress={onNewCustomer}
-            />
-          </View>
-        </Card>
-      );
-    }
-
-    if (outcome === "not_found") {
-      return (
-        <Card>
-          <View className="items-center">
-            <View className="mb-4 h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-neutral-800">
-              <Feather name="search" size={22} color="#9CA3AF" />
-            </View>
-            <Text className="text-center text-base font-semibold text-gray-900 dark:text-white">
-              We could not find that number
-            </Text>
-            <Text className="mt-2 text-center text-sm leading-5 text-gray-500 dark:text-gray-400">
-              Check the number and try again, or carry on as a new customer —
-              your details will be saved for next time.
-            </Text>
-          </View>
-          <View className="mt-5">
-            <PrimaryButton label="Try again" onPress={retry} />
-            <SecondaryButton
-              label="Continue as a new customer"
-              onPress={onNewCustomer}
-            />
+            <PrimaryButton label="Start a New Waiver" onPress={onNewCustomer} />
+            <SecondaryButton label="Try Again" onPress={retry} />
+            <SecondaryButton label="Back to Start" onPress={onCancel} />
           </View>
         </Card>
       );
@@ -284,6 +256,7 @@ export function KioskReturningPanel({
             setPhone(t);
             if (error) setError(null);
           }}
+          onBlur={() => setPhone((current) => formatPhoneForDisplay(current) || current)}
           placeholder="(555) 123-4567"
           placeholderTextColor="#9CA3AF"
           keyboardType="phone-pad"
