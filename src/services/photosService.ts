@@ -30,6 +30,8 @@ export type PhotoSessionSource = "staff" | "kiosk";
 
 export type SlideshowState = "visible" | "hidden" | "removed";
 
+export type SlideshowApprovalStatus = "pending" | "approved" | "rejected";
+
 /* ----------------------------------------------------------------- domain -- */
 
 export type SessionPhoto = {
@@ -45,6 +47,11 @@ export type SessionPhoto = {
   operatingDay: string | null;
   slideshowEligible: boolean;
   slideshowState: SlideshowState;
+  slideshowApprovalStatus: SlideshowApprovalStatus | null;
+  /** On the venue screen right now (eligible, visible and approved). */
+  showsInSlideshow: boolean;
+  width: number | null;
+  height: number | null;
   downloadCount: number;
 };
 
@@ -252,6 +259,10 @@ type ApiPhoto = {
   operating_day: string | null;
   slideshow_eligible: boolean;
   slideshow_state: SlideshowState;
+  slideshow_approval_status?: SlideshowApprovalStatus | null;
+  shows_in_slideshow?: boolean;
+  width?: number | null;
+  height?: number | null;
   download_count: number;
 };
 
@@ -265,7 +276,7 @@ type ApiDelivery = {
   duplicate_of_id: number | null;
 };
 
-type ApiSession = {
+export type ApiSession = {
   id: number;
   status: PhotoSessionStatus;
   location_id: number;
@@ -299,6 +310,10 @@ function mapPhoto(raw: ApiPhoto): SessionPhoto {
     operatingDay: raw.operating_day,
     slideshowEligible: Boolean(raw.slideshow_eligible),
     slideshowState: raw.slideshow_state,
+    slideshowApprovalStatus: raw.slideshow_approval_status ?? null,
+    showsInSlideshow: Boolean(raw.shows_in_slideshow),
+    width: raw.width ?? null,
+    height: raw.height ?? null,
     downloadCount: raw.download_count ?? 0,
   };
 }
@@ -315,7 +330,7 @@ function mapDelivery(raw: ApiDelivery): PhotoDeliveryRow {
   };
 }
 
-function mapSession(raw: ApiSession): PhotoSession {
+export function mapSession(raw: ApiSession): PhotoSession {
   return {
     id: raw.id,
     status: raw.status,
@@ -694,15 +709,24 @@ export async function sendLibraryPhoto(
   });
 }
 
-/** POST /api/slideshow-photos/{id}/inclusion — add to, or drop from, today's queue. */
+/**
+ * POST /api/slideshow-photos/{id}/inclusion — add to, or drop from, today's queue.
+ * A 409 means some players were never asked about a photo release; send it
+ * again with `confirmRelease` once staff confirm the group agreed.
+ */
 export async function setPhotoOnSlideshow(
   token: string,
   photoId: number,
   include: boolean,
+  confirmRelease = false,
 ): Promise<string> {
   const res = await apiRequest<{ message?: string }>(
     `/api/slideshow-photos/${photoId}/inclusion`,
-    { method: "POST", token, body: { include } },
+    {
+      method: "POST",
+      token,
+      body: { include, ...(confirmRelease ? { confirm_release: true } : {}) },
+    },
   );
   return res.message ?? "That change was saved.";
 }

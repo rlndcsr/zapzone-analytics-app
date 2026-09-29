@@ -1,7 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { DoorOpen } from "lucide-react-native";
 import { useColorScheme } from "nativewind";
-import { type ComponentProps } from "react";
+import { type ComponentProps, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,6 +14,8 @@ type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
 type PhotoNavRow = {
   icon: ComponentIconName;
+  /** For a web icon Feather lacks (the Escape Rooms door). */
+  renderIcon?: (color: string, size: number) => ReactNode;
   title: string;
   desc: string;
   cta: string;
@@ -30,6 +33,14 @@ const NAV_ROWS: PhotoNavRow[] = [
     desc: "Capture and send customer photos",
     cta: "Open Camera",
     route: "/photos/capture",
+  },
+  {
+    icon: "log-in",
+    renderIcon: (color, size) => <DoorOpen size={size} color={color} />,
+    title: "Escape Rooms",
+    desc: "Group photo, finish time and send",
+    cta: "Open Games",
+    route: "/photos/escape-rooms",
   },
   {
     icon: "image",
@@ -131,6 +142,7 @@ export default function PhotosScreen() {
               <View key={row.route} className="mb-3 w-1/2 px-1.5">
                 <NavTileCard
                   icon={row.icon}
+                  renderIcon={row.renderIcon}
                   title={row.title}
                   desc={row.desc}
                   cta={row.cta}
