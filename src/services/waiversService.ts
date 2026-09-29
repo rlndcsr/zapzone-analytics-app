@@ -1471,7 +1471,7 @@ export type KioskForm = {
   settings: KioskSettings;
 };
 
-function mapKioskForm(d: Record<string, unknown>): KioskForm {
+export function mapKioskForm(d: Record<string, unknown>): KioskForm {
   const t = (d.template ?? {}) as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   const num = (v: unknown) => {

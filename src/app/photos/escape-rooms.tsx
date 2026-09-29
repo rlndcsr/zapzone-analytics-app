@@ -456,7 +456,7 @@ export default function EscapeRoomsScreen() {
                 icon="maximize"
                 size="sm"
                 className="flex-1"
-                onPress={() => setQr(checkInQr(kioskUrl))}
+                onPress={() => setQr(checkInQr(kioskUrl, day?.location.id ?? effectiveLocationId))}
               />
             )}
           </View>

@@ -566,10 +566,15 @@ export function EscapeRoomGameView({
           title: `${game.room.name} · ${game.sessionTimeLabel}`,
           note: "Scan to sign your waiver for this game.",
         },
-        openOnDevice: true,
+        openOnDevice: {
+          locationId: game.locationId,
+          room: game.room.id,
+          time: game.sessionTime,
+          date: game.sessionDate,
+        },
       });
     } else {
-      onShowQr(checkInQr(kioskUrl));
+      onShowQr(checkInQr(kioskUrl, game.locationId));
     }
   };
 
@@ -1423,7 +1428,7 @@ export function EscapeRoomGameView({
 }
 
 /** The location-wide guest check-in QR (header button, and closed games). */
-export function checkInQr(kioskUrl: string): EscapeRoomQr {
+export function checkInQr(kioskUrl: string, locationId: number): EscapeRoomQr {
   return {
     title: "Escape-room check-in",
     description:
@@ -1435,6 +1440,6 @@ export function checkInQr(kioskUrl: string): EscapeRoomQr {
       title: "Escape Room Check-In",
       note: "Scan to choose your room and time and sign your waiver. Your group photo is emailed after the game.",
     },
-    openOnDevice: true,
+    openOnDevice: { locationId },
   };
 }

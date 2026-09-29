@@ -1,7 +1,8 @@
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { X } from "lucide-react-native";
 import { useRef, useState } from "react";
-import { Alert, Linking, Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 
 import { CenterModal } from "../../ui/CenterModal";
@@ -19,8 +20,16 @@ export type EscapeRoomQr = {
   fileName: string;
   /** Heading and line printed on the sign; no Print button when absent. */
   print?: { title: string; note: string };
-  /** Adds "Open on this device" (the staff kiosk, which clears between guests). */
-  openOnDevice?: boolean;
+  /**
+   * Adds "Open on this device": the app's own check-in screen (which clears
+   * itself between guests), for this location and optionally one game.
+   */
+  openOnDevice?: {
+    locationId: number;
+    room?: number | null;
+    time?: string;
+    date?: string;
+  };
 };
 
 const escapeHtml = (value: string) =>
@@ -116,12 +125,20 @@ export function EscapeRoomQrModal({
     }
   };
 
+  /** Opens the in-app check-in — the web's `?staff=1` kiosk — not a browser. */
   const openHere = () => {
-    if (!qr) return;
-    const target = `${qr.url}${qr.url.includes("?") ? "&" : "?"}staff=1`;
-    Linking.openURL(target).catch(() =>
-      Alert.alert("Could not open", "No browser is available on this device."),
-    );
+    const target = qr?.openOnDevice;
+    if (!target) return;
+    onClose();
+    router.push({
+      pathname: "/photos/escape-room-kiosk",
+      params: {
+        locationId: String(target.locationId),
+        ...(target.date ? { date: target.date } : {}),
+        ...(target.room ? { room: String(target.room) } : {}),
+        ...(target.time ? { time: target.time } : {}),
+      },
+    } as never);
   };
 
   return (
@@ -197,9 +214,9 @@ export function EscapeRoomQrModal({
             <Pressable
               onPress={openHere}
               className="mt-3 flex-row items-center gap-1 py-1"
-              accessibilityRole="link"
+              accessibilityRole="button"
             >
-              <Feather name="external-link" size={15} color={PRIMARY} />
+              <Feather name="tablet" size={15} color={PRIMARY} />
               <Text className="text-sm font-semibold text-[#0644C7]">
                 Open on this device
               </Text>

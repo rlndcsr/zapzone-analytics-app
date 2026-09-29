@@ -1,9 +1,15 @@
 import { apiRequest } from "../lib/api";
+import { mapKioskAd, type KioskAd } from "../lib/waivers/kioskContract";
 import {
   mapSession,
   type ApiSession,
   type PhotoSession,
 } from "./photosService";
+import {
+  mapKioskForm,
+  type KioskForm,
+  type KioskSubmission,
+} from "./waiversService";
 
 /*
  * Staff side of the escape-room games — the web admin's Photos → Escape Rooms
@@ -639,4 +645,195 @@ export async function linkEscapeRoomBooking(
     { method: "POST", token, body: { booking_id: bookingId } },
   );
   return mapGame(res.data);
+}
+
+/* ---------------------------------------------- guest check-in (public) -- */
+
+/*
+ * The guest side: players choose their room and time and sign the escape-room
+ * waiver. These are the public routes behind the web's
+ * /waiver/escape-room/{locationId} page, which the app now renders itself when
+ * staff press "Open on this device". No bearer token is sent.
+ */
+
+export type EscapeRoomGuestTime = {
+  time: string;
+  /** The game's date when it differs from the kiosk day (a signed-ahead link). */
+  date: string | null;
+  label: string;
+  inProgress: boolean;
+  /** Finished within the grace window — still accepted, but not offered. */
+  justFinished: boolean;
+};
+
+export type EscapeRoomGuestRoom = {
+  id: number;
+  name: string;
+  durationMinutes: number;
+  times: EscapeRoomGuestTime[];
+};
+
+/** A link to one game: the date, optionally room and time, and its signature. */
+export type EscapeRoomGameLink = {
+  date: string;
+  room?: string;
+  time?: string;
+  sig?: string;
+};
+
+export type EscapeRoomKiosk = {
+  location: { id: number; name: string };
+  date: string;
+  /** "Tuesday, September 29". */
+  dateLabel: string;
+  today: string | null;
+  /** Signing ahead for a booked game on a later day. */
+  ahead: boolean;
+  rooms: EscapeRoomGuestRoom[];
+  inactivityTimeoutSeconds: number;
+};
+
+export type EscapeRoomRoomForm = {
+  form: KioskForm;
+  room: { id: number; name: string; durationMinutes: number };
+  times: EscapeRoomGuestTime[];
+};
+
+export type EscapeRoomSubmitResult = {
+  id: number | null;
+  referenceNumber: string | null;
+  roomName: string;
+  sessionTimeLabel: string;
+  ad: KioskAd | null;
+};
+
+type ApiGuestTime = {
+  time: string;
+  date?: string;
+  label: string;
+  in_progress: boolean;
+  just_finished?: boolean;
+};
+
+const mapGuestTimes = (raw: ApiGuestTime[] | undefined): EscapeRoomGuestTime[] =>
+  (raw ?? []).map((t) => ({
+    time: t.time,
+    date: t.date ?? null,
+    label: t.label,
+    inProgress: Boolean(t.in_progress),
+    justFinished: Boolean(t.just_finished),
+  }));
+
+/** `recent=1` keeps a game that just started choosable, as the web asks. */
+const guestQuery = (link: EscapeRoomGameLink | null) => {
+  const params = new URLSearchParams({ recent: "1" });
+  if (link) {
+    params.append("date", link.date);
+    if (link.room) params.append("room", link.room);
+    if (link.time) params.append("time", link.time);
+    if (link.sig) params.append("sig", link.sig);
+  }
+  return params.toString();
+};
+
+/** GET /api/waivers/escape-room/{locationId} — rooms taking check-ins and their times. */
+export async function fetchEscapeRoomKiosk(
+  locationId: number,
+  link: EscapeRoomGameLink | null,
+): Promise<EscapeRoomKiosk> {
+  const res = await apiRequest<{
+    data: {
+      location: { id: number; name: string };
+      date: string;
+      date_label: string;
+      today?: string;
+      ahead?: boolean;
+      rooms: { id: number; name: string; duration_minutes: number; times: ApiGuestTime[] }[];
+      settings?: { inactivity_timeout_seconds?: number };
+    };
+  }>(`/api/waivers/escape-room/${locationId}?${guestQuery(link)}`, {
+    publicEndpoint: true,
+  });
+  const d = res.data;
+  return {
+    location: d.location,
+    date: d.date,
+    dateLabel: d.date_label,
+    today: d.today ?? null,
+    ahead: Boolean(d.ahead),
+    rooms: (d.rooms ?? []).map((room) => ({
+      id: room.id,
+      name: room.name,
+      durationMinutes: room.duration_minutes,
+      times: mapGuestTimes(room.times),
+    })),
+    inactivityTimeoutSeconds: d.settings?.inactivity_timeout_seconds ?? 120,
+  };
+}
+
+/** GET /api/waivers/escape-room/{locationId}/rooms/{roomId} — that room's waiver and fresh times. */
+export async function fetchEscapeRoomForm(
+  locationId: number,
+  roomId: number,
+  link: EscapeRoomGameLink | null,
+): Promise<EscapeRoomRoomForm> {
+  const res = await apiRequest<{ data: Record<string, unknown> }>(
+    `/api/waivers/escape-room/${locationId}/rooms/${roomId}?${guestQuery(link)}`,
+    { publicEndpoint: true },
+  );
+  const d = res.data ?? {};
+  const room = (d.room ?? {}) as { id: number; name: string; duration_minutes: number };
+  return {
+    form: mapKioskForm(d),
+    room: { id: room.id, name: room.name, durationMinutes: room.duration_minutes },
+    times: mapGuestTimes(d.times as ApiGuestTime[] | undefined),
+  };
+}
+
+/**
+ * POST /api/waivers/escape-room/{locationId}/submit — signs the waiver for one
+ * room and time. The template id and version the guest read are sent back so
+ * a waiver edited mid-signing is refused (409 on `waiver_template_version`).
+ */
+export async function submitEscapeRoomWaiver(
+  locationId: number,
+  roomId: number,
+  sessionTime: string,
+  submission: KioskSubmission,
+  shown: {
+    sessionDate?: string | null;
+    templateId?: number | null;
+    templateVersion?: number | null;
+    gameSignature?: string | null;
+  },
+): Promise<EscapeRoomSubmitResult> {
+  const res = await apiRequest<{
+    data?: {
+      id?: number;
+      reference_number?: string | null;
+      room_name?: string;
+      session_time_label?: string;
+      ad?: unknown;
+    };
+  }>(`/api/waivers/escape-room/${locationId}/submit`, {
+    method: "POST",
+    publicEndpoint: true,
+    body: {
+      ...submission,
+      package_id: roomId,
+      session_time: sessionTime,
+      ...(shown.sessionDate ? { session_date: shown.sessionDate } : {}),
+      ...(shown.templateId ? { waiver_template_id: shown.templateId } : {}),
+      ...(shown.templateVersion ? { waiver_template_version: shown.templateVersion } : {}),
+      ...(shown.gameSignature ? { game_signature: shown.gameSignature } : {}),
+    },
+  });
+  const d = res.data ?? {};
+  return {
+    id: d.id ?? null,
+    referenceNumber: d.reference_number?.trim() || null,
+    roomName: d.room_name ?? "",
+    sessionTimeLabel: d.session_time_label ?? "",
+    ad: mapKioskAd(d.ad),
+  };
 }
