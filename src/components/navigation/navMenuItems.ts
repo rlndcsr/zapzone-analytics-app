@@ -1,12 +1,34 @@
-import { Feather } from "@expo/vector-icons";
-import type { ComponentProps } from "react";
+// The exact icons the web admin sidebar uses (AdminSidebar.tsx), under the same
+// names — lucide-react-native still exports the older aliases (Home,
+// CheckSquare, FileSignature, BarChart3) for the same glyphs.
+import {
+  BarChart3,
+  Bell,
+  Calendar,
+  CalendarCheck,
+  Camera,
+  CheckSquare,
+  CreditCard,
+  FileSignature,
+  Home,
+  IdCard,
+  Mail,
+  Package,
+  Percent,
+  Settings,
+  Ticket,
+  User,
+  UserCog,
+  Users,
+  type LucideIcon,
+} from "lucide-react-native";
 
 import type { UserRole } from "../../services/auth";
 
 export type NavMenuItem = {
   key: string;
   label: string;
-  icon: ComponentProps<typeof Feather>["name"];
+  icon: LucideIcon;
   route?: string;
 
   mode?: "push" | "navigate";
@@ -16,82 +38,82 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
   {
     key: "home",
     label: "Home",
-    icon: "home",
+    icon: Home,
     route: "/home",
     mode: "navigate",
   },
   {
     key: "attractions",
     label: "Attractions",
-    icon: "zap",
+    icon: Ticket,
     route: "/attractions/attractions",
   },
-  { key: "events", label: "Events", icon: "flag", route: "/events/events" },
+  { key: "events", label: "Events", icon: CalendarCheck, route: "/events/events" },
   {
     key: "bookings",
     label: "Bookings",
-    icon: "calendar",
+    icon: Calendar,
     route: "/bookings/bookings",
   },
   {
     key: "packages",
     label: "Packages",
-    icon: "package",
+    icon: Package,
     route: "/packages/packages",
   },
   {
     key: "pricing",
     label: "Pricing",
-    icon: "percent",
+    icon: Percent,
     route: "/pricing/pricing",
   },
   {
     // Between Pricing and Waivers, as in the web admin sidebar.
     key: "custom-fields",
     label: "Custom Fields",
-    icon: "check-square",
+    icon: CheckSquare,
     route: "/custom-fields/custom-fields",
   },
   {
     key: "waivers",
     label: "Waivers",
-    icon: "file-text",
+    icon: FileSignature,
     route: "/waivers/waivers",
   },
   {
     key: "photos",
     label: "Photos",
-    icon: "camera",
+    icon: Camera,
     route: "/photos/photos",
   },
   {
     key: "customers",
     label: "Customers",
-    icon: "users",
+    icon: Users,
     route: "/customers/customers",
   },
   {
     key: "memberships",
     label: "Memberships",
-    icon: "credit-card",
+    icon: IdCard,
     route: "/memberships/memberships",
   },
   {
     key: "email",
     label: "Email Campaign",
-    icon: "mail",
+    icon: Mail,
     route: "/email-campaign/campaigns",
   },
   {
     key: "payments",
     label: "Payments",
-    icon: "dollar-sign",
+    icon: CreditCard,
     route: "/payments/payments",
   },
   {
     key: "analytics",
     label: "Analytics & Reports",
-    icon: "bar-chart-2",
+    icon: BarChart3,
     route: "/analytics-reports/performance-analytics",
   },
 ];
@@ -99,14 +121,14 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
 const USER_MANAGEMENT_ITEM: NavMenuItem = {
   key: "management",
   label: "User Management",
-  icon: "user",
+  icon: UserCog,
   route: "/user-managements/manage-accounts",
 };
 
 const ATTENDANTS_MANAGEMENT_ITEM: NavMenuItem = {
   key: "management",
   label: "Attendants Management",
-  icon: "user",
+  icon: UserCog,
   route: "/user-managements/attendants",
 };
 
@@ -143,26 +165,26 @@ export const PROFILE_SUPPORT_ITEMS: NavMenuItem[] = [
   {
     key: "profile",
     label: "Profile",
-    icon: "user",
+    icon: User,
     route: "/profile",
   },
   {
     key: "accounts",
     label: "Accounts",
-    icon: "users",
+    icon: Users,
     route: "/accounts",
     mode: "navigate",
   },
   {
     key: "settings",
     label: "Settings",
-    icon: "settings",
+    icon: Settings,
     route: "/settings/settings",
   },
   {
     key: "notifications",
     label: "Notifications",
-    icon: "bell",
+    icon: Bell,
     route: "/notification/notification",
   },
 ];

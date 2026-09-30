@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { scanFromURLAsync } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
+import { FileText, Tablet } from "lucide-react-native";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -783,29 +784,36 @@ export default function CheckInWaiversScreen() {
           <Pressable
             onPress={openKiosk}
             disabled={kioskLoading}
-            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900 ${
+            className={`h-11 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900 ${
               kioskLoading ? "opacity-60" : ""
             }`}
             accessibilityRole="button"
             accessibilityLabel="Launch waiver kiosk"
+            accessibilityState={{ disabled: kioskLoading, busy: kioskLoading }}
           >
             {kioskLoading ? (
               <ActivityIndicator size="small" color={PRIMARY} />
             ) : (
-              <Feather name="tablet" size={14} color={headerIcon} />
+              <Tablet size={16} color={headerIcon} />
             )}
-            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <Text
+              className="text-sm font-medium text-gray-700 dark:text-gray-200"
+              numberOfLines={1}
+            >
               {kioskLoading ? "Loading…" : "Launch Kiosk"}
             </Text>
           </Pressable>
           <Pressable
             onPress={() => router.push("/waivers/waivers")}
-            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900"
+            className="h-11 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900"
             accessibilityRole="button"
             accessibilityLabel="Open waiver records"
           >
-            <Feather name="file-text" size={14} color={headerIcon} />
-            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <FileText size={16} color={headerIcon} />
+            <Text
+              className="text-sm font-medium text-gray-700 dark:text-gray-200"
+              numberOfLines={1}
+            >
               Waiver Records
             </Text>
           </Pressable>

@@ -162,7 +162,7 @@ function useRevealStyle(
 
 type MenuCellProps = {
   label: string;
-  /** Pre-rendered glyph — Feather for nav items, lucide for quick actions. */
+  /** Pre-rendered lucide glyph — the web sidebar's icon for nav items. */
   icon: ReactNode;
   index: number;
   onPress: () => void;
@@ -625,9 +625,7 @@ export function MorphingFabMenu({
       <MenuCell
         key={item.key}
         label={item.label}
-        icon={
-          <Feather name={item.icon} size={CHIP_ICON_SIZE} color={FAB_COLOR} />
-        }
+        icon={<item.icon size={CHIP_ICON_SIZE} color={FAB_COLOR} />}
         index={visibleQuickActions.length + i}
         onPress={() => handleSelect(item)}
         itemsProgress={itemsProgress}
@@ -641,9 +639,7 @@ export function MorphingFabMenu({
       <MenuCell
         key={item.key}
         label={item.label}
-        icon={
-          <Feather name={item.icon} size={CHIP_ICON_SIZE} color={FAB_COLOR} />
-        }
+        icon={<item.icon size={CHIP_ICON_SIZE} color={FAB_COLOR} />}
         index={visibleQuickActions.length + items.length + i}
         onPress={() => handleSelect(item)}
         itemsProgress={itemsProgress}
