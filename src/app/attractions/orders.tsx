@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useMemo, useState, type ComponentProps } from "react";
+import { useCallback, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -37,7 +37,7 @@ import { getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
   checkInTicketOrder,
-  listTicketOrders,
+  listAllTicketOrders,
   type TicketOrderDetail,
 } from "../../services/ticketOrdersService";
 
@@ -251,7 +251,11 @@ export default function BulkOrdersScreen() {
     });
   }, []);
 
+  // Only the latest load may land — a slower reply for another location must not win (web parity).
+  const loadRequestRef = useRef(0);
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    const isCurrent = () => requestId === loadRequestRef.current;
     const token = getToken();
     if (!token) {
       setError("Your session has expired. Please sign in again.");
@@ -259,15 +263,17 @@ export default function BulkOrdersScreen() {
       return;
     }
     try {
-      const rows = await listTicketOrders(token, {
+      const rows = await listAllTicketOrders(token, {
         locationId: activeLocation.id === "all" ? null : activeLocation.id,
       });
+      if (!isCurrent()) return;
       setOrders(rows);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      if (isCurrent())
+        setError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [activeLocation.id]);
 

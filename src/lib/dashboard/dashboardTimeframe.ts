@@ -68,6 +68,7 @@ export function createdWithinTimeframe(
 /**
  * The dashboard's New Bookings: created within the timeframe, and not
  * cancelled — a booking that was made and then called off is not new business.
+ * Newest-created first, whatever order the full list arrived in (web parity).
  */
 export function filterNewBookings<
   T extends { createdAt: string | null; status?: string | null },
@@ -78,9 +79,11 @@ export function filterNewBookings<
   customTo?: string,
   now: Date = new Date(),
 ): T[] {
-  return bookings.filter(
-    (b) =>
-      String(b.status ?? "").toLowerCase() !== "cancelled" &&
-      createdWithinTimeframe(b.createdAt, timeframe, customFrom, customTo, now),
-  );
+  return bookings
+    .filter(
+      (b) =>
+        String(b.status ?? "").toLowerCase() !== "cancelled" &&
+        createdWithinTimeframe(b.createdAt, timeframe, customFrom, customTo, now),
+    )
+    .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 }

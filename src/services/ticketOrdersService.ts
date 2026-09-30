@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
 
 /*
@@ -333,7 +334,12 @@ const toApiItems = (items: CartItem[]) =>
     add_ons: item.addOns.map((a) => ({ id: a.id, quantity: a.quantity })),
   }));
 
-type Envelope = { success?: boolean; data?: unknown; qr_token?: unknown };
+type Envelope = {
+  success?: boolean;
+  data?: unknown;
+  qr_token?: unknown;
+  meta?: { last_page?: number | string };
+};
 
 /* ------------------------------------------------------------ endpoints -- */
 
@@ -392,9 +398,17 @@ export async function checkoutTicketOrder(
  */
 export async function listTicketOrders(
   token: string,
-  { locationId, page = 1, perPage = 1000, search }: TicketOrderListParams = {},
+  params: TicketOrderListParams = {},
   signal?: AbortSignal,
 ): Promise<TicketOrderDetail[]> {
+  return (await fetchTicketOrderPage(token, params, signal)).rows;
+}
+
+async function fetchTicketOrderPage(
+  token: string,
+  { locationId, page = 1, perPage = 200, search }: TicketOrderListParams,
+  signal?: AbortSignal,
+): Promise<{ rows: TicketOrderDetail[]; lastPage: number }> {
   const params = new URLSearchParams({
     page: String(page),
     per_page: String(perPage),
@@ -407,7 +421,28 @@ export async function listTicketOrders(
     { token, signal },
   );
   const rows = Array.isArray(res?.data) ? (res.data as RawOrder[]) : [];
-  return rows.map(mapOrderDetail);
+  const lastPage = Number(res?.meta?.last_page) || 1;
+  return { rows: rows.map(mapOrderDetail), lastPage };
+}
+
+/** Every Bulk Order across every page, 200 at a time (the server's cap; web: listAll). */
+export async function listAllTicketOrders(
+  token: string,
+  params: Omit<TicketOrderListParams, "page" | "perPage"> = {},
+  signal?: AbortSignal,
+): Promise<TicketOrderDetail[]> {
+  const rows = await fetchAllPages<TicketOrderDetail>(
+    async (page) => {
+      const res = await fetchTicketOrderPage(
+        token,
+        { ...params, page, perPage: 200 },
+        signal,
+      );
+      return { items: res.rows, lastPage: res.lastPage };
+    },
+    { maxPages: 50 },
+  );
+  return uniqueById(rows);
 }
 
 /**

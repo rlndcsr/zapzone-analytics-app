@@ -1,4 +1,5 @@
 import { apiRequest, mediaUrl } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 
 /** A selectable add-on for the attraction form. */
 export type AddOnOption = {
@@ -108,17 +109,46 @@ export async function fetchAddOnList({
   locationId?: number;
   signal?: AbortSignal;
 }): Promise<AddOnRow[]> {
-  const params = new URLSearchParams({
-    user_id: String(userId),
-    per_page: "200",
-  });
-  if (locationId != null) params.append("location_id", String(locationId));
+  const rows = await fetchAllAddOns({ token, userId, locationId, signal });
+  return rows.map(mapAddOnRow);
+}
 
-  const res = await apiRequest<AddOnsResponse>(
-    `/api/addons?${params.toString()}`,
-    { token, signal },
+/** Most pages the add-on index is walked for (500 a page, the server's cap). */
+const ADDON_PAGE_SIZE = 500;
+const ADDON_MAX_PAGES = 20;
+
+/** Every add-on across every page of GET /api/addons (web: getAllAddOns). */
+async function fetchAllAddOns({
+  token,
+  userId,
+  locationId,
+  signal,
+}: {
+  token: string;
+  userId: number;
+  locationId?: number;
+  signal?: AbortSignal;
+}): Promise<RawAddOn[]> {
+  const rows = await fetchAllPages<RawAddOn>(
+    async (page) => {
+      const params = new URLSearchParams({
+        user_id: String(userId),
+        per_page: String(ADDON_PAGE_SIZE),
+        page: String(page),
+      });
+      if (locationId != null) params.append("location_id", String(locationId));
+      const res = await apiRequest<AddOnsResponse>(
+        `/api/addons?${params.toString()}`,
+        { token, signal },
+      );
+      return {
+        items: res?.data?.add_ons ?? [],
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: ADDON_MAX_PAGES },
   );
-  return (res?.data?.add_ons ?? []).map(mapAddOnRow);
+  return uniqueById(rows);
 }
 
 type AddOnMutationResponse = { success?: boolean; data?: RawAddOn; message?: string };
@@ -157,7 +187,7 @@ type AddOnsResponse = {
   success: boolean;
   data: {
     add_ons?: RawAddOn[];
-    pagination?: unknown;
+    pagination?: { last_page?: number };
   };
 };
 
@@ -165,30 +195,19 @@ type FetchAddOnsParams = {
   token: string;
   userId: number;
   locationId?: number;
-  /** The endpoint defaults to 15/page; pass a high value to get the full set. */
-  perPage?: number;
 };
 
 /**
- * GET /api/addons — active add-ons for the attraction/package forms (same
- * endpoint the web create page uses). Scoped to the location when one is
- * provided. The response carries no base64 image, so it's payload-safe.
+ * GET /api/addons — the add-ons for the attraction/package/event forms (same
+ * endpoint the web create page uses), every page of them. Scoped to the
+ * location when one is provided. The response carries no base64 image.
  */
 export async function fetchAddOns({
   token,
   userId,
   locationId,
-  perPage,
 }: FetchAddOnsParams): Promise<AddOnOption[]> {
-  const params = new URLSearchParams({ user_id: String(userId) });
-  if (perPage != null) params.append("per_page", String(perPage));
-  if (locationId != null) params.append("location_id", String(locationId));
-
-  const res = await apiRequest<AddOnsResponse>(
-    `/api/addons?${params.toString()}`,
-    { token },
-  );
-  const list = res?.data?.add_ons ?? [];
+  const list = await fetchAllAddOns({ token, userId, locationId });
   return list.map((a) => ({
     id: a.id,
     name: a.name?.trim() || "Add-on",

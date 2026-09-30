@@ -1,5 +1,5 @@
 import { apiRequest } from "../lib/api";
-import { fetchAllPages } from "../lib/fetchAllPages";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 
 /** A selectable gift card for the package form. No image → payload-safe. */
 export type GiftCardOption = {
@@ -63,11 +63,15 @@ export type GiftCardInput = {
 };
 
 function mapGiftCardRow(g: RawGiftCard): GiftCardRow {
+  const expiry = g.expiry_date ?? g.expires_at ?? null;
+  // A card past its expiry is not active, whatever its status says (web: effectiveStatus).
+  const expired = !!expiry && new Date(expiry).getTime() < Date.now();
   const active =
-    g.is_active === true ||
-    g.is_active === 1 ||
-    (g.status ? g.status.toLowerCase() === "active" : false) ||
-    (g.is_active == null && g.status == null && !g.deleted);
+    !expired &&
+    (g.is_active === true ||
+      g.is_active === 1 ||
+      (g.status ? g.status.toLowerCase() === "active" : false) ||
+      (g.is_active == null && g.status == null && !g.deleted));
   const balanceRaw = g.balance ?? g.current_balance ?? g.remaining_balance;
   return {
     id: g.id,
@@ -83,15 +87,19 @@ function mapGiftCardRow(g: RawGiftCard): GiftCardRow {
   };
 }
 
-/** GET /api/gift-cards — the full gift-card list for the management screen. */
+/**
+ * GET /api/gift-cards — the full gift-card list for the management screen, in
+ * every status (the server's default is active cards only, so Inactive could
+ * never show anything). Web: getAllGiftCards({ status: 'all', include_expired }).
+ */
 export async function fetchGiftCardList(
   token: string,
   signal?: AbortSignal,
 ): Promise<GiftCardRow[]> {
-  return fetchAllPages<GiftCardRow>(
+  const rows = await fetchAllPages<GiftCardRow>(
     async (page) => {
       const res = await apiRequest<GiftCardsResponse>(
-        `/api/gift-cards?per_page=${PER_PAGE}&page=${page}`,
+        `/api/gift-cards?status=all&include_expired=1&sort_by=created_at&sort_order=desc&per_page=${PER_PAGE}&page=${page}`,
         { token, signal },
       );
       return {
@@ -101,6 +109,7 @@ export async function fetchGiftCardList(
     },
     { maxPages: MAX_PAGES },
   );
+  return uniqueById(rows);
 }
 
 /** POST /api/gift-cards — create a gift card. */

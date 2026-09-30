@@ -1,4 +1,5 @@
 import { ApiError, apiRequest, apiUrl } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { formatCardLabel } from "../lib/payments/cardLabel";
 import { tokenizeCardWithAccept } from "../lib/payments/acceptTokenize";
 
@@ -343,13 +344,17 @@ function looksLikePayment(v: unknown): v is RawPayment {
 }
 
 // GET /api/payments returns { success, data: { payments: [...], pagination } }.
-// The list has no aggregate/summary endpoint and no server-side search, so we
-// pull a generous page and compute stats + search + paging client-side. This
-// covers the current data volume; the page size is intentionally high so stats
-// stay accurate.
+// The list has no aggregate/summary endpoint and no server-side search, so every
+// page is loaded and stats + search + paging are computed client-side (web:
+// getAllPayments — id order, so a page boundary can't skip or repeat a row).
 const PER_PAGE = 1000;
+const MAX_PAGES = 50;
 
-function extractPayments(res: unknown): { rows: RawPayment[]; total: number } {
+function extractPayments(res: unknown): {
+  rows: RawPayment[];
+  total: number;
+  lastPage: number;
+} {
   const root = (res ?? {}) as Record<string, unknown>;
   const data = (root.data ?? {}) as Record<string, unknown>;
   const asArray = (v: unknown): RawPayment[] | null =>
@@ -361,18 +366,38 @@ function extractPayments(res: unknown): { rows: RawPayment[]; total: number } {
     asArray(data.payments) ?? asArray(data.data) ?? asArray(root.data) ?? asArray(res) ?? [];
   const pagination = (data.pagination ?? {}) as Record<string, unknown>;
   const total = typeof pagination.total === "number" ? pagination.total : rows.length;
-  return { rows, total };
+  const lastPage =
+    typeof pagination.last_page === "number" ? pagination.last_page : 1;
+  return { rows, total, lastPage };
 }
 
 export type PaymentList = { rows: PaymentRow[]; total: number };
 
+/** Every page of a payments index, newest id first, each row once. */
+async function fetchEveryPayment(
+  token: string,
+  path: string,
+): Promise<PaymentList> {
+  let total = 0;
+  const rows = await fetchAllPages<RawPayment>(
+    async (page) => {
+      const res = await apiRequest<unknown>(
+        `${path}?sort_by=id&sort_order=desc&per_page=${PER_PAGE}&page=${page}`,
+        { token },
+      );
+      const extracted = extractPayments(res);
+      if (page === 1) total = extracted.total;
+      return { items: extracted.rows, lastPage: extracted.lastPage };
+    },
+    { maxPages: MAX_PAGES },
+  );
+  const unique = uniqueById(rows);
+  return { rows: unique.map(mapPayment), total: Math.max(total, unique.length) };
+}
+
 /** GET /api/payments — the payment transactions the user can access. */
 export async function fetchPayments(token: string): Promise<PaymentList> {
-  const res = await apiRequest<unknown>(`/api/payments?per_page=${PER_PAGE}`, {
-    token,
-  });
-  const { rows, total } = extractPayments(res);
-  return { rows: rows.map(mapPayment), total };
+  return fetchEveryPayment(token, "/api/payments");
 }
 
 /** GET /api/payments filtered to one payable (web `getPayments({payable_*})`). */
@@ -394,11 +419,12 @@ export async function fetchPaymentsForPayable(
 
 /** GET /api/payments/trashed — soft-deleted payments (the "View Deleted" list). */
 export async function fetchTrashedPayments(token: string): Promise<PaymentList> {
-  const res = await apiRequest<unknown>(`/api/payments/trashed?per_page=${PER_PAGE}`, {
-    token,
-  });
-  const { rows, total } = extractPayments(res);
-  return { rows: rows.map(mapPayment), total };
+  const list = await fetchEveryPayment(token, "/api/payments/trashed");
+  // Paged in id order for stability; shown most recently deleted first, as before.
+  const deletedAt = (p: PaymentRow) =>
+    p.deletedAt ? new Date(p.deletedAt).getTime() || 0 : 0;
+  list.rows.sort((a, b) => deletedAt(b) - deletedAt(a) || b.id - a.id);
+  return list;
 }
 
 /* ------------------------------------------------------------ row actions -- */

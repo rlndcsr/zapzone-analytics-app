@@ -103,3 +103,9 @@ export async function fetchAllPages<T>(
 
   return pages.flat() as T[];
 }
+
+/** The first row per id, in order — a row that shifted pages mid-walk is kept once (web parity). */
+export function uniqueById<T extends { id: number }>(rows: T[]): T[] {
+  const seen = new Set<number>();
+  return rows.filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
+}

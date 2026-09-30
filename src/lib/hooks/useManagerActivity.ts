@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  fetchDashboardBookings,
-  type CalendarBooking,
-} from "../../services/bookingsService";
+import type { CalendarBooking } from "../../services/bookingsService";
+import { fullBookingList } from "../bookings/bookingListCache";
 import {
   fetchDashboardMetrics,
   type RecentEventPurchase,
@@ -81,7 +79,7 @@ export function useManagerActivity({
       // bookings list (for New Bookings rows) in parallel.
       const [metrics, bookings] = await Promise.all([
         fetchDashboardMetrics({ userId: user.id, token, timeframe, dateFrom, dateTo }),
-        fetchDashboardBookings({
+        fullBookingList({
           token,
           locationId: user.location_id ?? undefined,
         }),

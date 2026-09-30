@@ -1,7 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { fetchAllPages, type PageResult } from "./fetchAllPages.ts";
+import { fetchAllPages, uniqueById, type PageResult } from "./fetchAllPages.ts";
+
+describe("uniqueById", () => {
+  it("keeps the first row per id, in order", () => {
+    // A row that moved across a page boundary mid-walk arrives twice.
+    const rows = [
+      { id: 3, v: "a" },
+      { id: 1, v: "b" },
+      { id: 3, v: "c" },
+      { id: 2, v: "d" },
+    ];
+    assert.deepEqual(uniqueById(rows), [
+      { id: 3, v: "a" },
+      { id: 1, v: "b" },
+      { id: 2, v: "d" },
+    ]);
+  });
+
+  it("merges every page of a multi-page walk into one list", async () => {
+    // Three pages of 2, the last one repeating a row from page 2.
+    const pages: Record<number, { id: number }[]> = {
+      1: [{ id: 1 }, { id: 2 }],
+      2: [{ id: 3 }, { id: 4 }],
+      3: [{ id: 4 }, { id: 5 }],
+    };
+    const all = uniqueById(
+      await fetchAllPages(async (page) => ({ items: pages[page], lastPage: 3 }), {
+        maxPages: 10,
+      }),
+    );
+    assert.deepEqual(
+      all.map((r) => r.id),
+      [1, 2, 3, 4, 5],
+    );
+  });
+});
 
 /** A fake paginator: page N holds `["N-0", "N-1"]`, and each request resolves
  *  after `delays[page]` ticks so completion order can be forced out of order. */

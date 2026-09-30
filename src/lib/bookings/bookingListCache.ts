@@ -149,6 +149,21 @@ export async function syncBookingList({
   return data;
 }
 
+/** The full list for this scope — the fresh cached one, else a sync (web: dashboards read the saved list). */
+export async function fullBookingList({
+  token,
+  locationId,
+  force = false,
+}: {
+  token: string;
+  locationId?: number;
+  force?: boolean;
+}): Promise<CalendarBooking[]> {
+  const entry = cache.get(bookingCacheKey(locationId));
+  if (!force && isBookingCacheFresh(entry)) return entry!.data;
+  return syncBookingList({ token, locationId, force });
+}
+
 /**
  * Fetch + cache one date window for this scope, joining any sync already in flight.
  *

@@ -6,6 +6,8 @@ import {
   type ActivityFilters,
   type ActivityLogEntry,
 } from "../../services/activityLogsService";
+import { fetchAllStaffUsers } from "../../services/usersService";
+import { venueTodayKey } from "../dashboard/dashboardTimeframe";
 import { getToken } from "../session";
 
 /*
@@ -101,15 +103,14 @@ export type ActivityStats = {
 };
 
 /**
- * KPI counts for the Activity Log header — computed exactly like the web
- * (`getLocationMetrics`), all over the newest loaded page except Total:
- *   - Total Activities  → server pagination total (cheap `per_page=1` count).
- *   - Today's Activities → count of `isToday` (device-local calendar day) rows
- *     in the newest loaded page (web loads `itemsPerPage=20` newest-first and
- *     filters that page client-side; NOT a whole-dataset server date count).
- *   - Purchases Made / Active Attendants → location-manager page cards.
- *   - Manager Actions / Attendant Actions → company-admin (/admin/activity)
- *     cards: page rows whose actor role is location_manager / attendant.
+ * KPI counts for the Activity Log header (web `getLocationMetrics`). Every count
+ * is the server's own total (a cheap `per_page=1` request), never a tally of
+ * one page — the web moved off page tallies because they undercounted:
+ *   - Total Activities / Purchases Made → the whole filter.
+ *   - Today's Activities → `date_from` = the venue's today (Michigan).
+ *   - Manager Actions / Attendant Actions → `user_role`.
+ *   - Active Attendants → still the distinct logins in the newest page, as on
+ *     the web's manager page.
  * The screen picks which two role-specific cards to show. All respect the
  * active location filter. Refetches when `nonce` bumps.
  */
@@ -139,34 +140,28 @@ export function useActivityStats(locationId: number | undefined, nonce = 0) {
     Promise.all([
       fetchActivityCount(token, base),
       fetchActivityCount(token, { ...base, action: "purchased" }),
-      // Newest page (web itemsPerPage=20, created_at desc) — the web derives
-      // both Today's Activities and Active Attendants from this loaded page.
+      fetchActivityCount(token, { ...base, dateFrom: venueTodayKey() }),
+      fetchActivityCount(token, { ...base, userRole: "location_manager" }),
+      fetchActivityCount(token, { ...base, userRole: "attendant" }),
+      // Newest page (web itemsPerPage=20, created_at desc) — Active Attendants only.
       fetchActivityLogs(token, base, 1, WEB_PAGE_SIZE),
     ])
-      .then(([total, purchases, recentPage]) => {
+      .then(([total, purchases, today, managerActions, attendantActions, recentPage]) => {
         if (requestId !== requestIdRef.current) return;
-        // Rows in the loaded page whose local calendar day is today (web isToday).
-        const todayLogs = recentPage.logs.filter((log) =>
-          isTodayLocal(log.createdAt),
-        );
-        // Distinct users who logged in today (web's unique-userId set).
+        // Distinct users who logged in today, within the loaded page (web's unique-userId set).
         const activeIds = new Set<number>();
-        for (const log of todayLogs) {
-          if (log.action === "logged_in" && log.actor.id != null) {
+        for (const log of recentPage.logs) {
+          if (
+            isTodayLocal(log.createdAt) &&
+            log.action === "logged_in" &&
+            log.actor.id != null
+          ) {
             activeIds.add(log.actor.id);
           }
         }
-        // Manager / Attendant Actions — page rows by actor role (web's
-        // filteredLogs.filter(userType === 'location_manager' | 'attendant')).
-        let managerActions = 0;
-        let attendantActions = 0;
-        for (const log of recentPage.logs) {
-          if (log.actor.role === "location_manager") managerActions += 1;
-          else if (log.actor.role === "attendant") attendantActions += 1;
-        }
         setStats({
           total,
-          today: todayLogs.length,
+          today,
           purchases,
           activeAttendants: activeIds.size,
           managerActions,
@@ -225,4 +220,35 @@ export function useActivityFilterOptions(
   }, [locationId, nonce]);
 
   return logs;
+}
+
+/**
+ * Every staff member, active and inactive, for the user pickers — so someone
+ * with no recent activity can still be picked (web: getAllUsers x2). Best-effort.
+ */
+export function useActivityStaffOptions(nonce = 0) {
+  const [staff, setStaff] = useState<{ id: number; name: string }[]>([]);
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    const requests = requestIdRef;
+    const requestId = ++requests.current;
+    const token = getToken();
+    if (!token) return;
+
+    fetchAllStaffUsers(token, {})
+      .then((users) => {
+        if (requestId !== requests.current) return;
+        setStaff(users.map((u) => ({ id: u.id, name: u.name || u.email })));
+      })
+      .catch(() => {
+        /* The pickers still list everyone in the loaded logs. */
+      });
+
+    return () => {
+      requests.current++;
+    };
+  }, [nonce]);
+
+  return staff;
 }

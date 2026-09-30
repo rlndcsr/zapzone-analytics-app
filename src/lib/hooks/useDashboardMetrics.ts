@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  fetchDashboardBookings,
-  type CalendarBooking,
-} from "../../services/bookingsService";
+import { fullBookingList } from "../bookings/bookingListCache";
 import {
   type DashboardType,
   metricsCacheService,
@@ -24,31 +21,6 @@ import {
 } from "../dashboard/dashboardConfig";
 import { filterNewBookings } from "../dashboard/dashboardTimeframe";
 import { getCurrentUser, getToken } from "../session";
-
-type BookingsCache = {
-  key: string;
-  fetchedAt: number;
-  data: CalendarBooking[];
-};
-let bookingsCache: BookingsCache | null = null;
-const BOOKINGS_TTL_MS = 5 * 60 * 1000;
-
-async function loadLocationBookings(
-  token: string,
-  locationId: number | undefined,
-  force: boolean,
-): Promise<CalendarBooking[]> {
-  const key = String(locationId ?? "all");
-  const fresh =
-    !!bookingsCache &&
-    bookingsCache.key === key &&
-    Date.now() - bookingsCache.fetchedAt < BOOKINGS_TTL_MS;
-  if (fresh && !force) return bookingsCache!.data;
-
-  const data = await fetchDashboardBookings({ token, locationId });
-  bookingsCache = { key, fetchedAt: Date.now(), data };
-  return data;
-}
 
 type UseDashboardMetricsParams = {
   timeframe: TimeframeType;
@@ -182,11 +154,12 @@ export function useDashboardMetrics({
 
         if (dashboardNeedsBookings(config)) {
           try {
-            const bookings = await loadLocationBookings(
+            // Every booking, not the newest page — a busy week outgrew one page of 100.
+            const bookings = await fullBookingList({
               token,
-              user.location_id ?? undefined,
+              locationId: user.location_id ?? undefined,
               force,
-            );
+            });
             const created = filterNewBookings(
               bookings,
               timeframe,

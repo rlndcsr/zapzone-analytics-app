@@ -640,11 +640,14 @@ export type PhotoLibraryFilters = {
   /** Operating day bounds, YYYY-MM-DD. */
   from?: string;
   to?: string;
+  /** Operating days to cover (1–120); the server's default is 14. */
+  days?: number;
 };
 
 /**
  * GET /api/photo-library — ready photos grouped by operating day. The server
- * returns the 14 most recent days and caps the set at 1,500 photos.
+ * returns the `days` most recent days (14 by default) and caps the set at
+ * 1,500 photos.
  */
 export async function fetchPhotoLibrary(
   token: string,
@@ -657,6 +660,7 @@ export async function fetchPhotoLibrary(
   if (filters.source) params.append("source", filters.source);
   if (filters.from) params.append("from", filters.from);
   if (filters.to) params.append("to", filters.to);
+  if (filters.days != null) params.append("days", String(filters.days));
 
   const res = await apiRequest<{
     data: {

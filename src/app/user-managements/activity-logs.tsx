@@ -25,6 +25,7 @@ import { formatDateET, formatDateTimeET } from "../../lib/date/venueTime";
 import {
   useActivityFilterOptions,
   useActivityLogs,
+  useActivityStaffOptions,
   useActivityStats,
 } from "../../lib/hooks/useActivityLogs";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
@@ -813,6 +814,7 @@ const ActivityLogs = () => {
   });
   const { stats } = useActivityStats(activeLocationId, statsNonce);
   const optionSample = useActivityFilterOptions(activeLocationId, statsNonce);
+  const staffOptions = useActivityStaffOptions(statsNonce);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -850,7 +852,9 @@ const ActivityLogs = () => {
   }, [optionLogs]);
 
   const attendantOptions = useMemo<{ label: string; value: string }[]>(() => {
+    // Every staff member first, then anyone else in the logs (web getUniqueUsers).
     const map = new Map<string, string>();
+    for (const s of staffOptions) map.set(String(s.id), s.name);
     for (const l of optionLogs) {
       if (l.actor.id != null) map.set(String(l.actor.id), l.actor.name);
     }
@@ -858,7 +862,7 @@ const ActivityLogs = () => {
       { label: "All Attendants", value: "all" },
       ...[...map].map(([id, name]) => ({ label: name, value: id })),
     ];
-  }, [optionLogs]);
+  }, [optionLogs, staffOptions]);
 
   // Export user picker — the attendant options minus the leading "All" entry,
   // narrowed by the sheet's own search box.

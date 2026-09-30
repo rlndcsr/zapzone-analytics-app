@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 
 /** Attraction active-state, mirrored from the web `is_active` flag. */
 export type AttractionStatus = "active" | "inactive";
@@ -12,6 +13,8 @@ export type AttractionAddOn = {
   image: string | null;
   minQuantity: number;
   maxQuantity: number;
+  /** The add-on's own location; null when it is not tied to one. */
+  locationId: number | null;
 };
 
 /** Flattened attraction row backing the Attractions list + KPI cards. */
@@ -83,6 +86,7 @@ type RawAddOn = {
   image?: string | null;
   min_quantity?: number | string | null;
   max_quantity?: number | string | null;
+  location_id?: number | string | null;
 };
 
 type AttractionsListResponse = {
@@ -98,9 +102,9 @@ type AttractionsListResponse = {
   };
 };
 
-// The web /attractions page loads a single large page (per_page: 100) and
-// filters/sorts client-side; attraction counts are small, so we mirror that.
+// 100 a page (the server's cap), every page walked — the web's getAllAttractions.
 const PER_PAGE = 100;
+const MAX_PAGES = 20;
 
 function mapAttraction(raw: RawAttraction): AttractionRow {
   const durationRaw = raw.duration == null ? null : Number(raw.duration);
@@ -139,6 +143,7 @@ function mapAttraction(raw: RawAttraction): AttractionRow {
       image: a.image ?? null,
       minQuantity: Number(a.min_quantity ?? 0),
       maxQuantity: Number(a.max_quantity ?? 99),
+      locationId: a.location_id != null ? Number(a.location_id) : null,
     })),
     addOnsOrder: raw.add_ons_order ?? [],
     availability: mapAvailability(raw.availability),
@@ -486,17 +491,26 @@ export async function fetchAttractions({
   isActive,
   signal,
 }: FetchParams): Promise<AttractionRow[]> {
-  const params = new URLSearchParams({
-    per_page: String(PER_PAGE),
-    user_id: String(userId),
-  });
-  if (locationId != null) params.append("location_id", String(locationId));
-  if (isActive != null) params.append("is_active", isActive ? "true" : "false");
-
-  const res = await apiRequest<AttractionsListResponse>(
-    `/api/attractions?${params.toString()}`,
-    { token, signal },
+  const rows = await fetchAllPages<RawAttraction>(
+    async (page) => {
+      const params = new URLSearchParams({
+        per_page: String(PER_PAGE),
+        page: String(page),
+        user_id: String(userId),
+      });
+      if (locationId != null) params.append("location_id", String(locationId));
+      if (isActive != null)
+        params.append("is_active", isActive ? "true" : "false");
+      const res = await apiRequest<AttractionsListResponse>(
+        `/api/attractions?${params.toString()}`,
+        { token, signal },
+      );
+      return {
+        items: res?.data?.attractions ?? [],
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: MAX_PAGES },
   );
-  const items = res?.data?.attractions ?? [];
-  return items.map(mapAttraction);
+  return uniqueById(rows).map(mapAttraction);
 }

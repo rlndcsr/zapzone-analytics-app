@@ -78,6 +78,31 @@ describe("filterNewBookings", () => {
       [1],
     );
   });
+
+  it("lists the newest-created first, whatever order the full list came in", () => {
+    // The full booking list is ordered by booking date, not by when it was made.
+    const rows = [
+      { id: 1, createdAt: "2026-09-22T09:00:00Z", status: "confirmed" },
+      { id: 2, createdAt: "2026-09-22T15:00:00Z", status: "pending" },
+      { id: 3, createdAt: "2026-09-22T12:00:00Z", status: "confirmed" },
+    ];
+    assert.deepEqual(
+      filterNewBookings(rows, "today", undefined, undefined, NOON_ET).map((r) => r.id),
+      [2, 3, 1],
+    );
+  });
+
+  it("counts every booking in the window, not just the newest page of 100", () => {
+    const rows = Array.from({ length: 250 }, (_, i) => ({
+      id: i + 1,
+      createdAt: "2026-09-22T14:00:00Z",
+      status: "confirmed",
+    }));
+    assert.equal(
+      filterNewBookings(rows, "today", undefined, undefined, NOON_ET).length,
+      250,
+    );
+  });
 });
 
 describe("timeframeLabel", () => {

@@ -356,7 +356,7 @@ const EditPackage = () => {
             rooms: [],
             slotCleanupMinutes: null,
           })),
-          fetchAddOns({ token, userId, locationId: locId, perPage: 500 }).catch(
+          fetchAddOns({ token, userId, locationId: locId }).catch(
             () => [],
           ),
         ]);

@@ -570,28 +570,6 @@ export async function fetchAllBookings({
   return out;
 }
 
-export async function fetchDashboardBookings({
-  token,
-  locationId,
-  signal,
-}: FetchParams): Promise<CalendarBooking[]> {
-  // Newest-created first: New Bookings is about when a booking was made, and
-  // the default order (booking_date) would hand back the furthest-future ones.
-  const params = new URLSearchParams({
-    per_page: "500",
-    sort_by: "created_at",
-    sort_order: "desc",
-  });
-  if (locationId != null) params.append("location_id", String(locationId));
-
-  const res = await apiRequest<BookingsListResponse>(
-    `/api/bookings?${params.toString()}`,
-    { token, signal },
-  );
-  const items = res?.data?.bookings ?? [];
-  return items.map((raw) => mapBooking(raw, toDateKey(raw.booking_date) ?? ""));
-}
-
 export async function searchBookings({
   token,
   term,

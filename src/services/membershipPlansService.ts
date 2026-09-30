@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 
 /** Billing cadence, mirrored from the backend `billing_cycle`. */
 export type BillingCycle =
@@ -155,6 +156,18 @@ function extractPlans(res: unknown): RawPlan[] {
   return [];
 }
 
+/** The paginator's last page, or 1 when the response is not paginated. */
+function plansLastPage(res: unknown): number {
+  const data = ((res ?? {}) as Record<string, unknown>).data as
+    | Record<string, unknown>
+    | undefined;
+  return data && typeof data.last_page === "number" ? data.last_page : 1;
+}
+
+/** 100 a page in price order, every page walked (web: listAllPlans). */
+const PLAN_PAGE_SIZE = 100;
+const PLAN_MAX_PAGES = 20;
+
 type FetchParams = {
   token: string;
   /** Only active plans (used by the Add Member plan picker). */
@@ -175,7 +188,11 @@ export async function fetchMembershipPlans({
   search,
   signal,
 }: FetchParams): Promise<MembershipPlanRow[]> {
-  const params = new URLSearchParams({ per_page: "50" });
+  const params = new URLSearchParams({
+    per_page: String(PLAN_PAGE_SIZE),
+    sort_by: "price",
+    sort_order: "asc",
+  });
   if (activeOnly) params.append("active_only", "1");
   if (locationId != null) params.append("location_id", String(locationId));
   if (search) params.append("search", search);
@@ -190,11 +207,19 @@ export async function fetchMembershipPlans({
   signal?.addEventListener("abort", onExternalAbort);
 
   try {
-    const res = await apiRequest<unknown>(
-      `/api/membership-plans?${params.toString()}`,
-      { token, signal: controller.signal },
+    const rows = await fetchAllPages<RawPlan>(
+      async (page) => {
+        const pageParams = new URLSearchParams(params);
+        pageParams.set("page", String(page));
+        const res = await apiRequest<unknown>(
+          `/api/membership-plans?${pageParams.toString()}`,
+          { token, signal: controller.signal },
+        );
+        return { items: extractPlans(res), lastPage: plansLastPage(res) };
+      },
+      { maxPages: PLAN_MAX_PAGES },
     );
-    return extractPlans(res).map(mapPlan);
+    return uniqueById(rows).map(mapPlan);
   } catch (err) {
     if (timedOut) throw new Error("Request timed out. Pull to refresh to try again.");
     throw err;

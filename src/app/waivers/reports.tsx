@@ -343,6 +343,13 @@ const WaiverReportsScreen = () => {
     return rows.length;
   }, [data, rows]);
 
+  // The server stops at 1,000 rows and says so (web: "Showing X of Y record(s)…").
+  const truncatedTotal = useMemo(() => {
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    const { truncated, total } = data as { truncated?: unknown; total?: unknown };
+    return truncated === true ? String(total ?? "") : null;
+  }, [data]);
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header */}
@@ -480,9 +487,18 @@ const WaiverReportsScreen = () => {
             <EmptyState note={failure} />
           ) : (
             <>
-              <Text className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                {recordCount} record(s)
-              </Text>
+              {truncatedTotal != null ? (
+                <View className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/20">
+                  <Text className="text-sm text-amber-800 dark:text-amber-300">
+                    Showing {rows.length} of {truncatedTotal} record(s). Narrow
+                    the date range to see the rest.
+                  </Text>
+                </View>
+              ) : (
+                <Text className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                  {recordCount} record(s)
+                </Text>
+              )}
               <ReportTable columns={columns} rows={paged} />
               <Pagination
                 page={page}

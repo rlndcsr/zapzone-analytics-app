@@ -1,4 +1,5 @@
 import { ApiError, apiRequest, apiUrl, webUrl } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import {
   classifyLookupFailure,
   classifyLookupResponse,
@@ -1025,17 +1026,31 @@ export async function fetchContentTokens(
 
 /* -------------------------------------------------------- Group Invites -- */
 
-/** GET /api/waiver-bulk-invites — group (chaperone) invites. */
+/** GET /api/waiver-bulk-invites — every group (chaperone) invite, newest first, all pages. */
 export async function fetchGroupInvites(
   token: string,
   signal?: AbortSignal,
 ): Promise<GroupInvite[]> {
-  const params = new URLSearchParams({ per_page: "100" });
-  const res = await apiRequest<InvitesListResponse>(
-    `/api/waiver-bulk-invites?${params.toString()}`,
-    { token, signal },
+  const rows = await fetchAllPages<RawInvite>(
+    async (page) => {
+      const params = new URLSearchParams({
+        sort_by: "created_at",
+        sort_order: "desc",
+        per_page: "100",
+        page: String(page),
+      });
+      const res = await apiRequest<InvitesListResponse>(
+        `/api/waiver-bulk-invites?${params.toString()}`,
+        { token, signal },
+      );
+      return {
+        items: res?.data?.bulk_invites ?? [],
+        lastPage: res?.data?.pagination?.last_page ?? page,
+      };
+    },
+    { maxPages: 50 },
   );
-  return (res?.data?.bulk_invites ?? []).map(mapInvite);
+  return uniqueById(rows).map(mapInvite);
 }
 
 export type CreateGroupInviteInput = {

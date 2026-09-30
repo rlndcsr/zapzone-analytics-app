@@ -173,6 +173,8 @@ export type ActivityFilters = {
   action?: string;
   /** Attendant filter → `user_id[]` query param (one id, or many for export). */
   userId?: number | number[];
+  /** The actor's role → `user_role`, counted by the server rather than over one page. */
+  userRole?: string;
   locationId?: number;
   /** Inclusive `created_at >=` date (YYYY-MM-DD). */
   dateFrom?: string;
@@ -204,6 +206,7 @@ function buildParams(
   if (filters.userId != null)
     for (const id of [filters.userId].flat())
       params.append("user_id[]", String(id));
+  if (filters.userRole) params.append("user_role", filters.userRole);
   if (filters.locationId != null)
     params.append("location_id", String(filters.locationId));
   if (filters.dateFrom) params.append("date_from", filters.dateFrom);

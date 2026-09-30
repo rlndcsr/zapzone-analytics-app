@@ -88,6 +88,9 @@ const EditAttractionScreen = () => {
   const [displayOrder, setDisplayOrder] = useState("0");
   const [isActive, setIsActive] = useState(true);
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
+  const [attachedAddOns, setAttachedAddOns] = useState<
+    { id: number; name: string }[]
+  >([]);
 
   const [locationId, setLocationId] = useState<number | null>(null);
   const [locationName, setLocationName] = useState("");
@@ -193,6 +196,14 @@ const EditAttractionScreen = () => {
             ? detail.addOnsOrder
             : detail.addOns.map((a) => a.name);
         setSelectedAddOns(orderedNames);
+        // Its own attached add-ons, so a switched-off one is not dropped on save (web parity).
+        setAttachedAddOns(
+          detail.addOns
+            .filter(
+              (a) => a.locationId == null || a.locationId === detail.locationId,
+            )
+            .map((a) => ({ id: a.id, name: a.name })),
+        );
       } catch (err) {
         if (active)
           setLoadError(
@@ -369,7 +380,11 @@ const EditAttractionScreen = () => {
         ? null
         : Number(slotCapRaw);
     const addonIds = selectedAddOns
-      .map((n) => addOns.find((a) => a.name === n)?.id)
+      .map(
+        (n) =>
+          addOns.find((a) => a.name === n)?.id ??
+          attachedAddOns.find((a) => a.name === n)?.id,
+      )
       .filter((id): id is number => typeof id === "number");
 
     // Same payload contract the sheet used — edited scalars plus the now-editable

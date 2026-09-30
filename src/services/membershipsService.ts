@@ -1,4 +1,5 @@
 import { apiRequest, apiUrl, mediaUrl } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { formatCardLabel } from "../lib/payments/cardLabel";
 import type { AuthorizeNetPublicKey, PaymentOpaqueData } from "./paymentsService";
 
@@ -100,7 +101,11 @@ function looksLikeMembership(v: unknown): v is RawMembership {
  * GET /api/memberships returns a Laravel paginator wrapped in `{ success, data }`.
  * Return both the rows and the pagination total (drives the "Total" stat card).
  */
-function extractMemberships(res: unknown): { rows: RawMembership[]; total: number } {
+function extractMemberships(res: unknown): {
+  rows: RawMembership[];
+  total: number;
+  lastPage: number;
+} {
   const root = (res ?? {}) as Record<string, unknown>;
   const paginator = (root.data ?? {}) as Record<string, unknown>;
 
@@ -116,9 +121,15 @@ function extractMemberships(res: unknown): { rows: RawMembership[]; total: numbe
     [];
   const total =
     typeof paginator.total === "number" ? paginator.total : rows.length;
+  const lastPage =
+    typeof paginator.last_page === "number" ? paginator.last_page : 1;
 
-  return { rows, total };
+  return { rows, total, lastPage };
 }
+
+/** 200 a page, every page walked (web: listAllMemberships). */
+const MEMBERSHIP_PAGE_SIZE = 200;
+const MEMBERSHIP_MAX_PAGES = 50;
 
 /** Filters the list endpoint accepts (all optional). */
 export type MembershipFilters = {
@@ -138,7 +149,11 @@ export async function fetchMemberships({
   filters = {},
   signal,
 }: FetchParams): Promise<MembershipList> {
-  const params = new URLSearchParams({ per_page: "100" });
+  const params = new URLSearchParams({
+    per_page: String(MEMBERSHIP_PAGE_SIZE),
+    sort_by: "id",
+    sort_order: "desc",
+  });
   if (filters.search) params.append("search", filters.search);
   if (filters.status) params.append("status", filters.status);
   if (filters.planId != null) params.append("plan_id", String(filters.planId));
@@ -154,12 +169,26 @@ export async function fetchMemberships({
   signal?.addEventListener("abort", onExternalAbort);
 
   try {
-    const res = await apiRequest<unknown>(`/api/memberships?${params.toString()}`, {
-      token,
-      signal: controller.signal,
-    });
-    const { rows, total } = extractMemberships(res);
-    return { rows: rows.map(mapMembership), total };
+    let total = 0;
+    const rows = await fetchAllPages<RawMembership>(
+      async (page) => {
+        const pageParams = new URLSearchParams(params);
+        pageParams.set("page", String(page));
+        const res = await apiRequest<unknown>(
+          `/api/memberships?${pageParams.toString()}`,
+          { token, signal: controller.signal },
+        );
+        const extracted = extractMemberships(res);
+        if (page === 1) total = extracted.total;
+        return { items: extracted.rows, lastPage: extracted.lastPage };
+      },
+      { maxPages: MEMBERSHIP_MAX_PAGES },
+    );
+    const unique = uniqueById(rows);
+    return {
+      rows: unique.map(mapMembership),
+      total: Math.max(total, unique.length),
+    };
   } catch (err) {
     if (timedOut) throw new Error("Request timed out. Pull to refresh to try again.");
     throw err;

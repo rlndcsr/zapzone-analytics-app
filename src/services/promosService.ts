@@ -1,5 +1,5 @@
 import { apiRequest } from "../lib/api";
-import { fetchAllPages } from "../lib/fetchAllPages";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 
 /** A selectable promo for the package form. Carries no image → payload-safe. */
 export type PromoOption = {
@@ -153,13 +153,14 @@ export async function fetchPromoList(
   token: string,
   signal?: AbortSignal,
 ): Promise<PromoRow[]> {
-  return fetchAllPages<PromoRow>(
+  const rows = await fetchAllPages<PromoRow>(
     async (page) => {
       // status=all: every status but deleted. With no status the API returns
       // active codes only, so the Inactive filter could never show anything
       // and a deactivated code blocking a new one stayed invisible.
+      // exclude_batches: bulk batch codes belong to the Bulk Codes tab (web parity).
       const res = await apiRequest<PromosResponse>(
-        `/api/promos?status=all&per_page=${PER_PAGE}&page=${page}`,
+        `/api/promos?status=all&exclude_batches=1&sort_by=created_at&sort_order=desc&per_page=${PER_PAGE}&page=${page}`,
         { token, signal },
       );
       return {
@@ -169,6 +170,7 @@ export async function fetchPromoList(
     },
     { maxPages: MAX_PAGES },
   );
+  return uniqueById(rows);
 }
 
 /** POST /api/promos — create a single promo code. */

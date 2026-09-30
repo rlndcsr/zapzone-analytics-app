@@ -25,7 +25,9 @@ import {
   SkeletonBlock,
   usePulse,
 } from "../../components/ui/skeleton/SkeletonBlock";
+import { venueTodayKey } from "../../lib/dashboard/dashboardTimeframe";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
+import { libraryDaysNotice, libraryDayWindow } from "../../lib/photos/libraryDays";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -228,6 +230,15 @@ export default function PhotoLibraryScreen() {
   const [schedule, setSchedule] = useState<PhotoDeliverySchedule>("immediate");
   const [sending, setSending] = useState(false);
 
+  // A chosen range is covered in full (up to 120 days), not cut to the server's default 14.
+  const dayWindow = useMemo(
+    () => libraryDayWindow(from, to, venueTodayKey()),
+    [from, to],
+  );
+  const daysNote = library
+    ? libraryDaysNotice(dayWindow, library.days.length, library.truncated, !!from)
+    : null;
+
   const load = useCallback(async () => {
     const token = getToken();
     if (!effectiveLocationId || !token) return;
@@ -239,6 +250,7 @@ export default function PhotoLibraryScreen() {
           source: source || undefined,
           from: from || undefined,
           to: to || undefined,
+          days: dayWindow.dayLimit,
         }),
       );
     } catch (e) {
@@ -250,7 +262,7 @@ export default function PhotoLibraryScreen() {
       setLoading(false);
       setLoaded(true);
     }
-  }, [effectiveLocationId, from, source, to, showToast]);
+  }, [effectiveLocationId, from, source, to, dayWindow.dayLimit, showToast]);
 
   useEffect(() => {
     void load();
@@ -662,6 +674,14 @@ export default function PhotoLibraryScreen() {
               <Text className="text-sm text-amber-800 dark:text-amber-300">
                 Showing the most recent 1,500 photos. Narrow the date range to
                 see older days.
+              </Text>
+            </View>
+          )}
+
+          {!loading && !!daysNote && (
+            <View className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/20">
+              <Text className="text-sm text-amber-800 dark:text-amber-300">
+                {daysNote}
               </Text>
             </View>
           )}
