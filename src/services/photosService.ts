@@ -1799,6 +1799,13 @@ export type PhotoTemplates = {
   /** Placeholder names, without the braces the UI adds. */
   variables: string[];
   kinds: string[];
+  /** The Thanks for Playing email escape-room photos go out with. */
+  escapeRoomEmail: {
+    id: number;
+    name: string;
+    isActive: boolean;
+    roomsWithoutEmail: string[];
+  } | null;
 };
 
 type ApiPhotoTemplate = {
@@ -1833,13 +1840,28 @@ export async function fetchPhotoTemplates(
       templates: ApiPhotoTemplate[];
       variables: string[];
       kinds: string[];
+      escape_room_email?: {
+        id: number;
+        name: string;
+        is_active: boolean;
+        rooms_without_email?: string[];
+      } | null;
     };
   }>("/api/photo-templates", { token, signal });
+  const email = res.data.escape_room_email;
 
   return {
     templates: (res.data.templates ?? []).map(mapPhotoTemplate),
     variables: res.data.variables ?? [],
     kinds: res.data.kinds ?? [],
+    escapeRoomEmail: email
+      ? {
+          id: email.id,
+          name: email.name,
+          isActive: Boolean(email.is_active),
+          roomsWithoutEmail: email.rooms_without_email ?? [],
+        }
+      : null,
   };
 }
 

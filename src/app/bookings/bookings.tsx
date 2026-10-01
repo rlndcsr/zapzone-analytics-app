@@ -68,6 +68,11 @@ import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { cardLabelFromPayments, type CardBearingPayment } from "../../lib/payments/cardLabel";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  bulkCompleteBookingsNotice,
+  bulkCompleteConfirmMessage,
+  describeFollowUp,
+} from "../../lib/visitFollowUp/visitFollowUp";
+import {
   bulkDeleteBookings,
   bulkSetBookingStatus,
   checkInBooking,
@@ -869,13 +874,28 @@ const Bookings = () => {
   // change routes through the check-in endpoint). Refetches + clears selection;
   // filters, search and the current page are preserved.
   const runBulkStatus = useCallback(
-    async (status: Exclude<BookingBulkAction, "delete">) => {
+    async (
+      status: Exclude<BookingBulkAction, "delete">,
+      confirmed = false,
+    ): Promise<void> => {
       const token = getToken();
       if (!token || selectedIds.size === 0) return;
       const chosen = paged.filter((b) => selectedIds.has(b.id));
+      if (status === "completed" && !confirmed) {
+        // Completing emails guests, so ask first (web parity) and re-enter on OK.
+        Alert.alert(
+          "Complete",
+          bulkCompleteConfirmMessage(chosen.length, "booking"),
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "OK", onPress: () => void runBulkStatus(status, true) },
+          ],
+        );
+        return;
+      }
       setBulkBusy(status);
       try {
-        await bulkSetBookingStatus(
+        const followUps = await bulkSetBookingStatus(
           token,
           chosen.map((b) => ({
             id: b.id,
@@ -886,6 +906,11 @@ const Bookings = () => {
         );
         setSelectedIds(new Set());
         await refetch();
+        const notice =
+          status === "completed"
+            ? bulkCompleteBookingsNotice(followUps, chosen.length)
+            : null;
+        if (notice) Alert.alert(notice);
       } catch (e) {
         Alert.alert(
           "Update failed",
@@ -1505,9 +1530,16 @@ const Bookings = () => {
                   if (!token) return;
                   setStatusSaving(true);
                   try {
-                    await updateBookingStatus(token, statusBooking.id, option);
+                    const followUp = await updateBookingStatus(
+                      token,
+                      statusBooking.id,
+                      option,
+                    );
                     setStatusBooking(null);
                     refetch();
+                    const notice =
+                      option === "completed" ? describeFollowUp(followUp) : null;
+                    if (notice) Alert.alert(notice);
                   } catch (err) {
                     Alert.alert(
                       "Couldn't update status",
@@ -1546,6 +1578,7 @@ const Bookings = () => {
         amountPaid={payPaid}
         locationId={payDetail?.locationId ?? null}
         customerId={payDetail?.customerId ?? null}
+        status={payDetail?.status ?? payBooking?.status ?? null}
         loading={payLoading}
         onClose={() => setPayBooking(null)}
         onProcessed={refetch}

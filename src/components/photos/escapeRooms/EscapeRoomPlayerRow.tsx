@@ -3,6 +3,12 @@ import { useState } from "react";
 import { Text, TextInput, View } from "react-native";
 
 import { EXCLUDED_LABELS, plural } from "../../../lib/escapeRooms/escapeRooms";
+import {
+  canResendThanks,
+  REMOVE_PLAYER_QUESTION,
+  reviewBadge,
+  thanksBadge,
+} from "../../../lib/escapeRooms/gameFollowUp";
 import type {
   EscapeRoomDay,
   EscapeRoomGame,
@@ -20,6 +26,8 @@ export type PlayerActions = {
   remove: (player: EscapeRoomPlayer) => Promise<boolean>;
   move: (player: EscapeRoomPlayer, roomId: number, time: string) => Promise<boolean>;
   linkBooking: (player: EscapeRoomPlayer, bookingId: number | null) => Promise<boolean>;
+  /** Send now / cancel one of the player's follow-up emails. */
+  followUp: (rowId: number, action: "send" | "cancel") => Promise<void>;
 };
 
 function deliveryPill(player: EscapeRoomPlayer) {
@@ -149,6 +157,40 @@ export function EscapeRoomPlayerRow({
           <Pill label="Declined photo release" tone="amber" />
         )}
         {deliveryPill(player)}
+        {!excluded && player.thanksEmail && (
+          <Pill label={thanksBadge(player.thanksEmail).label} tone={thanksBadge(player.thanksEmail).tone} />
+        )}
+        {!excluded && player.thanksEmail && canResendThanks(player.thanksEmail) && (
+          <TextAction
+            label="Send thank-you again"
+            disabled={busy}
+            onPress={() => player.thanksEmail && void actions.followUp(player.thanksEmail.id, "send")}
+          />
+        )}
+        {!excluded && player.review && (
+          <Pill label={reviewBadge(player.review).label} tone={reviewBadge(player.review).tone} />
+        )}
+        {!excluded && player.review && player.review.rating === null && player.review.status === "scheduled" && (
+          <>
+            <TextAction
+              label="Send review now"
+              disabled={busy}
+              onPress={() => player.review && void actions.followUp(player.review.id, "send")}
+            />
+            <TextAction
+              label="Don't ask for a review"
+              disabled={busy}
+              onPress={() => player.review && void actions.followUp(player.review.id, "cancel")}
+            />
+          </>
+        )}
+        {!excluded && player.review && player.review.rating === null && player.review.status === "failed" && (
+          <TextAction
+            label="Send review again"
+            disabled={busy}
+            onPress={() => player.review && void actions.followUp(player.review.id, "send")}
+          />
+        )}
         {canResend && <TextAction label="Resend" onPress={() => toggle("resend")} />}
         {canMoveOrRemove && (
           <>
@@ -214,7 +256,7 @@ export function EscapeRoomPlayerRow({
       {panel === "remove" && (
         <View className="gap-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-900/20">
           <Text className="text-sm text-red-900 dark:text-red-200">
-            {`Remove ${player.name || "this player"} from this game? They will not be sent this game's photo. Their signed waiver is kept.`}
+            {REMOVE_PLAYER_QUESTION(player.name)}
           </Text>
           <View className="flex-row flex-wrap gap-2">
             <ActionButton

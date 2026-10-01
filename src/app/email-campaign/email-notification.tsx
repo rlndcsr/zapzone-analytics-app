@@ -20,6 +20,12 @@ import { Pagination } from "../../components/ui/Pagination";
 import { SendTestEmailSheet } from "../../components/ui/SendTestEmailSheet";
 import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import { VisitPromoBadge } from "../../components/ui/VisitEmailSettings";
+import {
+  BULK_TOGGLE_ALL_LOCKED,
+  bulkToggleSkippedNote,
+  planBulkToggle,
+} from "../../lib/email/visitEmail";
 import { consumeEmailNotificationsStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
@@ -252,14 +258,23 @@ const EmailNotifications = () => {
       const token = getToken();
       if (!token || selectedIds.size === 0) return;
       const target = key === "activate";
-      const ids = rows
-        .filter((n) => selectedIds.has(n.id) && n.isActive !== target)
-        .map((n) => n.id);
+      // Follow-up emails this user may not change are skipped (web parity).
+      const { targets: ids, locked } = planBulkToggle(rows, selectedIds, target);
+      if (ids.length === 0 && locked > 0) {
+        Alert.alert(BULK_TOGGLE_ALL_LOCKED);
+        setSelectedIds(new Set());
+        return;
+      }
       setBulkBusy(key);
       try {
         await Promise.all(ids.map((id) => toggleEmailNotificationStatus(token, id)));
         setSelectedIds(new Set());
         await load();
+        if (locked > 0) {
+          Alert.alert(
+            `${ids.length} notification(s) ${target ? "activated" : "deactivated"} successfully${bulkToggleSkippedNote(locked)}`,
+          );
+        }
       } catch (err) {
         Alert.alert(
           "Action failed",
@@ -312,7 +327,7 @@ const EmailNotifications = () => {
               Email Notifications
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Automated email notifications for bookings, purchases, and payments
+              Automated email notifications for bookings, purchases, payments and the follow-up after each visit
             </Text>
           </View>
 
@@ -520,6 +535,9 @@ const EmailNotifications = () => {
                         Default
                       </Text>
                     </View>
+                  )}
+                  {n.triggerType === "visit_completed" && (
+                    <VisitPromoBadge summary={n.promoSummary} />
                   )}
                 </View>
                 <View

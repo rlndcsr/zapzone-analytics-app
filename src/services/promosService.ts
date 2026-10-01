@@ -1,5 +1,6 @@
 import { apiRequest } from "../lib/api";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
+import type { SharedPromo } from "../lib/email/visitEmail";
 
 /** A selectable promo for the package form. Carries no image → payload-safe. */
 export type PromoOption = {
@@ -36,6 +37,8 @@ type RawPromo = {
   package_ids?: unknown;
   attraction_ids?: unknown;
   event_ids?: unknown;
+  batch_id?: number | null;
+  code_mode?: string | null;
 };
 
 /** Reads a targeting column into ids; null / absent / malformed → [] ("all"). */
@@ -301,4 +304,36 @@ export async function fetchPromos(
     },
     { maxPages: MAX_PAGES },
   );
+}
+
+/**
+ * GET /api/promos?shared_only — the codes a Visit Completed email can carry:
+ * shared codes only, never bulk-batch or one-time unique codes (web PromoCodePicker).
+ */
+export async function fetchSharedPromoCodes(
+  token: string,
+  signal?: AbortSignal,
+): Promise<SharedPromo[]> {
+  const res = await apiRequest<PromosResponse>(
+    "/api/promos?status=all&per_page=500&shared_only=1",
+    { token, signal },
+  );
+  return (res?.data?.promos ?? [])
+    .filter((p) => !p.batch_id && p.code_mode !== "unique" && !p.deleted)
+    .map((p) => ({
+      id: p.id,
+      code: p.code?.trim() || `#${p.id}`,
+      name: p.name?.trim() || null,
+      type: (p.type ?? p.discount_type ?? "fixed").toLowerCase(),
+      value: Number(p.value ?? p.discount_value ?? 0),
+      status: (p.status ?? "active").toLowerCase(),
+      startDate: p.start_date ?? null,
+      endDate: p.end_date ?? null,
+      usageLimitTotal: p.usage_limit_total != null ? Number(p.usage_limit_total) : null,
+      currentUsage: Number(p.current_usage ?? 0),
+      locationIds: idList(p.location_ids),
+      itemLimited: [p.package_ids, p.attraction_ids, p.event_ids].some(
+        (ids) => idList(ids).length > 0,
+      ),
+    }));
 }

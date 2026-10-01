@@ -5,11 +5,11 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useMemo, useRef, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, Text, TextInput, View } from "react-native";
 
 import { ApiError } from "../../../lib/api";
-import { formatFullDate } from "../../../lib/date/calendar";
-import { formatTimeET } from "../../../lib/date/venueTime";
+import { formatFullDate, toKey } from "../../../lib/date/calendar";
+import { formatTimeET, venueToday } from "../../../lib/date/venueTime";
 import {
   BOOKING_STATUS_LABELS,
   digitsOnly,
@@ -20,6 +20,25 @@ import {
   timeUsedExample,
   type EntryMode,
 } from "../../../lib/escapeRooms/escapeRooms";
+import {
+  completeAndSendExtras,
+  completeAndSendQuestion,
+  EMAIL_LATER_NOTE,
+  emailedLaterToast,
+  emailPlayersOptionLabel,
+  followUpInfoParts,
+  gameDayLabel,
+  gameFollowUpState,
+  newPlayersSummary,
+  PAST_GAME_EMAIL_NOTE,
+  pastGameEmailConfirm,
+  recordedResultToast,
+  recordOnlyQuestion,
+  reviewCountsLine,
+  sendToNewLabel,
+  thanksFailedLine,
+  withoutPhotoSummary,
+} from "../../../lib/escapeRooms/gameFollowUp";
 import { getCurrentUser, getToken } from "../../../lib/session";
 import { checkInBooking } from "../../../services/bookingsService";
 import {
@@ -44,6 +63,7 @@ import {
   type PhotoSession,
   type SessionPhoto,
 } from "../../../services/photosService";
+import { cancelFollowUp, sendFollowUpNow } from "../../../services/visitFollowUpService";
 import type { ToastType } from "../../ui/Toast";
 import { CheckboxRow, RadioRow, SegmentedToggle } from "../../ui/FormControls";
 import { PhotoCameraView, type PhotoCameraState } from "../PhotoCameraView";
@@ -144,6 +164,7 @@ export function EscapeRoomGameView({
   const secondsRef = useRef<TextInput>(null);
   const [confirming, setConfirming] = useState(false);
   const [recordingOnly, setRecordingOnly] = useState(false);
+  const [emailPlayersOnly, setEmailPlayersOnly] = useState(true);
 
   const [confirmResendAll, setConfirmResendAll] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -179,7 +200,13 @@ export function EscapeRoomGameView({
       (p.hasEmail || p.delivery?.status === "sent") &&
       !p.delivery?.isDuplicate,
   );
+  const recipients = recipientPlayers.length;
   const people = game.counts.people ?? game.counts.players;
+  const followUp = gameFollowUpState(game);
+  const thanksName = followUp.thanksName;
+  const isTodayGame = game.sessionDate === toKey(venueToday());
+  const dayLabel = gameDayLabel(game.sessionDate);
+  const reviewsLine = reviewCountsLine(game.followUp?.reviews);
   const example = timeUsedExample(roomMinutes);
 
   const room = day?.rooms.find((r) => r.id === game.room.id);
@@ -335,18 +362,26 @@ export function EscapeRoomGameView({
     const notYet = data.counts.retrying + data.counts.failed;
     showToast(
       notYet === 0
-        ? `Emailed the group photo to ${players(data.counts.emailed)}.`
+        ? `Emailed the ${thanksName} email with the group photo to ${players(data.counts.emailed)}.`
         : data.counts.emailed === 0
           ? `The photo has not gone through yet for ${players(notYet)}. See below.`
-          : `Emailed the group photo to ${players(data.counts.emailed)}. ${plural(notYet, "email has", "emails have")} not gone through yet; see below.`,
+          : `Emailed the ${thanksName} email with the group photo to ${players(data.counts.emailed)}. ${plural(notYet, "email has", "emails have")} not gone through yet; see below.`,
       notYet === 0 ? "success" : "info",
     );
   };
 
   const recordWithoutPhoto = async () => {
+    const emailing = emailPlayersOnly && followUp.canEmailPlayers && recipients > 0;
     const data = await run(
       (token) =>
-        completeEscapeRoomGame(token, game.id, escaped, escaped ? finish.label : null, true),
+        completeEscapeRoomGame(
+          token,
+          game.id,
+          escaped,
+          escaped ? finish.label : null,
+          true,
+          emailing,
+        ),
       "The result could not be recorded.",
     );
     setRecordingOnly(false);
@@ -355,10 +390,58 @@ export function EscapeRoomGameView({
       return;
     }
     onApply(data);
-    showToast("Result recorded. No photo was sent.", "success");
+    const toast = recordedResultToast(data.players, thanksName);
+    showToast(toast.message, toast.type);
+  };
+
+  const followUpAction = async (rowId: number, action: "send" | "cancel") => {
+    const token = getToken();
+    if (!token || lockRef.current) return;
+    lockRef.current = true;
+    setBusy(true);
+    try {
+      if (action === "send") {
+        const result = await sendFollowUpNow(token, rowId);
+        showToast(result.message || "Email sent.", "success");
+      } else {
+        await cancelFollowUp(token, rowId);
+        showToast("The email will not be sent.", "success");
+      }
+    } catch (e) {
+      showToast(errorMessage(e, "That did not work. Please try again."), "error");
+    } finally {
+      lockRef.current = false;
+      setBusy(false);
+      onRefresh();
+    }
+  };
+
+  // A game recorded without a photo emails its players later instead of sending a photo.
+  const emailPlayersLater = async (confirmed = false) => {
+    if (!isTodayGame && !confirmed) {
+      Alert.alert("", pastGameEmailConfirm(dayLabel, game.counts.newPlayers), [
+        { text: "Cancel", style: "cancel" },
+        { text: "OK", onPress: () => void emailPlayersLater(true) },
+      ]);
+      return;
+    }
+    const data = await run(
+      (token) => sendEscapeRoomToNewPlayers(token, game.id),
+      "The players could not be emailed.",
+    );
+    if (!data) {
+      onRefresh();
+      return;
+    }
+    onApply(data);
+    showToast(emailedLaterToast(game.players, data.players, followUp), "success");
   };
 
   const sendToNew = async () => {
+    if (game.completedWithoutPhoto) {
+      await emailPlayersLater();
+      return;
+    }
     const before = game.counts.sent;
     const notYetBefore = game.counts.retrying + game.counts.failed + game.counts.stuck;
     const data = await run(
@@ -537,6 +620,7 @@ export function EscapeRoomGameView({
       );
       return true;
     },
+    followUp: followUpAction,
     linkBooking: async (player, bookingId) => {
       const data = await run(
         (token) => linkEscapeRoomBooking(token, game.id, player.waiverId, bookingId),
@@ -649,11 +733,16 @@ export function EscapeRoomGameView({
             </Text>
             <Text className={`text-sm ${noticeTextClass("green")}`}>
               {game.completedWithoutPhoto
-                ? "Recorded without a group photo, so no email was sent"
+                ? withoutPhotoSummary(game.players, thanksName)
                 : `Photo emailed to ${players(game.counts.emailed)}`}
               {game.completedByName ? ` · completed by ${game.completedByName}` : ""}
               {game.completedAt ? ` at ${formatTimeET(game.completedAt, { showZone: false })}` : ""}.
             </Text>
+            {game.completedWithoutPhoto && game.counts.thanksFailed > 0 && (
+              <Text className="text-sm text-red-700 dark:text-red-300">
+                {thanksFailedLine(game.counts.thanksFailed)}
+              </Text>
+            )}
             {game.counts.retrying > 0 && (
               <Text className="text-sm text-amber-800 dark:text-amber-300">
                 {plural(game.counts.retrying, "email has", "emails have")} not gone through
@@ -673,6 +762,9 @@ export function EscapeRoomGameView({
               <Text className={`text-sm ${noticeTextClass("green")}`}>
                 {game.counts.sending} still sending.
               </Text>
+            )}
+            {!!reviewsLine && (
+              <Text className="text-sm text-emerald-800 dark:text-emerald-300">{reviewsLine}</Text>
             )}
           </Notice>
         )}
@@ -1170,16 +1262,44 @@ export function EscapeRoomGameView({
             </View>
           )}
 
+          {followUp.available && (
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
+              {followUpInfoParts(followUp).before}
+              <Text
+                className="underline"
+                onPress={() =>
+                  router.push(
+                    followUp.thanksEmailId
+                      ? ({
+                          pathname: "/email-campaign/create-notification",
+                          params: { id: String(followUp.thanksEmailId) },
+                        } as never)
+                      : ("/email-campaign/email-notification" as never),
+                  )
+                }
+              >
+                {thanksName}
+              </Text>
+              {followUpInfoParts(followUp).after}
+            </Text>
+          )}
+
           {confirming ? (
             <View className="gap-3 rounded-xl border border-[#0644C7] p-4">
               <Text className="text-sm text-gray-900 dark:text-white">
-                Email the group photo to {players(recipientPlayers.length)} in{" "}
-                {game.room.name} at {game.sessionTimeLabel}
-                {escaped
-                  ? ` with a finish time of ${finish.label}`
-                  : ", marked as didn't escape"}
-                ? This can only be done once.
+                {completeAndSendQuestion(
+                  thanksName,
+                  recipients,
+                  game.room.name,
+                  game.sessionTimeLabel,
+                  escaped ? finish.label : null,
+                )}
               </Text>
+              {!!completeAndSendExtras(followUp) && (
+                <Text className="text-sm text-gray-600 dark:text-gray-300">
+                  {completeAndSendExtras(followUp)}
+                </Text>
+              )}
               {recipientPlayers.length > 0 && (
                 <View className="gap-0.5">
                   {recipientPlayers.map((p) => (
@@ -1228,10 +1348,39 @@ export function EscapeRoomGameView({
           ) : recordingOnly ? (
             <View className="gap-3 rounded-xl border border-gray-300 p-4 dark:border-neutral-700">
               <Text className="text-sm text-gray-900 dark:text-white">
-                {`Record ${game.room.name} at ${game.sessionTimeLabel}${
-                  escaped ? ` with a finish time of ${finish.label}` : " as didn't escape"
-                } without a photo? No email is sent, and a photo can't be added to this game later.`}
+                {recordOnlyQuestion(
+                  game.room.name,
+                  game.sessionTimeLabel,
+                  escaped ? finish.label : null,
+                )}
               </Text>
+              {followUp.canEmailPlayers && recipients > 0 ? (
+                <>
+                  <CheckboxRow
+                    key={String(emailPlayersOnly)}
+                    alignTop
+                    checked={emailPlayersOnly}
+                    onToggle={() => setEmailPlayersOnly((v) => !v)}
+                    label={
+                      <Text className="flex-1 text-sm text-gray-700 dark:text-gray-300">
+                        {emailPlayersOptionLabel(followUp, recipients)}
+                      </Text>
+                    }
+                  />
+                  {!isTodayGame && (
+                    <Text className="text-xs text-amber-800 dark:text-amber-300">
+                      {PAST_GAME_EMAIL_NOTE}
+                    </Text>
+                  )}
+                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    {EMAIL_LATER_NOTE}
+                  </Text>
+                </>
+              ) : (
+                <Text className="text-sm text-gray-600 dark:text-gray-300">
+                  No email is sent.
+                </Text>
+              )}
               <View className="flex-row flex-wrap gap-2">
                 <ActionButton
                   label="Yes, record result only"
@@ -1260,7 +1409,10 @@ export function EscapeRoomGameView({
                 <TextAction
                   label="Group didn't want a photo? Record the result only"
                   disabled={busy || !finish.valid || (escaped && !finish.entered)}
-                  onPress={() => setRecordingOnly(true)}
+                  onPress={() => {
+                    setEmailPlayersOnly(isTodayGame);
+                    setRecordingOnly(true);
+                  }}
                 />
               )}
             </View>
@@ -1268,7 +1420,7 @@ export function EscapeRoomGameView({
         </Card>
       ) : (
         <Card className="gap-4">
-          {!!game.sendBlocker && !game.completedWithoutPhoto && (
+          {!!game.sendBlocker && (
             <Notice tone="amber" icon="alert-triangle">
               {game.sendBlocker}
             </Notice>
@@ -1276,26 +1428,21 @@ export function EscapeRoomGameView({
           {!game.sendBlocker && (game.counts.newPlayers > 0 || game.counts.stuck > 0) && (
             <View className="gap-3">
               <Text className="text-sm text-gray-800 dark:text-gray-200">
-                {[
-                  game.counts.newPlayers > 0
-                    ? `${plural(game.counts.newPlayers, "player has", "players have")} signed since the photo was sent`
-                    : "",
-                  game.counts.stuck > 0
-                    ? `${plural(game.counts.stuck, "email did", "emails did")} not finish sending`
-                    : "",
-                ]
-                  .filter(Boolean)
-                  .join(", and ")}
-                .
+                {newPlayersSummary({
+                  newPlayers: game.counts.newPlayers,
+                  stuck: game.counts.stuck,
+                  completedWithoutPhoto: game.completedWithoutPhoto,
+                  isToday: isTodayGame,
+                  dayLabel,
+                })}
               </Text>
               <ActionButton
-                label={
-                  game.counts.newPlayers > 0 && game.counts.stuck > 0
-                    ? "Send now"
-                    : game.counts.newPlayers > 0
-                      ? "Send to new players"
-                      : "Try sending again"
-                }
+                label={sendToNewLabel({
+                  newPlayers: game.counts.newPlayers,
+                  stuck: game.counts.stuck,
+                  completedWithoutPhoto: game.completedWithoutPhoto,
+                  thanksOn: followUp.thanksOn,
+                })}
                 icon="send"
                 loading={busy}
                 disabled={!game.canSendNew || busy}

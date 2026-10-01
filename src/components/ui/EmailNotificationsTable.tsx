@@ -4,6 +4,7 @@ import { Pressable, Text, View } from "react-native";
 
 import type { EmailNotificationRow } from "../../services/emailService";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
+import { VisitPromoBadge } from "./VisitEmailSettings";
 
 const PRIMARY = "#0644C7";
 
@@ -60,6 +61,7 @@ function buildColumns(h: Handlers): TableColumn<EmailNotificationRow>[] {
             </Text>
           </View>
         )}
+        {n.triggerType === "visit_completed" && <VisitPromoBadge summary={n.promoSummary} />}
       </View>
     ),
   },

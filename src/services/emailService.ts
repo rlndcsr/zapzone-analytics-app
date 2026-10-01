@@ -1,4 +1,11 @@
 import { apiRequest } from "../lib/api";
+import {
+  ALL_TRIGGER_GROUPS,
+  TRIGGER_LABEL_OVERRIDES,
+  type NotificationEntity,
+  type VisitActivityFilter,
+  type VisitPayloadFields,
+} from "../lib/email/visitEmail";
 
 /* ------------------------------------------------------------------ */
 /* Shared helpers                                                      */
@@ -450,6 +457,27 @@ export async function deleteEmailCampaign(token: string, id: number): Promise<vo
 /* Email notifications                                                 */
 /* ------------------------------------------------------------------ */
 
+/** The return-visit promo a Visit Completed email carries (API shape). */
+export type EmailPromoSummary = {
+  id: number;
+  code: string | null;
+  offer: string | null;
+  name: string | null;
+  ends_on: string | null;
+  terms?: string;
+  location_note?: string | null;
+  problem: string | null;
+};
+
+/** Another active visit email sent instead of this one for some visits (API shape). */
+export type VisitEmailOverride = {
+  id: number;
+  name: string;
+  location_name: string | null;
+  promo_code: string | null;
+  covers_everything: boolean;
+};
+
 export type EmailNotificationRow = {
   id: number;
   name: string;
@@ -459,6 +487,10 @@ export type EmailNotificationRow = {
   recipientCount: number;
   isActive: boolean;
   isDefault: boolean;
+  /** False when this user may not change it (company-wide follow-up emails). */
+  canEdit: boolean;
+  locationId: number | null;
+  promoSummary: EmailPromoSummary | null;
 };
 
 type RawNotification = {
@@ -469,7 +501,13 @@ type RawNotification = {
   recipient_types?: string[] | null;
   is_active?: boolean | null;
   is_default?: boolean | null;
+  location_id?: number | null;
+  can_edit?: boolean;
+  promo_summary?: EmailPromoSummary | null;
 };
+
+const triggerLabelOf = (trigger: string | null | undefined): string =>
+  (trigger && TRIGGER_LABEL_OVERRIDES[trigger]) || humanize(trigger);
 
 export type EmailNotificationStats = {
   total: number;
@@ -491,11 +529,14 @@ export async function fetchEmailNotifications(
     id: n.id,
     name: n.name?.trim() || "Notification",
     triggerType: n.trigger_type ?? "",
-    triggerLabel: humanize(n.trigger_type),
+    triggerLabel: triggerLabelOf(n.trigger_type),
     entityLabel: humanize(n.entity_type) || "—",
     recipientCount: Array.isArray(n.recipient_types) ? n.recipient_types.length : 0,
     isActive: n.is_active !== false,
     isDefault: !!n.is_default,
+    canEdit: n.can_edit !== false,
+    locationId: n.location_id ?? null,
+    promoSummary: n.promo_summary ?? null,
   }));
 
   const stats: EmailNotificationStats = {
@@ -540,6 +581,14 @@ export type EmailNotificationDetail = {
   sendAfterHours: number | null;
   locationName: string | null;
   createdAt: string | null;
+  locationId: number | null;
+  canEdit: boolean;
+  promoId: number | null;
+  promoSummary: EmailPromoSummary | null;
+  fromName: string;
+  reviewUrl: string;
+  activityFilter: VisitActivityFilter | null;
+  visitOverrides: VisitEmailOverride[];
 };
 
 type RawNotificationDetail = RawNotification & {
@@ -555,6 +604,11 @@ type RawNotificationDetail = RawNotification & {
    *  confused with `email_template_id`, the write-payload column above. */
   template?: { name?: string | null } | null;
   created_at?: string | null;
+  promo_id?: number | null;
+  from_name?: string | null;
+  review_url?: string | null;
+  activity_filter?: VisitActivityFilter | null;
+  visit_overrides?: VisitEmailOverride[];
 };
 
 /** GET /api/email-notifications/{id} — full notification for the details screen. */
@@ -571,7 +625,7 @@ export async function fetchEmailNotificationDetail(
     id: d.id,
     name: d.name?.trim() || "Notification",
     triggerType: d.trigger_type ?? "",
-    triggerLabel: humanize(d.trigger_type),
+    triggerLabel: triggerLabelOf(d.trigger_type),
     entityType: d.entity_type ?? "all",
     entityLabel: humanize(d.entity_type) || "All Entities",
     recipientTypes: Array.isArray(d.recipient_types) ? d.recipient_types : [],
@@ -587,6 +641,14 @@ export async function fetchEmailNotificationDetail(
     sendAfterHours: d.send_after_hours ?? null,
     locationName: d.location?.name ?? null,
     createdAt: d.created_at ?? null,
+    locationId: d.location_id ?? null,
+    canEdit: d.can_edit !== false,
+    promoId: d.promo_id ?? null,
+    promoSummary: d.promo_summary ?? null,
+    fromName: d.from_name ?? "",
+    reviewUrl: d.review_url ?? "",
+    activityFilter: d.activity_filter ?? null,
+    visitOverrides: Array.isArray(d.visit_overrides) ? d.visit_overrides : [],
   };
 }
 
@@ -608,6 +670,7 @@ export async function updateEmailNotification(
   };
   if (input.customEmails?.length) body.custom_emails = input.customEmails;
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
+  Object.assign(body, input.visitFields);
   await apiRequest(`/api/email-notifications/${id}`, { method: "PUT", token, body });
 }
 
@@ -642,7 +705,7 @@ export async function resetDefaultNotification(token: string, id: number): Promi
   });
 }
 
-export type NotificationEntityType = "all" | "package" | "attraction";
+export type NotificationEntityType = NotificationEntity;
 export type NotificationRecipientType =
   | "customer"
   | "staff"
@@ -661,6 +724,8 @@ export type CreateEmailNotificationInput = {
   includeQrCode: boolean;
   isActive: boolean;
   emailTemplateId?: number | null;
+  /** Visit-email keys (recipients, promo, sender, review link, activity), applied last. */
+  visitFields?: VisitPayloadFields;
 };
 
 /** POST /api/email-notifications — create an automated per-event email. */
@@ -680,6 +745,7 @@ export async function createEmailNotification(
   };
   if (input.customEmails?.length) body.custom_emails = input.customEmails;
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
+  Object.assign(body, input.visitFields);
   await apiRequest("/api/email-notifications", { method: "POST", token, body });
 }
 
@@ -687,52 +753,7 @@ export async function createEmailNotification(
 export const NOTIFICATION_TRIGGER_GROUPS: {
   label: string;
   options: { value: string; label: string }[];
-}[] = [
-  {
-    label: "Booking Events",
-    options: [
-      { value: "booking_created", label: "Booking Created" },
-      { value: "booking_confirmed", label: "Booking Confirmed" },
-      { value: "booking_updated", label: "Booking Updated" },
-      { value: "booking_rescheduled", label: "Booking Rescheduled" },
-      { value: "booking_cancelled", label: "Booking Cancelled" },
-      { value: "booking_checked_in", label: "Booking Checked In" },
-      { value: "booking_completed", label: "Booking Completed" },
-      { value: "booking_reminder", label: "Booking Reminder" },
-      { value: "booking_followup", label: "Booking Follow-up" },
-      { value: "booking_no_show", label: "Booking No-Show" },
-    ],
-  },
-  {
-    label: "Purchase Events",
-    options: [
-      { value: "purchase_created", label: "Purchase Created" },
-      { value: "purchase_confirmed", label: "Purchase Confirmed" },
-      { value: "purchase_cancelled", label: "Purchase Cancelled" },
-      { value: "purchase_completed", label: "Purchase Completed" },
-      { value: "purchase_checked_in", label: "Purchase Checked In" },
-      { value: "purchase_refunded", label: "Purchase Refunded" },
-      { value: "purchase_reminder", label: "Purchase Reminder" },
-      { value: "purchase_followup", label: "Purchase Follow-up" },
-    ],
-  },
-  {
-    label: "Payment Events",
-    options: [
-      { value: "payment_received", label: "Payment Received" },
-      { value: "payment_failed", label: "Payment Failed" },
-      { value: "payment_refunded", label: "Payment Refunded" },
-      { value: "payment_partial", label: "Partial Payment" },
-      { value: "payment_pending", label: "Payment Pending" },
-    ],
-  },
-  {
-    label: "Reports",
-    options: [
-      { value: "end_of_day_sales_report", label: "End of Day Sales Report" },
-    ],
-  },
-];
+}[] = ALL_TRIGGER_GROUPS;
 
 /** Curated merge variables for the notification composer (mirrors the web groups). */
 export const NOTIFICATION_VARIABLE_GROUPS: {

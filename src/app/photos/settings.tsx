@@ -26,6 +26,7 @@ import {
 } from "../../components/ui/skeleton/SkeletonBlock";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
+import { escapeRoomEmailNote } from "../../lib/escapeRooms/gameFollowUp";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -38,6 +39,7 @@ import {
   updatePhotoTemplate,
   type PhotoMessageTemplate,
   type PhotoSettings,
+  type PhotoTemplates,
   type PhotoTestChannel,
   type PhotoTestResult,
 } from "../../services/photosService";
@@ -416,6 +418,8 @@ export default function PhotoSettingsScreen() {
 
   const [templates, setTemplates] = useState<PhotoMessageTemplate[]>([]);
   const [variables, setVariables] = useState<string[]>([]);
+  const [escapeRoomEmail, setEscapeRoomEmail] =
+    useState<PhotoTemplates["escapeRoomEmail"]>(null);
   const [openTemplate, setOpenTemplate] = useState<number | null>(null);
   const [templateDraft, setTemplateDraft] = useState<
     Record<number, PhotoMessageTemplate>
@@ -446,6 +450,7 @@ export default function PhotoSettingsScreen() {
       });
       setTemplates(templateData.templates);
       setVariables(templateData.variables);
+      setEscapeRoomEmail(templateData.escapeRoomEmail);
       setTemplateDraft(
         Object.fromEntries(templateData.templates.map((t) => [t.id, t])),
       );
@@ -1087,6 +1092,27 @@ export default function PhotoSettingsScreen() {
                   .map((v) => `{{${v}}}`)
                   .join(", ")}`}
               >
+                <View className="mb-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 dark:border-indigo-900/40 dark:bg-indigo-900/20">
+                  <Text className="text-sm text-gray-600 dark:text-gray-300">
+                    Escape-room games send their group photo with the{" "}
+                    <Text
+                      className="font-semibold underline"
+                      onPress={() =>
+                        router.push(
+                          escapeRoomEmail
+                            ? {
+                                pathname: "/email-campaign/create-notification",
+                                params: { id: String(escapeRoomEmail.id) },
+                              }
+                            : "/email-campaign/email-notification",
+                        )
+                      }
+                    >
+                      {escapeRoomEmailNote(escapeRoomEmail).linkText}
+                    </Text>
+                    {escapeRoomEmailNote(escapeRoomEmail).after}
+                  </Text>
+                </View>
                 <View className="gap-3">
                   {templates.map((template) => {
                     const draft = templateDraft[template.id] ?? template;

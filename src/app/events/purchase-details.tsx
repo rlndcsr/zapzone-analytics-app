@@ -22,6 +22,7 @@ import { BulkOrderNotice } from "../../components/ui/BulkOrderNotice";
 import { ConnectedWaiversPanel } from "../../components/ui/ConnectedWaiversPanel";
 import { EventPurchaseQRSheet } from "../../components/ui/EventPurchaseQRSheet";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { VisitFollowUpCard } from "../../components/ui/VisitFollowUpCard";
 import {
   buildCalendarEventDraft,
   eventDurationMinutes,
@@ -650,6 +651,16 @@ const EventPurchaseDetailsScreen = () => {
             loading={waiversLoading}
           />
         </SectionCard>
+
+        {/* Follow-up emails — web ViewEventPurchase's VisitFollowUpCard. */}
+        {detail.status !== "cancelled" && (
+          <VisitFollowUpCard
+            visitType="event_purchase"
+            visitId={detail.id}
+            refreshKey={detail.status}
+            className="mb-4"
+          />
+        )}
 
         {/* Delete Purchase */}
         <Pressable

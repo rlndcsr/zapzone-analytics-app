@@ -1,5 +1,9 @@
 import { ApiError, apiRequest } from "../lib/api";
 import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
+import {
+  followUpOf,
+  type VisitFollowUpSummary,
+} from "../lib/visitFollowUp/visitFollowUp";
 import type { AppliedDiscount, AppliedFee } from "./pricingService";
 
 /** Booking lifecycle status, mirroring the backend `status` enum. */
@@ -749,7 +753,8 @@ export type UpdateEventPurchaseInput = {
   quantity: number;
   purchase_date: string;
   purchase_time: string;
-  status: EventPurchaseStatus;
+  /** Sent only when it changed (web parity), so an untouched status is left alone. */
+  status?: EventPurchaseStatus;
   payment_status: EditableEventPaymentStatus;
   payment_method: EventPaymentMethod;
   amount_paid: number;
@@ -765,19 +770,20 @@ export type UpdateEventPurchaseInput = {
 
 /**
  * PUT /api/event-purchases/{id} — save an edited event purchase. The backend
- * emails the customer on a date/time change or a move to Cancelled.
+ * emails the customer on a date/time change or a move to Cancelled, and sends
+ * the follow-up emails on a move to Completed (returned as `followUp`).
  */
 export async function updateEventPurchase(
   token: string,
   id: number,
   input: UpdateEventPurchaseInput | UpdateEventOrderLineInput,
-): Promise<boolean> {
+): Promise<{ ok: boolean; followUp?: VisitFollowUpSummary }> {
   const res = await apiRequest<{ success?: boolean } | null>(
     `/api/event-purchases/${id}`,
     { method: "PUT", token, body: input },
   );
   // A bare model (no envelope) still means success, like the web's reader.
-  return res == null || res.success !== false;
+  return { ok: res == null || res.success !== false, followUp: followUpOf(res) };
 }
 
 /**
@@ -788,12 +794,14 @@ export async function updateEventPurchaseStatus(
   token: string,
   id: number,
   status: EventPurchaseStatus,
-): Promise<void> {
-  await apiRequest(`/api/event-purchases/${id}/status`, {
+): Promise<VisitFollowUpSummary | undefined> {
+  // The endpoint answers with the bare purchase, carrying `follow_up` after a completion.
+  const res = await apiRequest(`/api/event-purchases/${id}/status`, {
     method: "PATCH",
     token,
     body: { status },
   });
+  return followUpOf(res);
 }
 
 /**

@@ -2,9 +2,38 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  bookingUpdateAfterPayment,
   derivePaymentStatus,
   resolvePaymentState,
+  statusAfterPayment,
 } from "./paymentState.ts";
+
+describe("statusAfterPayment — a payment never rewinds a visit", () => {
+  it("leaves checked-in and completed bookings where they are", () => {
+    assert.equal(statusAfterPayment("checked-in"), undefined);
+    assert.equal(statusAfterPayment("completed"), undefined);
+  });
+
+  it("confirms bookings that have not started yet", () => {
+    assert.equal(statusAfterPayment("pending"), "confirmed");
+    assert.equal(statusAfterPayment("confirmed"), "confirmed");
+    assert.equal(statusAfterPayment(null), "confirmed");
+    assert.equal(statusAfterPayment(undefined), "confirmed");
+  });
+
+  it("omits status from the update for a checked-in or completed booking", () => {
+    assert.deepEqual(bookingUpdateAfterPayment(120, "checked-in"), { amountPaid: 120 });
+    assert.deepEqual(bookingUpdateAfterPayment(120, "completed"), { amountPaid: 120 });
+    assert.equal("status" in bookingUpdateAfterPayment(120, "completed"), false);
+  });
+
+  it("sends confirmed for a pending booking", () => {
+    assert.deepEqual(bookingUpdateAfterPayment(60, "pending"), {
+      amountPaid: 60,
+      status: "confirmed",
+    });
+  });
+});
 
 describe("resolvePaymentState — the money cases", () => {
   it("calls a fully settled booking paid, in green", () => {

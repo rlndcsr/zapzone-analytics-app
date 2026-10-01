@@ -8,6 +8,10 @@ import { fetchAllPages } from "../lib/fetchAllPages";
 import { cardLabelFromPayments } from "../lib/payments/cardLabel";
 import { roomIsAvailable } from "../lib/rooms";
 import { normalizeCategory } from "../lib/venueCategories";
+import {
+  followUpOf,
+  type VisitFollowUpSummary,
+} from "../lib/visitFollowUp/visitFollowUp";
 import type {
   AppliedDiscount as PricingAppliedDiscount,
   AppliedFee as PricingAppliedFee,
@@ -865,17 +869,18 @@ export async function fetchBookingChangeLogs(
   }));
 }
 
-/** PATCH /api/bookings/{id}/status — change the booking status. */
+/** PATCH /api/bookings/{id}/status — change the booking status; returns the follow-up emails it triggered, if any. */
 export async function updateBookingStatus(
   token: string,
   id: number,
   status: string,
-): Promise<void> {
-  await apiRequest(`/api/bookings/${id}/status`, {
+): Promise<VisitFollowUpSummary | undefined> {
+  const res = await apiRequest(`/api/bookings/${id}/status`, {
     method: "PATCH",
     token,
     body: { status },
   });
+  return followUpOf(res);
 }
 
 /** PATCH /api/bookings/{id}/payment-status — mark paid / partial. */
@@ -935,11 +940,11 @@ export async function bulkSetBookingStatus(
   bookings: { id: number; referenceNumber: string | null }[],
   status: string,
   userId?: number,
-): Promise<void> {
-  await Promise.all(
+): Promise<(VisitFollowUpSummary | undefined)[]> {
+  return Promise.all(
     bookings.map((b) =>
       status === "checked-in" && b.referenceNumber
-        ? checkInBooking(token, b.referenceNumber, userId)
+        ? checkInBooking(token, b.referenceNumber, userId).then(() => undefined)
         : updateBookingStatus(token, b.id, status),
     ),
   );
@@ -2014,7 +2019,7 @@ export async function updateBooking(
   token: string,
   id: number,
   input: BookingUpdateInput,
-): Promise<void> {
+): Promise<VisitFollowUpSummary | undefined> {
   const body: Record<string, unknown> = {};
   if (input.locationId != null) body.location_id = input.locationId;
   if (input.packageId != null) body.package_id = input.packageId;
@@ -2064,7 +2069,8 @@ export async function updateBooking(
   if (input.overlapOverrideToken)
     body.overlap_override_token = input.overlapOverrideToken;
 
-  await apiRequest(`/api/bookings/${id}`, { method: "PUT", token, body });
+  const res = await apiRequest(`/api/bookings/${id}`, { method: "PUT", token, body });
+  return followUpOf(res);
 }
 
 export type BookingQuoteFee = {

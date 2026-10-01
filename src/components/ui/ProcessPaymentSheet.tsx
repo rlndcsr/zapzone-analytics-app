@@ -2,8 +2,10 @@ import { Feather } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
 
+import { bookingUpdateAfterPayment } from "../../lib/payments/paymentState";
 import { getToken } from "../../lib/session";
 import {
+  fetchBookingDetail,
   recordBookingPayment,
   updateBooking,
 } from "../../services/bookingsService";
@@ -23,6 +25,8 @@ type Props = {
   amountPaid: number;
   locationId: number | null;
   customerId: number | null;
+  /** Booking status as last seen; the fallback when the live status can't be read. */
+  status?: string | null;
   /** True while the caller is still fetching the authoritative amounts. */
   loading?: boolean;
   onClose: () => void;
@@ -33,7 +37,7 @@ type Props = {
 /**
  * "Process Payment" — the mobile port of the web admin's payment modal
  * (Bookings.tsx handleOpenPaymentModal / handleSubmitPayment): POST /api/payments
- * then PUT the booking's amount_paid / payment_status / status.
+ * then PUT the booking's amount_paid (and status, unless it is checked-in or completed).
  */
 export function ProcessPaymentSheet({
   visible,
@@ -43,6 +47,7 @@ export function ProcessPaymentSheet({
   amountPaid,
   locationId,
   customerId,
+  status = null,
   loading = false,
   onClose,
   onProcessed,
@@ -113,10 +118,14 @@ export function ProcessPaymentSheet({
       // state (BookingRepricer::derive), which is the only place that decision
       // can be made correctly.
       const newAmountPaid = amountPaid + value;
-      await updateBooking(token, bookingId, {
-        amountPaid: newAmountPaid,
-        status: "confirmed",
-      });
+      const liveStatus = (
+        await fetchBookingDetail(token, bookingId).catch(() => null)
+      )?.status;
+      await updateBooking(
+        token,
+        bookingId,
+        bookingUpdateAfterPayment(newAmountPaid, liveStatus ?? status),
+      );
 
       onProcessed();
       onClose();

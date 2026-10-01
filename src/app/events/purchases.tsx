@@ -49,6 +49,10 @@ import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { countTransactions } from "../../lib/purchaseMetrics";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  bulkCompleteConfirmMessage,
+  describeFollowUp,
+} from "../../lib/visitFollowUp/visitFollowUp";
+import {
   deleteEventPurchase,
   fetchTrashedEventPurchases,
   updateEventPurchaseStatus,
@@ -607,10 +611,25 @@ const EventPurchases = () => {
   // Bulk status — mirrors the web bulk bar (per-id updateStatus). Refetches +
   // clears selection; filters, search and the current page are preserved.
   const runBulkStatus = useCallback(
-    async (status: Exclude<BookingBulkAction, "delete">) => {
+    async (
+      status: Exclude<BookingBulkAction, "delete">,
+      confirmed = false,
+    ): Promise<void> => {
       const token = getToken();
       if (!token || selectedIds.size === 0) return;
       const ids = [...selectedIds];
+      if (status === "completed" && !confirmed) {
+        // Completing emails guests, so ask first (web parity) and re-enter on OK.
+        Alert.alert(
+          "Complete",
+          bulkCompleteConfirmMessage(ids.length, "purchase"),
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "OK", onPress: () => void runBulkStatus(status, true) },
+          ],
+        );
+        return;
+      }
       setBulkBusy(status);
       try {
         await Promise.all(
@@ -724,9 +743,12 @@ const EventPurchases = () => {
       }
       setStatusBusy(true);
       try {
-        await updateEventPurchaseStatus(token, p.id, status);
+        const followUp = await updateEventPurchaseStatus(token, p.id, status);
         await refetch();
         setStatusPurchase(null);
+        const notice =
+          status === "completed" ? describeFollowUp(followUp) : null;
+        if (notice) Alert.alert(`Status updated. ${notice}`);
       } catch (err) {
         Alert.alert(
           "Update failed",

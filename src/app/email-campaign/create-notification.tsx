@@ -23,29 +23,36 @@ import {
 } from "../../components/ui/EmailComposerKit";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { SelectField, type SelectOption } from "../../components/ui/FormControls";
+import { VisitEmailSettings } from "../../components/ui/VisitEmailSettings";
+import { firstFieldError } from "../../lib/api";
+import {
+  APPLY_TO_OPTIONS,
+  canCreateVisitEmail,
+  defaultVisitPayloadFields,
+  isVisitTrigger,
+  readOnlyVisitEmailMessage,
+  RETIRED_TRIGGER_LABELS,
+  triggerForEntity,
+  triggerGroupsFor,
+  VISIT_EMAIL_CREATE_DENIED,
+  visitPayloadFields,
+  type VisitActivityFilter,
+} from "../../lib/email/visitEmail";
 import { markEmailNotificationsStale } from "../../lib/emailStale";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createEmailNotification,
   fetchEmailNotificationDetail,
   fetchEmailTemplates,
-  NOTIFICATION_TRIGGER_GROUPS,
   NOTIFICATION_VARIABLE_GROUPS,
   updateEmailNotification,
+  type EmailPromoSummary,
   type EmailTemplateRow,
   type NotificationEntityType,
   type NotificationRecipientType,
+  type VisitEmailOverride,
 } from "../../services/emailService";
-
-const APPLY_TO_OPTIONS: SelectOption[] = [
-  { label: "All (Packages & Attractions)", value: "all" },
-  { label: "Packages Only", value: "package" },
-  { label: "Attractions Only", value: "attraction" },
-];
-
-const TRIGGER_OPTIONS: SelectOption[] = NOTIFICATION_TRIGGER_GROUPS.flatMap((g) =>
-  g.options.map((o) => ({ label: `${g.label.replace(" Events", "")} · ${o.label}`, value: o.value })),
-);
+import { fetchLocations } from "../../services/locationsService";
 
 const RECIPIENT_PILLS: { value: NotificationRecipientType; label: string }[] = [
   { value: "customer", label: "Customer" },
@@ -83,6 +90,29 @@ const CreateNotification = () => {
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Visit Completed / Visit Follow-up settings (web VisitEmailSettings).
+  const [promoId, setPromoId] = useState<number | null>(null);
+  const [fromName, setFromName] = useState("");
+  const [reviewUrl, setReviewUrl] = useState("");
+  const [activityFilter, setActivityFilter] = useState<VisitActivityFilter | null>(null);
+  const [promoSummary, setPromoSummary] = useState<EmailPromoSummary | null>(null);
+  const [overrides, setOverrides] = useState<VisitEmailOverride[]>([]);
+  const [canEdit, setCanEdit] = useState(true);
+  const [isDefault, setIsDefault] = useState(false);
+  const [locationId, setLocationId] = useState<number | null>(null);
+  const [originalTrigger, setOriginalTrigger] = useState<string | null>(null);
+  const [locations, setLocations] = useState<{ id: number; name: string }[]>([]);
+
+  const currentUser = getCurrentUser();
+  const isCompanyAdmin = currentUser?.role === "company_admin";
+  const isVisitEmail = isVisitTrigger(triggerType);
+  const canCreateVisit = canCreateVisitEmail(currentUser?.role);
+  const visitLocationId = isEdit
+    ? locationId
+    : isCompanyAdmin
+      ? null
+      : (currentUser?.location_id ?? null);
+
   const lastFocused = useRef<"subject" | "body">("body");
 
   useEffect(() => {
@@ -111,6 +141,16 @@ const CreateNotification = () => {
         setCustomEmails(d.customEmails);
         setSubject(d.subject);
         setBody(d.body);
+        setPromoId(d.promoId);
+        setFromName(d.fromName);
+        setReviewUrl(d.reviewUrl);
+        setActivityFilter(d.activityFilter);
+        setPromoSummary(d.promoSummary);
+        setOverrides(d.visitOverrides);
+        setCanEdit(d.canEdit);
+        setIsDefault(d.isDefault);
+        setLocationId(d.locationId);
+        setOriginalTrigger(d.triggerType || null);
         if (d.emailTemplateId != null) {
           setUseTemplate(true);
           setTemplateId(d.emailTemplateId);
@@ -121,6 +161,48 @@ const CreateNotification = () => {
       active2 = false;
     };
   }, [isEdit, editId]);
+
+  // Location names for the promo picker's "works only at …" line.
+  useEffect(() => {
+    if (!isVisitEmail || locations.length > 0) return;
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    fetchLocations(token, controller.signal)
+      .then((list) => setLocations(list.map((l) => ({ id: l.id, name: l.name }))))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [isVisitEmail, locations.length]);
+
+  const triggerOptions: SelectOption[] = useMemo(() => {
+    const options = triggerGroupsFor(entityType).flatMap((g) =>
+      g.options.map((o) => ({
+        label: `${g.label.replace(" Events", "")} · ${o.label}`,
+        value: o.value,
+      })),
+    );
+    // An email saved on a retired trigger keeps showing it, labelled as never sent.
+    if (originalTrigger && triggerType === originalTrigger && !options.some((o) => o.value === triggerType)) {
+      options.unshift({
+        label: RETIRED_TRIGGER_LABELS[triggerType] ?? triggerType.replace(/_/g, " "),
+        value: triggerType,
+      });
+    }
+    return options;
+  }, [entityType, triggerType, originalTrigger]);
+
+  const changeEntityType = (next: NotificationEntityType) => {
+    setEntityType(next);
+    setTriggerType((current) => triggerForEntity(next, current));
+  };
+
+  const applyToOptions: SelectOption[] = useMemo(
+    () =>
+      entityType === "waiver"
+        ? [...APPLY_TO_OPTIONS, { label: "Waivers", value: "waiver" }]
+        : APPLY_TO_OPTIONS,
+    [entityType],
+  );
 
   const insert = (token: string) => {
     if (lastFocused.current === "subject") setSubject((s) => s + token);
@@ -146,8 +228,11 @@ const CreateNotification = () => {
   );
 
   const create = async () => {
+    if (isEdit && !canEdit) return;
     if (!name.trim()) return Alert.alert("Missing name", "Enter a notification name.");
-    if (recipients.length === 0)
+    if (!isEdit && isVisitEmail && !canCreateVisit)
+      return Alert.alert(VISIT_EMAIL_CREATE_DENIED);
+    if (!isVisitEmail && recipients.length === 0)
       return Alert.alert("No recipients", "Select at least one recipient.");
     if (useTemplate) {
       if (templateId == null)
@@ -155,7 +240,7 @@ const CreateNotification = () => {
     } else if (!subject.trim() || !body.trim()) {
       return Alert.alert("Incomplete", "A subject and body are required.");
     }
-    if (recipients.includes("custom") && customEmails.length === 0)
+    if (!isVisitEmail && recipients.includes("custom") && customEmails.length === 0)
       return Alert.alert("Custom emails", "Add at least one custom email address.");
 
     const token = getToken();
@@ -174,6 +259,14 @@ const CreateNotification = () => {
         includeQrCode: includeQr,
         isActive: active,
         emailTemplateId: useTemplate ? templateId : null,
+        visitFields: (isEdit && isDefault ? defaultVisitPayloadFields : visitPayloadFields)({
+          triggerType,
+          entityType,
+          promoId,
+          fromName,
+          reviewUrl,
+          activityFilter,
+        }),
       };
       // Update in edit mode, otherwise create — same payload either way.
       if (isEdit && editId != null) await updateEmailNotification(token, editId, payload);
@@ -183,7 +276,8 @@ const CreateNotification = () => {
     } catch (e) {
       Alert.alert(
         "Failed",
-        e instanceof Error ? e.message : "Could not save the notification.",
+        firstFieldError(e) ??
+          (e instanceof Error ? e.message : "Could not save the notification."),
       );
     } finally {
       setSaving(false);
@@ -207,6 +301,7 @@ const CreateNotification = () => {
             icon="check"
             variant="primary"
             loading={saving}
+            disabled={isEdit && !canEdit}
             onPress={create}
           />
         }
@@ -222,6 +317,9 @@ const CreateNotification = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}
         >
+          {isEdit && !canEdit && (
+            <ReadOnlyBanner text={readOnlyVisitEmailMessage(locationId)} />
+          )}
           <EmailSection title="Notification Settings">
             <LabeledInput
               label="Notification Name"
@@ -236,8 +334,8 @@ const CreateNotification = () => {
                   label="Apply To"
                   required
                   value={entityType}
-                  options={APPLY_TO_OPTIONS}
-                  onSelect={(v) => setEntityType(v as NotificationEntityType)}
+                  options={applyToOptions}
+                  onSelect={(v) => changeEntityType(v as NotificationEntityType)}
                 />
               </View>
               <View className="flex-1">
@@ -245,7 +343,7 @@ const CreateNotification = () => {
                   label="Trigger Event"
                   required
                   value={triggerType}
-                  options={TRIGGER_OPTIONS}
+                  options={triggerOptions}
                   onSelect={(v) => setTriggerType(String(v))}
                 />
               </View>
@@ -267,6 +365,30 @@ const CreateNotification = () => {
             </Pressable>
           </EmailSection>
 
+          {isVisitEmail && (
+            <>
+              {!isEdit && !canCreateVisit && <ReadOnlyBanner text={VISIT_EMAIL_CREATE_DENIED} />}
+              <VisitEmailSettings
+                triggerType={triggerType}
+                promoId={promoId}
+                onPromoChange={setPromoId}
+                locationId={visitLocationId}
+                locations={locations}
+                promoSummary={promoSummary}
+                disabled={isEdit ? !canEdit : !canCreateVisit}
+                fromName={fromName}
+                onFromNameChange={setFromName}
+                reviewUrl={reviewUrl}
+                onReviewUrlChange={setReviewUrl}
+                activityFilter={activityFilter}
+                onActivityFilterChange={setActivityFilter}
+                canFilterActivity={!(isEdit && isDefault) && entityType !== "event"}
+                overrides={overrides}
+              />
+            </>
+          )}
+
+          {!isVisitEmail && (
           <EmailSection title="Recipients">
             <View className="flex-row flex-wrap gap-2">
               {RECIPIENT_PILLS.map((r) => {
@@ -355,6 +477,7 @@ const CreateNotification = () => {
               </Text>
             </Pressable>
           </EmailSection>
+          )}
 
           <EmailSection
             title="Email Content"
@@ -423,5 +546,14 @@ const CreateNotification = () => {
     </View>
   );
 };
+
+function ReadOnlyBanner({ text }: { text: string }) {
+  return (
+    <View className="mb-4 flex-row items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-900/20">
+      <Feather name="alert-triangle" size={18} color="#B45309" />
+      <Text className="flex-1 text-sm text-amber-900 dark:text-amber-200">{text}</Text>
+    </View>
+  );
+}
 
 export default CreateNotification;

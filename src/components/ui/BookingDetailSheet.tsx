@@ -685,6 +685,7 @@ export function BookingDetailSheet({
         amountPaid={detail?.amountPaid ?? 0}
         locationId={detail?.locationId ?? null}
         customerId={detail?.customerId ?? null}
+        status={detail?.status ?? null}
         onClose={() => setShowPayment(false)}
         onProcessed={() => {
           load();

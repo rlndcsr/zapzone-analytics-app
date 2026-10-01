@@ -72,6 +72,14 @@ import {
 import { useBookingQuote } from "../../lib/hooks/useBookingQuote";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
+  bookingUpdateEmailWanted,
+  changedStatusField,
+  COMPLETING_BOOKING_EMAIL_LABEL,
+  COMPLETING_BOOKING_HINT,
+  completesVisit,
+} from "../../lib/visitFollowUp/statusEdit";
+import { describeFollowUp } from "../../lib/visitFollowUp/visitFollowUp";
+import {
   fetchDayOffsByLocation,
   type DayOff,
 } from "../../services/dayOffsService";
@@ -1005,8 +1013,13 @@ const EditBookingScreen = () => {
     }
     setSaving(true);
     try {
-      await updateBooking(token, detail.id, input);
+      const followUp = await updateBooking(token, detail.id, input);
       markBookingsStale();
+      const followUpNotice =
+        status === "completed" && followUp ? describeFollowUp(followUp) : null;
+      if (followUpNotice) {
+        Alert.alert(`Booking updated successfully! ${followUpNotice}`);
+      }
       router.back();
     } catch (e) {
       // the move runs into something the page could not see — ask for the manager's PIN rather
@@ -1067,7 +1080,7 @@ const EditBookingScreen = () => {
       date,
       time,
       participants: participantCount,
-      status,
+      ...changedStatusField(status, detail.status),
       ...guestOfHonorPayload(!!packageDetail?.hasGuestOfHonor, {
         name: gohName,
         age: gohAge,
@@ -1076,7 +1089,7 @@ const EditBookingScreen = () => {
       customerNotes: customerNotes.trim() || null,
       // internalNotes is deliberately absent: notes are an append-only log, saved
       // as you write them through the log below, never as part of this save.
-      sendEmail,
+      sendEmail: bookingUpdateEmailWanted(sendEmail, status, detail.status),
       ...(addOnsChanged && { additionalAddons: buildAdditionalAddons() }),
       // A new package does not inherit the old one's attractions.
       ...(isPackageChanged && { additionalAttractions: [] }),
@@ -1554,6 +1567,11 @@ const EditBookingScreen = () => {
                 />
               </View>
             </View>
+            {completesVisit(status, detail?.status) && (
+              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {COMPLETING_BOOKING_HINT}
+              </Text>
+            )}
 
             {/* Add-ons */}
             {availableAddOns.length > 0 && (
@@ -1636,7 +1654,9 @@ const EditBookingScreen = () => {
               <View className="flex-row items-center gap-2 flex-1 mr-2">
                 <Bell size={16} color="#16a34a" />
                 <Text className="text-sm text-gray-700 dark:text-gray-200">
-                  Customer will receive update
+                  {completesVisit(status, detail?.status)
+                    ? COMPLETING_BOOKING_EMAIL_LABEL
+                    : "Customer will receive update"}
                 </Text>
               </View>
               <View className="flex-row rounded-full border border-gray-200 dark:border-neutral-700 overflow-hidden">

@@ -66,6 +66,21 @@ function toCents(value: number | string | null | undefined): number {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
 }
 
+/** Status a payment moves a booking to — never pulls a checked-in or completed visit back to confirmed. */
+export const statusAfterPayment = (
+  current: string | null | undefined,
+): "confirmed" | undefined =>
+  current === "checked-in" || current === "completed" ? undefined : "confirmed";
+
+/** The booking update a recorded payment sends; `status` is left out when the visit is already underway. */
+export function bookingUpdateAfterPayment(
+  amountPaid: number,
+  currentStatus: string | null | undefined,
+): { amountPaid: number; status?: "confirmed" } {
+  const status = statusAfterPayment(currentStatus);
+  return status ? { amountPaid, status } : { amountPaid };
+}
+
 export type PaymentStateInput = {
   payment_status?: string | null;
   amount_paid?: number | string | null;

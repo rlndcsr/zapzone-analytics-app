@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -35,6 +36,11 @@ import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
 import { WEEKDAY_NAMES_LOWER, formatFullDate } from "../../lib/date/calendar";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { getToken } from "../../lib/session";
+import {
+  changedStatusField,
+  EVENT_PURCHASE_EMAIL_NOTICE,
+} from "../../lib/visitFollowUp/statusEdit";
+import { describeFollowUp } from "../../lib/visitFollowUp/visitFollowUp";
 import { fetchDayOffsByLocation } from "../../services/dayOffsService";
 import {
   fetchEventPurchaseForEdit,
@@ -697,7 +703,7 @@ const EditEventPurchaseScreen = () => {
       quantity,
       purchase_date: purchaseDate,
       purchase_time: purchaseTime,
-      status,
+      ...changedStatusField(status, record.status),
       payment_status: paymentStatus,
       payment_method: paymentMethod,
       amount_paid: amountPaidNum,
@@ -713,7 +719,8 @@ const EditEventPurchaseScreen = () => {
     submitLockRef.current = true;
     setSubmitting(true);
     try {
-      const ok = await updateEventPurchase(token, record.id, body);
+      const statusChanged = !isOrderLine && status !== record.status;
+      const { ok, followUp } = await updateEventPurchase(token, record.id, body);
       if (!ok) {
         setToast({
           message: "Failed to update purchase. Please try again.",
@@ -728,6 +735,13 @@ const EditEventPurchaseScreen = () => {
       markEventPurchasesStale();
       void metricsCacheService.clearAllCaches();
 
+      const notice =
+        statusChanged && status === "completed" ? describeFollowUp(followUp) : null;
+      if (notice) {
+        Alert.alert(`Event purchase updated. ${notice}`);
+        router.back();
+        return;
+      }
       setToast({
         message: "Event purchase updated successfully!",
         type: "success",
@@ -964,9 +978,7 @@ const EditEventPurchaseScreen = () => {
             <View className="flex-row items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 p-3 mb-4">
               <Feather name="alert-circle" size={15} color="#D97706" />
               <Text className="flex-1 text-sm text-amber-800 dark:text-amber-300">
-                Changing the date or time will automatically notify the customer
-                by email. Setting the status to Cancelled will also send a
-                cancellation email.
+                {EVENT_PURCHASE_EMAIL_NOTICE}
               </Text>
             </View>
             {scheduleAvailability.length > 0 ? (

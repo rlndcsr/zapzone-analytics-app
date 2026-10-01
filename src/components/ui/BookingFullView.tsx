@@ -36,6 +36,7 @@ import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingQRModal } from "./BookingQRModal";
 import { BottomSheet } from "./BottomSheet";
 import { InternalNotesLog } from "./InternalNotesLog";
+import { VisitFollowUpCard } from "./VisitFollowUpCard";
 import { PaymentStatusBadge } from "./PaymentStatusBadge";
 
 const MONTH_NAMES = [
@@ -820,6 +821,15 @@ export function BookingFullView({
                 onNoteSaved={(summary) => onNoteSaved?.(summary)}
               />
             </View>
+          )}
+
+          {/* Follow-up emails — web ViewBooking's VisitFollowUpCard; gated on `visible` like the log above. */}
+          {visible && detail.status !== "cancelled" && (
+            <VisitFollowUpCard
+              visitType="booking"
+              visitId={detail.id}
+              refreshKey={detail.status}
+            />
           )}
 
           {/* Change history — the backend's permanent booking change log,

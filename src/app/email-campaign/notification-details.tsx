@@ -19,8 +19,11 @@ import {
   DetailSection,
   InfoRow,
 } from "../../components/ui/DetailKit";
+import { GuestRatingsPanel } from "../../components/ui/GuestRatingsPanel";
 import { SendTestEmailSheet } from "../../components/ui/SendTestEmailSheet";
+import { OverrideList } from "../../components/ui/VisitEmailSettings";
 import { mediaUrl } from "../../lib/api";
+import { visitFollowupTiming } from "../../lib/email/visitEmail";
 import { markEmailNotificationsStale } from "../../lib/emailStale";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
 import { getToken } from "../../lib/session";
@@ -204,7 +207,12 @@ const NotificationDetails = () => {
     .map((s) => mediaUrl(s))
     .filter((u): u is string => !!u);
   const appliesTo =
-    detail.entityType === "all" ? "All Entities" : prettyType(detail.entityType);
+    detail.entityType === "all"
+      ? detail.triggerType.startsWith("visit_")
+        ? "Every visit"
+        : "All Entities"
+      : prettyType(detail.entityType);
+  const promo = detail.promoSummary;
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -260,16 +268,68 @@ const NotificationDetails = () => {
             <InfoRow
               label="Timing"
               value={
-                [
-                  detail.sendBeforeHours != null ? `${detail.sendBeforeHours}h before` : null,
-                  detail.sendAfterHours != null ? `${detail.sendAfterHours}h after` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "—"
+                detail.triggerType === "visit_followup" && detail.sendAfterHours
+                  ? visitFollowupTiming(detail.sendAfterHours)
+                  : [
+                      detail.sendBeforeHours != null ? `${detail.sendBeforeHours}h before` : null,
+                      detail.sendAfterHours != null ? `${detail.sendAfterHours}h after` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "—"
               }
             />
           )}
+
+          {detail.triggerType === "visit_completed" && (
+            <View className="mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800 gap-1">
+              <Text className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                Return-visit promo code
+              </Text>
+              {promo?.code ? (
+                <View className="flex-row flex-wrap items-center gap-2">
+                  <View className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-900/40">
+                    <Feather name="tag" size={13} color="#92400E" />
+                    <Text className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                      {promo.code}
+                      {promo.offer ? ` · ${promo.offer}` : ""}
+                    </Text>
+                  </View>
+                  {!!promo.problem && (
+                    <Text className="text-xs text-red-700 dark:text-red-400">{promo.problem}</Text>
+                  )}
+                </View>
+              ) : promo?.problem ? (
+                <Text className="text-xs text-red-700 dark:text-red-400">{promo.problem}</Text>
+              ) : (
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
+                  No promo code chosen. Pick one on the edit page.
+                </Text>
+              )}
+              {!!promo?.terms && (
+                <Text className="text-xs text-gray-600 dark:text-gray-300">{promo.terms}</Text>
+              )}
+              {!!promo?.location_note && (
+                <Text className="text-xs text-amber-700 dark:text-amber-400">{promo.location_note}</Text>
+              )}
+            </View>
+          )}
+
+          {detail.visitOverrides.length > 0 && (
+            <View className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 gap-1 dark:border-amber-900/40 dark:bg-amber-900/20">
+              <Text className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                {detail.visitOverrides.some((o) => o.covers_everything)
+                  ? "This email is never sent: another active email covers every visit it does."
+                  : "Other active emails are sent instead for some visits:"}
+              </Text>
+              <OverrideList
+                overrides={detail.visitOverrides}
+                isThanks={detail.triggerType === "visit_completed"}
+              />
+            </View>
+          )}
         </DetailSection>
+
+        {detail.triggerType === "visit_followup" && <GuestRatingsPanel />}
 
         {/* Recipients */}
         <DetailSection icon="users" title="Recipients">
@@ -362,7 +422,7 @@ const NotificationDetails = () => {
             icon={detail.isActive ? "slash" : "check-circle"}
             label={detail.isActive ? "Deactivate" : "Activate"}
             busy={busy === "toggle"}
-            disabled={busy !== null}
+            disabled={busy !== null || !detail.canEdit}
             onPress={() => runAction("toggle", () => toggleEmailNotificationStatus(getToken()!, notificationId!))}
           />
           <DetailActionButton
@@ -392,7 +452,7 @@ const NotificationDetails = () => {
               label="Delete"
               variant="danger"
               busy={busy === "delete"}
-              disabled={busy !== null}
+              disabled={busy !== null || !detail.canEdit}
               onPress={confirmDelete}
             />
           )}

@@ -1,4 +1,8 @@
 import { apiRequest } from "../lib/api";
+import type {
+  FollowUpRow,
+  GameFollowUp,
+} from "../lib/visitFollowUp/visitFollowUp";
 import { mapKioskAd, type KioskAd } from "../lib/waivers/kioskContract";
 import {
   mapSession,
@@ -119,6 +123,9 @@ export type EscapeRoomPlayer = {
     error: string | null;
   } | null;
   excludedReason: EscapeRoomExcludedReason | null;
+  /** This player's Thanks for Playing / review-request rows (API shape). */
+  thanksEmail: FollowUpRow | null;
+  review: FollowUpRow | null;
 };
 
 export type EscapeRoomGameBooking = {
@@ -140,6 +147,8 @@ export type EscapeRoomCounts = {
   sending: number;
   stuck: number;
   newPlayers: number;
+  thanksSent: number;
+  thanksFailed: number;
   excluded: number;
   unsigned: number;
 };
@@ -174,6 +183,8 @@ export type EscapeRoomGame = {
   canSendNew: boolean;
   canResend: boolean;
   canCompleteWithoutPhoto: boolean;
+  /** Absent on older servers — read through {@link gameCanEmailPlayers}. */
+  canEmailPlayers: boolean | null;
   sendBlocker: string | null;
   photoLink: string | null;
   blockers: string[];
@@ -181,6 +192,7 @@ export type EscapeRoomGame = {
   kioskUrl: string | null;
   playersBooked: number | null;
   slideshow: { enabled: boolean; declined: number; notAsked: number } | null;
+  followUp: GameFollowUp | null;
 };
 
 /* -------------------------------------------------------------- mapping -- */
@@ -260,6 +272,8 @@ type ApiPlayer = {
     error: string | null;
   } | null;
   excluded_reason: EscapeRoomExcludedReason | null;
+  thanks_email?: FollowUpRow | null;
+  review?: FollowUpRow | null;
 };
 
 type ApiGame = {
@@ -303,6 +317,8 @@ type ApiGame = {
     sending: number;
     stuck: number;
     new_players: number;
+    thanks_sent?: number;
+    thanks_failed?: number;
     excluded: number;
     unsigned: number;
   };
@@ -311,6 +327,7 @@ type ApiGame = {
   can_send_new: boolean;
   can_resend?: boolean;
   can_complete_without_photo?: boolean;
+  can_email_players?: boolean;
   send_blocker?: string | null;
   photo_link?: string | null;
   blockers: string[];
@@ -318,6 +335,7 @@ type ApiGame = {
   kiosk_url: string | null;
   players_booked?: number;
   slideshow?: { enabled: boolean; declined: number; not_asked: number };
+  follow_up?: GameFollowUp;
 };
 
 function mapSlot(raw: ApiSlot): EscapeRoomSlot {
@@ -402,6 +420,8 @@ function mapPlayer(raw: ApiPlayer): EscapeRoomPlayer {
         }
       : null,
     excludedReason: raw.excluded_reason,
+    thanksEmail: raw.thanks_email ?? null,
+    review: raw.review ?? null,
   };
 }
 
@@ -448,6 +468,8 @@ function mapGame(raw: ApiGame): EscapeRoomGame {
       sending: c.sending,
       stuck: c.stuck,
       newPlayers: c.new_players,
+      thanksSent: c.thanks_sent ?? 0,
+      thanksFailed: c.thanks_failed ?? 0,
       excluded: c.excluded,
       unsigned: c.unsigned,
     },
@@ -456,6 +478,8 @@ function mapGame(raw: ApiGame): EscapeRoomGame {
     canSendNew: Boolean(raw.can_send_new),
     canResend: Boolean(raw.can_resend),
     canCompleteWithoutPhoto: Boolean(raw.can_complete_without_photo),
+    canEmailPlayers:
+      typeof raw.can_email_players === "boolean" ? raw.can_email_players : null,
     sendBlocker: raw.send_blocker ?? null,
     photoLink: raw.photo_link ?? null,
     blockers: raw.blockers ?? [],
@@ -469,6 +493,7 @@ function mapGame(raw: ApiGame): EscapeRoomGame {
           notAsked: raw.slideshow.not_asked ?? 0,
         }
       : null,
+    followUp: raw.follow_up ?? null,
   };
 }
 
@@ -536,7 +561,8 @@ export async function startEscapeRoomPhoto(
 
 /**
  * POST …/complete — records the result and emails the photo to every signed
- * player. `withoutPhoto` records the result only and sends nothing.
+ * player. `withoutPhoto` records the result only; with `emailPlayers` the
+ * players still get the Thanks for Playing email (without a photo).
  */
 export async function completeEscapeRoomGame(
   token: string,
@@ -544,6 +570,7 @@ export async function completeEscapeRoomGame(
   escaped: boolean,
   completionTime: string | null,
   withoutPhoto = false,
+  emailPlayers = false,
 ): Promise<EscapeRoomGame> {
   const res = await apiRequest<GameResponse>(`${gamePath(sessionId)}/complete`, {
     method: "POST",
@@ -553,6 +580,7 @@ export async function completeEscapeRoomGame(
       escaped,
       completion_time: escaped ? completionTime : null,
       ...(withoutPhoto ? { without_photo: true } : {}),
+      ...(withoutPhoto && emailPlayers ? { email_players: true } : {}),
     },
   });
   return mapGame(res.data);
