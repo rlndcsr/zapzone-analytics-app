@@ -112,7 +112,13 @@ export const APPLY_TO_OPTIONS: { label: string; value: NotificationEntity }[] = 
 
 // ── Permissions ────────────────────────────────────────────────────────────
 
-export const canCreateVisitEmail = (role: string | null | undefined): boolean =>
+/** Built-in emails can only be duplicated when they are one of the two follow-ups. */
+export const canDuplicateNotification = (
+  isDefault: boolean,
+  triggerType: string | null | undefined,
+): boolean => !isDefault || isVisitTrigger(triggerType);
+
+export const canCreateVisitEmail =(role: string | null | undefined): boolean =>
   role === "company_admin" || role === "location_manager";
 
 export const VISIT_EMAIL_CREATE_DENIED = "Only a manager or company admin can set up follow-up emails.";

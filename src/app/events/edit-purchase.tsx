@@ -719,7 +719,6 @@ const EditEventPurchaseScreen = () => {
     submitLockRef.current = true;
     setSubmitting(true);
     try {
-      const statusChanged = !isOrderLine && status !== record.status;
       const { ok, followUp } = await updateEventPurchase(token, record.id, body);
       if (!ok) {
         setToast({
@@ -736,7 +735,7 @@ const EditEventPurchaseScreen = () => {
       void metricsCacheService.clearAllCaches();
 
       const notice =
-        statusChanged && status === "completed" ? describeFollowUp(followUp) : null;
+        status === "completed" ? describeFollowUp(followUp) : null;
       if (notice) {
         Alert.alert(`Event purchase updated. ${notice}`);
         router.back();

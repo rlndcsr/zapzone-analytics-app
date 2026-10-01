@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   adminLocationField,
+  canDuplicateNotification,
   canCreateVisitEmail,
   defaultVisitPayloadFields,
   isVisitTrigger,
@@ -47,6 +48,24 @@ describe("trigger choices", () => {
     assert.equal(isVisitTrigger("visit_completed"), true);
     assert.equal(isVisitTrigger("booking_followup"), false);
     assert.equal(isVisitTrigger(null), false);
+  });
+});
+
+describe("duplicating built-in emails", () => {
+  it("duplicates any custom email", () => {
+    assert.equal(canDuplicateNotification(false, "booking_created"), true);
+    assert.equal(canDuplicateNotification(false, "visit_followup"), true);
+  });
+
+  it("duplicates the two built-in follow-ups", () => {
+    assert.equal(canDuplicateNotification(true, "visit_completed"), true);
+    assert.equal(canDuplicateNotification(true, "visit_followup"), true);
+  });
+
+  it("hides Duplicate on every other built-in email", () => {
+    assert.equal(canDuplicateNotification(true, "booking_confirmed"), false);
+    assert.equal(canDuplicateNotification(true, "end_of_day_sales_report"), false);
+    assert.equal(canDuplicateNotification(true, null), false);
   });
 });
 

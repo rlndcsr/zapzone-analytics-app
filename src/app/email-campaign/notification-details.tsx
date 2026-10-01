@@ -23,7 +23,7 @@ import { GuestRatingsPanel } from "../../components/ui/GuestRatingsPanel";
 import { SendTestEmailSheet } from "../../components/ui/SendTestEmailSheet";
 import { OverrideList } from "../../components/ui/VisitEmailSettings";
 import { mediaUrl } from "../../lib/api";
-import { visitFollowupTiming } from "../../lib/email/visitEmail";
+import { canDuplicateNotification, visitFollowupTiming } from "../../lib/email/visitEmail";
 import { markEmailNotificationsStale } from "../../lib/emailStale";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
 import { getToken } from "../../lib/session";
@@ -411,13 +411,15 @@ const NotificationDetails = () => {
             disabled={busy !== null}
             onPress={() => setShowTest(true)}
           />
-          <DetailActionButton
-            icon="copy"
-            label="Duplicate"
-            busy={busy === "duplicate"}
-            disabled={busy !== null}
-            onPress={() => runAction("duplicate", () => duplicateEmailNotification(getToken()!, notificationId!))}
-          />
+          {canDuplicateNotification(detail.isDefault, detail.triggerType) && (
+            <DetailActionButton
+              icon="copy"
+              label="Duplicate"
+              busy={busy === "duplicate"}
+              disabled={busy !== null}
+              onPress={() => runAction("duplicate", () => duplicateEmailNotification(getToken()!, notificationId!))}
+            />
+          )}
           <DetailActionButton
             icon={detail.isActive ? "slash" : "check-circle"}
             label={detail.isActive ? "Deactivate" : "Activate"}

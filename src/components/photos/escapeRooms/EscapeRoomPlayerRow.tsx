@@ -4,6 +4,7 @@ import { Text, TextInput, View } from "react-native";
 
 import { EXCLUDED_LABELS, plural } from "../../../lib/escapeRooms/escapeRooms";
 import {
+  canCancelRetryingReview,
   canResendThanks,
   REMOVE_PLAYER_QUESTION,
   reviewBadge,
@@ -190,6 +191,13 @@ export function EscapeRoomPlayerRow({
             label={reviewResendLabel(player.review, player.waiverId) ?? ""}
             disabled={busy}
             onPress={() => player.review && void actions.followUp(player.review.id, "send")}
+          />
+        )}
+        {!excluded && player.review && canCancelRetryingReview(player.review) && (
+          <TextAction
+            label="Don't ask for a review"
+            disabled={busy}
+            onPress={() => player.review && void actions.followUp(player.review.id, "cancel")}
           />
         )}
         {canResend && <TextAction label="Resend" onPress={() => toggle("resend")} />}

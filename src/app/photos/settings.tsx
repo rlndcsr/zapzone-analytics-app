@@ -420,6 +420,7 @@ export default function PhotoSettingsScreen() {
   const [variables, setVariables] = useState<string[]>([]);
   const [escapeRoomEmail, setEscapeRoomEmail] =
     useState<PhotoTemplates["escapeRoomEmail"]>(null);
+  const escapeRoomNote = escapeRoomEmailNote(escapeRoomEmail);
   const [openTemplate, setOpenTemplate] = useState<number | null>(null);
   const [templateDraft, setTemplateDraft] = useState<
     Record<number, PhotoMessageTemplate>
@@ -1094,23 +1095,29 @@ export default function PhotoSettingsScreen() {
               >
                 <View className="mb-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 dark:border-indigo-900/40 dark:bg-indigo-900/20">
                   <Text className="text-sm text-gray-600 dark:text-gray-300">
-                    Escape-room games send their group photo with the{" "}
-                    <Text
-                      className="font-semibold underline"
-                      onPress={() =>
-                        router.push(
-                          escapeRoomEmail
-                            ? {
-                                pathname: "/email-campaign/create-notification",
-                                params: { id: String(escapeRoomEmail.id) },
-                              }
-                            : "/email-campaign/email-notification",
-                        )
-                      }
-                    >
-                      {escapeRoomEmailNote(escapeRoomEmail).linkText}
-                    </Text>
-                    {escapeRoomEmailNote(escapeRoomEmail).after}
+                    {escapeRoomNote.before}
+                    {escapeRoomNote.links.map((link, index) => (
+                      <Text key={link.id ?? "all"}>
+                        {index > 0 ? "; " : ""}
+                        <Text
+                          className="font-semibold underline"
+                          onPress={() =>
+                            router.push(
+                              link.id != null
+                                ? {
+                                    pathname: "/email-campaign/create-notification",
+                                    params: { id: String(link.id) },
+                                  }
+                                : "/email-campaign/email-notification",
+                            )
+                          }
+                        >
+                          {link.text}
+                        </Text>
+                        {link.rooms !== null ? ` (${link.rooms})` : ""}
+                      </Text>
+                    ))}
+                    {escapeRoomNote.after}
                   </Text>
                 </View>
                 <View className="gap-3">

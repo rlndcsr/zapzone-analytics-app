@@ -185,6 +185,10 @@ export const describeFollowUp = (
     );
   } else if (!summary.recipient_email_masked) {
     parts.push("No email address on file, so no follow-up email went out.");
+  } else if (!thanks && summary.can_send_thanks) {
+    parts.push(
+      `Nothing has been emailed to ${summary.recipient_email_masked} for this visit yet. To send it, open the ${summary.visit_type === "event_purchase" ? "purchase" : "booking"} and choose Send ${thanksName} now.`,
+    );
   }
 
   if (review) {
@@ -216,8 +220,9 @@ export const followUpSendLabel = (row: FollowUpRow): string =>
       ? "Send again"
       : "Send now";
 
+/** Scheduled, or failed but still retrying (not given up). */
 export const canCancelFollowUp = (row: FollowUpRow): boolean =>
-  row.status === "scheduled";
+  row.status === "scheduled" || (row.status === "failed" && !row.gave_up);
 
 export type FollowUpCardText = {
   thanksName: string;

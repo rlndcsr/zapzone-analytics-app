@@ -323,10 +323,25 @@ export function reviewResendLabel(
   return null;
 }
 
+/** A failed review request that is still retrying can be cancelled ("Don't ask for a review"). */
+export const canCancelRetryingReview = (
+  row: Pick<FollowUpRow, "status" | "rating" | "gave_up">,
+): boolean => row.rating === null && row.status === "failed" && !row.gave_up;
+
 /** Photo Settings' note on which email carries escape-room photos (web PhotoSettings). */
 export function escapeRoomEmailNote(
-  email: { name: string; isActive: boolean; roomsWithoutEmail: string[] } | null,
-): { linkText: string; after: string } {
+  email: {
+    id: number;
+    name: string;
+    isActive: boolean;
+    roomsWithoutEmail: string[];
+    emails?: { id: number; name: string; rooms: string[] }[];
+  } | null,
+): {
+  before: string;
+  links: { id: number | null; text: string; rooms: string | null }[];
+  after: string;
+} {
   const rooms = email?.roomsWithoutEmail ?? [];
   const suffix =
     email && rooms.length > 0
@@ -334,8 +349,28 @@ export function escapeRoomEmailNote(
       : email && !email.isActive
         ? " It is switched off right now, so escape-room photos cannot be emailed."
         : "";
+  // Several Thanks emails each cover their own rooms: name every one with its rooms.
+  if ((email?.emails?.length ?? 0) > 1) {
+    return {
+      before:
+        "Escape-room games send their group photo with the Thanks for Playing email that covers each room: ",
+      links: (email?.emails ?? []).map((e) => ({
+        id: e.id,
+        text: followUpEmailName(e.name, "Thanks for Playing"),
+        rooms: e.rooms.join(", "),
+      })),
+      after: `. Each includes the finish time and the return-visit promo code. Edit the one for a room to change what its players get.${suffix}`,
+    };
+  }
   return {
-    linkText: email ? followUpEmailName(email.name, "Thanks for Playing") : "Thanks for Playing",
+    before: "Escape-room games send their group photo with the ",
+    links: [
+      {
+        id: email?.id ?? null,
+        text: email ? followUpEmailName(email.name, "Thanks for Playing") : "Thanks for Playing",
+        rooms: null,
+      },
+    ],
     after: ` email in Email Notifications, together with the finish time and the return-visit promo code. Edit that email to change what players get.${suffix}`,
   };
 }

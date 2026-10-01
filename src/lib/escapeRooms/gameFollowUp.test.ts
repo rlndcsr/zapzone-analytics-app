@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { GameFollowUp } from "../visitFollowUp/visitFollowUp.ts";
 import {
+  canCancelRetryingReview,
   canResendThanks,
   completeAndSendExtras,
   completeAndSendQuestion,
@@ -302,17 +303,78 @@ describe("per-player follow-ups", () => {
 });
 
 describe("Photo Settings escape-room email note", () => {
-  it("names the email and flags rooms it cannot cover", () => {
-    const note = escapeRoomEmailNote({ name: "Thanks for Playing (Guest)", isActive: true, roomsWithoutEmail: ["Pharaoh"] });
-    assert.equal(note.linkText, "Thanks for Playing");
-    assert.match(note.after, /No active Thanks for Playing email covers Pharaoh, so photos from that room cannot be emailed\.$/);
+  const email = (over: Partial<Parameters<typeof escapeRoomEmailNote>[0] & object> = {}) => ({
+    id: 10,
+    name: "Thanks for Playing (Guest)",
+    isActive: true,
+    roomsWithoutEmail: [] as string[],
+    emails: [] as { id: number; name: string; rooms: string[] }[],
+    ...over,
+  });
+
+  it("keeps the single-email wording when one email covers every room", () => {
+    const note = escapeRoomEmailNote(email({ emails: [{ id: 10, name: "Thanks for Playing (Guest)", rooms: ["Pharaoh", "Heist"] }] }));
+    assert.equal(note.before, "Escape-room games send their group photo with the ");
+    assert.deepEqual(note.links, [{ id: 10, text: "Thanks for Playing", rooms: null }]);
+    assert.equal(
+      note.after,
+      " email in Email Notifications, together with the finish time and the return-visit promo code. Edit that email to change what players get.",
+    );
+  });
+
+  it("lists each Thanks email with the rooms it covers", () => {
+    const note = escapeRoomEmailNote(
+      email({
+        emails: [
+          { id: 10, name: "Thanks for Playing (Guest)", rooms: ["Pharaoh", "Heist"] },
+          { id: 12, name: "Escape Zone Thanks", rooms: ["Asylum"] },
+        ],
+      }),
+    );
+    assert.equal(
+      note.before,
+      "Escape-room games send their group photo with the Thanks for Playing email that covers each room: ",
+    );
+    assert.deepEqual(note.links, [
+      { id: 10, text: "Thanks for Playing", rooms: "Pharaoh, Heist" },
+      { id: 12, text: "Escape Zone Thanks", rooms: "Asylum" },
+    ]);
+    assert.equal(
+      note.after,
+      ". Each includes the finish time and the return-visit promo code. Edit the one for a room to change what its players get.",
+    );
+  });
+
+  it("still flags rooms without an active Thanks email", () => {
+    const single = escapeRoomEmailNote(email({ roomsWithoutEmail: ["Pharaoh"] }));
+    assert.match(single.after, /No active Thanks for Playing email covers Pharaoh, so photos from that room cannot be emailed\.$/);
+    const many = escapeRoomEmailNote(
+      email({
+        roomsWithoutEmail: ["Vault", "Lab"],
+        emails: [
+          { id: 10, name: "A", rooms: ["Pharaoh"] },
+          { id: 12, name: "B", rooms: ["Asylum"] },
+        ],
+      }),
+    );
+    assert.match(many.after, /No active Thanks for Playing email covers Vault, Lab, so photos from those rooms cannot be emailed\.$/);
   });
 
   it("flags a switched-off email", () => {
     assert.match(
-      escapeRoomEmailNote({ name: "X", isActive: false, roomsWithoutEmail: [] }).after,
+      escapeRoomEmailNote(email({ name: "X", isActive: false })).after,
       / It is switched off right now, so escape-room photos cannot be emailed\.$/,
     );
-    assert.equal(escapeRoomEmailNote(null).linkText, "Thanks for Playing");
+    assert.deepEqual(escapeRoomEmailNote(null).links, [{ id: null, text: "Thanks for Playing", rooms: null }]);
+  });
+});
+
+describe("cancelling a review request that is still retrying", () => {
+  it("is offered only for a failed request that has not given up", () => {
+    assert.equal(canCancelRetryingReview({ status: "failed", gave_up: false, rating: null }), true);
+    assert.equal(canCancelRetryingReview({ status: "failed", gave_up: true, rating: null }), false);
+    assert.equal(canCancelRetryingReview({ status: "failed", gave_up: false, rating: 4 }), false);
+    // scheduled requests keep their own Don't ask for a review action
+    assert.equal(canCancelRetryingReview({ status: "scheduled", gave_up: false, rating: null }), false);
   });
 });

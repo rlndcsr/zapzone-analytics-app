@@ -114,9 +114,38 @@ describe("describeFollowUp — the notice after completing a visit", () => {
 
   it("says when there is no email address", () => {
     assert.equal(
-      describeFollowUp(summary({ recipient_email_masked: null })),
+      describeFollowUp(summary({ recipient_email_masked: null, can_send_thanks: true })),
       "No email address on file, so no follow-up email went out.",
     );
+  });
+
+  it("tells staff when nothing has been emailed yet, naming the booking", () => {
+    assert.equal(
+      describeFollowUp(summary({ can_send_thanks: true })),
+      "Nothing has been emailed to d***@example.com for this visit yet. To send it, open the booking and choose Send Thanks for Playing now.",
+    );
+  });
+
+  it("says purchase for an event purchase", () => {
+    assert.equal(
+      describeFollowUp(summary({ visit_type: "event_purchase", can_send_thanks: true })),
+      "Nothing has been emailed to d***@example.com for this visit yet. To send it, open the purchase and choose Send Thanks for Playing now.",
+    );
+  });
+
+  it("keeps the switched-off and already-handled messages ahead of it", () => {
+    assert.equal(
+      describeFollowUp(
+        summary({ can_send_thanks: true, thanks_email: { active: false, id: 10, name: null, hours: null, promo: null } }),
+      ),
+      "The Thanks for Playing email is switched off, so no thank-you email went out.",
+    );
+    assert.equal(
+      describeFollowUp(summary({ can_send_thanks: true, thanks: [row({ status: "failed" })] })),
+      "The Thanks for Playing email could not be sent yet and will be retried.",
+    );
+    // without can_send_thanks there is nothing to add
+    assert.equal(describeFollowUp(summary()), null);
   });
 });
 
@@ -144,9 +173,12 @@ describe("follow-up card — Send now / Don't send", () => {
     assert.equal(followUpSendLabel(row({ status: "canceled", attempts: 1 })), "Send again");
   });
 
-  it("lets only a scheduled email be cancelled", () => {
+  it("lets a scheduled email, or a failed one still retrying, be cancelled", () => {
     assert.equal(canCancelFollowUp(row()), true);
+    assert.equal(canCancelFollowUp(row({ status: "failed", gave_up: false })), true);
+    assert.equal(canCancelFollowUp(row({ status: "failed", gave_up: true })), false);
     assert.equal(canCancelFollowUp(row({ status: "sent" })), false);
+    assert.equal(canCancelFollowUp(row({ status: "canceled" })), false);
   });
 
   it("explains what completing will send on a visit not yet completed", () => {

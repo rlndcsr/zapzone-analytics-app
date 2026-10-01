@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
 import type { EmailNotificationRow } from "../../services/emailService";
+import { canDuplicateNotification } from "../../lib/email/visitEmail";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
 import { VisitPromoBadge } from "./VisitEmailSettings";
 
@@ -141,7 +142,9 @@ function buildColumns(h: Handlers): TableColumn<EmailNotificationRow>[] {
       <View className="flex-row items-center gap-0.5">
         <IconAction icon="eye" tint={PRIMARY} label={`View ${n.name}`} onPress={() => h.onView(n)} />
         <IconAction icon="send" tint={PRIMARY} label={`Send test for ${n.name}`} onPress={() => h.onTest(n)} />
-        <IconAction icon="copy" tint={PRIMARY} label={`Duplicate ${n.name}`} onPress={() => h.onDuplicate(n)} />
+        {canDuplicateNotification(n.isDefault, n.triggerType) && (
+          <IconAction icon="copy" tint={PRIMARY} label={`Duplicate ${n.name}`} onPress={() => h.onDuplicate(n)} />
+        )}
         <IconAction icon="edit-2" tint={PRIMARY} label={`Edit ${n.name}`} onPress={() => h.onEdit(n)} />
         {n.isDefault ? (
           <IconAction icon="rotate-ccw" tint="#D97706" label={`Reset ${n.name}`} onPress={() => h.onReset(n)} />

@@ -1805,6 +1805,8 @@ export type PhotoTemplates = {
     name: string;
     isActive: boolean;
     roomsWithoutEmail: string[];
+    /** Each active Thanks email and the escape rooms it covers. */
+    emails: { id: number; name: string; rooms: string[] }[];
   } | null;
 };
 
@@ -1845,6 +1847,7 @@ export async function fetchPhotoTemplates(
         name: string;
         is_active: boolean;
         rooms_without_email?: string[];
+        emails?: { id: number; name: string; rooms: string[] }[];
       } | null;
     };
   }>("/api/photo-templates", { token, signal });
@@ -1860,6 +1863,11 @@ export async function fetchPhotoTemplates(
           name: email.name,
           isActive: Boolean(email.is_active),
           roomsWithoutEmail: email.rooms_without_email ?? [],
+          emails: (email.emails ?? []).map((e) => ({
+            id: e.id,
+            name: e.name,
+            rooms: e.rooms ?? [],
+          })),
         }
       : null,
   };
