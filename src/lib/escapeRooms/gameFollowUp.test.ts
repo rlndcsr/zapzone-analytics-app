@@ -13,12 +13,14 @@ import {
   gameDayLabel,
   gameFollowUpState,
   newPlayersSummary,
+  pastGameCompleteConfirm,
   pastGameEmailConfirm,
   recordedResultToast,
   recordOnlyQuestion,
   REMOVE_PLAYER_QUESTION,
   reviewBadge,
   reviewCountsLine,
+  reviewResendLabel,
   sendToNewLabel,
   thanksBadge,
   thanksFailedLine,
@@ -146,8 +148,12 @@ describe("emailing the players later", () => {
   it("names the day of a past game", () => {
     assert.equal(gameDayLabel("2026-09-30"), "Wed, Sep 30");
     assert.equal(
-      pastGameEmailConfirm("Wed, Sep 30", 2),
+      pastGameEmailConfirm("Wed, Sep 30", 2, true),
       "This game was played on Wed, Sep 30. Email 2 players about it now?",
+    );
+    assert.equal(
+      pastGameEmailConfirm("Wed, Sep 30", 1, false),
+      "This game was played on Wed, Sep 30. Schedule review requests for 1 player?",
     );
   });
 
@@ -173,19 +179,48 @@ describe("emailing the players later", () => {
     assert.equal(sendToNewLabel({ ...base, newPlayers: 0, stuck: 1, completedWithoutPhoto: false }), "Try sending again");
   });
 
-  it("counts only newly thanked players in the toast", () => {
-    assert.equal(
-      emailedLaterToast([player("sent"), player(null)], [player("sent"), player("sent")], state()),
-      "Emailed the Thanks for Playing email to 1 player.",
+  it("reports what was sent, failed and scheduled — counting only this send", () => {
+    assert.deepEqual(
+      emailedLaterToast(
+        [player("sent"), player(null), player(null)],
+        [player("sent"), player("sent", { status: "scheduled" }), player("failed")],
+        "Thanks for Playing",
+      ),
+      {
+        message:
+          "The Thanks for Playing email went to 1 player, 1 email has not gone through yet, 1 review request is scheduled.",
+        type: "info",
+      },
     );
-    assert.equal(
-      emailedLaterToast([], [], { thanksOn: false, thanksName: "x" }),
-      "Review requests are scheduled for those players.",
+  });
+
+  it("is a success when everything went out", () => {
+    assert.deepEqual(
+      emailedLaterToast([player(null), player(null)], [player("sent"), player("sent")], "Thanks for Playing"),
+      { message: "The Thanks for Playing email went to 2 players.", type: "success" },
     );
+    assert.deepEqual(
+      emailedLaterToast([player(null)], [player(null, { status: "scheduled" })], "x"),
+      { message: "1 review request is scheduled.", type: "success" },
+    );
+  });
+
+  it("says so when nothing was sent", () => {
+    assert.deepEqual(emailedLaterToast([player("sent")], [player("sent")], "x"), {
+      message: "No email was sent. See each player below.",
+      type: "info",
+    });
   });
 });
 
 describe("Complete & Send", () => {
+  it("asks first on a game from an earlier day", () => {
+    assert.equal(
+      pastGameCompleteConfirm("Wed, Sep 30"),
+      "This game was played on Wed, Sep 30. Complete it and email the players now?",
+    );
+  });
+
   it("names the thank-you email in the confirm", () => {
     assert.equal(
       completeAndSendQuestion("Thanks for Playing", 4, "Pharaoh", "7:00 PM", null),
@@ -236,10 +271,26 @@ describe("per-player follow-ups", () => {
   });
 
   it("offers Send thank-you again only after it did not go out", () => {
-    assert.equal(canResendThanks({ status: "failed" }), true);
-    assert.equal(canResendThanks({ status: "skipped" }), true);
-    assert.equal(canResendThanks({ status: "sent" }), false);
-    assert.equal(canResendThanks({ status: "scheduled" }), false);
+    const r = (status: string, reason: string | null = null, waiver_id: number | null = 5) =>
+      ({ status, reason, waiver_id }) as Parameters<typeof canResendThanks>[0];
+    assert.equal(canResendThanks(r("failed"), 5), true);
+    assert.equal(canResendThanks(r("skipped"), 5), true);
+    assert.equal(canResendThanks(r("sent"), 5), false);
+    assert.equal(canResendThanks(r("scheduled"), 5), false);
+    // a player back in the game may be thanked again; one who left it may not
+    assert.equal(canResendThanks(r("canceled", "left_game", 5), 5), true);
+    assert.equal(canResendThanks(r("canceled", "left_game", 9), 5), false);
+  });
+
+  it("offers Send review now for a player back in the game", () => {
+    const r = (status: string, reason: string | null, waiver_id: number | string | null, rating: number | null = null) =>
+      ({ status, reason, waiver_id, rating }) as Parameters<typeof reviewResendLabel>[0];
+    assert.equal(reviewResendLabel(r("canceled", "left_game", 5), 5), "Send review now");
+    assert.equal(reviewResendLabel(r("canceled", "left_game", "5"), 5), "Send review now");
+    assert.equal(reviewResendLabel(r("failed", null, 5), 5), "Send review again");
+    assert.equal(reviewResendLabel(r("canceled", "left_game", 9), 5), null);
+    assert.equal(reviewResendLabel(r("canceled", "staff", 5), 5), null);
+    assert.equal(reviewResendLabel(r("failed", null, 5, 4), 5), null);
   });
 
   it("warns that removing a player also stops their follow-ups", () => {

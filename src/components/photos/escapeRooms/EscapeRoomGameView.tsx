@@ -31,6 +31,7 @@ import {
   gameFollowUpState,
   newPlayersSummary,
   PAST_GAME_EMAIL_NOTE,
+  pastGameCompleteConfirm,
   pastGameEmailConfirm,
   recordedResultToast,
   recordOnlyQuestion,
@@ -347,7 +348,14 @@ export function EscapeRoomGameView({
     }
   };
 
-  const complete = async () => {
+  const complete = async (confirmed = false) => {
+    if (!isTodayGame && !confirmed) {
+      Alert.alert("", pastGameCompleteConfirm(dayLabel), [
+        { text: "Cancel", style: "cancel" },
+        { text: "OK", onPress: () => void complete(true) },
+      ]);
+      return;
+    }
     const data = await run(
       (token) =>
         completeEscapeRoomGame(token, game.id, escaped, escaped ? finish.label : null),
@@ -419,7 +427,7 @@ export function EscapeRoomGameView({
   // A game recorded without a photo emails its players later instead of sending a photo.
   const emailPlayersLater = async (confirmed = false) => {
     if (!isTodayGame && !confirmed) {
-      Alert.alert("", pastGameEmailConfirm(dayLabel, game.counts.newPlayers), [
+      Alert.alert("", pastGameEmailConfirm(dayLabel, game.counts.newPlayers, followUp.thanksOn), [
         { text: "Cancel", style: "cancel" },
         { text: "OK", onPress: () => void emailPlayersLater(true) },
       ]);
@@ -434,7 +442,8 @@ export function EscapeRoomGameView({
       return;
     }
     onApply(data);
-    showToast(emailedLaterToast(game.players, data.players, followUp), "success");
+    const toast = emailedLaterToast(game.players, data.players, thanksName);
+    showToast(toast.message, toast.type);
   };
 
   const sendToNew = async () => {

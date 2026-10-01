@@ -204,7 +204,7 @@ export const canSendFollowUpNow = (
   completed &&
   ["scheduled", "failed", "skipped", "canceled"].includes(row.status) &&
   row.is_current_recipient !== false &&
-  !["opted_out", "recipient_changed", "redirected", "left_game"].includes(
+  !["opted_out", "redirected", "left_game"].includes(
     row.reason ?? "",
   ) &&
   !(row.kind === "review" && row.reason === "asked_recently");

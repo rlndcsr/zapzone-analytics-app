@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  adminLocationField,
   canCreateVisitEmail,
   defaultVisitPayloadFields,
   isVisitTrigger,
@@ -14,6 +15,7 @@ import {
   triggerForEntity,
   triggerGroupsFor,
   visitFollowupTiming,
+  VISIT_COMPLETED_TIMING_NOTE,
   visitPayloadFields,
   type SharedPromo,
 } from "./visitEmail.ts";
@@ -119,6 +121,25 @@ describe("visit email payload", () => {
     assert.equal(fields.promo_id, 9);
     assert.equal("activity_filter" in fields, false);
     assert.deepEqual(defaultVisitPayloadFields({ ...base, triggerType: "booking_created" }), {});
+  });
+
+  it("saves a company admin's All Locations choice explicitly", () => {
+    assert.deepEqual(adminLocationField("company_admin", null), { location_id: null });
+    assert.deepEqual(adminLocationField("company_admin", undefined), { location_id: null });
+  });
+
+  it("keeps a location-scoped email on its location", () => {
+    assert.deepEqual(adminLocationField("company_admin", 4), { location_id: 4 });
+    // a manager's scope is decided by the server, as on the web
+    assert.deepEqual(adminLocationField("location_manager", 4), {});
+    assert.deepEqual(adminLocationField("location_manager", null), {});
+  });
+
+  it("explains how old, future and earlier-day visits are emailed", () => {
+    assert.equal(
+      VISIT_COMPLETED_TIMING_NOTE,
+      "Party bookings and event purchases more than 3 days old, or still in the future, are marked Completed without an email. Staff can still send it with Send now on the booking or purchase. Escape-room games from an earlier day are emailed when staff complete them on the game screen, which asks first.",
+    );
   });
 
   it("words the review request timing", () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "../../lib/api";
+import { eventCheckInRefusal } from "../checkin/eventCheckInRefusal";
 import { getActiveLocationId } from "../location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -472,6 +473,11 @@ export function useEntityCheckIn(): UseEntityCheckIn {
                 message:
                   "This ticket belongs to a bulk order — scan the order instead.",
               });
+              return;
+            }
+            const refusal = eventCheckInRefusal(surface.ticket.status);
+            if (refusal) {
+              setNotice({ tone: "error", message: refusal });
               return;
             }
             await updateEventPurchaseStatus(token, surface.ticket.id, "checked-in");

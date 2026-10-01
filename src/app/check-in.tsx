@@ -47,6 +47,7 @@ import {
   waiverTruncationNote,
 } from "../lib/checkin/checkInWaiverList";
 import { deskDateLabel, deskTodayKey } from "../lib/checkin/deskDate";
+import { eventCheckInRefusal } from "../lib/checkin/eventCheckInRefusal";
 import { shiftDateKey } from "../lib/dashboard/activityCategories";
 import { formatShortDate } from "../lib/date/calendar";
 import { resolveScannedCode } from "../lib/checkin/resolveScannedCode";
@@ -722,6 +723,7 @@ export default function CheckInWaiversScreen() {
       case "event":
         return (
           surface.ticket.ticketOrderId == null &&
+          !eventCheckInRefusal(surface.ticket.status) &&
           surface.ticket.status !== "checked-in" &&
           !surface.ticket.checkedInAt
         );

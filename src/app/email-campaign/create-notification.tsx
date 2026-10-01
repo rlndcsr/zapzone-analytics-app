@@ -26,6 +26,7 @@ import { SelectField, type SelectOption } from "../../components/ui/FormControls
 import { VisitEmailSettings } from "../../components/ui/VisitEmailSettings";
 import { firstFieldError } from "../../lib/api";
 import {
+  adminLocationField,
   APPLY_TO_OPTIONS,
   canCreateVisitEmail,
   defaultVisitPayloadFields,
@@ -259,14 +260,18 @@ const CreateNotification = () => {
         includeQrCode: includeQr,
         isActive: active,
         emailTemplateId: useTemplate ? templateId : null,
-        visitFields: (isEdit && isDefault ? defaultVisitPayloadFields : visitPayloadFields)({
-          triggerType,
-          entityType,
-          promoId,
-          fromName,
-          reviewUrl,
-          activityFilter,
-        }),
+        visitFields: {
+          // Mobile has no location picker, so an admin keeps the email's saved scope (All Locations on create).
+          ...(isEdit && isDefault ? {} : adminLocationField(currentUser?.role, isEdit ? locationId : null)),
+          ...(isEdit && isDefault ? defaultVisitPayloadFields : visitPayloadFields)({
+            triggerType,
+            entityType,
+            promoId,
+            fromName,
+            reviewUrl,
+            activityFilter,
+          }),
+        },
       };
       // Update in edit mode, otherwise create — same payload either way.
       if (isEdit && editId != null) await updateEmailNotification(token, editId, payload);

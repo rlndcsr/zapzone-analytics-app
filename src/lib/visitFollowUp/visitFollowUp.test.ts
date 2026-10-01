@@ -127,6 +127,13 @@ describe("follow-up card — Send now / Don't send", () => {
     assert.equal(canSendFollowUpNow(row({ status: "sent" }), true), false);
     assert.equal(canSendFollowUpNow(row({ is_current_recipient: false }), true), false);
     assert.equal(canSendFollowUpNow(row({ reason: "opted_out" }), true), false);
+    assert.equal(canSendFollowUpNow(row({ reason: "left_game" }), true), false);
+    // after a guest email change the current guest's row can be sent again
+    assert.equal(canSendFollowUpNow(row({ status: "canceled", reason: "recipient_changed" }), true), true);
+    assert.equal(
+      canSendFollowUpNow(row({ status: "canceled", reason: "recipient_changed", is_current_recipient: false }), true),
+      false,
+    );
     assert.equal(canSendFollowUpNow(row({ kind: "review", reason: "asked_recently" }), true), false);
     assert.equal(canSendFollowUpNow(row({ kind: "thanks", reason: "asked_recently" }), true), true);
   });

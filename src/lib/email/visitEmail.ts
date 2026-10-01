@@ -169,7 +169,18 @@ export type VisitPayloadFields = {
   from_name?: string | null;
   review_url?: string | null;
   activity_filter?: VisitActivityFilter | null;
+  location_id?: number | null;
 };
+
+/**
+ * A company admin's location choice, sent explicitly so All Locations (null)
+ * is saved instead of the server falling back to the admin's own location.
+ */
+export const adminLocationField = (
+  role: string | null | undefined,
+  locationId: number | null | undefined,
+): { location_id?: number | null } =>
+  role === "company_admin" ? { location_id: locationId ?? null } : {};
 
 /**
  * The visit-email keys of a create / non-default edit payload. Visit emails
@@ -205,6 +216,10 @@ export function defaultVisitPayloadFields(input: VisitFieldsInput): VisitPayload
       : {}),
   };
 }
+
+/** Visit Completed "How this email is sent" note on old, future and earlier-day visits. */
+export const VISIT_COMPLETED_TIMING_NOTE =
+  "Party bookings and event purchases more than 3 days old, or still in the future, are marked Completed without an email. Staff can still send it with Send now on the booking or purchase. Escape-room games from an earlier day are emailed when staff complete them on the game screen, which asks first.";
 
 /** Details "Timing" for a visit follow-up. */
 export const visitFollowupTiming = (hours: number): string =>

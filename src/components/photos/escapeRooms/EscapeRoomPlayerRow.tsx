@@ -7,6 +7,7 @@ import {
   canResendThanks,
   REMOVE_PLAYER_QUESTION,
   reviewBadge,
+  reviewResendLabel,
   thanksBadge,
 } from "../../../lib/escapeRooms/gameFollowUp";
 import type {
@@ -160,7 +161,7 @@ export function EscapeRoomPlayerRow({
         {!excluded && player.thanksEmail && (
           <Pill label={thanksBadge(player.thanksEmail).label} tone={thanksBadge(player.thanksEmail).tone} />
         )}
-        {!excluded && player.thanksEmail && canResendThanks(player.thanksEmail) && (
+        {!excluded && player.thanksEmail && canResendThanks(player.thanksEmail, player.waiverId) && (
           <TextAction
             label="Send thank-you again"
             disabled={busy}
@@ -184,9 +185,9 @@ export function EscapeRoomPlayerRow({
             />
           </>
         )}
-        {!excluded && player.review && player.review.rating === null && player.review.status === "failed" && (
+        {!excluded && player.review && reviewResendLabel(player.review, player.waiverId) && (
           <TextAction
-            label="Send review again"
+            label={reviewResendLabel(player.review, player.waiverId) ?? ""}
             disabled={busy}
             onPress={() => player.review && void actions.followUp(player.review.id, "send")}
           />

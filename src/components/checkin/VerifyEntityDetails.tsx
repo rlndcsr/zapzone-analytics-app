@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Text, View } from "react-native";
 
+import { eventCheckInRefusal } from "../../lib/checkin/eventCheckInRefusal";
 import type { ScannedEventTicket } from "../../services/eventPurchasesService";
 import type { ScanResult as MembershipScan } from "../../services/membershipsService";
 import type { ScannedWaiver } from "../../services/waiversService";
@@ -235,6 +236,7 @@ export function VerifyEventTicketDetails({
   const alreadyIn = ticket.status === "checked-in" || !!ticket.checkedInAt;
   const owes = Math.max(0, ticket.totalAmount - ticket.amountPaid) > 0;
   const time = fmtTime(ticket.purchaseTime);
+  const refusal = eventCheckInRefusal(ticket.status);
 
   return (
     <View>
@@ -244,6 +246,13 @@ export function VerifyEventTicketDetails({
           {...BLOCK_BANNER}
           heading="Part of a Bulk Order"
           message="This ticket is admitted through its order — scan the order's QR code instead."
+        />
+      ) : refusal ? (
+        <Banner
+          icon="alert-circle"
+          {...WARN_BANNER}
+          heading="Cannot Check In"
+          message={refusal}
         />
       ) : alreadyIn ? (
         <Banner

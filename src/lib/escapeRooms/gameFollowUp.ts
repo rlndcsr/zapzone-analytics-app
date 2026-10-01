@@ -225,21 +225,46 @@ export function sendToNewLabel(input: {
 }
 
 /** Confirm before emailing the players of a past, photo-less game. */
-export const pastGameEmailConfirm = (dayLabel: string, newPlayers: number): string =>
-  `This game was played on ${dayLabel}. Email ${players(newPlayers)} about it now?`;
+export const pastGameEmailConfirm = (
+  dayLabel: string,
+  newPlayers: number,
+  thanksOn: boolean,
+): string =>
+  thanksOn
+    ? `This game was played on ${dayLabel}. Email ${players(newPlayers)} about it now?`
+    : `This game was played on ${dayLabel}. Schedule review requests for ${players(newPlayers)}?`;
 
-/** Toast after emailing the players of a photo-less game later. */
+/** Confirm before Complete & Send on a game from an earlier day. */
+export const pastGameCompleteConfirm = (dayLabel: string): string =>
+  `This game was played on ${dayLabel}. Complete it and email the players now?`;
+
+/** Toast after emailing the players of a photo-less game later: what was sent, failed and scheduled. */
 export function emailedLaterToast(
   before: PlayerLike[],
   after: PlayerLike[],
-  state: Pick<GameFollowUpState, "thanksOn" | "thanksName">,
-): string {
-  const thanked =
-    after.filter((p) => p.thanksEmail?.status === "sent").length -
-    before.filter((p) => p.thanksEmail?.status === "sent").length;
-  return state.thanksOn
-    ? `Emailed the ${state.thanksName} email to ${players(Math.max(0, thanked))}.`
-    : "Review requests are scheduled for those players.";
+  thanksName: string,
+): { message: string; type: "success" | "info" } {
+  const gained = (test: (p: PlayerLike) => boolean) =>
+    Math.max(0, after.filter(test).length - before.filter(test).length);
+  const thanked = gained((p) => p.thanksEmail?.status === "sent");
+  const notDelivered = gained((p) => p.thanksEmail?.status === "failed");
+  const reviewsWaiting = gained((p) => p.review?.status === "scheduled");
+  const parts = [
+    thanked > 0 ? `the ${thanksName} email went to ${players(thanked)}` : "",
+    notDelivered > 0
+      ? `${notDelivered} ${notDelivered === 1 ? "email has" : "emails have"} not gone through yet`
+      : "",
+    reviewsWaiting > 0
+      ? `${reviewsWaiting} review ${reviewsWaiting === 1 ? "request is" : "requests are"} scheduled`
+      : "",
+  ].filter(Boolean);
+  return {
+    message:
+      parts.length > 0
+        ? `${parts.join(", ").replace(/^./, (first) => first.toUpperCase())}.`
+        : "No email was sent. See each player below.",
+    type: notDelivered > 0 || parts.length === 0 ? "info" : "success",
+  };
 }
 
 export type PlayerBadge = { label: string; tone: "green" | "red" | "gray" | "amber" | "blue" };
@@ -272,8 +297,31 @@ export function reviewBadge(row: Pick<FollowUpRow, "status" | "rating" | "due_at
   }
 }
 
-export const canResendThanks = (row: Pick<FollowUpRow, "status">): boolean =>
-  ["failed", "skipped", "canceled"].includes(row.status);
+type RowForPlayer = Pick<FollowUpRow, "status" | "reason" | "waiver_id">;
+
+/** A row cancelled because the player left the game belongs to them again once they are back in it. */
+const leftThisGame = (row: RowForPlayer, waiverId: number): boolean =>
+  row.reason === "left_game" && Number(row.waiver_id) !== Number(waiverId);
+
+export const canResendThanks = (row: RowForPlayer, waiverId: number): boolean =>
+  ["failed", "skipped", "canceled"].includes(row.status) && !leftThisGame(row, waiverId);
+
+/** "Send review again" after a failure, or "Send review now" for a player back in the game. */
+export function reviewResendLabel(
+  row: RowForPlayer & Pick<FollowUpRow, "rating">,
+  waiverId: number,
+): string | null {
+  if (row.rating !== null) return null;
+  if (row.status === "failed") return "Send review again";
+  if (
+    row.status === "canceled" &&
+    row.reason === "left_game" &&
+    Number(row.waiver_id) === Number(waiverId)
+  ) {
+    return "Send review now";
+  }
+  return null;
+}
 
 /** Photo Settings' note on which email carries escape-room photos (web PhotoSettings). */
 export function escapeRoomEmailNote(

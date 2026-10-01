@@ -12,6 +12,7 @@ import {
   promoScopeLine,
   type SharedPromo,
   type VisitActivityFilter,
+  VISIT_COMPLETED_TIMING_NOTE,
 } from "../../lib/email/visitEmail";
 import { getToken } from "../../lib/session";
 import type { EmailPromoSummary, VisitEmailOverride } from "../../services/emailService";
@@ -198,7 +199,7 @@ export function VisitEmailSettings({
                 Goes to each guest as soon as staff mark the visit complete: Complete &amp; Send on the escape-room game screen (with the group photo and finish time), Result only when staff choose to email the players, or setting a party booking or an event purchase to Completed. It is never sent from checkout, check-in or imports, and each guest gets it once per visit.
               </Text>
               <Text className="text-sm text-gray-700 dark:text-gray-200">
-                Visits more than 3 days old, or still in the future, are marked Completed without an email. Staff can still send it with Send now on the booking or purchase.
+                {VISIT_COMPLETED_TIMING_NOTE}
               </Text>
               <Text className="text-xs text-gray-500 dark:text-gray-400">
                 Party bookings include the group photo only when staff sent that party&apos;s photo from the photo library to the party&apos;s waivers. Event purchases never include a photo.
