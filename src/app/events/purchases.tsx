@@ -463,17 +463,18 @@ const EventPurchases = () => {
 
   // KPI values — computed over the active set (already location-scoped by the
   // fetch), like the web metrics.
-  // KPI math mirrors the web EventPurchases metrics exactly: revenue is the
-  // sum of total_amount (not amount paid), and Avg. Purchase = revenue / count.
+  // KPI math mirrors the web EventPurchases metrics exactly: revenue is what
+  // was collected (amount_paid) on live lines only — cancelled/refunded/voided
+  // are left out of both the count and the money — and Avg. Purchase =
+  // revenue / count.
   const kpis = useMemo(() => {
     const lines = purchases.length;
     const confirmed = purchases.filter((p) => p.status === "confirmed").length;
-    // Web parity: the transaction count skips cancelled/refunded/voided lines.
     const live = purchases.filter(
       (p) => !ENDED_STATUSES.includes(String(p.status)),
     );
     const total = countTransactions(live);
-    const revenue = purchases.reduce((sum, p) => sum + p.totalAmount, 0);
+    const revenue = live.reduce((sum, p) => sum + p.amountPaid, 0);
     const avg = total > 0 ? revenue / total : 0;
     const customers = new Set(purchases.map((p) => p.email)).size;
     return { total, lines, confirmed, revenue, avg, customers };
@@ -929,21 +930,11 @@ const EventPurchases = () => {
         }
       >
         <View className="px-5">
-          {/* Overview intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Purchases Overview
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              All customer event ticket purchases at a glance
-            </Text>
-          </View>
-
           {/* New Purchase — the primary filled CTA, full width. Export CSV
               lives in the header. */}
           <Pressable
             onPress={() => router.push("/events/create-purchase")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5"
+            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mt-6 mb-5"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
             <Text className="text-sm font-semibold text-white">
@@ -981,7 +972,7 @@ const EventPurchases = () => {
                   tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Revenue"
                   value={formatMoney(kpis.revenue)}
-                  change="All time revenue"
+                  change="Collected, excluding cancelled/refunded"
                 />
               </View>
               <View className="w-1/2">

@@ -67,9 +67,9 @@ export function InfoRow({
   );
 }
 
-type Variant = "primary" | "outline" | "danger";
+type Variant = "primary" | "outline" | "danger" | "dangerSolid";
 
-/** Pill action button (primary/outline/danger) shared by the details screens' Actions row. */
+/** Pill action button (primary/outline/danger/dangerSolid) shared by the details screens' Actions row. */
 export function DetailActionButton({
   icon,
   label,
@@ -88,12 +88,14 @@ export function DetailActionButton({
   const base =
     variant === "primary"
       ? "bg-[#0644C7]"
-      : variant === "danger"
+      : variant === "dangerSolid"
+        ? "bg-red-600"
+        : variant === "danger"
         ? "border border-red-200 dark:border-red-900/50 bg-white dark:bg-neutral-900"
         : "border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900";
-  const tint = variant === "primary" ? "#FFFFFF" : variant === "danger" ? "#DC2626" : "#374151";
+  const tint = variant === "primary" || variant === "dangerSolid" ? "#FFFFFF" : variant === "danger" ? "#DC2626" : "#374151";
   const textColor =
-    variant === "primary"
+    variant === "primary" || variant === "dangerSolid"
       ? "text-white"
       : variant === "danger"
         ? "text-red-600 dark:text-red-400"

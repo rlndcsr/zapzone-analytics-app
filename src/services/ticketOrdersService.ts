@@ -148,6 +148,8 @@ export type TicketOrderDetail = {
   notes: string | null;
   createdAt: string | null;
   lines: TicketOrderLine[];
+  /** The extra confirmation checkboxes and how they were answered. */
+  customFieldResponses: { id: number; label: string; value: boolean }[];
 };
 
 export type TicketOrderListParams = {
@@ -319,6 +321,16 @@ const mapOrderDetail = (raw: RawOrder): TicketOrderDetail => {
     createdAt: str(raw.created_at),
     lines: Array.isArray(raw.lines)
       ? (raw.lines as Record<string, unknown>[]).map(mapOrderLine)
+      : [],
+    customFieldResponses: Array.isArray(raw.custom_field_responses)
+      ? (raw.custom_field_responses as Record<string, unknown>[])
+          .filter((r) => typeof r.label === "string" && r.label.trim())
+          .map((r, i) => ({
+            id: r.id != null ? num(r.id) : i,
+            label: (r.label as string).trim(),
+            // The column is a boolean cast, but a 0/1 or "1" still reaches us.
+            value: r.value === true || r.value === 1 || r.value === "1",
+          }))
       : [],
   };
 };

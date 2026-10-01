@@ -44,7 +44,10 @@ const money = (n: number | null | undefined) => `$${Number(n ?? 0).toFixed(2)}`;
 
 const ENDED = ["cancelled", "refunded"];
 
-const STATUS_LABEL: Record<string, { label: string; wrap: string; text: string }> = {
+const STATUS_LABEL: Record<
+  string,
+  { label: string; wrap: string; text: string }
+> = {
   draft: {
     label: "Draft",
     wrap: "bg-gray-100 dark:bg-neutral-800",
@@ -104,23 +107,26 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
+/** Icon tile, two to a row; `full` takes the whole row (the customer's email). */
 function InfoTile({
   icon,
   label,
+  full = false,
   children,
 }: {
   icon: IconName;
   label: string;
+  full?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <View className="w-1/2 px-2 pb-4">
+    <View className={`${full ? "w-full" : "w-1/2"} px-2 pb-4`}>
       <View className="flex-row items-start gap-3">
         <View className="h-9 w-9 items-center justify-center rounded-lg bg-[#0644C7]/10">
           <Feather name={icon} size={16} color={PRIMARY} />
         </View>
         <View className="flex-1">
-          <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
             {label}
           </Text>
           {children}
@@ -129,6 +135,34 @@ function InfoTile({
     </View>
   );
 }
+
+/** One section of the single details card, divided like the web's. */
+function Section({
+  last = false,
+  children,
+}: {
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      className={`p-4 ${last ? "" : "border-b border-gray-100 dark:border-neutral-800"}`}
+    >
+      {children}
+    </View>
+  );
+}
+
+const PAYMENT_PILL: Record<string, string> = {
+  completed:
+    "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300",
+  refunded:
+    "bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300",
+  voided:
+    "bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300",
+};
+const PAYMENT_PILL_PENDING =
+  "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300";
 
 function LineCard({
   line,
@@ -260,13 +294,6 @@ function LineCard({
         </Pressable>
       </View>
 
-      {unpaid && !line.checkedInAt && (
-        <Text className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
-          Money and status are managed on the order — collect the balance below
-          to release this ticket.
-        </Text>
-      )}
-
       {line.type === "attraction" && (
         <View className="mt-3">
           <WaiverConnectionCard
@@ -293,7 +320,9 @@ export default function OrderDetailsScreen() {
 
   const [order, setOrder] = useState<TicketOrderDetail | null>(null);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
-  const [waivers, setWaivers] = useState<Record<number, EntityWaivers | null>>({});
+  const [waivers, setWaivers] = useState<Record<number, EntityWaivers | null>>(
+    {},
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -347,7 +376,9 @@ export default function OrderDetailsScreen() {
       );
       setWaivers(Object.fromEntries(entries));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "We could not load that order.");
+      setError(
+        e instanceof Error ? e.message : "We could not load that order.",
+      );
     } finally {
       setLoading(false);
     }
@@ -449,7 +480,10 @@ export default function OrderDetailsScreen() {
             setActing("cancel");
             try {
               await cancelTicketOrder(token, order.id);
-              Alert.alert("Order cancelled", `${order.referenceNumber} was cancelled.`);
+              Alert.alert(
+                "Order cancelled",
+                `${order.referenceNumber} was cancelled.`,
+              );
               await load();
             } catch (e) {
               Alert.alert(
@@ -470,7 +504,11 @@ export default function OrderDetailsScreen() {
     const token = getToken();
     if (!token) return;
     try {
-      const fresh = await fetchEntityWaivers(token, "attraction_purchase", lineId);
+      const fresh = await fetchEntityWaivers(
+        token,
+        "attraction_purchase",
+        lineId,
+      );
       setWaivers((current) => ({ ...current, [lineId]: fresh }));
     } catch {
       // keep what is on screen; the check-in itself already succeeded
@@ -515,7 +553,8 @@ export default function OrderDetailsScreen() {
     );
   }
 
-  const allIn = order.lines.length > 0 && order.lines.every((l) => l.checkedInAt);
+  const allIn =
+    order.lines.length > 0 && order.lines.every((l) => l.checkedInAt);
   const ended = ENDED.includes(order.status);
   // `payments` comes from a separate fetch (the show endpoint doesn't eager-load
   // it) — pick the same card the per-payment rows below would show.
@@ -565,11 +604,14 @@ export default function OrderDetailsScreen() {
           </View>
           <Pressable
             onPress={() => setShowQr(true)}
-            className="rounded-full bg-gray-100 p-2 active:opacity-70 dark:bg-neutral-800"
+            className="flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90"
             accessibilityRole="button"
             accessibilityLabel="View order QR code"
           >
-            <Feather name="grid" size={20} color={headerIcon} />
+            <Feather name="grid" size={14} color="#FFFFFF" />
+            <Text className="text-xs font-semibold text-white">
+              View QR Code
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -635,203 +677,234 @@ export default function OrderDetailsScreen() {
             </View>
           )}
 
-          {/* Order Information */}
-          <View className="rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-            <Text className="mb-3 text-base font-bold text-gray-900 dark:text-white">
-              Order Information
-            </Text>
-            <View className="-mx-2 flex-row flex-wrap">
-              <InfoTile icon="user" label="Customer">
-                <Text className="text-sm font-medium text-gray-800 dark:text-white">
-                  {order.customerName}
-                </Text>
-                {!!order.customerEmail && (
-                  <Text
-                    className="text-[11px] text-gray-500 dark:text-gray-400"
-                    numberOfLines={1}
-                  >
-                    {order.customerEmail}
+          {/* One card, sectioned like the web TicketOrderDetails. */}
+          <View className="overflow-hidden rounded-2xl border border-gray-100 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+            {/* Order Information */}
+            <Section>
+              <Text className="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
+                Order Information
+              </Text>
+              <View className="-mx-2 flex-row flex-wrap">
+                <InfoTile icon="user" label="Customer" full>
+                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                    {order.customerName}
                   </Text>
-                )}
-                {!!order.customerPhone && (
-                  <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-                    {order.customerPhone}
+                  {!!order.customerEmail && (
+                    <Text className="text-xs text-gray-600 dark:text-gray-400">
+                      {order.customerEmail}
+                    </Text>
+                  )}
+                  {!!order.customerPhone && (
+                    <Text className="text-xs text-gray-600 dark:text-gray-400">
+                      {order.customerPhone}
+                    </Text>
+                  )}
+                </InfoTile>
+                <InfoTile icon="calendar" label="Order Date">
+                  <Text className="text-sm font-medium text-gray-800 dark:text-white">
+                    {order.purchaseDate ?? "—"}
                   </Text>
-                )}
-              </InfoTile>
-              <InfoTile icon="calendar" label="Order Date">
-                <Text className="text-sm font-medium text-gray-800 dark:text-white">
-                  {order.purchaseDate ?? "—"}
-                </Text>
-              </InfoTile>
-              <InfoTile icon="check-circle" label="Status">
-                <View className="mt-0.5">
-                  <StatusPill status={order.status} />
-                </View>
-              </InfoTile>
-              <InfoTile icon="map-pin" label="Location">
-                <Text className="text-sm font-medium text-gray-800 dark:text-white">
-                  {order.locationName ?? "—"}
-                </Text>
-              </InfoTile>
-              <InfoTile icon="credit-card" label="Payment Method">
-                <Text className="text-sm font-medium text-gray-800 dark:text-white">
-                  {methodLabel(order.paymentMethod)}
-                </Text>
+                </InfoTile>
+                <InfoTile icon="check-circle" label="Status">
+                  <View className="mt-0.5">
+                    <StatusPill status={order.status} />
+                  </View>
+                </InfoTile>
+                <InfoTile icon="map-pin" label="Location">
+                  <Text className="text-sm font-medium text-gray-800 dark:text-white">
+                    {order.locationName ?? "—"}
+                  </Text>
+                </InfoTile>
+                <InfoTile icon="credit-card" label="Payment Method">
+                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                    {methodLabel(order.paymentMethod)}
+                  </Text>
+                </InfoTile>
                 {!!orderCardLabel && (
-                  <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-                    {orderCardLabel}
-                  </Text>
+                  <InfoTile icon="credit-card" label="Card Used">
+                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                      {orderCardLabel}
+                    </Text>
+                    <Text className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                      Ask the guest to confirm the last four digits.
+                    </Text>
+                  </InfoTile>
                 )}
-              </InfoTile>
-              <InfoTile icon="tag" label="Items">
-                <Text className="text-sm font-medium text-gray-800 dark:text-white">
-                  {order.itemCount} {order.itemCount === 1 ? "item" : "items"} ·{" "}
-                  {order.ticketCount} tickets
-                  {allIn ? " · all checked in" : ""}
-                </Text>
-              </InfoTile>
-            </View>
-            {!!order.notes && (
-              <View className="mt-1 border-t border-gray-100 pt-3 dark:border-neutral-800">
-                <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Notes
-                </Text>
-                <Text className="mt-0.5 text-sm text-gray-700 dark:text-gray-200">
-                  {order.notes}
-                </Text>
+                <InfoTile icon="tag" label="Items">
+                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                    {order.itemCount} {order.itemCount === 1 ? "item" : "items"}{" "}
+                    · {order.ticketCount} tickets
+                    {allIn ? " · all checked in" : ""}
+                  </Text>
+                </InfoTile>
               </View>
-            )}
-          </View>
 
-          {/* Tickets on this Order */}
-          <View className="mt-4 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-            <View className="mb-3 flex-row items-center justify-between gap-3">
-              <Text className="flex-1 text-base font-bold text-gray-900 dark:text-white">
-                Tickets on this Order
-              </Text>
-              <Pressable
-                onPress={() => void checkIn()}
-                disabled={checkInAllDisabled}
-                accessibilityRole="button"
-                accessibilityLabel="Check in every ticket on this order"
-                className={`flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90 ${
-                  checkInAllDisabled ? "opacity-50" : ""
-                }`}
-              >
-                {checkingIn === "all" ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text className="text-xs font-semibold text-white">
-                    {allIn ? "All Checked In" : "Check In All"}
+              {/* Extra confirmations — the web's CustomFieldAnswers block. */}
+              {order.customFieldResponses.length > 0 && (
+                <View className="mt-1 border-t border-gray-100 pt-3 dark:border-neutral-800">
+                  <Text className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Extra confirmations
                   </Text>
-                )}
-              </Pressable>
-            </View>
-
-            {order.lines.length === 0 ? (
-              <Text className="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
-                This order has no ticket lines.
-              </Text>
-            ) : (
-              order.lines.map((line) => (
-                <LineCard
-                  key={line.id}
-                  line={line}
-                  order={order}
-                  busy={checkingIn}
-                  waivers={waivers[line.id]}
-                  onCheckIn={() => void checkIn([line.id])}
-                  onEdit={() => openLineEdit(line)}
-                  onWaiversChanged={() => reloadLineWaivers(line.id)}
-                />
-              ))
-            )}
-          </View>
-
-          {/* Payment Information */}
-          <View className="mt-4 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-            <Text className="mb-3 text-base font-bold text-gray-900 dark:text-white">
-              Payment Information
-            </Text>
-
-            <View className="-mx-2 flex-row flex-wrap">
-              <InfoTile icon="dollar-sign" label="Subtotal">
-                <Text className="text-sm font-medium text-gray-800 dark:text-white">
-                  {money(order.subtotal)}
-                </Text>
-                {order.discountAmount > 0 && (
-                  <Text className="text-[11px] text-green-600 dark:text-green-400">
-                    −{money(order.discountAmount)} discounts
-                  </Text>
-                )}
-                {order.feeTotal > 0 && (
-                  <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-                    +{money(order.feeTotal)} fees
-                  </Text>
-                )}
-              </InfoTile>
-              <InfoTile icon="credit-card" label="Total / Paid">
-                <Text className="text-sm font-medium text-gray-800 dark:text-white">
-                  {money(order.totalAmount)} / {money(order.amountPaid)}
-                </Text>
-                {order.remainingBalance > 0 && !ended && (
-                  <Text className="text-[11px] font-medium text-yellow-700 dark:text-yellow-400">
-                    {money(order.remainingBalance)} due at the venue
-                  </Text>
-                )}
-              </InfoTile>
-            </View>
-
-            {payments.length === 0 ? (
-              <Text className="text-sm text-gray-500 dark:text-gray-400">
-                {order.remainingBalance > 0
-                  ? "No payments recorded yet — the balance is collected at the venue."
-                  : "No payment rows found for this order."}
-              </Text>
-            ) : (
-              <View className="gap-2">
-                {payments.map((p) => (
-                  <View
-                    key={p.id}
-                    className="rounded-xl bg-gray-50 p-3 dark:bg-neutral-800/40"
-                  >
-                    <View className="flex-row items-center gap-2">
-                      <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                        {money(p.amount)}
-                      </Text>
-                      <Text className="text-xs capitalize text-gray-600 dark:text-gray-300">
-                        {p.method}
-                      </Text>
-                      <View
-                        className={`rounded-full px-2 py-0.5 ${
-                          p.status === "completed"
-                            ? "bg-green-100 dark:bg-green-900/30"
-                            : p.status === "refunded" || p.status === "voided"
-                              ? "bg-purple-100 dark:bg-purple-900/30"
-                              : "bg-yellow-100 dark:bg-yellow-900/30"
+                  {order.customFieldResponses.map((r) => (
+                    <View
+                      key={r.id}
+                      className="flex-row items-start gap-2 py-0.5"
+                    >
+                      <Feather
+                        name={r.value ? "check" : "x"}
+                        size={15}
+                        color={r.value ? "#16a34a" : "#9ca3af"}
+                        style={{ marginTop: 2 }}
+                      />
+                      <Text
+                        className={`flex-1 text-sm ${
+                          r.value
+                            ? "text-gray-800 dark:text-gray-100"
+                            : "text-gray-500 dark:text-gray-400"
                         }`}
                       >
-                        <Text className="text-[10px] font-medium capitalize text-gray-800 dark:text-gray-200">
-                          {p.status}
-                        </Text>
-                      </View>
-                      <Text
-                        className="flex-1 text-right text-[10px] text-gray-500 dark:text-gray-400"
-                        numberOfLines={1}
-                      >
-                        {p.createdAt ? formatDateTimeET(p.createdAt) : ""}
+                        {r.label}
                       </Text>
                     </View>
-                    {!!p.cardLabel && (
-                      <Text className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        {p.cardLabel}
-                      </Text>
-                    )}
-                  </View>
-                ))}
+                  ))}
+                </View>
+              )}
+            </Section>
+
+            {/* Tickets on this Order */}
+            <Section>
+              <View className="mb-3 flex-row items-center justify-between gap-3">
+                <Text className="flex-1 text-lg font-semibold text-gray-900 dark:text-white">
+                  Tickets on this Order
+                </Text>
+                <Pressable
+                  onPress={() => void checkIn()}
+                  disabled={checkInAllDisabled}
+                  accessibilityRole="button"
+                  accessibilityLabel="Check in every ticket on this order"
+                  className={`flex-row items-center gap-1.5 rounded-lg bg-[#0644C7] px-3 py-2 active:opacity-90 ${
+                    checkInAllDisabled ? "opacity-50" : ""
+                  }`}
+                >
+                  {checkingIn === "all" ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text className="text-xs font-semibold text-white">
+                      {allIn ? "All Checked In" : "Check In All"}
+                    </Text>
+                  )}
+                </Pressable>
               </View>
-            )}
+
+              {order.lines.length === 0 ? (
+                <Text className="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+                  This order has no ticket lines.
+                </Text>
+              ) : (
+                order.lines.map((line) => (
+                  <LineCard
+                    key={line.id}
+                    line={line}
+                    order={order}
+                    busy={checkingIn}
+                    waivers={waivers[line.id]}
+                    onCheckIn={() => void checkIn([line.id])}
+                    onEdit={() => openLineEdit(line)}
+                    onWaiversChanged={() => reloadLineWaivers(line.id)}
+                  />
+                ))
+              )}
+            </Section>
+
+            {/* Payment Information */}
+            <Section last>
+              <Text className="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
+                Payment Information
+              </Text>
+
+              <View className="-mx-2 flex-row flex-wrap">
+                <InfoTile icon="dollar-sign" label="Subtotal">
+                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                    {money(order.subtotal)}
+                  </Text>
+                  {order.discountAmount > 0 && (
+                    <Text className="text-xs text-green-600 dark:text-green-400">
+                      −{money(order.discountAmount)} discounts
+                    </Text>
+                  )}
+                  {order.feeTotal > 0 && (
+                    <Text className="text-xs text-gray-600 dark:text-gray-400">
+                      +{money(order.feeTotal)} fees
+                    </Text>
+                  )}
+                </InfoTile>
+                <InfoTile icon="credit-card" label="Total / Paid">
+                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                    {money(order.totalAmount)} / {money(order.amountPaid)}
+                  </Text>
+                  {order.remainingBalance > 0 && !ended && (
+                    <Text className="text-xs font-medium text-yellow-700 dark:text-yellow-400">
+                      {money(order.remainingBalance)} due at the venue
+                    </Text>
+                  )}
+                </InfoTile>
+              </View>
+
+              {payments.length === 0 ? (
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
+                  {order.remainingBalance > 0
+                    ? "No payments recorded yet — the balance is collected at the venue."
+                    : "No payment rows found for this order."}
+                </Text>
+              ) : (
+                <View className="gap-2">
+                  {/* One row per payment, as on the web: amount, method, status,
+                    card, transaction ID, and when it was taken. */}
+                  {payments.map((p) => {
+                    const pill = PAYMENT_PILL[p.status] ?? PAYMENT_PILL_PENDING;
+                    return (
+                      <View
+                        key={p.id}
+                        className="flex-row flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-gray-50 p-3 dark:bg-neutral-800/40"
+                      >
+                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {money(p.amount)}
+                        </Text>
+                        <Text className="text-sm text-gray-600 dark:text-gray-300">
+                          {p.methodLabel}
+                        </Text>
+                        <View className={`rounded-full px-2.5 py-0.5 ${pill}`}>
+                          <Text className={`text-xs font-medium ${pill}`}>
+                            {p.status}
+                          </Text>
+                        </View>
+                        {!!p.cardLabel && (
+                          <Text className="text-xs text-gray-600 dark:text-gray-400">
+                            {p.cardLabel}
+                          </Text>
+                        )}
+                        {!!p.transactionId && (
+                          <Text
+                            className="font-mono text-xs text-gray-500 dark:text-gray-400"
+                            numberOfLines={1}
+                          >
+                            {p.transactionId}
+                          </Text>
+                        )}
+                        <Text className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                          {p.createdAt
+                            ? formatDateTimeET(p.createdAt, {
+                                month: "short",
+                                showZone: false,
+                              })
+                            : ""}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </Section>
           </View>
         </View>
       </ScrollView>

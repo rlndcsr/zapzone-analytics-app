@@ -17,6 +17,8 @@ export type PaymentRow = {
   id: number;
   /** Gateway transaction reference shown as the TRANSACTION number. */
   reference: string;
+  /** The raw gateway `transaction_id` only — null when the row has none. */
+  transactionId: string | null;
   /** Booking / event reference number (e.g. "BK2026…"), shown under the type. */
   payableReference: string | null;
   /** "Package Booking" / "Attraction" / "Event" from the payable type. */
@@ -262,6 +264,7 @@ function mapPayment(raw: RawPayment): PaymentRow {
   return {
     id: raw.id,
     reference: raw.transaction_id?.trim() || raw.payment_id?.trim() || `#${raw.id}`,
+    transactionId: raw.transaction_id?.trim() || null,
     payableReference: payableReference(payableType, payable, payableId),
     typeLabel:
       TYPE_LABELS[payableType ?? ""] || humanize(payableType) || "Payment",

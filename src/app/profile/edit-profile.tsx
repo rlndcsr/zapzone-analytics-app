@@ -214,12 +214,12 @@ const EditProfile = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Cream hero — centered title, then centered avatar / name */}
+      {/* Blue hero, matching Profile — centered title, then avatar / name */}
       <ScreenHeader title="Edit Profile" className="pb-8">
         <View className="items-center mt-5">
           {/* The picture set on the Profile screen, fitted rather than cropped;
               a plain glyph until there is one. */}
-          <View className="h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-black/5 bg-white dark:border-white/10 dark:bg-neutral-800">
+          <View className="h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-white/20">
             {avatarUri ? (
               <Image
                 source={{ uri: avatarUri }}
@@ -229,10 +229,10 @@ const EditProfile = () => {
                 accessibilityLabel="Profile picture"
               />
             ) : (
-              <Feather name="user" size={38} color="#9CA3AF" />
+              <Feather name="user" size={38} color="#FFFFFF" />
             )}
           </View>
-          <Text className="mt-3 text-lg font-semibold text-gray-900 dark:text-white">
+          <Text className="mt-3 text-lg font-semibold text-white">
             {displayName}
           </Text>
         </View>

@@ -371,9 +371,19 @@ export async function createEventPurchase(
 /* ----------------------------------------------- purchase detail + delete -- */
 
 /** A fee line applied to a purchase (mirrors web `applied_fees`). */
-export type EventAppliedFee = { name: string; amount: number };
+export type EventAppliedFee = {
+  name: string;
+  amount: number;
+  /** Additive fees were added on top (shown red, "+"); inclusive sit inside the price. */
+  applicationType: "additive" | "inclusive";
+};
 /** A discount line applied to a purchase (mirrors web `applied_discounts`). */
-export type EventAppliedDiscount = { name: string; amount: number };
+export type EventAppliedDiscount = {
+  name: string;
+  amount: number;
+  /** e.g. "percentage" / "fixed" — the web prints it in brackets. */
+  type: string;
+};
 /** One purchased add-on line on the detail screen. */
 export type EventPurchaseAddonLine = {
   id: number;
@@ -426,6 +436,8 @@ export type EventPurchaseDetail = {
   addOns: EventPurchaseAddonLine[];
   appliedFees: EventAppliedFee[];
   appliedDiscounts: EventAppliedDiscount[];
+  /** The extra confirmation checkboxes and how they were answered. */
+  customFieldResponses: { id: number; label: string; value: boolean }[];
 };
 
 type RawEventAddonLine = {
@@ -453,12 +465,21 @@ type RawEventPurchaseDetail = RawEventPurchase & {
   } | null;
   add_ons?: RawEventAddonLine[] | null;
   applied_fees?:
-    { fee_name?: string | null; fee_amount?: number | string | null }[] | null;
+    | {
+        fee_name?: string | null;
+        fee_amount?: number | string | null;
+        fee_application_type?: "additive" | "inclusive" | null;
+      }[]
+    | null;
   applied_discounts?:
     | {
         discount_name?: string | null;
         discount_amount?: number | string | null;
+        discount_type?: string | null;
       }[]
+    | null;
+  custom_field_responses?:
+    | { id?: number | string | null; label?: string | null; value?: unknown }[]
     | null;
 };
 
@@ -506,11 +527,22 @@ function mapDetail(raw: RawEventPurchaseDetail): EventPurchaseDetail {
     appliedFees: (raw.applied_fees ?? []).map((f) => ({
       name: f.fee_name?.trim() || "Fee",
       amount: Number(f.fee_amount ?? 0),
+      applicationType:
+        f.fee_application_type === "inclusive" ? "inclusive" : "additive",
     })),
     appliedDiscounts: (raw.applied_discounts ?? []).map((d) => ({
       name: d.discount_name?.trim() || "Discount",
       amount: Number(d.discount_amount ?? 0),
+      type: d.discount_type?.trim() || "",
     })),
+    customFieldResponses: (raw.custom_field_responses ?? [])
+      .filter((r) => !!r.label?.trim())
+      .map((r, i) => ({
+        id: r.id != null ? Number(r.id) : i,
+        label: r.label!.trim(),
+        // The column is a boolean cast, but a 0/1 or "1" still reaches us.
+        value: r.value === true || r.value === 1 || r.value === "1",
+      })),
   };
 }
 

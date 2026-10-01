@@ -9,7 +9,7 @@ import { VisitPromoBadge } from "./VisitEmailSettings";
 
 const PRIMARY = "#0644C7";
 
-/** Small circular icon button for the Actions column (matches the other tables). */
+/** Square icon button for the Actions column — the web's `p-2 rounded-lg` buttons. */
 const IconAction = ({
   icon,
   tint,
@@ -23,10 +23,10 @@ const IconAction = ({
 }) => (
   <Pressable
     onPress={onPress}
-    hitSlop={6}
+    hitSlop={4}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+    className="w-8 h-8 rounded-lg items-center justify-center active:bg-blue-50 dark:active:bg-neutral-800"
   >
     <Feather name={icon} size={16} color={tint} />
   </Pressable>
@@ -138,18 +138,22 @@ function buildColumns(h: Handlers): TableColumn<EmailNotificationRow>[] {
     key: "actions",
     label: "Actions",
     width: 200,
+    // Same buttons, order and conditions as the web row: Send test · Reset (a
+    // customized default only) · Duplicate · View (grey) · Edit · Delete (not
+    // on defaults) — right-aligned.
     render: (n) => (
-      <View className="flex-row items-center gap-0.5">
-        <IconAction icon="eye" tint={PRIMARY} label={`View ${n.name}`} onPress={() => h.onView(n)} />
+      <View className="flex-row items-center justify-end gap-1">
         <IconAction icon="send" tint={PRIMARY} label={`Send test for ${n.name}`} onPress={() => h.onTest(n)} />
+        {n.isDefault && n.isCustomized && (
+          <IconAction icon="rotate-ccw" tint="#D97706" label={`Reset ${n.name}`} onPress={() => h.onReset(n)} />
+        )}
         {canDuplicateNotification(n.isDefault, n.triggerType) && (
           <IconAction icon="copy" tint={PRIMARY} label={`Duplicate ${n.name}`} onPress={() => h.onDuplicate(n)} />
         )}
-        <IconAction icon="edit-2" tint={PRIMARY} label={`Edit ${n.name}`} onPress={() => h.onEdit(n)} />
-        {n.isDefault ? (
-          <IconAction icon="rotate-ccw" tint="#D97706" label={`Reset ${n.name}`} onPress={() => h.onReset(n)} />
-        ) : (
-          <IconAction icon="trash-2" tint="#EF4444" label={`Delete ${n.name}`} onPress={() => h.onDelete(n)} />
+        <IconAction icon="eye" tint="#4B5563" label={`View ${n.name}`} onPress={() => h.onView(n)} />
+        <IconAction icon="edit" tint={PRIMARY} label={`Edit ${n.name}`} onPress={() => h.onEdit(n)} />
+        {!n.isDefault && (
+          <IconAction icon="trash-2" tint="#DC2626" label={`Delete ${n.name}`} onPress={() => h.onDelete(n)} />
         )}
       </View>
     ),

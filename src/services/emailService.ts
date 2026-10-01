@@ -487,6 +487,8 @@ export type EmailNotificationRow = {
   recipientCount: number;
   isActive: boolean;
   isDefault: boolean;
+  /** A default whose subject or body was edited — only then can it be reset. */
+  isCustomized: boolean;
   /** False when this user may not change it (company-wide follow-up emails). */
   canEdit: boolean;
   locationId: number | null;
@@ -501,6 +503,8 @@ type RawNotification = {
   recipient_types?: string[] | null;
   is_active?: boolean | null;
   is_default?: boolean | null;
+  is_subject_customized?: boolean | null;
+  is_body_customized?: boolean | null;
   location_id?: number | null;
   can_edit?: boolean;
   promo_summary?: EmailPromoSummary | null;
@@ -534,6 +538,7 @@ export async function fetchEmailNotifications(
     recipientCount: Array.isArray(n.recipient_types) ? n.recipient_types.length : 0,
     isActive: n.is_active !== false,
     isDefault: !!n.is_default,
+    isCustomized: !!n.is_subject_customized || !!n.is_body_customized,
     canEdit: n.can_edit !== false,
     locationId: n.location_id ?? null,
     promoSummary: n.promo_summary ?? null,
@@ -589,6 +594,8 @@ export type EmailNotificationDetail = {
   reviewUrl: string;
   activityFilter: VisitActivityFilter | null;
   visitOverrides: VisitEmailOverride[];
+  /** Log counts by status, from the show response's `statistics`. */
+  statistics: { sent: number; failed: number; pending: number } | null;
 };
 
 type RawNotificationDetail = RawNotification & {
@@ -616,11 +623,12 @@ export async function fetchEmailNotificationDetail(
   token: string,
   id: number,
 ): Promise<EmailNotificationDetail> {
-  const res = await apiRequest<{ data?: RawNotificationDetail }>(
-    `/api/email-notifications/${id}`,
-    { token },
-  );
+  const res = await apiRequest<{
+    data?: RawNotificationDetail;
+    statistics?: { total_sent?: number; total_failed?: number; total_pending?: number } | null;
+  }>(`/api/email-notifications/${id}`, { token });
   const d = (res?.data ?? (res as unknown as RawNotificationDetail)) ?? ({} as RawNotificationDetail);
+  const stats = res?.statistics;
   return {
     id: d.id,
     name: d.name?.trim() || "Notification",
@@ -649,7 +657,83 @@ export async function fetchEmailNotificationDetail(
     reviewUrl: d.review_url ?? "",
     activityFilter: d.activity_filter ?? null,
     visitOverrides: Array.isArray(d.visit_overrides) ? d.visit_overrides : [],
+    statistics: stats
+      ? {
+          sent: Number(stats.total_sent ?? 0),
+          failed: Number(stats.total_failed ?? 0),
+          pending: Number(stats.total_pending ?? 0),
+        }
+      : null,
   };
+}
+
+export type EmailNotificationLogStatus = "sent" | "failed" | "pending";
+
+/** One email this notification sent (or tried to) — a row of Notification Logs. */
+export type EmailNotificationLog = {
+  id: number;
+  recipientEmail: string;
+  recipientType: string;
+  subject: string;
+  status: EmailNotificationLogStatus;
+  errorMessage: string | null;
+  sentAt: string | null;
+  createdAt: string | null;
+};
+
+type RawNotificationLog = {
+  id: number;
+  recipient_email?: string | null;
+  recipient_type?: string | null;
+  subject?: string | null;
+  status?: string | null;
+  error_message?: string | null;
+  sent_at?: string | null;
+  created_at?: string | null;
+};
+
+/** GET /api/email-notifications/{id}/logs — newest first, paginated like the web. */
+export async function fetchEmailNotificationLogs(
+  token: string,
+  id: number,
+  page = 1,
+  perPage = 10,
+): Promise<{ logs: EmailNotificationLog[]; total: number; lastPage: number }> {
+  const res = await apiRequest<unknown>(
+    `/api/email-notifications/${id}/logs?page=${page}&per_page=${perPage}`,
+    { token },
+  );
+  const { rows, total } = extractPaginated<RawNotificationLog>(res);
+  const paginator = ((res as { data?: { last_page?: number } } | null)?.data ?? {}) as {
+    last_page?: number;
+  };
+  return {
+    logs: rows.map((l) => ({
+      id: l.id,
+      recipientEmail: l.recipient_email ?? "",
+      recipientType: l.recipient_type ?? "",
+      subject: l.subject ?? "",
+      status:
+        l.status === "sent" || l.status === "failed" ? l.status : "pending",
+      errorMessage: l.error_message ?? null,
+      sentAt: l.sent_at ?? null,
+      createdAt: l.created_at ?? null,
+    })),
+    total,
+    lastPage: Math.max(1, Number(paginator.last_page ?? 1)),
+  };
+}
+
+/** POST /api/email-notifications/{id}/logs/{logId}/resend — retry a failed send. */
+export async function resendEmailNotificationLog(
+  token: string,
+  id: number,
+  logId: number,
+): Promise<void> {
+  await apiRequest(`/api/email-notifications/${id}/logs/${logId}/resend`, {
+    method: "POST",
+    token,
+  });
 }
 
 /** PUT /api/email-notifications/{id} — update an automated notification (edit flow). */

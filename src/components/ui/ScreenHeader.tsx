@@ -1,11 +1,13 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useColorScheme } from "nativewind";
-import { type ReactNode } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { setStatusBarStyle } from "expo-status-bar";
+import { useCallback, type ReactNode } from "react";
 import { Text, View } from "react-native";
 
 import { PressableScale } from "./motion/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const BRAND = "#0644C7";
 
 type ScreenHeaderProps = {
   title: string;
@@ -15,6 +17,7 @@ type ScreenHeaderProps = {
   className?: string;
 };
 
+/** Solid blue hero with white text, matching the Profile screen's hero. */
 export function ScreenHeader({
   title,
   subtitle,
@@ -24,13 +27,20 @@ export function ScreenHeader({
 }: ScreenHeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
+
+  // Light status bar (white clock / wifi) over the blue hero while focused,
+  // back to `auto` on the way out — as the Profile screen does.
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarStyle("light", true);
+      return () => setStatusBarStyle("auto", true);
+    }, []),
+  );
 
   return (
     <View
-      className={`bg-[#0644C7]/5 dark:bg-neutral-900 rounded-b-[32px] px-5 ${className}`}
-      style={{ paddingTop: insets.top + 10 }}
+      className={`rounded-b-[32px] px-5 ${className}`}
+      style={{ paddingTop: insets.top + 10, backgroundColor: BRAND }}
     >
       <View className="flex-row items-center">
         <PressableScale
@@ -38,12 +48,12 @@ export function ScreenHeader({
           onPress={onBack ?? (() => router.back())}
           accessibilityRole="button"
           accessibilityLabel="Go back"
-          className="h-9 w-9 items-center justify-center rounded-full bg-black/5 dark:bg-neutral-800"
+          className="h-9 w-9 items-center justify-center rounded-full bg-white/15"
         >
-          <Feather name="chevron-left" size={22} color={headerIcon} />
+          <Feather name="chevron-left" size={22} color="#FFFFFF" />
         </PressableScale>
         <Text
-          className="flex-1 text-center text-[22px] font-bold text-gray-900 dark:text-white"
+          className="flex-1 text-center text-[22px] font-bold text-white"
           numberOfLines={1}
         >
           {title}
@@ -52,7 +62,7 @@ export function ScreenHeader({
       </View>
 
       {subtitle ? (
-        <Text className="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">
+        <Text className="mt-2 text-center text-sm text-white/80">
           {subtitle}
         </Text>
       ) : null}
