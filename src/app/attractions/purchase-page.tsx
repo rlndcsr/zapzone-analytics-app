@@ -1264,11 +1264,22 @@ const PurchasePageScreen = () => {
                   alignTop
                   label={
                     <Text className="text-xs leading-5 text-gray-500 dark:text-gray-400">
-                      I agree to receive automated delivery notifications and
-                      promotional text messages from Zap Zone at the phone number
-                      provided. Consent is not a condition of purchase. Message
-                      frequency varies. Message and data rates may apply. Reply
-                      STOP to cancel or HELP for help. View our{" "}
+                      I agree to receive text messages from Zap Zone at the phone
+                      number provided above. I understand that consent is not a
+                      condition of purchase. Message and data rates may apply.
+                      Message frequency varies. Text STOP to cancel or HELP for
+                      assistance.
+                      {/* Links on their own line, as on the web checkout. */}
+                      {"\n"}
+                      <Text
+                        className="text-[#0644C7] dark:text-blue-400 underline"
+                        onPress={() =>
+                          Linking.openURL("https://zap-zone.com/privacy-policy/")
+                        }
+                      >
+                        Privacy Policy
+                      </Text>
+                      {" | "}
                       <Text
                         className="text-[#0644C7] dark:text-blue-400 underline"
                         onPress={() =>
@@ -1277,9 +1288,8 @@ const PurchasePageScreen = () => {
                           )
                         }
                       >
-                        Terms and Conditions
+                        Terms &amp; Conditions
                       </Text>
-                      .
                     </Text>
                   }
                 />
