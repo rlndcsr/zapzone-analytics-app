@@ -215,7 +215,7 @@ const SelectRow = ({
   </Pressable>
 );
 
-/** Accepted-card badges, mirroring the web admin's four payment marks. */
+/** Accepted-card badges, mirroring the web admin's row: Visa, Mastercard, Discover (not every location takes Amex). */
 const CardBrandRow = () => (
   <View className="flex-row items-center gap-1.5">
     <View className="h-6 px-1.5 rounded bg-[#1A1F71] items-center justify-center">
@@ -223,9 +223,6 @@ const CardBrandRow = () => (
     </View>
     <View className="h-6 px-1.5 rounded bg-[#EB001B] items-center justify-center">
       <Text className="text-[8px] font-bold text-white">MC</Text>
-    </View>
-    <View className="h-6 px-1.5 rounded bg-[#2E77BC] items-center justify-center">
-      <Text className="text-[8px] font-bold text-white">AMEX</Text>
     </View>
     <View className="h-6 px-1.5 rounded bg-[#F76B1C] items-center justify-center">
       <Text className="text-[8px] font-bold text-white">DISC</Text>
