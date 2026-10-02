@@ -29,6 +29,8 @@ export type VisitorSessionRow = {
   guestName: string;
   guestPhone: string;
   guestEmail: string;
+  /** The guest ticked the text-message consent box in the welcome popup. */
+  guestSmsConsent: boolean;
   pageViews: number;
   clicks: number;
   conversions: number;
@@ -55,6 +57,7 @@ type RawSession = {
   guest_name?: string | null;
   guest_phone?: string | null;
   guest_email?: string | null;
+  guest_sms_consent?: boolean | number | null;
   page_views?: number | string | null;
   clicks?: number | string | null;
   conversions?: number | string | null;
@@ -83,6 +86,7 @@ function mapSession(raw: RawSession): VisitorSessionRow {
     guestName: str(raw.guest_name),
     guestPhone: str(raw.guest_phone),
     guestEmail: str(raw.guest_email),
+    guestSmsConsent: raw.guest_sms_consent === true || raw.guest_sms_consent === 1,
     pageViews: num(raw.page_views),
     clicks: num(raw.clicks),
     conversions: num(raw.conversions),
@@ -306,6 +310,9 @@ export type VisitorSessionDetail = {
   guestName: string;
   guestPhone: string;
   guestEmail: string;
+  smsConsent: boolean;
+  /** When they opted in, formatted by the backend (venue time); blank otherwise. */
+  smsConsentLabel: string;
   deviceType: string;
   browser: string;
   os: string;
@@ -330,6 +337,8 @@ type DetailResponse = {
       name?: string | null;
       phone?: string | null;
       email?: string | null;
+      sms_consent?: boolean | null;
+      sms_consent_label?: string | null;
     } | null;
     device?: {
       device_type?: string | null;
@@ -388,6 +397,8 @@ export async function fetchVisitorSessionDetail(
     guestName: str(data.guest?.name),
     guestPhone: str(data.guest?.phone),
     guestEmail: str(data.guest?.email),
+    smsConsent: data.guest?.sms_consent === true,
+    smsConsentLabel: str(data.guest?.sms_consent_label),
     deviceType: str(data.device?.device_type),
     browser: str(data.device?.browser),
     os: str(data.device?.os),

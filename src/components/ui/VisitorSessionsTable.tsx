@@ -6,6 +6,7 @@ import {
   formatSessionDuration,
   type VisitorSessionRow,
 } from "../../services/visitorTrackingService";
+import { smsConsentLabel } from "../../lib/visitors/smsConsent";
 
 const PRIMARY = "#0644C7";
 
@@ -84,7 +85,7 @@ type Column = {
 
 /**
  * Columns mirror the web page's default-visible set, in order and label:
- * Customer (name or Anonymous, email, device · browser) · Phone · Session
+ * Customer (name or Anonymous, email, device · browser) · Phone · SMS · Session
  * (entry → exit, with the page/click/purchase/duration line) · Date · Actions.
  * The web's Pages, Clicks, Purchases and Time on site columns are
  * `defaultVisible: false`, so they're folded into the Session cell here too.
@@ -143,6 +144,21 @@ const COLUMNS: Column[] = [
       ) : (
         <Text className="text-sm text-gray-400 dark:text-gray-500">—</Text>
       ),
+  },
+  {
+    key: "sms",
+    label: "SMS",
+    width: 90,
+    render: (s) => {
+      const label = smsConsentLabel(s);
+      return !label ? (
+        <Text className="text-sm text-gray-400 dark:text-gray-500">—</Text>
+      ) : s.guestSmsConsent ? (
+        <Text className="text-xs font-medium text-green-600 dark:text-green-400">{label}</Text>
+      ) : (
+        <Text className="text-xs text-gray-400 dark:text-gray-500">{label}</Text>
+      );
+    },
   },
   {
     key: "session",

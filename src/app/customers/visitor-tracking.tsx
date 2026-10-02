@@ -31,6 +31,7 @@ import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleto
 import { venueDateKey } from "../../lib/date/venueTime";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
+import { smsConsentLabel, smsOptInLine } from "../../lib/visitors/smsConsent";
 import {
   MAX_LOADED_SESSIONS,
   exportVisitorSessions,
@@ -503,6 +504,7 @@ const VisitorTracking = () => {
       const header = [
         "Customer",
         "Phone",
+        "SMS",
         "Email",
         "Date",
         "First seen (ET)",
@@ -522,6 +524,7 @@ const VisitorTracking = () => {
         [
           s.guestName || "Anonymous",
           s.guestPhone,
+          smsConsentLabel(s),
           s.guestEmail,
           s.sessionDate,
           s.firstSeenLabel,
@@ -921,6 +924,11 @@ const VisitorTracking = () => {
                       {detail.guestPhone}
                     </Text>
                   </Pressable>
+                )}
+                {!!smsOptInLine(detail) && (
+                  <Text className="text-xs font-medium text-green-600 dark:text-green-400">
+                    {smsOptInLine(detail)}
+                  </Text>
                 )}
                 {!!detail.guestEmail && (
                   <Pressable
