@@ -3,7 +3,13 @@ import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
 import type { EmailNotificationRow } from "../../services/emailService";
-import { canDuplicateNotification } from "../../lib/email/visitEmail";
+import {
+  canDeleteNotification,
+  canDuplicateNotification,
+  canResetNotification,
+  canSetUpVisitEmail,
+} from "../../lib/email/visitEmail";
+import { getCurrentUser } from "../../lib/session";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
 import { VisitPromoBadge } from "./VisitEmailSettings";
 
@@ -44,6 +50,8 @@ type Handlers = {
 // Columns mirror the web `/admin/email/notifications` default-visible set + order:
 // Notification (name + Default badge) · Trigger · Entity · Recipients · Status · Actions.
 function buildColumns(h: Handlers): TableColumn<EmailNotificationRow>[] {
+  const user = getCurrentUser();
+  const canSetUpVisit = canSetUpVisitEmail(user?.role, user?.location_id);
   return [
   {
     key: "name",
@@ -144,15 +152,15 @@ function buildColumns(h: Handlers): TableColumn<EmailNotificationRow>[] {
     render: (n) => (
       <View className="flex-row items-center justify-end gap-1">
         <IconAction icon="send" tint={PRIMARY} label={`Send test for ${n.name}`} onPress={() => h.onTest(n)} />
-        {n.isDefault && n.isCustomized && (
+        {canResetNotification(n) && (
           <IconAction icon="rotate-ccw" tint="#D97706" label={`Reset ${n.name}`} onPress={() => h.onReset(n)} />
         )}
-        {canDuplicateNotification(n.isDefault, n.triggerType) && (
+        {canDuplicateNotification(n.isDefault, n.triggerType, canSetUpVisit) && (
           <IconAction icon="copy" tint={PRIMARY} label={`Duplicate ${n.name}`} onPress={() => h.onDuplicate(n)} />
         )}
         <IconAction icon="eye" tint="#4B5563" label={`View ${n.name}`} onPress={() => h.onView(n)} />
         <IconAction icon="edit" tint={PRIMARY} label={`Edit ${n.name}`} onPress={() => h.onEdit(n)} />
-        {!n.isDefault && (
+        {canDeleteNotification(n) && (
           <IconAction icon="trash-2" tint="#DC2626" label={`Delete ${n.name}`} onPress={() => h.onDelete(n)} />
         )}
       </View>

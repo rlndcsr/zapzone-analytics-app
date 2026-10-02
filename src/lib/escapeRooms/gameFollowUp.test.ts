@@ -139,6 +139,33 @@ describe("Result only can email the players", () => {
     );
     assert.equal(withoutPhotoSummary([player(null)], "x"), "Recorded without a group photo, so no email was sent");
     assert.equal(
+      thanksFailedLine(2),
+      "2 thank-you emails have not gone through. Use Send thank-you again next to the player.",
+    );
+  });
+
+  it("says review request later only while one is still pending", () => {
+    const review = (status: string, extra: { gave_up?: boolean; rating?: number | null } = {}) => ({
+      thanksEmail: null,
+      review: { status: status as "scheduled", rating: extra.rating ?? null, due_at: null, gave_up: extra.gave_up ?? false },
+    });
+    const later = "Recorded without a group photo; the players get a review request later";
+    assert.equal(withoutPhotoSummary([review("scheduled")], "x"), later);
+    assert.equal(withoutPhotoSummary([review("sending")], "x"), later);
+    assert.equal(withoutPhotoSummary([review("failed")], "x"), later);
+    assert.equal(
+      withoutPhotoSummary([review("sent"), review("sent")], "x"),
+      "Recorded without a group photo; a review request went to 2 players",
+    );
+    assert.equal(
+      withoutPhotoSummary([review("sent", { rating: 5 })], "x"),
+      "Recorded without a group photo; a review request went to 1 player",
+    );
+    const none = "Recorded without a group photo, so no email was sent";
+    assert.equal(withoutPhotoSummary([review("failed", { gave_up: true })], "x"), none);
+    assert.equal(withoutPhotoSummary([review("canceled")], "x"), none);
+    assert.equal(withoutPhotoSummary([review("skipped")], "x"), none);
+    assert.equal(
       thanksFailedLine(1),
       "1 thank-you email has not gone through. Use Send thank-you again next to the player.",
     );

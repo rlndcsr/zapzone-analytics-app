@@ -17,8 +17,21 @@ const players = (count: number) => plural(count, "player", "players");
 
 type PlayerLike = {
   thanksEmail: Pick<FollowUpRow, "status"> | null;
-  review: Pick<FollowUpRow, "status" | "rating" | "due_at"> | null;
+  review:
+    | (Pick<FollowUpRow, "status" | "rating" | "due_at"> & Partial<Pick<FollowUpRow, "gave_up">>)
+    | null;
 };
+
+/** A review request that may still go out: scheduled, sending, or failed but still retrying. */
+const reviewPending = (p: PlayerLike): boolean =>
+  !!p.review &&
+  p.review.rating === null &&
+  (p.review.status === "scheduled" ||
+    p.review.status === "sending" ||
+    (p.review.status === "failed" && !p.review.gave_up));
+
+const reviewReached = (p: PlayerLike): boolean =>
+  p.review?.status === "sent" || (p.review?.rating ?? null) !== null;
 
 export type GameFollowUpState = {
   available: boolean;
@@ -94,8 +107,12 @@ export function withoutPhotoSummary(gamePlayers: PlayerLike[], thanksName: strin
   if (thanked > 0) {
     return `Recorded without a group photo; the ${thanksName} email went to ${players(thanked)}`;
   }
-  if (gamePlayers.some((p) => p.review)) {
+  if (gamePlayers.some(reviewPending)) {
     return "Recorded without a group photo; the players get a review request later";
+  }
+  const reviewed = gamePlayers.filter(reviewReached).length;
+  if (reviewed > 0) {
+    return `Recorded without a group photo; a review request went to ${players(reviewed)}`;
   }
   return "Recorded without a group photo, so no email was sent";
 }

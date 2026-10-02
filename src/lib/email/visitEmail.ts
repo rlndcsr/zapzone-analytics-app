@@ -112,11 +112,33 @@ export const APPLY_TO_OPTIONS: { label: string; value: NotificationEntity }[] = 
 
 // ── Permissions ────────────────────────────────────────────────────────────
 
-/** Built-in emails can only be duplicated when they are one of the two follow-ups. */
+/** Who may set up (and so duplicate) a follow-up email: a company admin, or a manager with a location. */
+export const canSetUpVisitEmail = (
+  role: string | null | undefined,
+  locationId: number | null | undefined,
+): boolean => role === "company_admin" || (role === "location_manager" && !!locationId);
+
+/**
+ * Built-in emails can only be duplicated when they are one of the two follow-ups,
+ * and a follow-up only by staff who may set one up.
+ */
 export const canDuplicateNotification = (
   isDefault: boolean,
   triggerType: string | null | undefined,
-): boolean => !isDefault || isVisitTrigger(triggerType);
+  canSetUpVisit: boolean,
+): boolean =>
+  (!isDefault || isVisitTrigger(triggerType)) && (!isVisitTrigger(triggerType) || canSetUpVisit);
+
+/** Reset is offered on an edited built-in email this user may change. */
+export const canResetNotification = (n: {
+  isDefault: boolean;
+  isCustomized: boolean;
+  canEdit: boolean;
+}): boolean => n.isDefault && n.isCustomized && n.canEdit;
+
+/** Delete is offered on a custom email this user may change. */
+export const canDeleteNotification = (n: { isDefault: boolean; canEdit: boolean }): boolean =>
+  !n.isDefault && n.canEdit;
 
 export const canCreateVisitEmail =(role: string | null | undefined): boolean =>
   role === "company_admin" || role === "location_manager";

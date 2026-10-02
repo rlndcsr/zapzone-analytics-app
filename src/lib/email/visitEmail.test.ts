@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 
 import {
   adminLocationField,
+  canDeleteNotification,
   canDuplicateNotification,
+  canResetNotification,
+  canSetUpVisitEmail,
   canCreateVisitEmail,
   defaultVisitPayloadFields,
   isVisitTrigger,
@@ -53,19 +56,49 @@ describe("trigger choices", () => {
 
 describe("duplicating built-in emails", () => {
   it("duplicates any custom email", () => {
-    assert.equal(canDuplicateNotification(false, "booking_created"), true);
-    assert.equal(canDuplicateNotification(false, "visit_followup"), true);
+    assert.equal(canDuplicateNotification(false, "booking_created", true), true);
+    assert.equal(canDuplicateNotification(false, "visit_followup", true), true);
   });
 
   it("duplicates the two built-in follow-ups", () => {
-    assert.equal(canDuplicateNotification(true, "visit_completed"), true);
-    assert.equal(canDuplicateNotification(true, "visit_followup"), true);
+    assert.equal(canDuplicateNotification(true, "visit_completed", true), true);
+    assert.equal(canDuplicateNotification(true, "visit_followup", true), true);
   });
 
   it("hides Duplicate on every other built-in email", () => {
-    assert.equal(canDuplicateNotification(true, "booking_confirmed"), false);
-    assert.equal(canDuplicateNotification(true, "end_of_day_sales_report"), false);
-    assert.equal(canDuplicateNotification(true, null), false);
+    assert.equal(canDuplicateNotification(true, "booking_confirmed", true), false);
+    assert.equal(canDuplicateNotification(true, "end_of_day_sales_report", true), false);
+    assert.equal(canDuplicateNotification(true, null, true), false);
+  });
+
+  it("hides Duplicate on follow-up emails from staff who cannot set one up", () => {
+    assert.equal(canDuplicateNotification(true, "visit_completed", false), false);
+    assert.equal(canDuplicateNotification(false, "visit_followup", false), false);
+    // other custom emails are unaffected by the follow-up permission
+    assert.equal(canDuplicateNotification(false, "booking_created", false), true);
+  });
+});
+
+describe("follow-up email action permissions", () => {
+  it("lets company admins and managers with a location set up follow-up emails", () => {
+    assert.equal(canSetUpVisitEmail("company_admin", null), true);
+    assert.equal(canSetUpVisitEmail("location_manager", 3), true);
+    assert.equal(canSetUpVisitEmail("location_manager", null), false);
+    assert.equal(canSetUpVisitEmail("attendant", 3), false);
+    assert.equal(canSetUpVisitEmail(undefined, undefined), false);
+  });
+
+  it("offers Reset only on an edited built-in email the user may change", () => {
+    assert.equal(canResetNotification({ isDefault: true, isCustomized: true, canEdit: true }), true);
+    assert.equal(canResetNotification({ isDefault: true, isCustomized: true, canEdit: false }), false);
+    assert.equal(canResetNotification({ isDefault: true, isCustomized: false, canEdit: true }), false);
+    assert.equal(canResetNotification({ isDefault: false, isCustomized: true, canEdit: true }), false);
+  });
+
+  it("offers Delete only on a custom email the user may change", () => {
+    assert.equal(canDeleteNotification({ isDefault: false, canEdit: true }), true);
+    assert.equal(canDeleteNotification({ isDefault: false, canEdit: false }), false);
+    assert.equal(canDeleteNotification({ isDefault: true, canEdit: true }), false);
   });
 });
 

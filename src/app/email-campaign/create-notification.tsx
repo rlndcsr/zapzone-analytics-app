@@ -29,6 +29,7 @@ import {
   adminLocationField,
   APPLY_TO_OPTIONS,
   canCreateVisitEmail,
+  canSetUpVisitEmail,
   defaultVisitPayloadFields,
   isVisitTrigger,
   readOnlyVisitEmailMessage,
@@ -108,6 +109,9 @@ const CreateNotification = () => {
   const isCompanyAdmin = currentUser?.role === "company_admin";
   const isVisitEmail = isVisitTrigger(triggerType);
   const canCreateVisit = canCreateVisitEmail(currentUser?.role);
+  // Editing a follow-up email needs a role that may set one up (web `visitLocked`).
+  const visitLocked =
+    isEdit && isVisitEmail && !canSetUpVisitEmail(currentUser?.role, currentUser?.location_id);
   const visitLocationId = isEdit
     ? locationId
     : isCompanyAdmin
@@ -229,7 +233,7 @@ const CreateNotification = () => {
   );
 
   const create = async () => {
-    if (isEdit && !canEdit) return;
+    if (isEdit && (!canEdit || visitLocked)) return;
     if (!name.trim()) return Alert.alert("Missing name", "Enter a notification name.");
     if (!isEdit && isVisitEmail && !canCreateVisit)
       return Alert.alert(VISIT_EMAIL_CREATE_DENIED);
@@ -306,7 +310,7 @@ const CreateNotification = () => {
             icon="check"
             variant="primary"
             loading={saving}
-            disabled={isEdit && !canEdit}
+            disabled={isEdit && (!canEdit || visitLocked)}
             onPress={create}
           />
         }
@@ -322,6 +326,7 @@ const CreateNotification = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}
         >
+          {canEdit && visitLocked && <ReadOnlyBanner text={VISIT_EMAIL_CREATE_DENIED} />}
           {isEdit && !canEdit && (
             <ReadOnlyBanner text={readOnlyVisitEmailMessage(locationId)} />
           )}

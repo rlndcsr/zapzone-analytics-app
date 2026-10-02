@@ -126,6 +126,45 @@ describe("describeFollowUp — the notice after completing a visit", () => {
     );
   });
 
+  it("after an email correction, says nothing went to the new address and names the button", () => {
+    const old = row({ status: "sent", is_current_recipient: false, recipient_email_masked: "o***@old.com", sent_at: "2026-10-01T19:05:00Z" });
+    assert.equal(
+      describeFollowUp(summary({ can_send_thanks: true, thanks: [old] })),
+      "The Thanks for Playing email went to the earlier address o***@old.com. Nothing has been emailed to d***@example.com for this visit yet. To send it, open the booking and choose Send Thanks for Playing to d***@example.com.",
+    );
+    assert.equal(
+      describeFollowUp(summary({ visit_type: "event_purchase", can_send_thanks: true, thanks: [old] })),
+      "The Thanks for Playing email went to the earlier address o***@old.com. Nothing has been emailed to d***@example.com for this visit yet. To send it, open the purchase and choose Send Thanks for Playing to d***@example.com.",
+    );
+  });
+
+  it("names the button for the new address even when the old one was never reached", () => {
+    const old = row({ status: "failed", is_current_recipient: false, recipient_email_masked: "o***@old.com" });
+    assert.equal(
+      describeFollowUp(summary({ can_send_thanks: true, thanks: [old] })),
+      "Nothing has been emailed to d***@example.com for this visit yet. To send it, open the booking and choose Send Thanks for Playing to d***@example.com.",
+    );
+  });
+
+  it("keeps describing the current address's own row when the email is unchanged", () => {
+    assert.equal(
+      describeFollowUp(summary({ can_send_thanks: true, thanks: [row({ status: "sent", sent_at: "2026-10-01T19:05:00Z" })] })),
+      "The Thanks for Playing email was already sent to d***@example.com on Oct 1, 3:05 PM, so it was not sent again.",
+    );
+  });
+
+  it("says escape-room players still get the review request when the thank-you is off", () => {
+    const off = { active: false, id: null, name: null, hours: null, promo: null };
+    assert.equal(
+      describeFollowUp(summary({ handled_by_game: true, thanks_email: off })),
+      "This is an escape-room booking, and the Thanks for Playing email is switched off, so the group photo cannot be emailed. The players still get the Review Request email once their result is recorded on the game screen.",
+    );
+    assert.equal(
+      describeFollowUp(summary({ handled_by_game: true, thanks_email: off, review_email: off })),
+      "This is an escape-room booking, and the Thanks for Playing and Review Request emails are switched off, so nothing is emailed from the game screen.",
+    );
+  });
+
   it("says purchase for an event purchase", () => {
     assert.equal(
       describeFollowUp(summary({ visit_type: "event_purchase", can_send_thanks: true })),
@@ -179,6 +218,30 @@ describe("follow-up card — Send now / Don't send", () => {
     assert.equal(canCancelFollowUp(row({ status: "failed", gave_up: true })), false);
     assert.equal(canCancelFollowUp(row({ status: "sent" })), false);
     assert.equal(canCancelFollowUp(row({ status: "canceled" })), false);
+  });
+
+  it("asks for the guest's email before completion when there is none", () => {
+    const text = followUpCardText(summary({ completed: false, recipient_email_masked: null }), "booking");
+    assert.equal(
+      text.intro,
+      "This booking has no email address. Add the guest's email before it is set to Completed, or no follow-up emails can be sent.",
+    );
+  });
+
+  it("mentions only the emails that are switched on before completion", () => {
+    const off = { active: false, id: null, name: null, hours: null, promo: null };
+    assert.equal(
+      followUpCardText(summary({ completed: false, review_email: off }), "event_purchase").intro,
+      "When this purchase is set to Completed, Thanks for Playing goes to d***@example.com right away. Visits more than 3 days old or still ahead are not emailed automatically.",
+    );
+    assert.equal(
+      followUpCardText(summary({ completed: false, thanks_email: off }), "booking").intro,
+      "When this booking is set to Completed, Review Request goes to d***@example.com about 24 hours later (never overnight). Visits more than 3 days old or still ahead are not emailed automatically.",
+    );
+    assert.equal(
+      followUpCardText(summary({ completed: false, thanks_email: off, review_email: off }), "booking").intro,
+      "No follow-up emails go out when this booking is set to Completed.",
+    );
   });
 
   it("explains what completing will send on a visit not yet completed", () => {

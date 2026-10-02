@@ -19,10 +19,14 @@ import { GuestRatingsPanel } from "../../components/ui/GuestRatingsPanel";
 import { SendTestEmailSheet } from "../../components/ui/SendTestEmailSheet";
 import { OverrideList } from "../../components/ui/VisitEmailSettings";
 import { mediaUrl } from "../../lib/api";
-import { canDuplicateNotification, visitFollowupTiming } from "../../lib/email/visitEmail";
+import {
+  canDuplicateNotification,
+  canSetUpVisitEmail,
+  visitFollowupTiming,
+} from "../../lib/email/visitEmail";
 import { markEmailNotificationsStale } from "../../lib/emailStale";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteEmailNotification,
   duplicateEmailNotification,
@@ -477,7 +481,11 @@ const NotificationDetails = () => {
             disabled={busy !== null}
             onPress={() => setShowTest(true)}
           />
-          {canDuplicateNotification(detail.isDefault, detail.triggerType) && (
+          {canDuplicateNotification(
+            detail.isDefault,
+            detail.triggerType,
+            canSetUpVisitEmail(getCurrentUser()?.role, getCurrentUser()?.location_id),
+          ) && (
             <DetailActionButton
               icon="copy"
               label="Duplicate"
