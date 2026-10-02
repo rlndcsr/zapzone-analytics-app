@@ -165,3 +165,19 @@ describe("the read-side shapes the screens use", () => {
     );
   });
 });
+
+describe("normalizeCategory — names that match Object's own properties", () => {
+  it("keeps a category named after a built-in property as plain text", () => {
+    for (const name of ["constructor", "Constructor", "__proto__", "hasOwnProperty", "toString"]) {
+      const result = normalizeCategory(name);
+      assert.equal(typeof result, "string", name);
+      assert.equal(result, name);
+      assert.equal(isEscapeRoomCategory(name), false, name);
+    }
+  });
+
+  it("still maps the real aliases", () => {
+    assert.equal(normalizeCategory("Escape Rooms"), ESCAPE_ROOM_CATEGORY);
+    assert.equal(normalizeCategory("  Bowling "), "Bowling");
+  });
+});
