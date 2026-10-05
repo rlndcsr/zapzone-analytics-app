@@ -2640,6 +2640,11 @@ export type CreateBookingInput = {
   skip_date_validation?: boolean;
   /** proof a manager approved saving this on top of a detected overlap */
   overlap_override_token?: string;
+  /**
+   * This checkout attempt's key (`lib/payments/checkoutKey`), so a retry finds
+   * its own booking and a repeat of one that went through answers ALREADY_BOOKED.
+   */
+  checkout_key?: string;
   notes?: string;
   // No internal_notes: a booking is never created with one. Notes are an append-only
   // log, added after the fact through addInternalNote.
@@ -2667,10 +2672,19 @@ type CreateBookingResponse = {
     id: number;
     reference_number?: string | null;
     customer_id?: number | null;
+    status?: string | null;
+    total_amount?: number | string | null;
+    amount_paid?: number | string | null;
   };
   message?: string;
 };
 
+/**
+ * POST /api/bookings. Besides the new booking's ids, returns what the server
+ * saved — its status and amounts — because a card checkout must go by those,
+ * not by what the screen computed: the server may have confirmed it already (a
+ * gift card covered it) or saved a different amount still owed.
+ */
 export async function createBooking(
   token: string,
   input: CreateBookingInput,
@@ -2678,6 +2692,9 @@ export async function createBooking(
   id: number;
   referenceNumber: string | null;
   customerId: number | null;
+  status: string | null;
+  totalAmount: number;
+  amountPaid: number;
 }> {
   const res = await apiRequest<CreateBookingResponse>("/api/bookings", {
     method: "POST",
@@ -2688,7 +2705,29 @@ export async function createBooking(
     id: res.data.id,
     referenceNumber: res.data.reference_number ?? null,
     customerId: res.data.customer_id ?? null,
+    status: res.data.status ?? null,
+    totalAmount: Number(res.data.total_amount ?? 0),
+    amountPaid: Number(res.data.amount_paid ?? 0),
   };
+}
+
+/**
+ * POST /api/bookings/{id}/qrcode — stores the booking's QR and, with
+ * `sendEmail`, sends the confirmation email carrying it (web
+ * `bookingService.storeQrCode`). A card booking normally gets both from the
+ * charge; this is for one the server confirmed without a card charge.
+ */
+export async function storeBookingQrCode(
+  token: string,
+  bookingId: number,
+  qrCode: string,
+  sendEmail: boolean,
+): Promise<void> {
+  await apiRequest(`/api/bookings/${bookingId}/qrcode`, {
+    method: "POST",
+    token,
+    body: { qr_code: qrCode, send_email: sendEmail },
+  });
 }
 
 export type ChangeReasonOptions = {

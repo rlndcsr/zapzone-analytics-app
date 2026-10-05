@@ -87,6 +87,7 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
+import { newCheckoutKey } from "../../lib/payments/checkoutKey";
 import { derivePaymentStatus } from "../../lib/payments/paymentState";
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
@@ -101,6 +102,7 @@ import {
   fetchPackageAvailabilitySchedules,
   fetchPackageList,
   recordBookingPayment,
+  storeBookingQrCode,
   type AvailableSlot,
   type BookablePackage,
   type PackageAvailabilitySchedule,
@@ -117,8 +119,9 @@ import {
   type DiscountCodeResult,
 } from "../../services/discountCodesService";
 import {
-  CHARGE_UNKNOWN_MESSAGE,
+  chargeFailureMessage,
   chargeOutcomeUnknown,
+  chargeUnknownMessage,
   declineMessage,
   fetchAuthorizeNetPublicKey,
   PAYMENT_TYPE,
@@ -730,6 +733,9 @@ const CreateBookingScreen = () => {
   const scrollRef = useRef<ScrollView>(null);
   // held in a ref so the re-submit right after approval sees it without waiting for a render
   const overrideTokenRef = useRef<string | null>(null);
+  // One key per checkout attempt (lib/payments/checkoutKey). It survives an "already booked"
+  // answer, so a second tap shows that answer again instead of booking a duplicate.
+  const checkoutKeyRef = useRef(newCheckoutKey());
   // Taking the last online start is worth telling staff about, but it is not an overlap, so it is
   // confirmed rather than approved by a manager. Held in a ref for the same reason as the token.
   const sideEffectsAcceptedRef = useRef(false);
@@ -1844,7 +1850,7 @@ const CreateBookingScreen = () => {
         freshSubmitTotal,
       );
 
-      const { id, referenceNumber, customerId } = await createBooking(token, {
+      const created = await createBooking(token, {
         guest_name: customerName.trim(),
         guest_email: customerEmail.trim() || undefined,
         guest_phone: customerPhone.trim() || undefined,
@@ -1857,6 +1863,7 @@ const CreateBookingScreen = () => {
         package_id: pkg.id,
         room_id: slot.roomId ?? undefined,
         overlap_override_token: overrideTokenRef.current ?? undefined,
+        checkout_key: checkoutKeyRef.current,
         type: "package",
         booking_date: scheduledDate,
         booking_time: slot.startTime,
@@ -1898,6 +1905,7 @@ const CreateBookingScreen = () => {
           : null,
         send_email: sendEmail,
       });
+      const { id, referenceNumber, customerId } = created;
 
       // Mirror the web: record the collected amount as a payment (in-store).
       if (freshAmountPaid > 0 && paymentMethod === "in-store") {
@@ -1913,7 +1921,34 @@ const CreateBookingScreen = () => {
         }
       }
 
-      if (isCardPayment) {
+      // Go by what the server saved, not what this screen computed (web OnsiteBooking): it may
+      // have confirmed the booking already, and the card is never charged more than it still owes.
+      const serverDue =
+        Math.round((created.totalAmount - created.amountPaid) * 100) / 100;
+      const chargeAmount = Math.min(freshAmountPaid, serverDue);
+
+      if (isCardPayment && created.status === "confirmed") {
+        // Nothing left to charge (a gift card covered it), so no charge sends the confirmation
+        // email with its QR — store it here instead.
+        const qrCode = referenceNumber
+          ? await qr.generate(referenceNumber)
+          : null;
+        if (qrCode) {
+          try {
+            await storeBookingQrCode(token, id, qrCode, sendEmail);
+          } catch {
+            // The booking is confirmed either way; staff can resend the confirmation.
+          }
+        }
+      } else if (isCardPayment && !(chargeAmount > 0)) {
+        await rollbackBooking(token, id);
+        markBookingsStale();
+        const message =
+          "The server found nothing to charge for this booking, so the card was not charged. Check the total and try again.";
+        setPaymentError(message);
+        Alert.alert("Payment failed", message);
+        return;
+      } else if (isCardPayment) {
         // The web encodes the booking's reference number (not its id) — that is
         // what the check-in scanner reads off a booking QR.
         const qrCode = referenceNumber
@@ -1933,7 +1968,7 @@ const CreateBookingScreen = () => {
             authorizeCredentials!,
             {
               location_id: effectiveLocationId,
-              amount: freshAmountPaid,
+              amount: chargeAmount,
               order_id: `P${pkg.id}-${String(Date.now()).slice(-8)}`,
               description: `On-Site Booking: ${pkg.name}`,
               customer_id: customerId ?? undefined,
@@ -1958,17 +1993,16 @@ const CreateBookingScreen = () => {
           // A lost response can't prove the card wasn't charged, so keep the
           // booking and let staff reconcile rather than risk a double charge.
           if (chargeOutcomeUnknown(payErr)) {
-            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
-            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            const message = chargeUnknownMessage("booking", "Bookings");
+            markBookingsStale();
+            setPaymentError(message);
+            Alert.alert("Payment status unknown", message);
             return;
           }
           await rollbackBooking(token, id);
           markBookingsStale();
           setPaymentError(getPaymentErrorMessage(payErr));
-          Alert.alert(
-            "Payment failed",
-            `${getPaymentErrorMessage(payErr)}\n\nThe booking has been cancelled and no charges were made.`,
-          );
+          Alert.alert("Payment failed", chargeFailureMessage(payErr, "booking"));
           return;
         }
 
@@ -1989,6 +2023,8 @@ const CreateBookingScreen = () => {
       overrideTokenRef.current = null;
       sideEffectsAcceptedRef.current = false;
       setOverrideGate(null);
+      // this attempt is finished: the next booking from this screen is a new checkout
+      checkoutKeyRef.current = newCheckoutKey();
 
       markBookingsStale();
       Alert.alert("Booking created", `Reference: ${referenceNumber ?? id}`, [

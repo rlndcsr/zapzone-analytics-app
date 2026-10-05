@@ -1,6 +1,12 @@
 import { ApiError, apiRequest, apiUrl } from "../lib/api";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { formatCardLabel } from "../lib/payments/cardLabel";
+import { getPaymentErrorMessage } from "../lib/payments/cardUtils";
+import {
+  chargeFailureNotice,
+  chargeUnknownMessage,
+  isChargeOutcomeUnknown,
+} from "../lib/payments/chargeOutcome";
 import { tokenizeCardWithAccept } from "../lib/payments/acceptTokenize";
 
 /** Payment lifecycle status (backend `status` column). */
@@ -633,23 +639,38 @@ export async function chargePayment(
 }
 
 /**
- * Whether a thrown charge failure leaves the outcome genuinely unknown.
+ * Whether a thrown charge failure leaves the outcome genuinely unknown (web
+ * `PaymentOutcomeUnknownError`).
  *
- * Tokenization errors and HTTP rejections both prove no money moved: the first
+ * Tokenization errors and most HTTP rejections prove no money moved: the first
  * never reaches our backend, the second was refused before or by the gateway.
- * A transport failure (`ApiError.status === 0` — timeout or dropped connection)
- * is different: the request may have been processed and only the response lost.
- * Rolling back on that could delete a record the customer actually paid for, so
- * callers must leave it alone and tell the operator to verify.
+ * Three answers are different — a transport failure (`ApiError.status === 0`,
+ * a timeout or dropped connection), a 502/504 from a proxy, and a 409
+ * CHARGE_IN_PROGRESS while another charge for the same record is still
+ * running. The card may have been charged in each, so rolling back could delete
+ * a record the customer actually paid for: callers must keep it and tell the
+ * operator to verify. See `lib/payments/chargeOutcome`.
  */
 export function chargeOutcomeUnknown(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 0;
+  return err instanceof ApiError && isChargeOutcomeUnknown(err.status, err.body);
 }
 
-/** What to tell the operator when a charge's outcome can't be determined. */
-export const CHARGE_UNKNOWN_MESSAGE =
-  "The payment result never came back, so it may or may not have gone through. " +
-  "Check the Payments list before charging this card again.";
+/**
+ * The alert after a charge failure the record was rolled back for. The server's
+ * own words are shown as they are; see `chargeFailureNotice`.
+ */
+export function chargeFailureMessage(
+  err: unknown,
+  subject: "booking" | "purchase" | "order",
+): string {
+  return chargeFailureNotice(
+    getPaymentErrorMessage(err),
+    err instanceof ApiError && err.status > 0 ? err.message : null,
+    subject,
+  );
+}
+
+export { chargeUnknownMessage };
 
 /**
  * Tokenize then charge — the mobile equivalent of the web's

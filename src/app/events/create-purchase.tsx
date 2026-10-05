@@ -89,8 +89,9 @@ import {
   type EventRow,
 } from "../../services/eventsService";
 import {
-  CHARGE_UNKNOWN_MESSAGE,
+  chargeFailureMessage,
   chargeOutcomeUnknown,
+  chargeUnknownMessage,
   declineMessage,
   fetchAuthorizeNetPublicKey,
   PAYMENT_TYPE,
@@ -919,16 +920,14 @@ const CreateEventPurchaseScreen = () => {
           // A lost response can't prove the card wasn't charged, so keep the
           // purchase and let staff reconcile rather than risk a double charge.
           if (chargeOutcomeUnknown(payErr)) {
-            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
-            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            const message = chargeUnknownMessage("purchase", "the purchase list");
+            setPaymentError(message);
+            Alert.alert("Payment status unknown", message);
             return;
           }
           await rollbackEventPurchase(token, purchaseId);
           setPaymentError(getPaymentErrorMessage(payErr));
-          Alert.alert(
-            "Payment failed",
-            `${getPaymentErrorMessage(payErr)}\n\nThe purchase has been cancelled and no charges were made.`,
-          );
+          Alert.alert("Payment failed", chargeFailureMessage(payErr, "purchase"));
           return;
         }
 

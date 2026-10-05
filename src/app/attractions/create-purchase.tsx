@@ -124,8 +124,9 @@ import {
   type EventRow,
 } from "../../services/eventsService";
 import {
-  CHARGE_UNKNOWN_MESSAGE,
+  chargeFailureMessage,
   chargeOutcomeUnknown,
+  chargeUnknownMessage,
   declineMessage,
   fetchAuthorizeNetPublicKey,
   PAYMENT_TYPE,
@@ -1446,16 +1447,14 @@ const CreatePurchaseScreen = () => {
         );
       } catch (payErr) {
         if (chargeOutcomeUnknown(payErr)) {
-          setPaymentError(CHARGE_UNKNOWN_MESSAGE);
-          Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+          const message = chargeUnknownMessage("order", "Orders");
+          setPaymentError(message);
+          Alert.alert("Payment status unknown", message);
           return;
         }
         await rollbackTicketOrder(token, order.id);
         setPaymentError(getPaymentErrorMessage(payErr));
-        Alert.alert(
-          "Payment failed",
-          `${getPaymentErrorMessage(payErr)}\n\nThe order has been cancelled and no charges were made.`,
-        );
+        Alert.alert("Payment failed", chargeFailureMessage(payErr, "order"));
         return;
       }
 
@@ -1796,18 +1795,16 @@ const CreatePurchaseScreen = () => {
           // A lost response can't prove the card wasn't charged, so keep the
           // purchase and let staff reconcile rather than risk a double charge.
           if (chargeOutcomeUnknown(payErr)) {
-            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
-            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            const message = chargeUnknownMessage("purchase", "the purchase list");
+            setPaymentError(message);
+            Alert.alert("Payment status unknown", message);
             return;
           }
           // Anything else proves no money moved, so the unpaid purchase must
           // not survive (web `forceDeletePurchase`).
           await rollbackAttractionPurchase(token, purchaseId);
           setPaymentError(getPaymentErrorMessage(payErr));
-          Alert.alert(
-            "Payment failed",
-            `${getPaymentErrorMessage(payErr)}\n\nThe purchase has been cancelled and no charges were made.`,
-          );
+          Alert.alert("Payment failed", chargeFailureMessage(payErr, "purchase"));
           return;
         }
 

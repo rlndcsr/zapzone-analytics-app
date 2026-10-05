@@ -244,6 +244,11 @@ export type PurchaseAddonInput = {
  * `POST /api/payments/charge`, exactly as the web `CreatePurchase` does.
  */
 export type CreateAttractionPurchaseInput = {
+  /**
+   * This checkout attempt's key (`lib/payments/checkoutKey`): a repeat of an
+   * attempt that already went through answers 409 ALREADY_PURCHASED.
+   */
+  checkout_key?: string;
   /** Redeemed server-side against this purchase's total when present. */
   gift_card_code?: string;
   attraction_id: number;

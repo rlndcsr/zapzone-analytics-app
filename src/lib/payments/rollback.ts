@@ -9,15 +9,15 @@
  * and a failed cleanup must not replace that message with a confusing second
  * error. A rollback that fails leaves an unpaid record staff can delete by hand,
  * which is strictly better than losing the decline message.
+ *
+ * Never call these when the charge's outcome is unknown (`chargeOutcomeUnknown`):
+ * the card may have been charged, and the record must be kept.
  */
 
 import { forceDeleteAttractionPurchase } from "../../services/attractionPurchasesService";
-import { deleteBooking, forceDeleteBooking } from "../../services/bookingsService";
+import { forceDeleteBooking } from "../../services/bookingsService";
 import { forceDeleteEventPurchase } from "../../services/eventPurchasesService";
-import {
-  forceDeleteThenSoftDelete,
-  ROLLBACK_REASON,
-} from "./forceDeleteThenSoftDelete";
+import { forceDeleteOrKeep, type BookingRollbackOutcome } from "./bookingRollback";
 
 async function quietly(what: string, remove: () => Promise<void>): Promise<void> {
   try {
@@ -34,22 +34,19 @@ export const rollbackEventPurchase = (token: string, id: number) =>
   quietly("event purchase", () => forceDeleteEventPurchase(token, id));
 
 /**
- * Booking rollback for a failed card payment. Tries the permanent force-delete
- * first (a soft delete alone would leave the slot's room looking reserved); if
- * that fails, falls back to an ordinary soft delete with a fixed reason —
- * matching the web's `bookingService.rollbackBooking` — so a force-delete
- * failure (e.g. the booking already has a payment on it) doesn't silently
- * leave an unpaid booking with no trace at all. The reason also skips the
- * interactive change-reason prompt, since nobody is present to answer it here.
+ * Booking rollback for a failed card payment (web `bookingService.rollbackBooking`).
+ * Only the permanent force-delete is tried — a soft delete alone would leave the
+ * slot's room looking reserved, and falling back to one after the server refused
+ * the force-delete could trash a booking that had already been paid. A refused
+ * rollback keeps the booking for staff to check.
  */
-export async function rollbackBooking(token: string, id: number): Promise<void> {
-  const outcome = await forceDeleteThenSoftDelete(
-    () => forceDeleteBooking(token, id),
-    () => deleteBooking(token, id, { changeReason: ROLLBACK_REASON }),
-  );
-  if (outcome === "failed" && __DEV__) {
-    console.warn(
-      "[payments] booking rollback failed — both force-delete and soft-delete failed",
-    );
+export async function rollbackBooking(
+  token: string,
+  id: number,
+): Promise<BookingRollbackOutcome> {
+  const outcome = await forceDeleteOrKeep(() => forceDeleteBooking(token, id));
+  if (outcome === "kept" && __DEV__) {
+    console.warn("[payments] booking rollback refused or failed, so the booking was kept");
   }
+  return outcome;
 }

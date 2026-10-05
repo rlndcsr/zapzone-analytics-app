@@ -35,7 +35,7 @@ import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { CheckboxRow } from "../../components/ui/FormControls";
 import { InputField } from "../../components/ui/InputField";
-import { firstMediaUrl, mediaUrl } from "../../lib/api";
+import { ApiError, firstMediaUrl, mediaUrl } from "../../lib/api";
 import { attractionIsCallToBook } from "../../lib/callToBook";
 import { countryName } from "../../lib/countries";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
@@ -84,6 +84,7 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
+import { newCheckoutKey } from "../../lib/payments/checkoutKey";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
   buildAppliedDiscounts,
@@ -95,8 +96,9 @@ import {
   useQrDataUri,
 } from "../../lib/payments/useQrDataUri";
 import {
-  CHARGE_UNKNOWN_MESSAGE,
+  chargeFailureMessage,
   chargeOutcomeUnknown,
+  chargeUnknownMessage,
   declineMessage,
   fetchAuthorizeNetPublicKey,
   PAYMENT_TYPE,
@@ -339,6 +341,8 @@ const PurchasePageScreen = () => {
   >(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  /** The server's answer when this checkout had already gone through (ALREADY_PURCHASED). */
+  const [alreadyPurchasedNotice, setAlreadyPurchasedNotice] = useState<string | null>(null);
   // Location day-offs backing the calendar's blocked / limited dates (same
   // data + endpoint the web purchase calendar uses).
   const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
@@ -346,6 +350,9 @@ const PurchasePageScreen = () => {
   /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
    *  produce a second card charge. */
   const lastSubmitAtRef = useRef(0);
+  /** One key per checkout attempt (web `checkoutKeyRef`), so a retry after a lost connection
+   *  shows the purchase that already went through instead of buying it again. */
+  const checkoutKeyRef = useRef(newCheckoutKey());
 
   // Load the attraction detail (same GET /api/attractions/{id} the web uses).
   useEffect(() => {
@@ -702,6 +709,7 @@ const PurchasePageScreen = () => {
 
     const isPayLater = paymentMethod === "paylater";
     const input: CreateAttractionPurchaseInput = {
+      checkout_key: checkoutKeyRef.current,
       attraction_id: detail.id,
       guest_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
       guest_email: email.trim() || undefined,
@@ -744,7 +752,29 @@ const PurchasePageScreen = () => {
     try {
       // Web order: create the purchase (unpaid) first so the charge has a
       // payable to link to, then charge the card.
-      const { id: purchaseId } = await createAttractionPurchase(token, input);
+      let purchaseId: number;
+      try {
+        ({ id: purchaseId } = await createAttractionPurchase(token, input));
+      } catch (createErr) {
+        // A retry of this checkout after it already went through: show that purchase, never
+        // create and charge a second one (web PurchaseAttraction).
+        const refusal =
+          createErr instanceof ApiError && createErr.status === 409
+            ? (createErr.body as { code?: string } | undefined)
+            : undefined;
+        if (refusal?.code === "ALREADY_PURCHASED") {
+          checkoutKeyRef.current = newCheckoutKey();
+          markAttractionPurchasesStale();
+          setPaymentError("");
+          setAlreadyPurchasedNotice(
+            (createErr as ApiError).message ||
+              "This purchase was already saved. Check it in Purchases before taking payment again.",
+          );
+          setConfirmed(true);
+          return;
+        }
+        throw createErr;
+      }
       markAttractionPurchasesStale();
 
       if (isCardPayment) {
@@ -792,16 +822,14 @@ const PurchasePageScreen = () => {
           // A lost response can't prove the card wasn't charged, so keep the
           // purchase and let staff reconcile rather than risk a double charge.
           if (chargeOutcomeUnknown(payErr)) {
-            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
-            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            const message = chargeUnknownMessage("purchase", "the purchase list");
+            setPaymentError(message);
+            Alert.alert("Payment status unknown", message);
             return;
           }
           await rollbackAttractionPurchase(token, purchaseId);
           setPaymentError(getPaymentErrorMessage(payErr));
-          Alert.alert(
-            "Payment failed",
-            `${getPaymentErrorMessage(payErr)}\n\nThe purchase has been cancelled and no charges were made.`,
-          );
+          Alert.alert("Payment failed", chargeFailureMessage(payErr, "purchase"));
           return;
         }
 
@@ -815,6 +843,8 @@ const PurchasePageScreen = () => {
         setPaymentError("");
       }
 
+      // this attempt is finished: another purchase from this screen is a new checkout
+      checkoutKeyRef.current = newCheckoutKey();
       setConfirmed(true);
     } catch (err) {
       Alert.alert(
@@ -900,9 +930,10 @@ const PurchasePageScreen = () => {
               Purchase confirmed
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1 text-center">
-              {paymentMethod === "in-store" && sendEmail
-                ? "A receipt has been sent to the email provided."
-                : "The purchase has been recorded."}
+              {alreadyPurchasedNotice ??
+                (paymentMethod === "in-store" && sendEmail
+                  ? "A receipt has been sent to the email provided."
+                  : "The purchase has been recorded.")}
             </Text>
 
             <View className="w-full mt-6 pt-5 border-t border-gray-100 dark:border-neutral-800 gap-2">

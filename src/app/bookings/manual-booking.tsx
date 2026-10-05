@@ -62,6 +62,7 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
+import { newCheckoutKey } from "../../lib/payments/checkoutKey";
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { derivePaymentStatus } from "../../lib/payments/paymentState";
@@ -69,8 +70,9 @@ import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import { ApiError } from "../../lib/api";
 import {
-  CHARGE_UNKNOWN_MESSAGE,
+  chargeFailureMessage,
   chargeOutcomeUnknown,
+  chargeUnknownMessage,
   declineMessage,
   fetchAuthorizeNetPublicKey,
   PAYMENT_TYPE,
@@ -442,6 +444,9 @@ const ManualBookingScreen = () => {
 
   // a manager's approval belongs to the booking it was given for
   const overrideTokenRef = useRef<string | null>(null);
+  // One key per checkout attempt (lib/payments/checkoutKey). It survives an "already booked"
+  // answer, so a second tap shows that answer again instead of booking a duplicate.
+  const checkoutKeyRef = useRef(newCheckoutKey());
   const [overrideGate, setOverrideGate] = useState<{
     conflicts: string[];
     onlineSlotsLost: string[];
@@ -962,6 +967,7 @@ const ManualBookingScreen = () => {
 
       const { id, referenceNumber, customerId } = await createBooking(token, {
         overlap_override_token: overrideTokenRef.current ?? undefined,
+        checkout_key: checkoutKeyRef.current,
         guest_name: customerName.trim(),
         guest_email: email.trim() || undefined,
         guest_phone: phone.trim() || undefined,
@@ -1067,17 +1073,16 @@ const ManualBookingScreen = () => {
           // A lost response can't prove the card wasn't charged, so keep the
           // booking and let staff reconcile rather than risk a double charge.
           if (chargeOutcomeUnknown(payErr)) {
-            setPaymentError(CHARGE_UNKNOWN_MESSAGE);
-            Alert.alert("Payment status unknown", CHARGE_UNKNOWN_MESSAGE);
+            const message = chargeUnknownMessage("booking", "Bookings");
+            markBookingsStale();
+            setPaymentError(message);
+            Alert.alert("Payment status unknown", message);
             return;
           }
           await rollbackBooking(token, id);
           markBookingsStale();
           setPaymentError(getPaymentErrorMessage(payErr));
-          Alert.alert(
-            "Payment failed",
-            `${getPaymentErrorMessage(payErr)}\n\nThe booking has been cancelled and no charges were made.`,
-          );
+          Alert.alert("Payment failed", chargeFailureMessage(payErr, "booking"));
           return;
         }
 
@@ -1095,6 +1100,8 @@ const ManualBookingScreen = () => {
       // the approval was for this booking, now saved — it must not reach another one
       overrideTokenRef.current = null;
       setOverrideGate(null);
+      // this attempt is finished: the next booking from this screen is a new checkout
+      checkoutKeyRef.current = newCheckoutKey();
 
       markBookingsStale();
       Alert.alert(
