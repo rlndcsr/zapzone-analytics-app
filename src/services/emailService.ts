@@ -166,7 +166,10 @@ export type EmailTemplateDetail = {
   subject: string;
   body: string;
   status: EmailTemplateStatus;
+  /** Display label — "General" when the template has none. */
   category: string;
+  /** The stored category exactly as saved (null when none), for the edit form. */
+  categoryValue: string | null;
   locationId: number | null;
 };
 
@@ -193,8 +196,30 @@ export async function fetchEmailTemplateDetail(
     body: raw.body ?? "",
     status: (raw.status ?? "draft") as EmailTemplateStatus,
     category: raw.category?.trim() || "General",
+    categoryValue: raw.category?.trim() || null,
     locationId: raw.location_id ?? null,
   };
+}
+
+/** DELETE /api/email-templates/{id} — the web list's Delete action. */
+export async function deleteEmailTemplate(token: string, id: number): Promise<void> {
+  await apiRequest(`/api/email-templates/${id}`, { method: "DELETE", token });
+}
+
+/**
+ * POST /api/email-templates/preview — the subject and body with every merge
+ * variable replaced by the server's sample data (web `previewContent`, the Edit
+ * page's Preview button).
+ */
+export async function previewEmailContent(
+  token: string,
+  input: { subject: string; body: string },
+): Promise<{ subject: string; body: string }> {
+  const res = await apiRequest<{ data?: { subject?: string | null; body?: string | null } }>(
+    "/api/email-templates/preview",
+    { method: "POST", token, body: input },
+  );
+  return { subject: res?.data?.subject ?? "", body: res?.data?.body ?? "" };
 }
 
 /** PUT /api/email-templates/{id} — update an existing template (edit flow). */

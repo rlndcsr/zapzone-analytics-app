@@ -55,7 +55,8 @@ export function ComposerHeader({
         </View>
       </View>
       {!!actions && (
-        <View className="flex-row items-center justify-end gap-2 mt-3">{actions}</View>
+        // wraps rather than overflowing when three actions meet a narrow phone
+        <View className="flex-row flex-wrap items-center justify-end gap-2 mt-3">{actions}</View>
       )}
     </View>
   );

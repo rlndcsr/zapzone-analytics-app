@@ -11,7 +11,7 @@ const NAMED_ENTITIES: Record<string, string> = {
   "&nbsp;": " ",
 };
 
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))

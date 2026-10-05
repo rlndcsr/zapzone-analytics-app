@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -14,7 +14,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DetailActionButton } from "../../components/ui/DetailKit";
 import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
+import { EmailPreviewSheet } from "../../components/ui/EmailPreviewSheet";
 import { EmailTemplatesTable } from "../../components/ui/EmailTemplatesTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
@@ -23,8 +25,11 @@ import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { consumeEmailTemplatesStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
+  deleteEmailTemplate,
+  fetchEmailTemplateDetail,
   fetchEmailTemplates,
   updateEmailTemplateStatus,
+  type EmailTemplateDetail,
   type EmailTemplateRow,
   type EmailTemplateStatus,
 } from "../../services/emailService";
@@ -296,6 +301,92 @@ const EmailTemplates = () => {
     [router],
   );
 
+  // --- Row actions: Preview · Edit · Delete (web `renderActions`) ---
+  // Preview reads the template fresh from GET /api/email-templates/{id}, so it shows
+  // exactly what is saved — subject and body with its merge variables as written.
+  const [preview, setPreview] = useState<{
+    row: EmailTemplateRow;
+    detail: EmailTemplateDetail | null;
+    error: string | null;
+  } | null>(null);
+  // Kept apart from the data so the sheet keeps its content while it slides away.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewRequest = useRef(0);
+
+  const loadPreview = useCallback(async (row: EmailTemplateRow) => {
+    const request = ++previewRequest.current;
+    setPreview({ row, detail: null, error: null });
+    setPreviewOpen(true);
+    const token = getToken();
+    if (!token) {
+      setPreview({ row, detail: null, error: "Not signed in" });
+      return;
+    }
+    try {
+      const detail = await fetchEmailTemplateDetail(token, row.id);
+      // a later tap on another row wins
+      if (request === previewRequest.current) setPreview({ row, detail, error: null });
+    } catch (err) {
+      if (request === previewRequest.current) {
+        setPreview({
+          row,
+          detail: null,
+          error: err instanceof Error ? err.message : "Failed to load template",
+        });
+      }
+    }
+  }, []);
+
+  const closePreview = useCallback(() => {
+    previewRequest.current += 1;
+    setPreviewOpen(false);
+  }, []);
+
+  const editTemplate = useCallback(
+    (id: number) =>
+      router.push({
+        pathname: "/email-campaign/create-template",
+        params: { id: String(id) },
+      }),
+    [router],
+  );
+
+  const confirmDelete = useCallback(
+    (t: EmailTemplateRow) =>
+      Alert.alert(
+        "Delete Template",
+        "Are you sure you want to delete this email template? Any campaigns using this template will not be affected.\n\nThis action cannot be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete Template",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) return;
+              try {
+                await deleteEmailTemplate(token, t.id);
+                setSelectedIds((prev) => {
+                  if (!prev.has(t.id)) return prev;
+                  const next = new Set(prev);
+                  next.delete(t.id);
+                  return next;
+                });
+                await load();
+                Alert.alert("Template deleted", `"${t.name}" was deleted.`);
+              } catch (err) {
+                Alert.alert(
+                  "Failed to delete template",
+                  err instanceof Error ? err.message : "Please try again.",
+                );
+              }
+            },
+          },
+        ],
+      ),
+    [load],
+  );
+
   // Bulk status change — mirrors the web "Change Status" action, applied per id.
   const runBulkStatus = useCallback(
     async (key: string) => {
@@ -545,6 +636,9 @@ const EmailTemplates = () => {
                 onToggleRow={toggleRow}
                 onToggleAll={toggleAllVisible}
                 onRowPress={(t) => openDetails(t.id)}
+                onPreview={loadPreview}
+                onEdit={(t) => editTemplate(t.id)}
+                onDelete={confirmDelete}
               />
             ) : (
               paged.map((t) => {
@@ -621,6 +715,36 @@ const EmailTemplates = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Template Preview — the web list's Preview modal */}
+      <EmailPreviewSheet
+        visible={previewOpen}
+        onClose={closePreview}
+        title={preview?.detail?.name ?? preview?.row.name ?? "Template"}
+        subtitle="Template Preview"
+        loading={!!preview && !preview.detail && !preview.error}
+        error={preview?.error ?? null}
+        onRetry={preview ? () => loadPreview(preview.row) : undefined}
+        subject={preview?.detail?.subject ?? ""}
+        body={preview?.detail?.body ?? ""}
+        footer={
+          <>
+            <DetailActionButton icon="x" label="Close" onPress={closePreview} />
+            {!!preview && (
+              <DetailActionButton
+                icon="edit"
+                label="Edit Template"
+                variant="primary"
+                onPress={() => {
+                  const id = preview.row.id;
+                  closePreview();
+                  editTemplate(id);
+                }}
+              />
+            )}
+          </>
+        }
+      />
 
       {/* Toggle Columns */}
       <BottomSheet

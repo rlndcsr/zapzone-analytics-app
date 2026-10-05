@@ -1,4 +1,6 @@
-import { Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
+import { useMemo } from "react";
+import { Pressable, Text, View } from "react-native";
 
 import type {
   EmailTemplateRow,
@@ -28,9 +30,39 @@ const STATUS_PILL: Record<
   archived: { label: "Archived", pill: "bg-gray-200 dark:bg-neutral-700", text: "text-gray-600 dark:text-gray-300" },
 };
 
+/** Small circular icon button for the Actions column (matches the other tables). */
+const IconAction = ({
+  icon,
+  tint,
+  label,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  tint: string;
+  label: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    hitSlop={6}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+  >
+    <Feather name={icon} size={16} color={tint} />
+  </Pressable>
+);
+
+type RowHandlers = {
+  onPreview: (t: EmailTemplateRow) => void;
+  onEdit: (t: EmailTemplateRow) => void;
+  onDelete: (t: EmailTemplateRow) => void;
+};
+
 // Columns mirror the web `/admin/email/templates` default-visible set + order:
-// Template (name + subject) · Category · Status · Created.
-const COLUMNS: TableColumn<EmailTemplateRow>[] = [
+// Template (name + subject) · Category · Status · Created · Actions.
+function buildColumns(h: RowHandlers): TableColumn<EmailTemplateRow>[] {
+  return [
   {
     key: "template",
     label: "Template",
@@ -87,7 +119,21 @@ const COLUMNS: TableColumn<EmailTemplateRow>[] = [
       </Text>
     ),
   },
-];
+  {
+    // Web parity: Preview (blue) · Edit (green) · Delete (red).
+    key: "actions",
+    label: "Actions",
+    width: 130,
+    render: (t) => (
+      <View className="flex-row items-center gap-0.5">
+        <IconAction icon="eye" tint="#2563EB" label={`Preview ${t.name}`} onPress={() => h.onPreview(t)} />
+        <IconAction icon="edit" tint="#16A34A" label={`Edit ${t.name}`} onPress={() => h.onEdit(t)} />
+        <IconAction icon="trash-2" tint="#DC2626" label={`Delete ${t.name}`} onPress={() => h.onDelete(t)} />
+      </View>
+    ),
+  },
+  ];
+}
 
 /** Table view for Email Templates — thin wrapper over the shared SelectableTable. */
 export function EmailTemplatesTable({
@@ -96,16 +142,26 @@ export function EmailTemplatesTable({
   onToggleRow,
   onToggleAll,
   onRowPress,
+  onPreview,
+  onEdit,
+  onDelete,
 }: {
   templates: EmailTemplateRow[];
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
   onRowPress: (t: EmailTemplateRow) => void;
+  onPreview: (t: EmailTemplateRow) => void;
+  onEdit: (t: EmailTemplateRow) => void;
+  onDelete: (t: EmailTemplateRow) => void;
 }) {
+  const columns = useMemo(
+    () => buildColumns({ onPreview, onEdit, onDelete }),
+    [onPreview, onEdit, onDelete],
+  );
   return (
     <SelectableTable
-      columns={COLUMNS}
+      columns={columns}
       rows={templates}
       rowId={(t) => t.id}
       onRowPress={onRowPress}
