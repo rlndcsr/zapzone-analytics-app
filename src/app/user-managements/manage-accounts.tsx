@@ -1458,6 +1458,17 @@ const ManageAccounts = () => {
           <View className="-mx-1.5 flex-row flex-wrap">
             <View className="mb-3 w-1/2 px-1.5">
               <NavTileCard
+                icon="key"
+                title="Employee PINs"
+                desc="Issue staff PINs and set the automatic logout"
+                cta="Manage PINs"
+                onPress={() =>
+                  router.push("/user-managements/staff-pins" as never)
+                }
+              />
+            </View>
+            <View className="mb-3 w-1/2 px-1.5">
+              <NavTileCard
                 icon="activity"
                 title="Activity Log"
                 desc="Review staff account activity"
