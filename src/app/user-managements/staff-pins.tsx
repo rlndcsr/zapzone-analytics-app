@@ -26,6 +26,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CenterModal } from "../../components/ui/CenterModal";
+import { StaffPinsTable } from "../../components/ui/StaffPinsTable";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -37,7 +38,6 @@ import {
   MAX_IDLE_SECONDS,
   MIN_IDLE_SECONDS,
   parseIdleSeconds,
-  staffRoleLabel,
   validateStaffPin,
 } from "../../lib/staffPins";
 import {
@@ -69,24 +69,19 @@ function errorMessage(err: unknown, fallback: string): string {
 function SectionCard({
   icon,
   title,
-  right,
   children,
 }: {
   icon: ComponentProps<typeof Feather>["name"];
   title: string;
-  right?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mb-5 shadow-sm border border-gray-100 dark:border-neutral-800">
-      <View className="flex-row items-center justify-between mb-4">
-        <View className="flex-row items-center gap-2 flex-1">
-          <Feather name={icon} size={18} color="#6B7280" />
-          <Text className="text-base font-semibold text-gray-900 dark:text-white">
-            {title}
-          </Text>
-        </View>
-        {right}
+      <View className="flex-row items-center gap-2 mb-4">
+        <Feather name={icon} size={18} color="#6B7280" />
+        <Text className="text-base font-semibold text-gray-900 dark:text-white">
+          {title}
+        </Text>
       </View>
       {children}
     </View>
@@ -95,13 +90,11 @@ function SectionCard({
 
 function RowButton({
   label,
-  icon,
   tone = "neutral",
   disabled,
   onPress,
 }: {
   label: string;
-  icon?: ComponentProps<typeof Feather>["name"];
   tone?: "neutral" | "danger";
   disabled?: boolean;
   onPress: () => void;
@@ -114,15 +107,12 @@ function RowButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
-      className={`h-9 flex-row items-center justify-center gap-1.5 rounded-lg border px-3 active:opacity-70 ${
+      className={`h-9 items-center justify-center rounded-lg border px-3 active:opacity-70 ${
         danger
           ? "border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950"
           : "border-gray-200 bg-white dark:border-neutral-700 dark:bg-neutral-900"
       } ${disabled ? "opacity-50" : ""}`}
     >
-      {icon && (
-        <Feather name={icon} size={14} color={danger ? "#E11D48" : "#374151"} />
-      )}
       <Text
         className={`text-xs font-semibold ${
           danger ? "text-rose-600 dark:text-rose-400" : "text-gray-700 dark:text-gray-200"
@@ -132,29 +122,6 @@ function RowButton({
       </Text>
     </Pressable>
   );
-}
-
-function PinStatusChip({ entry }: { entry: StaffPinRosterEntry }) {
-  if (entry.locked) {
-    return (
-      <View className="flex-row items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 dark:bg-amber-900/40">
-        <Feather name="lock" size={11} color="#92400E" />
-        <Text className="text-xs font-medium text-amber-800 dark:text-amber-300">
-          Locked
-        </Text>
-      </View>
-    );
-  }
-  if (entry.has_pin) {
-    return (
-      <View className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">
-        <Text className="text-xs font-medium text-emerald-800 dark:text-emerald-300">
-          Set
-        </Text>
-      </View>
-    );
-  }
-  return <Text className="text-xs text-gray-500 dark:text-gray-400">Not set</Text>;
 }
 
 /* ------------------------------------------------------------- terminal row -- */
@@ -334,12 +301,21 @@ const StaffPins = () => {
     [load, showToast],
   );
 
-  const openPin = (entry: StaffPinRosterEntry) => {
+  const openPin = useCallback((entry: StaffPinRosterEntry) => {
     setPinTarget(entry);
     setPinValue("");
     setPinError(null);
     setPinOpen(true);
-  };
+  }, []);
+
+  const unlockPin = useCallback(
+    (entry: StaffPinRosterEntry) =>
+      void act(
+        (t) => unlockStaffPin(t, entry.id),
+        `${entry.name} can use their PIN again.`,
+      ),
+    [act],
+  );
 
   const submitPin = async () => {
     if (!pinTarget) return;
@@ -366,21 +342,24 @@ const StaffPins = () => {
     }
   };
 
-  const confirmRemovePin = (entry: StaffPinRosterEntry) => {
-    Alert.alert(
-      "Remove PIN",
-      `Remove the PIN for ${entry.name}? They will not be able to sign in to a shared terminal until a new one is set.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () =>
-            void act((t) => clearStaffPin(t, entry.id), `PIN removed for ${entry.name}.`),
-        },
-      ],
-    );
-  };
+  const confirmRemovePin = useCallback(
+    (entry: StaffPinRosterEntry) => {
+      Alert.alert(
+        "Remove PIN",
+        `Remove the PIN for ${entry.name}? They will not be able to sign in to a shared terminal until a new one is set.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: () =>
+              void act((t) => clearStaffPin(t, entry.id), `PIN removed for ${entry.name}.`),
+          },
+        ],
+      );
+    },
+    [act],
+  );
 
   const confirmRemoveTerminal = (terminal: StaffTerminal) => {
     Alert.alert(
@@ -491,112 +470,77 @@ const StaffPins = () => {
                 </Text>
               </SectionCard>
 
-              {/* Employee PINs */}
-              <SectionCard
-                icon="key"
-                title="Employee PINs"
-                right={
-                  <Pressable
-                    onPress={() => void onRefresh()}
-                    disabled={refreshing}
-                    className="flex-row items-center gap-1 px-2 py-1 rounded-lg active:bg-gray-100 dark:active:bg-neutral-800"
-                    accessibilityRole="button"
-                    accessibilityLabel="Refresh"
-                  >
-                    <Feather name="refresh-cw" size={13} color={PRIMARY} />
-                    <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                      Refresh
-                    </Text>
-                  </Pressable>
-                }
-              >
-                <View className="flex-row items-center gap-2 h-10 rounded-lg border border-gray-200 dark:border-neutral-700 px-3 mb-2">
-                  <Feather name="search" size={15} color="#9CA3AF" />
-                  <TextInput
-                    value={search}
-                    onChangeText={setSearch}
-                    placeholder="Search by name or email"
-                    placeholderTextColor="#9CA3AF"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    className="flex-1 text-sm text-gray-900 dark:text-white"
-                  />
-                  {!!search && (
-                    <Pressable
-                      onPress={() => setSearch("")}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear search"
-                    >
-                      <Feather name="x" size={15} color="#9CA3AF" />
-                    </Pressable>
-                  )}
-                </View>
-
-                {visibleRoster.map((entry) => (
-                  <View
-                    key={entry.id}
-                    className="py-3 border-b border-gray-100 dark:border-neutral-800"
-                  >
-                    <View className="flex-row items-start justify-between gap-3">
-                      <View className="flex-1">
-                        <Text
-                          className="font-medium text-gray-900 dark:text-white"
-                          numberOfLines={1}
-                        >
-                          {entry.name}
-                        </Text>
-                        <Text
-                          className="text-xs text-gray-500 dark:text-gray-400"
-                          numberOfLines={1}
-                        >
-                          {entry.email}
-                        </Text>
-                        <Text className="text-xs text-gray-700 dark:text-gray-300 mt-1">
-                          {staffRoleLabel(entry.role)}
-                        </Text>
-                      </View>
-                      <PinStatusChip entry={entry} />
-                    </View>
-
-                    <View className="flex-row flex-wrap justify-end gap-2 mt-2">
-                      <RowButton
-                        label={entry.has_pin ? "Reset PIN" : "Set PIN"}
-                        disabled={busy}
-                        onPress={() => openPin(entry)}
-                      />
-                      {entry.locked && (
-                        <RowButton
-                          label="Unlock"
-                          icon="unlock"
-                          disabled={busy}
-                          onPress={() =>
-                            void act(
-                              (t) => unlockStaffPin(t, entry.id),
-                              `${entry.name} can use their PIN again.`,
-                            )
-                          }
-                        />
-                      )}
-                      {entry.has_pin && (
-                        <RowButton
-                          label="Remove"
-                          icon="trash-2"
-                          tone="danger"
-                          disabled={busy}
-                          onPress={() => confirmRemovePin(entry)}
-                        />
-                      )}
-                    </View>
-                  </View>
-                ))}
-
-                {visibleRoster.length === 0 && (
-                  <Text className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                    {roster.length === 0 ? "No staff to show." : "No staff match your search."}
+              {/* Employee PINs — the web's table, in the app's shared table
+                  design (same as Attendants / Accounts). */}
+              <View className="flex-row items-center justify-between mb-3">
+                <View className="flex-row items-center gap-2">
+                  <Feather name="key" size={18} color="#6B7280" />
+                  <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                    Employee PINs
                   </Text>
+                </View>
+                <Pressable
+                  onPress={() => void onRefresh()}
+                  disabled={refreshing}
+                  className="flex-row items-center gap-1 px-2 py-1 rounded-lg active:bg-gray-100 dark:active:bg-neutral-800"
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh"
+                >
+                  <Feather name="refresh-cw" size={13} color={PRIMARY} />
+                  <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                    Refresh
+                  </Text>
+                </Pressable>
+              </View>
+
+              <View className="flex-row items-center gap-2 h-11 rounded-xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 mb-3">
+                <Feather name="search" size={15} color="#9CA3AF" />
+                <TextInput
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Search by name or email"
+                  placeholderTextColor="#9CA3AF"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  className="flex-1 text-sm text-gray-900 dark:text-white"
+                />
+                {!!search && (
+                  <Pressable
+                    onPress={() => setSearch("")}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear search"
+                  >
+                    <Feather name="x" size={15} color="#9CA3AF" />
+                  </Pressable>
                 )}
-              </SectionCard>
+              </View>
+
+              <View className="mb-5">
+                {visibleRoster.length === 0 ? (
+                  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
+                    <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                      <Feather name="key" size={26} color="#9CA3AF" />
+                    </View>
+                    <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
+                      {roster.length === 0 ? "No staff to show" : "No staff found"}
+                    </Text>
+                    {roster.length > 0 && (
+                      <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
+                        Try a different name or email.
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <StaffPinsTable
+                    roster={visibleRoster}
+                    busy={busy}
+                    onSetPin={openPin}
+                    onUnlock={unlockPin}
+                    onRemove={confirmRemovePin}
+                  />
+                )}
+              </View>
 
               {/* Automatic logout */}
               <SectionCard icon="lock" title="Automatic logout">
