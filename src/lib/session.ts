@@ -108,6 +108,18 @@ export async function setSession(token: string, user: AuthUser): Promise<void> {
   notify();
 }
 
+/** Replace the live user's record in place — same account and token, so nothing per-account resets. */
+export async function updateSessionUser(user: AuthUser): Promise<void> {
+  if (authToken == null || authUser?.id !== user.id) return;
+  authUser = user;
+  void upsertSavedAccount(authToken, user);
+  try {
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(persistableUser(user)));
+  } catch {
+    // Secure storage unavailable — the in-memory record still applies.
+  }
+}
+
 // Restores the saved session on launch. A window that "lapsed" only because the
 // app was closed is NOT expired — reopening the app counts as activity.
 export async function restoreSession(): Promise<boolean> {

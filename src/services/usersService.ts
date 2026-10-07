@@ -67,6 +67,9 @@ export type StaffUser = {
   companyId: number | null;
   locationId: number | null;
   locationName: string | null;
+  /** A manager's other assigned locations — the home location is never repeated here. */
+  workLocationIds: number[];
+  workLocationNames: string[];
   department: string | null;
   position: string | null;
   employeeId: string | null;
@@ -95,6 +98,7 @@ type RawUser = {
   last_login?: string | null;
   created_at?: string | null;
   location?: { id?: number; name?: string | null } | null;
+  locations?: { id: number; name?: string | null }[] | null;
 };
 
 type Pagination = {
@@ -137,6 +141,9 @@ function dateOnly(value: string | null | undefined): string | null {
  */
 function mapUser(raw: RawUser): StaffUser {
   const role = raw.role ?? "attendant";
+  const others = (Array.isArray(raw.locations) ? raw.locations : []).filter(
+    (l) => l.id !== raw.location_id,
+  );
   return {
     id: raw.id,
     firstName: raw.first_name ?? "",
@@ -149,6 +156,8 @@ function mapUser(raw: RawUser): StaffUser {
     companyId: raw.company_id ?? null,
     locationId: raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || null,
+    workLocationIds: others.map((l) => l.id),
+    workLocationNames: others.map((l) => l.name?.trim() ?? "").filter(Boolean),
     department: raw.department?.trim() || null,
     position: raw.position?.trim() || roleLabel(role),
     employeeId: raw.employee_id?.trim() || `ZAP-${raw.id}`,
@@ -344,6 +353,8 @@ export type CreateStaffPayload = {
   phone?: string;
   role: StaffRole;
   location_id?: number | null;
+  /** company_admin only: a manager's home location first, then the others. */
+  location_ids?: number[];
   password_mode: "generate" | "custom";
   password?: string;
   send_email: boolean;
@@ -394,6 +405,9 @@ export type UpdateStaffPayload = {
   department?: string | null;
   shift?: string | null;
   status?: StaffStatus;
+  /** company_admin only, for a manager: home location + every assigned one. */
+  location_id?: number | null;
+  location_ids?: number[];
 };
 
 /** PUT /api/users/{id} — update an existing staff account. */

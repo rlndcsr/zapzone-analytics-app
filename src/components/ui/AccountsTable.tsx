@@ -156,6 +156,14 @@ function buildColumns(h: Handlers): TableColumn<StaffUser>[] {
               </Text>
             </View>
           )}
+          {u.role === "location_manager" && u.workLocationNames.length > 0 && (
+            <Text
+              numberOfLines={2}
+              className="text-xs text-gray-500 dark:text-gray-400 mt-1"
+            >
+              Also manages {u.workLocationNames.join(", ")}
+            </Text>
+          )}
         </View>
       ),
     },

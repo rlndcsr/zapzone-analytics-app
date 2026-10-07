@@ -16,6 +16,7 @@ import { authDebug } from "../../lib/debug/authDebug";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { setSession } from "../../lib/session";
 import { login, type AuthUser } from "../../services/auth";
+import { resolveStaffLocation } from "../../services/staffLocationService";
 import { InputField } from "../ui/InputField";
 import { PasswordInput } from "../ui/PasswordInput";
 
@@ -95,7 +96,10 @@ export function LoginForm({ initialEmail, onSuccess }: LoginFormProps = {}) {
       // Establish the session, then navigate imperatively. `setSession` awaits
       // its storage writes and notifies before this runs, so the replace happens
       // after the auth state has settled — not during a render.
-      await setSession(result.token, result.user);
+      const user = await resolveStaffLocation(result.token, result.user, {
+        reopen: true,
+      });
+      await setSession(result.token, user);
       // Load this account's stored dashboard timeframe before the dashboard
       // mounts — the web re-reads `dashboard_timeframe_<userId>` when its
       // dashboard initialises, so a fresh sign-in must not inherit whatever
@@ -103,7 +107,7 @@ export function LoginForm({ initialEmail, onSuccess }: LoginFormProps = {}) {
       await restoreTimeframeSelection();
       if (onSuccess) {
         authDebug("LoginForm → onSuccess (add-account path)");
-        onSuccess(result.user);
+        onSuccess(user);
       } else {
         authDebug('LoginForm router.replace("/home")');
         router.replace("/home");

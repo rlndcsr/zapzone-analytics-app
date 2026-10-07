@@ -167,6 +167,10 @@ let cache: {
   data: AllVisitorSessions;
 } | null = null;
 
+export function clearVisitorSessionsCache(): void {
+  cache = null;
+}
+
 /** The cached set for this location while it is still fresh, else null. */
 export function peekVisitorSessions(
   locationId?: number,

@@ -1,5 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { MapPin } from "lucide-react-native";
 import { useColorScheme } from "nativewind";
 import { useEffect, useRef } from "react";
 import { BackHandler, Text, View } from "react-native";
@@ -67,7 +68,11 @@ function PulsingDot({ index, color }: { index: number; color: string }) {
 export default function SwitchAccount() {
   const router = useRouter();
   const { colorScheme } = useColorScheme();
-  const { userId } = useLocalSearchParams<{ userId?: string }>();
+  // A manager's location switch reuses this bridge only to remount the app; nothing is pending.
+  const { userId, locationName } = useLocalSearchParams<{
+    userId?: string;
+    locationName?: string;
+  }>();
 
   const accounts = useSavedAccounts();
   const target = accounts.find((a) => a.userId === Number(userId));
@@ -134,9 +139,11 @@ export default function SwitchAccount() {
           </View>
         ) : (
           <View
-            className="h-[92px] w-[92px] rounded-full"
+            className="h-[92px] w-[92px] rounded-full items-center justify-center"
             style={{ backgroundColor: ACTIVE_ACCOUNT_TINT }}
-          />
+          >
+            {locationName ? <MapPin size={36} color={ACTIVE_ACCOUNT_BLUE} /> : null}
+          </View>
         )}
       </Animated.View>
 
@@ -147,10 +154,10 @@ export default function SwitchAccount() {
       </View>
 
       <Text className="mt-7 text-[13px] font-medium uppercase tracking-[1.5px] text-gray-400 dark:text-gray-500">
-        Switching account
+        {locationName ? "Switching location" : "Switching account"}
       </Text>
       <Text className="mt-2 text-center text-[20px] font-semibold text-gray-900 dark:text-white">
-        {target?.name ?? "Please wait"}
+        {locationName ?? target?.name ?? "Please wait"}
       </Text>
       {target ? (
         <Text className="mt-1 text-[13px] text-gray-500 dark:text-gray-400">

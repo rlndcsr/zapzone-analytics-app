@@ -24,6 +24,12 @@ let allSpacesCache: SpacesCache | null = null;
 type DayCache = { key: string; fetchedAt: number; data: ScheduleBooking[] };
 const dayCache = new Map<string, DayCache>();
 
+export function clearSpaceScheduleCache(): void {
+  spacesCache = null;
+  allSpacesCache = null;
+  dayCache.clear();
+}
+
 const userKey = (userId?: number) => String(userId ?? "me");
 const dayKey = (userId: number | undefined, date: string, locationId?: number) =>
   `${userKey(userId)}|${date}|${locationId ?? "all"}`;

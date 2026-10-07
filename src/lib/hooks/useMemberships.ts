@@ -38,6 +38,10 @@ let cache: Cache | null = null;
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const cacheKey = (locationId?: number) => String(locationId ?? "all");
 
+export function clearMembershipsCache(): void {
+  cache = null;
+}
+
 /**
  * Loads the membership list and status counts together. The list is fetched
  * unfiltered (screens filter client-side); the counts come from the reports

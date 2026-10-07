@@ -2,13 +2,19 @@ import { markAccountSignInRequired } from "../lib/accounts/savedAccountsStore";
 import { apiRequest, apiUrl } from "../lib/api";
 // TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
 import { authDebug } from "../lib/debug/authDebug";
+import {
+  stateFromUserPayload,
+  withStaffLocation,
+} from "../lib/location/staffLocation";
 import { unregisterCurrentPushDevice } from "../lib/notifications/pushDevice";
 import {
   clearSession,
   getCurrentUser,
   getToken,
   handleUnauthorized,
+  updateSessionUser,
 } from "../lib/session";
+import { metricsCacheService } from "./metricsCacheService";
 
 /** Staff roles returned by the backend (kept open-ended for forward-compat). */
 export type UserRole =
@@ -84,6 +90,16 @@ export async function validateStoredSession(): Promise<void> {
     authDebug("validateStoredSession GET /api/user", { status: res.status });
     if (res.status === 401) {
       handleUnauthorized();
+    } else if (res.ok && getCurrentUser()?.role === "location_manager") {
+      // The server owns a manager's active location; a dropped assignment lands them back home.
+      const state = stateFromUserPayload(await res.json().catch(() => null));
+      const user = getCurrentUser();
+      if (state && user) {
+        if (state.active_location_id !== user.location_id) {
+          await metricsCacheService.clearAllCaches();
+        }
+        await updateSessionUser(withStaffLocation(user, state));
+      }
     }
   } catch {
     // Offline / timeout — keep the session; it re-validates on the next request.

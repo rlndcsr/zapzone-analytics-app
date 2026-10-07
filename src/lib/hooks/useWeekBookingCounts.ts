@@ -11,6 +11,10 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 type CountsCache = { fetchedAt: number; data: Record<string, number> };
 const cache = new Map<string, CountsCache>();
 
+export function clearWeekBookingCountsCache(): void {
+  cache.clear();
+}
+
 const cacheKey = (
   userId: number | undefined,
   from: string,

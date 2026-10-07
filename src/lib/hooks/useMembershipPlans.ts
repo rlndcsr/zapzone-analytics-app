@@ -11,6 +11,10 @@ type Cache = { fetchedAt: number; data: MembershipPlanRow[] };
 let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+export function clearMembershipPlansCache(): void {
+  cache = null;
+}
+
 /** Loads + caches the membership plan list, with `refetch` + optimistic patches. */
 export function useMembershipPlans() {
   const cacheFresh = !!cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS;

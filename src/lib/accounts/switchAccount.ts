@@ -1,5 +1,6 @@
 import type { AuthUser } from "../../services/auth";
 import { fetchUserWithToken, TokenCheckError } from "../../services/auth";
+import { resolveStaffLocation } from "../../services/staffLocationService";
 import { restoreTimeframeSelection } from "../dashboard/timeframeStore";
 import { setSession } from "../session";
 import {
@@ -38,7 +39,11 @@ export async function prepareAccountSwitch(
       return { status: "needs_password", message: null };
     }
 
-    const user = await fetchUserWithToken(account.userId, token);
+    // GET /users/{id} reports the home location; the token may be working elsewhere.
+    const user = await resolveStaffLocation(
+      token,
+      await fetchUserWithToken(account.userId, token),
+    );
     pending = { token, user };
     return { status: "ready" };
   } catch (error) {

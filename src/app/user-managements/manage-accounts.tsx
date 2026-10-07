@@ -411,6 +411,11 @@ const AccountCard = ({
         </Text>
       </View>
     )}
+    {user.role === "location_manager" && user.workLocationNames.length > 0 && (
+      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1" numberOfLines={2}>
+        Also manages {user.workLocationNames.join(", ")}
+      </Text>
+    )}
 
     <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
       <View className="flex-row items-center gap-1.5">
@@ -515,6 +520,55 @@ const BulkChip = ({
   </Pressable>
 );
 
+/** The web's ManagerLocationsPicker: every location except the home one, as checkboxes. */
+const ManagerLocationsPicker = ({
+  locations,
+  homeLocationId,
+  selectedIds,
+  onChange,
+}: {
+  locations: LocationOption[];
+  homeLocationId: number | null;
+  selectedIds: number[];
+  onChange: (ids: number[]) => void;
+}) => {
+  const others = locations.filter((l) => l.id !== homeLocationId);
+  return (
+    <View>
+      <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+        Other locations this manager can manage
+      </Text>
+      <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+        They switch between their locations in the app and work in one location at a time.
+      </Text>
+      {others.length === 0 ? (
+        <Text className="text-xs text-gray-400">
+          {homeLocationId != null
+            ? "There are no other locations to add."
+            : "Choose a home location first."}
+        </Text>
+      ) : (
+        <View className="gap-3">
+          {others.map((l) => (
+            <CheckboxRow
+              key={l.id}
+              label={l.name}
+              checked={selectedIds.includes(l.id)}
+              onToggle={() =>
+                onChange(
+                  selectedIds.includes(l.id)
+                    ? selectedIds.filter((id) => id !== l.id)
+                    : [...selectedIds, l.id],
+                )
+              }
+            />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+};
+
 /* ------------------------------------------------------------------ screen -- */
 
 type FormState = {
@@ -525,6 +579,7 @@ type FormState = {
   phone: string;
   role: StaffRole;
   location_id: number | null;
+  extra_location_ids: number[];
   position: string;
   department: string;
   shift: string;
@@ -544,6 +599,7 @@ function emptyForm(): FormState {
     phone: "",
     role: "attendant",
     location_id: null,
+    extra_location_ids: [],
     position: "",
     department: "",
     shift: "",
@@ -763,7 +819,11 @@ const ManageAccounts = () => {
     if (departmentFilter !== "all")
       rows = rows.filter((a) => (a.department ?? "") === departmentFilter);
     if (locationFilter !== "all")
-      rows = rows.filter((a) => (a.locationName ?? "") === locationFilter);
+      rows = rows.filter(
+        (a) =>
+          (a.locationName ?? "") === locationFilter ||
+          a.workLocationNames.includes(locationFilter),
+      );
     if (lastLoginFilter !== "any")
       rows = rows.filter((a) => matchesLastLogin(a.lastLogin, lastLoginFilter));
 
@@ -790,6 +850,7 @@ const ManageAccounts = () => {
           a.employeeId,
           a.department,
           a.locationName,
+          ...a.workLocationNames,
           a.position,
         ].map((v) => (v ?? "").toLowerCase());
         return tokens.every((t) => fields.some((f) => f.includes(t)));
@@ -885,6 +946,7 @@ const ManageAccounts = () => {
       phone: u.phone ?? "",
       role: u.role,
       location_id: u.locationId,
+      extra_location_ids: u.workLocationIds,
       position: u.position ?? "",
       department: u.department ?? "",
       shift: u.shift ?? "",
@@ -899,6 +961,12 @@ const ManageAccounts = () => {
 
   const isEditing = form.id != null;
   const requiresLocation = form.role !== "company_admin";
+  // Only a company admin chooses which locations a manager can switch between (server-enforced too).
+  const managesLocations = isCompanyAdmin && form.role === "location_manager";
+  const extraLocationIds = useMemo(
+    () => form.extra_location_ids.filter((id) => id !== form.location_id),
+    [form.extra_location_ids, form.location_id],
+  );
 
   const roleOptions = useMemo<SelectOption[]>(
     () => [
@@ -934,6 +1002,10 @@ const ManageAccounts = () => {
       Alert.alert("Location required", "Please select a location for this role.");
       return;
     }
+    if (isEditing && managesLocations && form.location_id == null) {
+      Alert.alert("Home location required", "Choose a home location for this manager.");
+      return;
+    }
     if (
       !isEditing &&
       form.password_mode === "custom" &&
@@ -955,6 +1027,12 @@ const ManageAccounts = () => {
           department: form.department || null,
           shift: form.shift || null,
           status: form.status,
+          ...(managesLocations && form.location_id != null
+            ? {
+                location_id: form.location_id,
+                location_ids: [form.location_id, ...extraLocationIds],
+              }
+            : {}),
         });
         setSheet(null);
         afterMutation();
@@ -967,6 +1045,9 @@ const ManageAccounts = () => {
           phone: form.phone.trim() || undefined,
           role: form.role,
           location_id: requiresLocation ? (form.location_id ?? undefined) : undefined,
+          ...(managesLocations && form.location_id != null && extraLocationIds.length > 0
+            ? { location_ids: [form.location_id, ...extraLocationIds] }
+            : {}),
           password_mode: form.password_mode,
           password:
             form.password_mode === "custom" ? form.password : undefined,
@@ -991,7 +1072,7 @@ const ManageAccounts = () => {
     } finally {
       setSaving(false);
     }
-  }, [form, isEditing, requiresLocation, afterMutation]);
+  }, [form, isEditing, requiresLocation, managesLocations, extraLocationIds, afterMutation]);
 
   /* ---- row actions ---- */
 
@@ -1972,6 +2053,14 @@ const ManageAccounts = () => {
                 label="Location"
                 value={selected.locationName}
               />
+              {selected.role === "location_manager" &&
+                selected.workLocationNames.length > 0 && (
+                  <DetailField
+                    icon="map"
+                    label="Also manages"
+                    value={selected.workLocationNames.join(", ")}
+                  />
+                )}
             </DetailSection>
 
             <DetailSection title="Dates">
@@ -2109,6 +2198,33 @@ const ManageAccounts = () => {
                     setForm((f) => ({ ...f, status: String(v) as StaffStatus }))
                   }
                 />
+                {managesLocations && (
+                  <View className="gap-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
+                    <View>
+                      <SelectField
+                        label="Home location"
+                        required
+                        placeholder="Select a location"
+                        value={form.location_id}
+                        options={locationSelectOptions}
+                        onSelect={(v) =>
+                          setForm((f) => ({ ...f, location_id: Number(v) }))
+                        }
+                      />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Where this manager starts each time they sign in.
+                      </Text>
+                    </View>
+                    <ManagerLocationsPicker
+                      locations={locations}
+                      homeLocationId={form.location_id}
+                      selectedIds={extraLocationIds}
+                      onChange={(ids) =>
+                        setForm((f) => ({ ...f, extra_location_ids: ids }))
+                      }
+                    />
+                  </View>
+                )}
               </>
             ) : (
               <>
@@ -2136,6 +2252,17 @@ const ManageAccounts = () => {
                     options={locationSelectOptions}
                     onSelect={(v) =>
                       setForm((f) => ({ ...f, location_id: Number(v) }))
+                    }
+                  />
+                )}
+
+                {managesLocations && (
+                  <ManagerLocationsPicker
+                    locations={locations}
+                    homeLocationId={form.location_id}
+                    selectedIds={extraLocationIds}
+                    onChange={(ids) =>
+                      setForm((f) => ({ ...f, extra_location_ids: ids }))
                     }
                   />
                 )}
