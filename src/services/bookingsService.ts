@@ -4,7 +4,8 @@ import {
   locationAddressLine,
 } from "../lib/bookings/bookingDetailFields";
 import { compareCheckInRows } from "../lib/checkin/checkInOrder";
-import { fetchAllPages } from "../lib/fetchAllPages";
+import { newestFirst } from "../lib/bookings/bookingSync";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { cardLabelFromPayments } from "../lib/payments/cardLabel";
 import { roomIsAvailable } from "../lib/rooms";
 import { normalizeCategory } from "../lib/venueCategories";
@@ -345,6 +346,13 @@ type BookingsListResponse = {
       per_page: number;
       total: number;
     };
+    // Present only on `sync=1` / `updated_since` requests.
+    sync?: {
+      cursor?: string;
+      scope?: string;
+      total?: number;
+      deleted_ids?: number[];
+    };
   };
 };
 
@@ -539,17 +547,44 @@ export async function fetchDayBookings({
   return rows.filter((b) => (seen.has(b.id) ? false : (seen.add(b.id), true)));
 }
 
-/** Every booking, paged newest-first. Callers filter by date and cache it. */
-export async function fetchAllBookings({
-  token,
-  locationId,
-  signal,
-}: FetchParams): Promise<CalendarBooking[]> {
+/** The cursor a full download hands back, for asking only what changed since. */
+export type BookingSyncCursor = { cursor: string; scope: string };
+
+export type FullBookingList = {
+  bookings: CalendarBooking[];
+  sync: BookingSyncCursor | null;
+};
+
+/** Every booking, latest booking date first. Callers filter by date and cache it. */
+export async function fetchAllBookings(
+  params: FetchParams,
+): Promise<FullBookingList> {
+  try {
+    return await fetchEveryBooking(params, true);
+  } catch (err) {
+    // A refused sync (403/422) still lists bookings the plain way.
+    if (err instanceof ApiError && (err.status === 403 || err.status === 422)) {
+      return fetchEveryBooking(params, false);
+    }
+    throw err;
+  }
+}
+
+async function fetchEveryBooking(
+  { token, locationId, signal }: FetchParams,
+  sync: boolean,
+): Promise<FullBookingList> {
   let lastPage = 1;
+  let total = 0;
+  let cursor: BookingSyncCursor | null = null;
 
   const out = await fetchAllPages<CalendarBooking>(
     async (page) => {
-      const res = await fetchPage(page, {}, { token, locationId, signal });
+      const res = await fetchPage(page, sync ? { sync: "1" } : {}, {
+        token,
+        locationId,
+        signal,
+      });
       const bookings: CalendarBooking[] = [];
       for (const raw of res?.data?.bookings ?? []) {
         const date = toDateKey(raw.booking_date);
@@ -558,7 +593,15 @@ export async function fetchAllBookings({
       const reported = res?.data?.pagination?.last_page ?? page;
       // Page 1 is the only page whose count decides the walk, so it is also the
       // only one the "older pages skipped" warning below should believe.
-      if (page === 1) lastPage = reported;
+      if (page === 1) {
+        lastPage = reported;
+        total = res?.data?.pagination?.total ?? 0;
+        const info = res?.data?.sync;
+        cursor =
+          info?.cursor && info.scope
+            ? { cursor: info.cursor, scope: info.scope }
+            : null;
+      }
       return { items: bookings, lastPage: reported };
     },
     { maxPages: SYNC_MAX_PAGES },
@@ -571,7 +614,76 @@ export async function fetchAllBookings({
     );
   }
 
-  return out;
+  const bookings = newestFirst(uniqueById(out));
+  // An incomplete list (page cap, rows shifting mid-walk) can't be kept current from the change feed.
+  return { bookings, sync: bookings.length === total ? cursor : null };
+}
+
+/** The backend allows 500 a page on `updated_since`; past 20 pages a full download is cheaper. */
+const CHANGES_PER_PAGE = 500;
+const CHANGES_MAX_PAGES = 20;
+
+export type BookingChanges = BookingSyncCursor & {
+  bookings: CalendarBooking[];
+  deletedIds: number[];
+  total: number;
+};
+
+/** What changed since a sync cursor, or null when the server wants a full download instead. */
+export async function fetchBookingChanges({
+  token,
+  locationId,
+  cursor,
+  signal,
+}: FetchParams & { cursor: string }): Promise<BookingChanges | null> {
+  const bookings: CalendarBooking[] = [];
+  let first: BookingChanges | null = null;
+  let beforeId: number | undefined;
+
+  for (let page = 0; page < CHANGES_MAX_PAGES; page += 1) {
+    const params = new URLSearchParams({
+      updated_since: cursor,
+      per_page: String(CHANGES_PER_PAGE),
+    });
+    if (beforeId != null) params.append("before_id", String(beforeId));
+    if (locationId != null) params.append("location_id", String(locationId));
+
+    let res: BookingsListResponse;
+    try {
+      res = await apiRequest<BookingsListResponse>(
+        `/api/bookings?${params.toString()}`,
+        { token, signal },
+      );
+    } catch (err) {
+      // 422: the cursor expired or too much changed; 403: this login can't sync.
+      if (err instanceof ApiError && (err.status === 403 || err.status === 422)) {
+        return null;
+      }
+      throw err;
+    }
+
+    const sync = res?.data?.sync;
+    if (!sync?.cursor || !sync.scope || typeof sync.total !== "number") {
+      return null;
+    }
+    first ??= {
+      bookings,
+      deletedIds: sync.deleted_ids ?? [],
+      total: sync.total,
+      cursor: sync.cursor,
+      scope: sync.scope,
+    };
+
+    const rows = res.data.bookings ?? [];
+    for (const raw of rows) {
+      const date = toDateKey(raw.booking_date);
+      if (date) bookings.push(mapBooking(raw, date));
+    }
+    if (rows.length < CHANGES_PER_PAGE) return first;
+    beforeId = rows[rows.length - 1].id;
+  }
+
+  return null;
 }
 
 export async function searchBookings({

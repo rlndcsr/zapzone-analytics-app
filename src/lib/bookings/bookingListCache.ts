@@ -1,18 +1,27 @@
 import {
   fetchAllBookings,
+  fetchBookingChanges,
   fetchBookingsInRange,
+  type BookingSyncCursor,
   type CalendarBooking,
 } from "../../services/bookingsService";
+import { applyBookingChanges } from "./bookingSync";
 import { mergeBookingInto } from "./patchBooking";
 
 // Single source of truth for the full booking list. Manage Bookings and both
 // calendars read/write this one cache, so navigating between them never re-pages.
-type CacheEntry = { fetchedAt: number; data: CalendarBooking[] };
+type SyncState = BookingSyncCursor & { fullAt: number };
+type CacheEntry = { fetchedAt: number; data: CalendarBooking[]; sync?: SyncState };
 
 // One entry per location scope; `inFlight` lets two consumers share one trip.
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<CalendarBooking[]>>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// Web parity: re-download everything about every 30 min, only the changes in between.
+const FULL_REFRESH_MS = 30 * 60 * 1000;
+// The newest sync started per scope; an older one finishing late must not overwrite it.
+const latestSync = new Map<string, number>();
+let syncSeq = 0;
 
 // The calendars want one day, one week or one month — not the whole history. Those windows live
 // in their own map, keyed by scope AND range, so a day's grid costs one small request instead of
@@ -54,6 +63,7 @@ let stale = false;
 export function markBookingsStale(): void {
   cache.clear();
   rangeCache.clear();
+  latestSync.clear();
   stale = true;
 }
 
@@ -138,15 +148,57 @@ export async function syncBookingList({
   }
 
   if (__DEV__) console.log(`[BookingCache] Sync started key=${key}`);
-  const pending = fetchAllBookings({ token, locationId }).finally(() => {
-    inFlight.delete(key);
-    if (__DEV__) console.log(`[BookingCache] Sync finished key=${key}`);
-  });
+  const seq = ++syncSeq;
+  latestSync.set(key, seq);
+  const pending = loadBookingList(token, locationId, cache.get(key))
+    .then((entry) => {
+      if (latestSync.get(key) === seq) cache.set(key, entry);
+      return entry.data;
+    })
+    .finally(() => {
+      if (inFlight.get(key) === pending) inFlight.delete(key);
+      if (__DEV__) console.log(`[BookingCache] Sync finished key=${key}`);
+    });
   inFlight.set(key, pending);
 
-  const data = await pending;
-  cache.set(key, { fetchedAt: Date.now(), data });
-  return data;
+  return pending;
+}
+
+/** Merge only what changed since the last sync when possible, else download the whole list. */
+async function loadBookingList(
+  token: string,
+  locationId: number | undefined,
+  base: CacheEntry | undefined,
+): Promise<CacheEntry> {
+  const startedAt = Date.now();
+  if (base?.sync && startedAt - base.sync.fullAt < FULL_REFRESH_MS) {
+    const changes = await fetchBookingChanges({
+      token,
+      locationId,
+      cursor: base.sync.cursor,
+    });
+    if (changes && changes.scope === base.sync.scope) {
+      const data = applyBookingChanges(
+        base.data,
+        changes.bookings,
+        changes.deletedIds,
+      );
+      if (data.length === changes.total) {
+        return {
+          fetchedAt: Date.now(),
+          data,
+          sync: { ...base.sync, cursor: changes.cursor },
+        };
+      }
+    }
+  }
+
+  const full = await fetchAllBookings({ token, locationId });
+  return {
+    fetchedAt: Date.now(),
+    data: full.bookings,
+    sync: full.sync ? { ...full.sync, fullAt: startedAt } : undefined,
+  };
 }
 
 /** The full list for this scope — the fresh cached one, else a sync (web: dashboards read the saved list). */
