@@ -63,6 +63,10 @@ import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkeleton";
 import { categoryKeyOf } from "../../lib/calendar/categoryFilter";
+import {
+  changeReasonPromptAvailable,
+  requestChangeReason,
+} from "../../lib/changeReasonPrompt";
 import { consumeBookingsStale, useBookings } from "../../lib/hooks/useBookings";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { cardLabelFromPayments, type CardBearingPayment } from "../../lib/payments/cardLabel";
@@ -73,7 +77,6 @@ import {
   describeFollowUp,
 } from "../../lib/visitFollowUp/visitFollowUp";
 import {
-  bulkDeleteBookings,
   bulkSetBookingStatus,
   checkInBooking,
   deleteBooking,
@@ -925,8 +928,10 @@ const Bookings = () => {
     [selectedIds, paged, currentUser?.id, refetch],
   );
 
-  // Bulk delete — same confirmation as the web, then the dedicated bulk-delete
-  // endpoint (one round-trip). Soft-deletes to trash, like the row action.
+  // Bulk delete — same confirmation as the web, then the reason asked once and
+  // each booking soft-deleted to trash with it, so every booking's history
+  // records why (web Bookings `handleBulkDelete`). The bulk-delete endpoint
+  // would log the reason only once, against the batch.
   const confirmBulkDelete = useCallback(() => {
     const count = selectedIds.size;
     if (count === 0) return;
@@ -942,11 +947,35 @@ const Bookings = () => {
             const token = getToken();
             if (!token) return;
             const ids = [...selectedIds];
+            // Without a mounted prompt the server's own 422 explains what is missing.
+            let changeReason: string | undefined;
+            if (changeReasonPromptAvailable()) {
+              const reason = await requestChangeReason({
+                summary: `Deleting ${ids.length} booking(s)`,
+                destructive: true,
+              });
+              if (!reason) return;
+              changeReason = reason;
+            }
             setBulkBusy("delete");
             try {
-              await bulkDeleteBookings(token, ids);
+              const results = await Promise.allSettled(
+                ids.map((id) => deleteBooking(token, id, { changeReason })),
+              );
+              const failures = results.filter(
+                (r): r is PromiseRejectedResult => r.status === "rejected",
+              );
               setSelectedIds(new Set());
               await refetch();
+              if (failures.length > 0) {
+                const first = failures[0].reason;
+                Alert.alert(
+                  "Delete failed",
+                  `${failures.length} of ${ids.length} booking(s) could not be deleted.${
+                    first instanceof Error && first.message ? `\n${first.message}` : ""
+                  }`,
+                );
+              }
             } catch (e) {
               Alert.alert(
                 "Delete failed",

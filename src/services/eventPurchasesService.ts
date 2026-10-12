@@ -1,5 +1,6 @@
 import { ApiError, apiRequest } from "../lib/api";
 import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
+import { checkoutTokenBody, rememberCheckoutToken } from "../lib/payments/checkoutTokens";
 import {
   followUpOf,
   type VisitFollowUpSummary,
@@ -347,12 +348,16 @@ export type CreateEventPurchaseInput = {
   add_ons?: EventPurchaseAddonInput[];
   applied_fees?: AppliedFee[];
   applied_discounts?: AppliedDiscount[];
+  /** One per checkout attempt (`lib/payments/checkoutKey`), so a retry cannot charge twice. */
+  checkout_key?: string;
 };
 
 type CreatePurchaseResponse = {
   success: boolean;
   data: { id: number } & Record<string, unknown>;
   message?: string;
+  /** Proves this caller created the purchase when it rolls back or charges it. */
+  checkout_token?: unknown;
 };
 
 /** POST /api/event-purchases — create an on-site event purchase. */
@@ -365,6 +370,7 @@ export async function createEventPurchase(
     token,
     body: input,
   });
+  rememberCheckoutToken("event_purchase", res.data.id, res.checkout_token);
   return { id: res.data.id };
 }
 
@@ -844,7 +850,11 @@ export async function deleteEventPurchase(
   token: string,
   id: number,
 ): Promise<void> {
-  await apiRequest(`/api/event-purchases/${id}`, { method: "DELETE", token });
+  await apiRequest(`/api/event-purchases/${id}`, {
+    method: "DELETE",
+    token,
+    body: checkoutTokenBody("event_purchase", id),
+  });
 }
 
 /**
@@ -861,5 +871,6 @@ export async function forceDeleteEventPurchase(
   await apiRequest(`/api/event-purchases/${id}/force-delete`, {
     method: "DELETE",
     token,
+    body: checkoutTokenBody("event_purchase", id),
   });
 }

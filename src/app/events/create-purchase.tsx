@@ -60,6 +60,7 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
+import { newCheckoutKey } from "../../lib/payments/checkoutKey";
 import { rollbackEventPurchase } from "../../lib/payments/rollback";
 import {
   buildAppliedDiscounts,
@@ -459,6 +460,9 @@ const CreateEventPurchaseScreen = () => {
   /** Web parity (`lastSubmitTimeRef`): 3s cooldown, so a double-tap can never
    *  produce a second card charge. */
   const lastSubmitAtRef = useRef(0);
+  /** Sent as `checkout_key`, so a retry after "no answer" cannot charge twice;
+   *  renewed once the purchase goes through (web `OnsitePurchaseEvent`). */
+  const checkoutKeyRef = useRef(newCheckoutKey());
 
   // Accept.js credentials for the event's location — fetched as soon as the
   // card method is active, exactly like the web `initializeAuthorizeNet`.
@@ -808,6 +812,7 @@ const CreateEventPurchaseScreen = () => {
       applied_fees: freshAppliedFees.length > 0 ? freshAppliedFees : undefined,
       applied_discounts:
         freshAppliedDiscounts.length > 0 ? freshAppliedDiscounts : undefined,
+      checkout_key: checkoutKeyRef.current,
     };
 
     submitLockRef.current = true;
@@ -845,6 +850,7 @@ const CreateEventPurchaseScreen = () => {
             } as const);
 
         if (outcome.action === "settled") {
+          checkoutKeyRef.current = newCheckoutKey();
           setPaymentError("");
           Alert.alert(
             "Purchase confirmed",
@@ -939,6 +945,7 @@ const CreateEventPurchaseScreen = () => {
           return;
         }
 
+        checkoutKeyRef.current = newCheckoutKey();
         setPaymentError("");
         Alert.alert(
           "Purchase confirmed",
@@ -954,6 +961,7 @@ const CreateEventPurchaseScreen = () => {
         return;
       }
 
+      checkoutKeyRef.current = newCheckoutKey();
       Alert.alert("Purchase created", `${money(freshTotal)} · ${selected.name}`, [
         { text: "OK", onPress: () => router.back() },
       ]);

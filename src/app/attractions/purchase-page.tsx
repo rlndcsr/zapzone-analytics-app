@@ -343,6 +343,11 @@ const PurchasePageScreen = () => {
   const [confirmed, setConfirmed] = useState(false);
   /** The server's answer when this checkout had already gone through (ALREADY_PURCHASED). */
   const [alreadyPurchasedNotice, setAlreadyPurchasedNotice] = useState<string | null>(null);
+  /** What the server actually has for that earlier purchase, shown instead of this form's figures. */
+  const [existingPurchase, setExistingPurchase] = useState<{
+    quantity: number;
+    paid: number;
+  } | null>(null);
   // Location day-offs backing the calendar's blocked / limited dates (same
   // data + endpoint the web purchase calendar uses).
   const [dayOffs, setDayOffs] = useState<DayOff[]>([]);
@@ -760,9 +765,21 @@ const PurchasePageScreen = () => {
         // create and charge a second one (web PurchaseAttraction).
         const refusal =
           createErr instanceof ApiError && createErr.status === 409
-            ? (createErr.body as { code?: string } | undefined)
+            ? (createErr.body as
+                | {
+                    code?: string;
+                    data?: { quantity?: number | string; amount_paid?: number | string };
+                  }
+                | undefined)
             : undefined;
         if (refusal?.code === "ALREADY_PURCHASED") {
+          const earlier = refusal.data;
+          if (earlier) {
+            setExistingPurchase({
+              quantity: Number(earlier.quantity ?? quantity),
+              paid: Number(earlier.amount_paid ?? 0),
+            });
+          }
           checkoutKeyRef.current = newCheckoutKey();
           markAttractionPurchasesStale();
           setPaymentError("");
@@ -946,7 +963,7 @@ const PurchasePageScreen = () => {
               <View className="flex-row justify-between">
                 <Text className="text-sm text-gray-500 dark:text-gray-400">Tickets</Text>
                 <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                  {quantity}
+                  {existingPurchase?.quantity ?? quantity}
                 </Text>
               </View>
               <View className="flex-row justify-between">
@@ -956,9 +973,11 @@ const PurchasePageScreen = () => {
                 </Text>
               </View>
               <View className="flex-row justify-between pt-2 mt-1 border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-base font-bold text-gray-900 dark:text-white">Total</Text>
                 <Text className="text-base font-bold text-gray-900 dark:text-white">
-                  {money(total)}
+                  {existingPurchase ? "Total Paid" : "Total"}
+                </Text>
+                <Text className="text-base font-bold text-gray-900 dark:text-white">
+                  {money(existingPurchase ? existingPurchase.paid : total)}
                 </Text>
               </View>
             </View>

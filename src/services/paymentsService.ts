@@ -8,6 +8,7 @@ import {
   isChargeOutcomeUnknown,
 } from "../lib/payments/chargeOutcome";
 import { tokenizeCardWithAccept } from "../lib/payments/acceptTokenize";
+import { checkoutTokenFor } from "../lib/payments/checkoutTokens";
 
 /** Payment lifecycle status (backend `status` column). */
 export type PaymentStatus =
@@ -630,10 +631,15 @@ export async function chargePayment(
   token: string,
   body: PaymentChargeRequest,
 ): Promise<PaymentChargeResponse> {
+  // the token the create returned, so the server knows this checkout made the record
+  const checkoutToken =
+    body.payable_type && body.payable_id
+      ? checkoutTokenFor(body.payable_type, body.payable_id)
+      : undefined;
   return apiRequest<PaymentChargeResponse>("/api/payments/charge", {
     method: "POST",
     token,
-    body,
+    body: checkoutToken ? { ...body, checkout_token: checkoutToken } : body,
     timeoutMs: CHARGE_TIMEOUT_MS,
   });
 }

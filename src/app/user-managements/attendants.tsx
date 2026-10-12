@@ -44,6 +44,7 @@ import {
   type LocationOption,
 } from "../../services/locationsService";
 import {
+  bulkDeleteStaffUsers,
   createStaff,
   createStaffInvite,
   deleteStaffUser,
@@ -1020,8 +1021,9 @@ const ManageAttendants = () => {
     viewMode,
   ]);
 
-  // No bulk staff endpoint — fan out per-id requests, skipping the current user
-  // and (for a status change) rows already in the target state.
+  // Delete goes to the bulk-delete endpoint (web ManageAttendants); a status
+  // change has no bulk endpoint, so it fans out per-id requests. Both skip the
+  // current user and (for a status change) rows already in the target state.
   const runBulk = useCallback(
     async (target: "active" | "inactive" | "delete") => {
       const token = getToken();
@@ -1036,14 +1038,23 @@ const ManageAttendants = () => {
       setBulkBusy(target);
       try {
         if (target === "delete") {
-          for (const u of chosen) await deleteStaffUser(token, u.id);
-        } else {
-          for (const u of chosen)
-            if (u.status !== target) await toggleStaffStatus(token, u.id);
+          const message = await bulkDeleteStaffUsers(
+            token,
+            chosen.map((u) => u.id),
+          );
+          clearSelection();
+          afterMutation();
+          Alert.alert("Attendants deleted", message ?? "Attendants deleted");
+          return;
         }
+        for (const u of chosen)
+          if (u.status !== target) await toggleStaffStatus(token, u.id);
         clearSelection();
         afterMutation();
       } catch (err) {
+        // reload rather than guess: part of the selection may already have gone through
+        clearSelection();
+        afterMutation();
         Alert.alert(
           "Bulk action failed",
           err instanceof Error ? err.message : "Could not update the selection.",

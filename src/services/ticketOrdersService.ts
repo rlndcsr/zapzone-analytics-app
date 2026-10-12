@@ -1,6 +1,7 @@
 import { apiRequest } from "../lib/api";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
+import { checkoutTokenFor, rememberCheckoutToken } from "../lib/payments/checkoutTokens";
 
 /*
  * Ticket-order (multi-item order) API client — mirrors the web admin's
@@ -179,6 +180,8 @@ export type TicketOrderCheckoutInput = {
   guest_phone?: string;
   payment_method?: "authorize.net" | "in-store" | "paylater";
   notes?: string;
+  /** One per checkout attempt (`lib/payments/checkoutKey`), so a retry cannot charge twice. */
+  checkout_key?: string;
 };
 
 /* ------------------------------------------------------------- mapping --- */
@@ -397,6 +400,7 @@ export async function checkoutTicketOrder(
   if (!data || typeof data !== "object") {
     throw new Error("We could not place this order.");
   }
+  rememberCheckoutToken("ticket_order", Number((data as RawOrder).id), res.qr_token);
   return mapOrder(
     data as RawOrder,
     typeof res.qr_token === "string" ? res.qr_token : null,
@@ -556,9 +560,11 @@ export async function rollbackTicketOrder(
   orderId: number,
 ): Promise<void> {
   try {
+    // a shopper's rollback is refused unless it carries the order's own token
     await apiRequest(`/api/ticket-orders/${orderId}/rollback`, {
       method: "DELETE",
       token,
+      body: { qr_token: checkoutTokenFor("ticket_order", orderId) },
     });
   } catch {
     /* never mask the payment error with a cleanup error */

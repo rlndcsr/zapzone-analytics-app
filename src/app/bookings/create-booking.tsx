@@ -736,6 +736,8 @@ const CreateBookingScreen = () => {
   // One key per checkout attempt (lib/payments/checkoutKey). It survives an "already booked"
   // answer, so a second tap shows that answer again instead of booking a duplicate.
   const checkoutKeyRef = useRef(newCheckoutKey());
+  // what the key was last sent for; a changed retry gets a new key
+  const checkoutAttemptRef = useRef<string | null>(null);
   // Taking the last online start is worth telling staff about, but it is not an overlap, so it is
   // confirmed rather than approved by a manager. Held in a ref for the same reason as the token.
   const sideEffectsAcceptedRef = useRef(false);
@@ -1540,15 +1542,20 @@ const CreateBookingScreen = () => {
     };
   }, [pkg, scheduledDate, slot, effectiveLocationId]);
 
-  // Submitted total = base+fees (web); discount is sent separately.
-  const submitTotal = feeBreakdown ? feeBreakdown.total : subtotal;
+  const specialDiscount = special?.has_special_pricing ? special.total_discount : 0;
+  // Submitted total = base+fees less special pricing, so the amount saved and
+  // charged matches the total shown (web OnsiteBooking); the discount is also
+  // sent on its own as discount_amount.
+  const submitTotal = Math.max(
+    0,
+    (feeBreakdown ? feeBreakdown.total : subtotal) - specialDiscount,
+  );
   // Special pricing plus whatever a validated gift card / promo code takes off.
   const codeDiscount =
     (giftResult?.valid ? giftResult.discountAmount : 0) +
     (promoResult?.valid ? promoResult.discountAmount : 0);
-  const discount =
-    (special?.has_special_pricing ? special.total_discount : 0) + codeDiscount;
-  const displayTotal = Math.max(0, submitTotal - discount);
+  const discount = specialDiscount + codeDiscount;
+  const displayTotal = Math.max(0, submitTotal - codeDiscount);
 
   // Quoted off the pre-fee subtotal, as the web's calculatePartialAmount does.
   const partialDeposit = useMemo(() => {
@@ -1819,13 +1826,16 @@ const CreateBookingScreen = () => {
         time: slot.startTime,
       });
       const freshFeeBreakdown = freshPricing?.feeBreakdown ?? feeBreakdown;
-      const freshSubmitTotal = freshFeeBreakdown
-        ? freshFeeBreakdown.total
-        : subtotal;
       const freshSpecial = freshPricing?.specialPricing ?? special;
-      const freshDiscount =
-        (freshSpecial?.has_special_pricing ? freshSpecial.total_discount : 0) +
-        codeDiscount;
+      const freshSpecialDiscount = freshSpecial?.has_special_pricing
+        ? freshSpecial.total_discount
+        : 0;
+      const freshSubmitTotal = Math.max(
+        0,
+        (freshFeeBreakdown ? freshFeeBreakdown.total : subtotal) -
+          freshSpecialDiscount,
+      );
+      const freshDiscount = freshSpecialDiscount + codeDiscount;
       // Same branching as the `dueNow` memo, just fed the fresh total.
       const freshDueNow =
         paymentMethod === "paylater"
@@ -1849,6 +1859,14 @@ const CreateBookingScreen = () => {
         freshAmountPaid,
         freshSubmitTotal,
       );
+
+      // a retry for a different package, time, space or party size is a new
+      // checkout: keeping the old key would be told the earlier booking went through
+      const attempt = JSON.stringify([pkg.id, scheduledDate, slot.startTime, slot.roomId ?? null, participants]);
+      if (checkoutAttemptRef.current !== null && checkoutAttemptRef.current !== attempt) {
+        checkoutKeyRef.current = newCheckoutKey();
+      }
+      checkoutAttemptRef.current = attempt;
 
       const created = await createBooking(token, {
         guest_name: customerName.trim(),

@@ -462,6 +462,25 @@ export async function deleteStaffUser(token: string, id: number): Promise<void> 
   await apiRequest(`/api/users/${id}`, { method: "DELETE", token });
 }
 
+/**
+ * POST /api/users/bulk-delete — remove several staff accounts (web
+ * `userService.bulkDelete`). The server skips the caller and any account
+ * outside their access, so its message (e.g. "2 users deleted successfully;
+ * 1 skipped …") is what to show, and the list must be reloaded rather than
+ * pruned by the ids that were sent.
+ */
+export async function bulkDeleteStaffUsers(
+  token: string,
+  ids: number[],
+): Promise<string | null> {
+  const res = await apiRequest<{ message?: unknown }>("/api/users/bulk-delete", {
+    method: "POST",
+    token,
+    body: { ids },
+  });
+  return typeof res?.message === "string" && res.message ? res.message : null;
+}
+
 export type ResendCredentialsInput = {
   passwordMode: "generate" | "custom";
   /** Required when passwordMode is "custom"; min 8 characters (server-enforced). */

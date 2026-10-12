@@ -48,6 +48,7 @@ import {
   type LocationOption,
 } from "../../services/locationsService";
 import {
+  bulkDeleteStaffUsers,
   createStaff,
   createStaffInvite,
   deleteStaffUser,
@@ -1240,10 +1241,10 @@ const ManageAccounts = () => {
     viewMode,
   ]);
 
-  // Bulk-set status / delete for the selected accounts. There's no bulk users
-  // endpoint, so — like the bookings bulk bar — this fans out per-id requests,
-  // skipping the current user and (for a status change) rows already in the
-  // target state.
+  // Bulk-set status / delete for the selected accounts. Delete goes to the
+  // bulk-delete endpoint (web ManageAccounts); a status change has no bulk
+  // endpoint, so it fans out per-id requests. Both skip the current user and
+  // (for a status change) rows already in the target state.
   const runBulk = useCallback(
     async (target: "active" | "inactive" | "delete") => {
       const token = getToken();
@@ -1258,14 +1259,23 @@ const ManageAccounts = () => {
       setBulkBusy(target);
       try {
         if (target === "delete") {
-          for (const u of chosen) await deleteStaffUser(token, u.id);
-        } else {
-          for (const u of chosen)
-            if (u.status !== target) await toggleStaffStatus(token, u.id);
+          const message = await bulkDeleteStaffUsers(
+            token,
+            chosen.map((u) => u.id),
+          );
+          clearSelection();
+          afterMutation();
+          Alert.alert("Accounts deleted", message ?? "Accounts deleted");
+          return;
         }
+        for (const u of chosen)
+          if (u.status !== target) await toggleStaffStatus(token, u.id);
         clearSelection();
         afterMutation();
       } catch (err) {
+        // reload rather than guess: part of the selection may already have gone through
+        clearSelection();
+        afterMutation();
         Alert.alert(
           "Bulk action failed",
           err instanceof Error ? err.message : "Could not update the selection.",

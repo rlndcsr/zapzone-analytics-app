@@ -7,6 +7,7 @@ import { compareCheckInRows } from "../lib/checkin/checkInOrder";
 import { newestFirst } from "../lib/bookings/bookingSync";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { cardLabelFromPayments } from "../lib/payments/cardLabel";
+import { checkoutTokenBody, rememberCheckoutToken } from "../lib/payments/checkoutTokens";
 import { roomIsAvailable } from "../lib/rooms";
 import { normalizeCategory } from "../lib/venueCategories";
 import {
@@ -1013,12 +1014,17 @@ export async function deleteBooking(
   id: number,
   options?: { changeReason?: string },
 ): Promise<void> {
+  const checkoutToken = checkoutTokenBody("booking", id);
   await apiRequest(`/api/bookings/${id}`, {
     method: "DELETE",
     token,
-    body: options?.changeReason
-      ? { change_reason: options.changeReason }
-      : undefined,
+    body:
+      options?.changeReason || checkoutToken
+        ? {
+            ...(options?.changeReason ? { change_reason: options.changeReason } : {}),
+            ...checkoutToken,
+          }
+        : undefined,
   });
 }
 
@@ -1029,6 +1035,7 @@ export async function forceDeleteBooking(
   await apiRequest(`/api/bookings/${id}/force-delete`, {
     method: "DELETE",
     token,
+    body: checkoutTokenBody("booking", id),
   });
 }
 
@@ -2789,6 +2796,8 @@ type CreateBookingResponse = {
     amount_paid?: number | string | null;
   };
   message?: string;
+  /** Proves this caller created the booking when it rolls back or charges it. */
+  checkout_token?: unknown;
 };
 
 /**
@@ -2813,6 +2822,7 @@ export async function createBooking(
     token,
     body: input,
   });
+  rememberCheckoutToken("booking", res.data.id, res.checkout_token);
   return {
     id: res.data.id,
     referenceNumber: res.data.reference_number ?? null,

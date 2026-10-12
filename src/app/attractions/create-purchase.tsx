@@ -77,6 +77,7 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
+import { newCheckoutKey } from "../../lib/payments/checkoutKey";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
   buildAppliedDiscounts,
@@ -615,6 +616,10 @@ const CreatePurchaseScreen = () => {
   /** Web parity (`lastSubmitTimeRef`): a 3s cooldown after any submit, so a
    *  double-tap can never produce a second card charge. */
   const lastSubmitAtRef = useRef(0);
+  /** Sent as `checkout_key` with the order or purchase, so a retry after "no
+   *  answer" cannot charge twice; renewed once a purchase goes through (web
+   *  `CreatePurchase`). */
+  const checkoutKeyRef = useRef(newCheckoutKey());
   /** Monotonic suffix that keeps two identical order lines distinguishable. */
   const lineSeqRef = useRef(0);
 
@@ -1352,6 +1357,7 @@ const CreatePurchaseScreen = () => {
       notes:
         notes.trim() ||
         `Staff order — ${items.length} item${items.length > 1 ? "s" : ""}`,
+      checkout_key: checkoutKeyRef.current,
     });
 
     // One code admits the whole order, so it is stored on the order itself
@@ -1376,6 +1382,7 @@ const CreatePurchaseScreen = () => {
       });
 
       if (outcome.action === "settled") {
+        checkoutKeyRef.current = newCheckoutKey();
         markOrderListsStale();
         Alert.alert(
           "Order created",
@@ -1486,6 +1493,7 @@ const CreatePurchaseScreen = () => {
       } catch {
         // The order exists and must not be rolled back over a bookkeeping
         // failure — staff finish it from Payments (web parity).
+        checkoutKeyRef.current = newCheckoutKey();
         markOrderListsStale();
         Alert.alert(
           "Order created, payment not recorded",
@@ -1496,6 +1504,7 @@ const CreatePurchaseScreen = () => {
       }
     }
 
+    checkoutKeyRef.current = newCheckoutKey();
     markOrderListsStale();
     const chargedNote =
       giftCard && isCardPayment && orderChargeAmount !== order.totalAmount
@@ -1679,6 +1688,7 @@ const CreatePurchaseScreen = () => {
         freshSpecialPricingDiscount > 0 ? freshSpecialPricingDiscount : undefined,
       applied_discounts:
         freshAppliedDiscounts.length > 0 ? freshAppliedDiscounts : undefined,
+      checkout_key: checkoutKeyRef.current,
     };
 
     submitLockRef.current = true;
@@ -1717,6 +1727,7 @@ const CreatePurchaseScreen = () => {
             } as const);
 
         if (outcome.action === "settled") {
+          checkoutKeyRef.current = newCheckoutKey();
           setPaymentError("");
           Alert.alert(
             "Purchase confirmed",
@@ -1816,6 +1827,7 @@ const CreatePurchaseScreen = () => {
           return;
         }
 
+        checkoutKeyRef.current = newCheckoutKey();
         setPaymentError("");
         Alert.alert(
           "Purchase confirmed",
@@ -1831,6 +1843,7 @@ const CreatePurchaseScreen = () => {
         return;
       }
 
+      checkoutKeyRef.current = newCheckoutKey();
       Alert.alert("Purchase created", `${money(freshTotal)} · ${selected.name}`, [
         { text: "OK", onPress: () => router.back() },
       ]);

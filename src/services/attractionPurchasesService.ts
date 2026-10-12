@@ -1,6 +1,7 @@
 import { apiRequest } from "../lib/api";
 import { fetchAllPages } from "../lib/fetchAllPages";
 import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
+import { checkoutTokenBody, rememberCheckoutToken } from "../lib/payments/checkoutTokens";
 import type {
   AppliedDiscount as PayloadAppliedDiscount,
   AppliedFee as PayloadAppliedFee,
@@ -291,6 +292,8 @@ type CreatePurchaseResponse = {
   success: boolean;
   data: { id: number } & Record<string, unknown>;
   message?: string;
+  /** Proves this caller created the purchase when it rolls back or charges it. */
+  checkout_token?: unknown;
 };
 
 /** POST /api/attraction-purchases — create an on-site purchase. */
@@ -302,6 +305,7 @@ export async function createAttractionPurchase(
     "/api/attraction-purchases",
     { method: "POST", token, body: input },
   );
+  rememberCheckoutToken("attraction_purchase", res.data.id, res.checkout_token);
   return { id: res.data.id };
 }
 
@@ -701,6 +705,7 @@ export async function deleteAttractionPurchase(
   await apiRequest(`/api/attraction-purchases/${id}`, {
     method: "DELETE",
     token,
+    body: checkoutTokenBody("attraction_purchase", id),
   });
 }
 
@@ -718,6 +723,7 @@ export async function forceDeleteAttractionPurchase(
   await apiRequest(`/api/attraction-purchases/${id}/force-delete`, {
     method: "DELETE",
     token,
+    body: checkoutTokenBody("attraction_purchase", id),
   });
 }
 

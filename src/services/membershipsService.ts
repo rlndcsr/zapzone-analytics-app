@@ -668,7 +668,14 @@ export async function updateMembershipPaymentMethod(
   });
 }
 
-/** POST /api/memberships/{id}/retry-payment — retry a failed/past-due charge. */
+/**
+ * POST /api/memberships/{id}/retry-payment — retry a failed/past-due charge.
+ *
+ * With a saved card this charges it through Authorize.Net, which can outrun the
+ * default 15s; waiting as long as a card charge does means staff see the
+ * server's own answer (including "no answer from the payment service") rather
+ * than a client timeout. A failure throws an ApiError carrying that message.
+ */
 export async function retryMembershipPayment(
   token: string,
   id: number,
@@ -676,6 +683,7 @@ export async function retryMembershipPayment(
   await apiRequest(`/api/memberships/${id}/retry-payment`, {
     method: "POST",
     token,
+    timeoutMs: 60000,
   });
 }
 

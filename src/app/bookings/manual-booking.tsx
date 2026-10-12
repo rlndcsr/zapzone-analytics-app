@@ -447,6 +447,8 @@ const ManualBookingScreen = () => {
   // One key per checkout attempt (lib/payments/checkoutKey). It survives an "already booked"
   // answer, so a second tap shows that answer again instead of booking a duplicate.
   const checkoutKeyRef = useRef(newCheckoutKey());
+  // what the key was last sent for; a changed retry gets a new key
+  const checkoutAttemptRef = useRef<string | null>(null);
   const [overrideGate, setOverrideGate] = useState<{
     conflicts: string[];
     onlineSlotsLost: string[];
@@ -762,14 +764,16 @@ const ManualBookingScreen = () => {
     };
   }, [pkg, scheduledDate, scheduledTime, subtotal, effectiveLocationId]);
 
-  // total_amount is base+fees (discount is sent separately, like the web).
+  // total_amount is base+fees less the special-pricing discount — the total
+  // shown is the one saved and charged (web ManualBooking); the discount is
+  // also sent on its own as discount_amount.
   const feeTotal = feeBreakdown ? feeBreakdown.total : subtotal;
   const discount = special?.has_special_pricing ? special.total_discount : 0;
   const displayTotal = Math.max(0, feeTotal - discount);
 
   const finalTotal = totalAmountOverride
     ? Math.max(0, Number(totalAmountOverride) || 0)
-    : feeTotal;
+    : displayTotal;
   const finalAmountPaid =
     paymentMethod === "paylater"
       ? 0
@@ -953,7 +957,7 @@ const ManualBookingScreen = () => {
         : 0;
       const freshFinalTotal = totalAmountOverride
         ? Math.max(0, Number(totalAmountOverride) || 0)
-        : freshFeeTotal;
+        : Math.max(0, freshFeeTotal - freshDiscount);
       const freshFinalAmountPaid =
         paymentMethod === "paylater"
           ? 0
@@ -964,6 +968,14 @@ const ManualBookingScreen = () => {
         freshFinalAmountPaid,
         freshFinalTotal,
       );
+
+      // a retry for a different package, time, space or party size is a new
+      // checkout: keeping the old key would be told the earlier booking went through
+      const attempt = JSON.stringify([pkg.id, scheduledDate, scheduledTime, selectedRoomId ?? null, participants]);
+      if (checkoutAttemptRef.current !== null && checkoutAttemptRef.current !== attempt) {
+        checkoutKeyRef.current = newCheckoutKey();
+      }
+      checkoutAttemptRef.current = attempt;
 
       const { id, referenceNumber, customerId } = await createBooking(token, {
         overlap_override_token: overrideTokenRef.current ?? undefined,
