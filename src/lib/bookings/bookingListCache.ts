@@ -5,7 +5,9 @@ import {
   type BookingSyncCursor,
   type CalendarBooking,
 } from "../../services/bookingsService";
+import { getToken } from "../session";
 import { applyBookingChanges } from "./bookingSync";
+import { createOwnerGuard } from "./cacheOwner";
 import { mergeBookingInto } from "./patchBooking";
 
 // Single source of truth for the full booking list. Manage Bookings and both
@@ -31,6 +33,21 @@ const rangeCache = new Map<string, CacheEntry>();
 const rangeInFlight = new Map<string, Promise<CalendarBooking[]>>();
 /** Swiping through a month of days would otherwise keep every one of them for the session. */
 const MAX_RANGE_ENTRIES = 24;
+// Bumped on every reset, so a range fetch started before a location switch never files its result.
+let generation = 0;
+
+function resetBookingCache(): void {
+  cache.clear();
+  rangeCache.clear();
+  latestSync.clear();
+  inFlight.clear();
+  rangeInFlight.clear();
+  generation++;
+}
+
+// Another session (sign-out, sign-in, account switch) finds every list emptied first.
+const ownBookingCache = createOwnerGuard<string | null>(resetBookingCache);
+const owned = () => ownBookingCache(getToken());
 
 export const bookingCacheKey = (locationId?: number) =>
   String(locationId ?? "all");
@@ -41,29 +58,36 @@ export const bookingRangeKey = (
   locationId?: number,
 ) => `${bookingCacheKey(locationId)}|${from}|${to}`;
 
-export const getCachedRange = (key: string): CacheEntry | undefined =>
-  rangeCache.get(key);
+export const getCachedRange = (key: string): CacheEntry | undefined => {
+  owned();
+  return rangeCache.get(key);
+};
 
-export const getCachedBookings = (key: string): CacheEntry | undefined =>
-  cache.get(key);
+export const getCachedBookings = (key: string): CacheEntry | undefined => {
+  owned();
+  return cache.get(key);
+};
 
 export const isBookingCacheFresh = (entry?: CacheEntry): boolean =>
   !!entry && Date.now() - entry.fetchedAt < CACHE_TTL_MS;
 
-export const hasCachedBookings = (key: string): boolean => cache.has(key);
+export const hasCachedBookings = (key: string): boolean => {
+  owned();
+  return cache.has(key);
+};
 
 /** True while a sync is still running (TEMP: investigation logging). */
-export const isBookingSyncInProgress = (key?: string): boolean =>
-  key == null ? inFlight.size > 0 : inFlight.has(key);
+export const isBookingSyncInProgress = (key?: string): boolean => {
+  owned();
+  return key == null ? inFlight.size > 0 : inFlight.has(key);
+};
 
 // Set after a mutation so the list screen force-refetches on next focus.
 let stale = false;
 
 /** Mark the cached booking list stale so it refetches on next focus. */
 export function markBookingsStale(): void {
-  cache.clear();
-  rangeCache.clear();
-  latestSync.clear();
+  resetBookingCache();
   stale = true;
 }
 
@@ -97,6 +121,7 @@ export function patchCachedBooking(
   bookingId: number,
   patch: Partial<CalendarBooking>,
 ): void {
+  owned();
   let touched = false;
 
   // Both maps: a booking the calendar is showing lives in a range entry, and a note saved from
@@ -121,6 +146,7 @@ export function readBookingCache(
   key: string,
   caller: string,
 ): CacheEntry | undefined {
+  owned();
   const entry = cache.get(key);
   if (__DEV__) {
     const state = isBookingCacheFresh(entry) ? "HIT" : "MISS";
@@ -139,6 +165,7 @@ export async function syncBookingList({
   locationId?: number;
   force?: boolean;
 }): Promise<CalendarBooking[]> {
+  owned();
   const key = bookingCacheKey(locationId);
 
   const joined = force ? undefined : inFlight.get(key);
@@ -211,6 +238,7 @@ export async function fullBookingList({
   locationId?: number;
   force?: boolean;
 }): Promise<CalendarBooking[]> {
+  owned();
   const entry = cache.get(bookingCacheKey(locationId));
   if (!force && isBookingCacheFresh(entry)) return entry!.data;
   return syncBookingList({ token, locationId, force });
@@ -236,6 +264,7 @@ export async function syncBookingRange({
   to: string;
   force?: boolean;
 }): Promise<CalendarBooking[]> {
+  owned();
   const full = cache.get(bookingCacheKey(locationId));
   if (!force && isBookingCacheFresh(full)) {
     return full!.data.filter((b) => b.date >= from && b.date <= to);
@@ -246,14 +275,19 @@ export async function syncBookingRange({
   const joined = force ? undefined : rangeInFlight.get(key);
   if (joined) return joined;
 
-  const pending = fetchBookingsInRange({ token, locationId, from, to }).finally(
-    () => {
-      rangeInFlight.delete(key);
-    },
-  );
+  const startedIn = generation;
+  const pending: Promise<CalendarBooking[]> = fetchBookingsInRange({
+    token,
+    locationId,
+    from,
+    to,
+  }).finally(() => {
+    if (rangeInFlight.get(key) === pending) rangeInFlight.delete(key);
+  });
   rangeInFlight.set(key, pending);
 
   const data = await pending;
+  if (startedIn !== generation) return data;
   // Re-inserting moves the key to the end, so the oldest-touched window is the one dropped.
   rangeCache.delete(key);
   rangeCache.set(key, { fetchedAt: Date.now(), data });
