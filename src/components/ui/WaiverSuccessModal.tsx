@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useEffect, useRef, useState } from "react";
-import { Modal, Pressable, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 
 type Props = {
@@ -20,6 +20,9 @@ type Props = {
   autoCloseSeconds?: number;
   onAutoClose?: () => void;
   closingText?: string;
+  /** An optional second, outlined button under the main one. */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
 };
 
 export function WaiverSuccessModal({
@@ -32,6 +35,8 @@ export function WaiverSuccessModal({
   autoCloseSeconds,
   onAutoClose,
   closingText = "Closing",
+  secondaryLabel,
+  onSecondary,
 }: Props) {
   const [secondsLeft, setSecondsLeft] = useState(autoCloseSeconds ?? 0);
   const autoCloseRef = useRef(onAutoClose ?? onClose);
@@ -59,7 +64,16 @@ export function WaiverSuccessModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View className="flex-1 items-center justify-center bg-black/60 p-5">
+      <View className="flex-1 bg-black/60">
+        {/* Scrolls so every button stays reachable on a short screen. */}
+        <ScrollView
+          contentContainerStyle={{
+            flexGrow: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
         <View className="w-full max-w-md items-center rounded-2xl bg-white p-6 dark:bg-neutral-900">
           <View className="mb-3 h-14 w-14 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
             <Feather name="check" size={24} color="#16A34A" />
@@ -108,12 +122,25 @@ export function WaiverSuccessModal({
             </Text>
           </Pressable>
 
+          {!!secondaryLabel && !!onSecondary && (
+            <Pressable
+              onPress={onSecondary}
+              className="mt-2.5 w-full rounded-lg border border-gray-300 bg-white py-3 active:opacity-80 dark:border-neutral-700 dark:bg-neutral-900"
+              accessibilityRole="button"
+            >
+              <Text className="text-center text-sm font-semibold text-gray-700 dark:text-gray-200">
+                {secondaryLabel}
+              </Text>
+            </Pressable>
+          )}
+
           {!!autoCloseSeconds && (
             <Text className="mt-3 text-center text-xs text-gray-400 dark:text-gray-500">
               {closingText} in {secondsLeft}s
             </Text>
           )}
         </View>
+        </ScrollView>
       </View>
     </Modal>
   );

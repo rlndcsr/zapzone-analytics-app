@@ -19,7 +19,12 @@ import { WaiverSuccessModal } from "../../components/ui/WaiverSuccessModal";
 import { KioskWaiverForm } from "../../components/waivers/KioskWaiverForm";
 import { ApiError } from "../../lib/api";
 import { formatFullDate } from "../../lib/date/calendar";
-import { DATE_KEY } from "../../lib/escapeRooms/escapeRooms";
+import {
+  DATE_KEY,
+  guestOpenTimes as openTimes,
+  guestRoomSummary,
+  isPinnedGame,
+} from "../../lib/escapeRooms/escapeRooms";
 import { useStatusModal } from "../../lib/hooks/useStatusModal";
 import { markWaiversStale } from "../../lib/hooks/useWaivers";
 import { touchSession } from "../../lib/session";
@@ -56,9 +61,6 @@ const errorMessage = (e: unknown, fallback: string): string =>
 /** A submission refused on this field (the backend's `errors.{field}`). */
 const refusedField = (e: unknown, field: string): boolean =>
   e instanceof ApiError && !!e.fieldErrors?.[field];
-
-/** Times a guest may pick; a game that just finished is still accepted but not offered. */
-const openTimes = (times: EscapeRoomGuestTime[]) => times.filter((t) => !t.justFinished);
 
 /** "Tuesday, September 29" without the year, as the web words it. */
 const dayLabel = (key: string) => formatFullDate(key).replace(/, \d{4}$/, "");
@@ -193,8 +195,11 @@ export default function EscapeRoomKioskScreen() {
   const [completedWaiverId, setCompletedWaiverId] = useState<number | null>(null);
   const [completedRef, setCompletedRef] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
+  // Set once the screen resets for the next guest: the link's finished game is offered only before that.
+  const [linkSpent, setLinkSpent] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
+  const submitLock = useRef(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadSequence = useRef(0);
   const stepSequence = useRef(0);
@@ -239,6 +244,9 @@ export default function EscapeRoomKioskScreen() {
   }, [loadKiosk]);
 
   const activeLink = kiosk && gameLink && kiosk.date === gameLink.date ? gameLink : null;
+  const pinnedGame = isPinnedGame(kiosk);
+  const linkedTime = (roomId: number): string | null =>
+    activeLink && !linkSpent && Number(activeLink.room) === roomId ? activeLink.time ?? null : null;
 
   // Unavailable (not a bad link): try again by itself, as the web does.
   useEffect(() => {
@@ -249,6 +257,7 @@ export default function EscapeRoomKioskScreen() {
 
   const resetAll = useCallback(() => {
     stepSequence.current++;
+    setLinkSpent(true);
     setFormKey((k) => k + 1);
     setPhase("room");
     setRoom(null);
@@ -269,7 +278,7 @@ export default function EscapeRoomKioskScreen() {
   // and counts as app activity: this screen can serve guests for hours with no
   // staff screen in between, and its public calls don't extend the staff
   // session, so without this the app would sign out under a guest.
-  const idleActive = !loading && !error && !justCompleted;
+  const idleActive = !loading && !error && !justCompleted && !submitting && !formLoading;
   const armIdle = useCallback(() => {
     void touchSession();
     if (idleTimer.current) clearTimeout(idleTimer.current);
@@ -359,7 +368,12 @@ export default function EscapeRoomKioskScreen() {
       if (sequence !== stepSequence.current) return;
       setTime(null);
       setPhase("time");
-      setNotice(errorMessage(e, "This room is not ready for check-in. Please see the front desk."));
+      setNotice(
+        errorMessage(
+          e,
+          "We could not load your waiver. Please tap your time again. If this keeps happening, please see the front desk.",
+        ),
+      );
     } finally {
       if (sequence === stepSequence.current) setFormLoading(false);
     }
@@ -433,6 +447,8 @@ export default function EscapeRoomKioskScreen() {
   };
 
   const handleSubmit = async (submission: KioskSubmission) => {
+    // A second tap before the first re-renders, or anything behind the confirmation, must not sign twice.
+    if (justCompleted || submitLock.current) return;
     if (!room) {
       backToRooms();
       return;
@@ -442,6 +458,7 @@ export default function EscapeRoomKioskScreen() {
       toTop();
       return;
     }
+    submitLock.current = true;
     setSubmitting(true);
     try {
       const result = await submitEscapeRoomWaiver(locationId, room.id, time.time, submission, {
@@ -482,6 +499,12 @@ export default function EscapeRoomKioskScreen() {
         setNotice(errorMessage(e, "That time is no longer available. Please choose another time."));
         toTop();
         void refreshRoomTimes(room);
+      } else if (e instanceof ApiError && e.status === 0) {
+        // No answer is not a refusal: the waiver may be saved, so it is not sent again from here.
+        status.error(
+          "We did not hear back",
+          "Your waiver may already be saved. Please check with the front desk before signing again.",
+        );
       } else {
         status.error(
           "Could not submit",
@@ -489,6 +512,7 @@ export default function EscapeRoomKioskScreen() {
         );
       }
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   };
@@ -577,6 +601,12 @@ export default function EscapeRoomKioskScreen() {
   const noGamesText = kiosk.ahead
     ? "There are no booked games in this room that day. Please check your booking email, or see the front desk."
     : "There are no more games in this room today. Please see the front desk.";
+  const offeredTimes = room ? openTimes(room.times, linkedTime(room.id)) : [];
+  const nextLabel =
+    room && time
+      ? `Sign for another player on ${room.name} ·\u00a0${time.label.replace(/ /g, "\u00a0")}`
+      : "Sign for another player";
+  const secondaryLabel = pinnedGame ? undefined : "Sign for a different room or time";
 
   return (
     <>
@@ -653,8 +683,8 @@ export default function EscapeRoomKioskScreen() {
                   </Text>
                   <View className="gap-3">
                     {kiosk.rooms.map((r) => {
-                      const available = openTimes(r.times);
-                      const hasTimes = available.length > 0;
+                      const summary = guestRoomSummary(r, kiosk.ahead, linkedTime(r.id));
+                      const hasTimes = summary.offered > 0;
                       return (
                         <Pressable
                           key={r.id}
@@ -670,13 +700,7 @@ export default function EscapeRoomKioskScreen() {
                             {r.name}
                           </Text>
                           <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            {kiosk.ahead
-                              ? hasTimes
-                                ? `${r.durationMinutes} min · ${available.length} booked ${available.length === 1 ? "game" : "games"} that day`
-                                : "No booked games that day"
-                              : hasTimes
-                                ? `${r.durationMinutes} min · ${available.length} ${available.length === 1 ? "game" : "games"} left today`
-                                : "No more games today"}
+                            {summary.label}
                           </Text>
                         </Pressable>
                       );
@@ -708,12 +732,12 @@ export default function EscapeRoomKioskScreen() {
               <Text className="mb-4 mt-1 text-center text-sm text-gray-500 dark:text-gray-400">
                 Choose the start time on your booking.
               </Text>
-              {openTimes(room.times).length === 0 ? (
+              {offeredTimes.length === 0 ? (
                 <Text className="py-6 text-center text-sm text-gray-600 dark:text-gray-300">
                   {noGamesText}
                 </Text>
               ) : (
-                <TimeGrid times={openTimes(room.times)} onPick={(t) => void chooseTime(t)} />
+                <TimeGrid times={offeredTimes} onPick={(t) => void chooseTime(t)} />
               )}
               <View className="mt-1 items-center">
                 <OutlineButton label="Choose a different room" onPress={backToRooms} />
@@ -741,7 +765,7 @@ export default function EscapeRoomKioskScreen() {
                   {"After your game, we'll email your group photo to the email address you enter below."}
                 </Text>
                 {!time &&
-                  (openTimes(room.times).length === 0 ? (
+                  (offeredTimes.length === 0 ? (
                     <Text className="text-sm text-gray-700 dark:text-gray-200">{noGamesText}</Text>
                   ) : (
                     <View className="gap-2">
@@ -749,7 +773,7 @@ export default function EscapeRoomKioskScreen() {
                         Choose your game time. What you typed below is kept.
                       </Text>
                       <TimeGrid
-                        times={openTimes(room.times)}
+                        times={offeredTimes}
                         onPick={(t) => void chooseTime(t)}
                       />
                     </View>
@@ -777,16 +801,20 @@ export default function EscapeRoomKioskScreen() {
         </>,
       )}
 
-      {/* With an ad, the ad beat is the confirmation; it closes by itself. */}
+      {/* With an ad, the ad beat is the confirmation; it stays up long enough for the next player to tap. */}
       <KioskAdModal
         visible={justCompleted && !!completedAd}
         ad={completedAd}
         waiverId={completedWaiverId}
         signerFirstName={completedName}
         waiverReference={completedRef}
-        closeLabel="Done"
+        closeLabel={nextLabel}
         closingText="Returning to the room list"
-        onClose={resetAll}
+        onClose={startNextPlayer}
+        onAutoClose={resetAll}
+        minSeconds={SUCCESS_HOLD_SECONDS}
+        secondaryLabel={secondaryLabel}
+        onSecondary={resetAll}
       />
 
       <WaiverSuccessModal
@@ -794,11 +822,13 @@ export default function EscapeRoomKioskScreen() {
         waiverReference={completedRef}
         signerFirstName={completedName}
         note="Your group photo will be emailed to you after the game."
-        closeLabel="Next player for this game"
+        closeLabel={nextLabel}
         onClose={startNextPlayer}
         autoCloseSeconds={SUCCESS_HOLD_SECONDS}
         onAutoClose={resetAll}
         closingText="Returning to the room list"
+        secondaryLabel={secondaryLabel}
+        onSecondary={resetAll}
       />
 
       <StatusModal {...status.props} />

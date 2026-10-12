@@ -5,6 +5,7 @@ import {
   Image,
   Modal,
   Pressable,
+  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -32,6 +33,10 @@ export function KioskAdModal({
   onClose,
   closeLabel = "Start Next Waiver",
   closingText = "Returning to the start screen",
+  onAutoClose,
+  minSeconds = 0,
+  secondaryLabel,
+  onSecondary,
 }: {
   visible: boolean;
   ad: KioskAd | null;
@@ -43,23 +48,31 @@ export function KioskAdModal({
   onClose: () => void;
   closeLabel?: string;
   closingText?: string;
+  /** Runs when the countdown ends; `onClose` when absent. */
+  onAutoClose?: () => void;
+  /** Keeps the confirmation up at least this long, whatever the ad's own time. */
+  minSeconds?: number;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
 }) {
-  const totalSeconds = ad ? CONFIRM_BEAT_SECONDS + ad.displaySeconds : 0;
+  const totalSeconds = ad
+    ? Math.max(minSeconds, CONFIRM_BEAT_SECONDS + ad.displaySeconds)
+    : 0;
   const [secondsLeft, setSecondsLeft] = useState(totalSeconds);
   const [step, setStep] = useState<LearnMoreStep>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  const onCloseRef = useRef(onAutoClose ?? onClose);
+  onCloseRef.current = onAutoClose ?? onClose;
 
   useEffect(() => {
     if (!visible || !ad) return;
-    setSecondsLeft(CONFIRM_BEAT_SECONDS + ad.displaySeconds);
+    setSecondsLeft(Math.max(minSeconds, CONFIRM_BEAT_SECONDS + ad.displaySeconds));
     setStep("idle");
     setMessage(null);
     setFailed(false);
-  }, [visible, ad]);
+  }, [visible, ad, minSeconds]);
 
   useEffect(() => {
     if (!visible || !ad) return;
@@ -107,7 +120,16 @@ export function KioskAdModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View className="flex-1 items-center justify-center bg-black/60 p-5">
+      <View className="flex-1 bg-black/60">
+        {/* Scrolls so every button stays reachable on a short screen. */}
+        <ScrollView
+          contentContainerStyle={{
+            flexGrow: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
         <View className="w-full max-w-md overflow-hidden rounded-2xl bg-white dark:bg-neutral-900">
           <View className="flex-row items-center gap-2 border-b border-gray-100 px-5 py-4 dark:border-neutral-800">
             <View className="h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
@@ -227,6 +249,18 @@ export function KioskAdModal({
               </Text>
             </Pressable>
 
+            {!!secondaryLabel && !!onSecondary && (
+              <Pressable
+                onPress={onSecondary}
+                className="mt-2.5 rounded-lg border border-gray-300 bg-white py-3 active:opacity-80 dark:border-neutral-700 dark:bg-neutral-900"
+                accessibilityRole="button"
+              >
+                <Text className="text-center text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  {secondaryLabel}
+                </Text>
+              </Pressable>
+            )}
+
             <Text className="mt-2.5 text-center text-[11px] text-gray-400 dark:text-gray-500">
               {secondsLeft > 0
                 ? `${closingText} in ${secondsLeft}s`
@@ -234,6 +268,7 @@ export function KioskAdModal({
             </Text>
           </View>
         </View>
+        </ScrollView>
       </View>
     </Modal>
   );

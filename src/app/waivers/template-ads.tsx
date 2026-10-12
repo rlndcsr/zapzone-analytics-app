@@ -99,8 +99,8 @@ type FormTarget =
 const TemplateAds = () => {
   const insets = useSafeAreaInsets();
   const status = useStatusModal();
-  const { templateId: templateIdParam, title: titleParam } =
-    useLocalSearchParams<{ templateId?: string; title?: string }>();
+  const { templateId: templateIdParam, title: titleParam, kind: kindParam } =
+    useLocalSearchParams<{ templateId?: string; title?: string; kind?: string }>();
   const templateId = templateIdParam ? Number(templateIdParam) : null;
 
   const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
@@ -693,6 +693,13 @@ const TemplateAds = () => {
                     How long the ad holds before the kiosk returns to the start
                     screen
                   </Text>
+                  {kindParam === "escape_room" && (
+                    <Text className={HINT}>
+                      Escape-room check-in keeps the confirmation up for at
+                      least 25 seconds, so each player can tap Sign for another
+                      player.
+                    </Text>
+                  )}
                 </View>
               </View>
             )}

@@ -752,6 +752,9 @@ const mapGuestTimes = (raw: ApiGuestTime[] | undefined): EscapeRoomGuestTime[] =
     justFinished: Boolean(t.just_finished),
   }));
 
+/** Loading or sending a waiver gives up after this long instead of spinning on (web parity). */
+const GUEST_WAIVER_TIMEOUT_MS = 60000;
+
 /** `recent=1` keeps a game that just started choosable, as the web asks. */
 const guestQuery = (link: EscapeRoomGameLink | null) => {
   const params = new URLSearchParams({ recent: "1" });
@@ -807,7 +810,7 @@ export async function fetchEscapeRoomForm(
 ): Promise<EscapeRoomRoomForm> {
   const res = await apiRequest<{ data: Record<string, unknown> }>(
     `/api/waivers/escape-room/${locationId}/rooms/${roomId}?${guestQuery(link)}`,
-    { publicEndpoint: true },
+    { publicEndpoint: true, timeoutMs: GUEST_WAIVER_TIMEOUT_MS },
   );
   const d = res.data ?? {};
   const room = (d.room ?? {}) as { id: number; name: string; duration_minutes: number };
@@ -846,6 +849,7 @@ export async function submitEscapeRoomWaiver(
   }>(`/api/waivers/escape-room/${locationId}/submit`, {
     method: "POST",
     publicEndpoint: true,
+    timeoutMs: GUEST_WAIVER_TIMEOUT_MS,
     body: {
       ...submission,
       package_id: roomId,

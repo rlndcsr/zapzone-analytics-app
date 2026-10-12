@@ -4,6 +4,9 @@ import { describe, it } from "node:test";
 import {
   evaluateCorrection,
   evaluateFinishTime,
+  guestOpenTimes,
+  guestRoomSummary,
+  isPinnedGame,
   shiftDateKey,
   slotBadge,
   slotHasActivity,
@@ -136,5 +139,54 @@ describe("shiftDateKey", () => {
 
   it("is unaffected by the DST change", () => {
     assert.equal(shiftDateKey("2026-11-01", 1), "2026-11-02");
+  });
+});
+
+describe("guest check-in times", () => {
+  const times = [
+    { time: "14:00", justFinished: true },
+    { time: "15:00", justFinished: false },
+  ];
+
+  it("offers only games that have not ended", () => {
+    assert.deepEqual(guestOpenTimes(times).map((t) => t.time), ["15:00"]);
+  });
+
+  it("keeps the linked game through its grace window, and no other finished one", () => {
+    assert.deepEqual(guestOpenTimes(times, "14:00").map((t) => t.time), ["14:00", "15:00"]);
+    assert.deepEqual(guestOpenTimes(times, "13:00").map((t) => t.time), ["15:00"]);
+  });
+
+  it("counts only games that have not ended as left today", () => {
+    assert.equal(guestRoomSummary({ durationMinutes: 60, times }, false).label, "60 min · 1 game left today");
+  });
+
+  it("calls a finished linked game 'Your game' when nothing else is left", () => {
+    const finished = [{ time: "14:00", justFinished: true }];
+    assert.deepEqual(guestRoomSummary({ durationMinutes: 60, times: finished }, false, "14:00"), {
+      offered: 1,
+      label: "60 min · Your game",
+    });
+    assert.deepEqual(guestRoomSummary({ durationMinutes: 60, times: finished }, false), {
+      offered: 0,
+      label: "No more games today",
+    });
+  });
+
+  it("words a signed-ahead room as booked games that day", () => {
+    assert.equal(
+      guestRoomSummary({ durationMinutes: 45, times: [{ time: "10:00", justFinished: false }] }, true).label,
+      "45 min · 1 booked game that day",
+    );
+  });
+});
+
+describe("isPinnedGame", () => {
+  it("pins a signed-ahead link and another day's game, not today's room list", () => {
+    assert.equal(isPinnedGame({ ahead: true, date: "2026-10-14", today: "2026-10-13" }), true);
+    assert.equal(isPinnedGame({ ahead: false, date: "2026-10-12", today: "2026-10-13" }), true);
+    assert.equal(isPinnedGame({ ahead: false, date: "2026-10-13", today: "2026-10-13" }), false);
+    assert.equal(isPinnedGame({ ahead: false, date: "2026-10-13", today: null }), false);
+    assert.equal(isPinnedGame(null), false);
   });
 });

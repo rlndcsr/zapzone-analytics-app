@@ -226,3 +226,43 @@ export function shiftDateKey(key: string, days: number): string {
 }
 
 export const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+/* --------------------------------------------- guest check-in (web EscapeRoomWaiverKiosk) -- */
+
+type GuestTimeLike = { time: string; justFinished: boolean };
+
+/** Times a guest is offered: games not over yet, plus the linked game through its grace window. */
+export function guestOpenTimes<T extends GuestTimeLike>(times: T[], keep?: string | null): T[] {
+  return times.filter((t) => !t.justFinished || (!!keep && t.time === keep));
+}
+
+/** A link that opens only one game (signing ahead, another day) has no room list to go back to. */
+export const isPinnedGame = (
+  kiosk: { ahead: boolean; date: string; today: string | null } | null,
+): boolean => !!kiosk && (kiosk.ahead || (!!kiosk.today && kiosk.date !== kiosk.today));
+
+/** A room card's line under its name; only games that have not ended count as left today. */
+export function guestRoomSummary(
+  room: { durationMinutes: number; times: GuestTimeLike[] },
+  ahead: boolean,
+  keep?: string | null,
+): { offered: number; label: string } {
+  const offered = guestOpenTimes(room.times, keep).length;
+  if (ahead) {
+    return {
+      offered,
+      label: offered > 0
+        ? `${room.durationMinutes} min · ${plural(offered, "booked game", "booked games")} that day`
+        : "No booked games that day",
+    };
+  }
+  const upcoming = room.times.filter((t) => !t.justFinished).length;
+  return {
+    offered,
+    label: upcoming > 0
+      ? `${room.durationMinutes} min · ${plural(upcoming, "game", "games")} left today`
+      : offered > 0
+        ? `${room.durationMinutes} min · Your game`
+        : "No more games today",
+  };
+}

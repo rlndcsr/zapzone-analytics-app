@@ -127,6 +127,8 @@ export type WaiverTemplate = {
   companyId: number | null;
   locationId: number | null;
   title: string;
+  /** "standard" or "escape_room" (backend `kind`); null when the backend predates kinds. */
+  kind: string | null;
   internalDescription: string | null;
   status: TemplateStatus;
   isDefault: boolean;
@@ -244,6 +246,7 @@ type RawTemplate = {
   company_id?: number | null;
   location_id?: number | null;
   title?: string;
+  kind?: string | null;
   internal_description?: string | null;
   status?: TemplateStatus;
   is_default?: boolean;
@@ -395,6 +398,7 @@ function mapTemplate(raw: RawTemplate): WaiverTemplate {
     companyId: raw.company_id ?? null,
     locationId: raw.location_id ?? null,
     title: raw.title?.trim() || "Untitled template",
+    kind: raw.kind ?? null,
     internalDescription: raw.internal_description ?? null,
     status: raw.status ?? "draft",
     isDefault: !!raw.is_default,

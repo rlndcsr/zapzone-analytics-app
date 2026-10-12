@@ -323,7 +323,7 @@ const Templates = () => {
   const openAds = (t: WaiverTemplate) => {
     router.push({
       pathname: "/waivers/template-ads",
-      params: { templateId: String(t.id), title: t.title },
+      params: { templateId: String(t.id), title: t.title, kind: t.kind ?? "" },
     } as never);
   };
 
