@@ -1555,6 +1555,7 @@ const CreateBookingScreen = () => {
     (giftResult?.valid ? giftResult.discountAmount : 0) +
     (promoResult?.valid ? promoResult.discountAmount : 0);
   const discount = specialDiscount + codeDiscount;
+  // The server takes the codes off total_amount itself, so they come off here exactly once (web OnsiteBooking).
   const displayTotal = Math.max(0, submitTotal - codeDiscount);
 
   // Quoted off the pre-fee subtotal, as the web's calculatePartialAmount does.
@@ -1585,20 +1586,20 @@ const CreateBookingScreen = () => {
   const dueNow = useMemo(() => {
     if (paymentMethod === "paylater") return 0;
     if (paymentMethod === "in-store" && inStoreTyped > 0) {
-      return Math.min(inStoreTyped, submitTotal);
+      return Math.min(inStoreTyped, displayTotal);
     }
     if (paymentType === "custom") {
-      return Math.min(Math.max(0, Number(customAmount) || 0), submitTotal);
+      return Math.min(Math.max(0, Number(customAmount) || 0), displayTotal);
     }
     // Packages with no deposit configured fall back to the full amount.
     if (paymentType === "partial" && partialDeposit > 0) {
-      return Math.min(partialDeposit, submitTotal);
+      return Math.min(partialDeposit, displayTotal);
     }
-    return submitTotal;
+    return displayTotal;
   }, [
     paymentMethod,
     paymentType,
-    submitTotal,
+    displayTotal,
     partialDeposit,
     customAmount,
     inStoreTyped,
@@ -1630,7 +1631,7 @@ const CreateBookingScreen = () => {
     return null;
   };
 
-  const balance = Math.max(0, submitTotal - dueNow);
+  const balance = Math.max(0, displayTotal - dueNow);
 
   const dateOptions = useMemo(() => {
     const out: { value: string; label: string }[] = [];
@@ -1835,21 +1836,21 @@ const CreateBookingScreen = () => {
         (freshFeeBreakdown ? freshFeeBreakdown.total : subtotal) -
           freshSpecialDiscount,
       );
-      const freshDiscount = freshSpecialDiscount + codeDiscount;
+      const freshNetTotal = Math.max(0, freshSubmitTotal - codeDiscount);
       // Same branching as the `dueNow` memo, just fed the fresh total.
       const freshDueNow =
         paymentMethod === "paylater"
           ? 0
           : paymentMethod === "in-store" && inStoreTyped > 0
-            ? Math.min(inStoreTyped, freshSubmitTotal)
+            ? Math.min(inStoreTyped, freshNetTotal)
             : paymentType === "custom"
               ? Math.min(
                   Math.max(0, Number(customAmount) || 0),
-                  freshSubmitTotal,
+                  freshNetTotal,
                 )
               : paymentType === "partial" && partialDeposit > 0
-                ? Math.min(partialDeposit, freshSubmitTotal)
-                : freshSubmitTotal;
+                ? Math.min(partialDeposit, freshNetTotal)
+                : freshNetTotal;
       const freshAmountPaid = freshDueNow;
 
       // The shared rule, not a bare `>=`: a fully paid booking whose total
@@ -1857,7 +1858,7 @@ const CreateBookingScreen = () => {
       // "partial" and need chasing for a balance of nothing.
       const paymentStatus = derivePaymentStatus(
         freshAmountPaid,
-        freshSubmitTotal,
+        freshNetTotal,
       );
 
       // a retry for a different package, time, space or party size is a new
@@ -1917,7 +1918,11 @@ const CreateBookingScreen = () => {
         applied_fees: buildAppliedFees(freshFeeBreakdown).length
           ? buildAppliedFees(freshFeeBreakdown)
           : null,
-        discount_amount: freshDiscount > 0 ? freshDiscount : undefined,
+        // the server redeems the codes and adds their value to discount_amount itself
+        promo_code: promoResult?.valid ? promoCode.trim() : undefined,
+        gift_card_code: giftResult?.valid ? giftCode.trim() : undefined,
+        discount_amount:
+          freshSpecialDiscount > 0 ? freshSpecialDiscount : undefined,
         applied_discounts: buildAppliedDiscounts(freshSpecial).length
           ? buildAppliedDiscounts(freshSpecial)
           : null,
@@ -2868,7 +2873,11 @@ const CreateBookingScreen = () => {
                     <InputField
                       label=""
                       value={giftCode}
-                      onChangeText={setGiftCode}
+                      // an edited code is no longer the one that was validated and will be sent
+                      onChangeText={(t) => {
+                        setGiftCode(t);
+                        setGiftResult(null);
+                      }}
                       placeholder="GIFT-XXXX"
                       autoCapitalize="characters"
                     />
@@ -2916,7 +2925,10 @@ const CreateBookingScreen = () => {
                       <InputField
                         label=""
                         value={promoCode}
-                        onChangeText={setPromoCode}
+                        onChangeText={(t) => {
+                          setPromoCode(t);
+                          setPromoResult(null);
+                        }}
                         placeholder="PROMO-XXXX"
                         autoCapitalize="characters"
                       />
@@ -3270,7 +3282,7 @@ const CreateBookingScreen = () => {
                       />
                     </View>
                     <Text className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Total: {money(submitTotal)} | Remaining: {money(balance)}
+                      Total: {money(displayTotal)} | Remaining: {money(balance)}
                     </Text>
                   </View>
                 )}
@@ -3408,7 +3420,7 @@ const CreateBookingScreen = () => {
                           v: "partial",
                           label: "Partial Payment",
                           hint: `Pay ${money(partialDeposit)} now, remaining ${money(
-                            Math.max(0, submitTotal - partialDeposit),
+                            Math.max(0, displayTotal - partialDeposit),
                           )} later`,
                         },
                         {
@@ -3470,10 +3482,10 @@ const CreateBookingScreen = () => {
                             Remaining: {money(balance)}
                           </Text>
                           <Text className="text-xs text-gray-600 dark:text-gray-400">
-                            Total: {money(submitTotal)}
+                            Total: {money(displayTotal)}
                           </Text>
                         </View>
-                        {dueNow > 0 && dueNow >= submitTotal && (
+                        {dueNow > 0 && dueNow >= displayTotal && (
                           <Text className="mt-2 text-xs font-medium text-green-600 dark:text-green-400">
                             ✓ This covers the full amount
                           </Text>

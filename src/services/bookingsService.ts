@@ -2780,6 +2780,9 @@ export type CreateBookingInput = {
   guest_country?: string;
   sent_email_to_staff?: boolean;
   applied_fees?: PricingAppliedFee[] | null;
+  /** Redeemed by the server, which takes their value off total_amount and adds it to discount_amount. */
+  promo_code?: string;
+  gift_card_code?: string;
   discount_amount?: number;
   applied_discounts?: PricingAppliedDiscount[] | null;
   send_email?: boolean;
