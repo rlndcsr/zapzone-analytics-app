@@ -174,9 +174,9 @@ export async function approveLocationChangeRequest(
     });
   } catch (err) {
     // A 409 body carries the clash list; surface it as its own error type so the
-    // screen can offer "Approve anyway".
-    if (err instanceof ApiError && err.status === 409) {
-      const body = err.body as { conflicts?: LocationChangeConflict[] } | null;
+    // screen can offer "Approve anyway". A declined blocked-period warning keeps its own message.
+    const body = err instanceof ApiError ? (err.body as { code?: string; conflicts?: LocationChangeConflict[] } | null) : null;
+    if (err instanceof ApiError && err.status === 409 && body?.code !== "BLOCKED_PERIOD") {
       throw new LocationChangeConflictError(body?.conflicts ?? []);
     }
     throw err;

@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 
 import {
   closureRangeIsValid,
+  describeBlockedPeriod,
   describeClosure,
+  describeOperatingWindow,
+  operatingWindowError,
   isFullDayClosure,
   isSlotBlockedByClosure,
   isSpanBlockedByClosure,
@@ -124,5 +127,35 @@ describe("describeClosure", () => {
       "Closed 10:00 AM - 2:30 PM",
     );
     assert.equal(describeClosure(closure("00:15:00", null)), "Closed from 12:15 AM");
+  });
+});
+
+describe("an operating window (open for set hours)", () => {
+  it("needs at least one time, and has to block something", () => {
+    assert.equal(operatingWindowError("", ""), "Enter the time it opens, the time it closes, or both.");
+    assert.equal(
+      operatingWindowError("00:00", "00:00"),
+      "Those hours keep the whole day open, so nothing would be blocked.",
+    );
+    assert.equal(operatingWindowError("12:00", "16:00"), null);
+    assert.equal(operatingWindowError("12:00", ""), null);
+    assert.equal(operatingWindowError("", "16:00"), null);
+  });
+
+  it("accepts a close after midnight up to 6:00 AM, not later", () => {
+    assert.equal(operatingWindowError("18:00", "02:00"), null);
+    assert.equal(
+      operatingWindowError("18:00", "07:00"),
+      "The closing time must be later than the opening time, or no later than 6:00 AM the next morning.",
+    );
+  });
+
+  it("words the open hours and what they leave blocked, as the web does", () => {
+    assert.equal(describeOperatingWindow("12:00", "16:00"), "Open only 12:00 PM – 4:00 PM");
+    assert.equal(describeOperatingWindow("12:00", ""), "Opens late at 12:00 PM");
+    assert.equal(describeOperatingWindow("", "16:00"), "Closes early at 4:00 PM");
+    assert.equal(describeOperatingWindow("18:00", "02:00"), "Open only 6:00 PM – 2:00 AM (next morning)");
+    assert.equal(describeBlockedPeriod("12:00", "16:00"), "Blocked before 12:00 PM and from 4:00 PM");
+    assert.equal(describeBlockedPeriod("", "00:00"), "Nothing is blocked");
   });
 });

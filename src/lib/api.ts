@@ -14,6 +14,18 @@ import {
   withChangeReason,
 } from "./changeReasonPrompt";
 import {
+  BLOCKED_PERIOD_DECLINED,
+  blockedPeriodWarning,
+  confirmBlockedPeriod,
+  readBody,
+  rememberAcknowledged,
+  rememberedBlockIds,
+  targetKey,
+  warningBlockIds,
+  withAcknowledgement,
+} from "./blockedPeriodPrompt";
+import {
+  getCurrentUser,
   handleUnauthorized,
   isSessionInvalidated,
   touchSession,
@@ -156,6 +168,8 @@ type RequestOptions = {
    * prompt again. Never set this yourself.
    */
   _reasonRetried?: boolean;
+  /** Internal: block ids this request already acknowledged, so a retry never asks twice. */
+  _acknowledgedBlockIds?: number[];
 };
 
 export async function apiRequest<T>(
@@ -168,6 +182,7 @@ export async function apiRequest<T>(
     timeoutMs = DEFAULT_TIMEOUT_MS,
     publicEndpoint = false,
     _reasonRetried = false,
+    _acknowledgedBlockIds = [],
   }: RequestOptions = {},
 ): Promise<T> {
   // After a 401 teardown, silently drop pending/new authenticated requests.
@@ -256,9 +271,11 @@ export async function apiRequest<T>(
       status: response.status,
       authenticated: !!token,
     });
+    const blocked = publicEndpoint ? null : blockedPeriodWarning(response.status, data);
     // Report the failure with the server's own request id, so the phone's
     // account and the server's account of it line up. The reporter throttles.
-    if (!isReportingEndpoint(path)) {
+    // A blocked-period warning is a question for staff, not a failure (web parity).
+    if (!isReportingEndpoint(path) && !blocked) {
       reportClientError({
         kind: "api",
         status: response.status,
@@ -299,6 +316,7 @@ export async function apiRequest<T>(
             timeoutMs,
             publicEndpoint,
             _reasonRetried: true,
+            _acknowledgedBlockIds,
           });
         } catch (err) {
           // the caller never saw the reason; keep it so its own retry need not ask again
@@ -306,6 +324,38 @@ export async function apiRequest<T>(
           throw err;
         }
       }
+    }
+
+    // Staff saving inside an availability block: confirm ("Book anyway"), then resend
+    // acknowledging every block it hits — see lib/blockedPeriodPrompt.ts.
+    const requestBody = blocked ? readBody(body) : null;
+    const blockIds = blocked ? warningBlockIds(blocked) : [];
+    if (
+      blocked &&
+      requestBody &&
+      blockIds.length > 0 &&
+      !blockIds.every((id) => _acknowledgedBlockIds.includes(id))
+    ) {
+      const key = targetKey(getCurrentUser()?.id ?? null, method, path, requestBody);
+      const remembered = rememberedBlockIds(key);
+      const confirmed =
+        blockIds.every((id) => remembered.includes(id)) ||
+        (await confirmBlockedPeriod(blocked));
+      if (!confirmed) {
+        throw new ApiError(BLOCKED_PERIOD_DECLINED, response.status, data?.errors, data);
+      }
+      const acknowledged = [...new Set([..._acknowledgedBlockIds, ...remembered, ...blockIds])];
+      rememberAcknowledged(key, acknowledged);
+      return apiRequest<T>(path, {
+        method,
+        body: withAcknowledgement(requestBody, acknowledged),
+        signal,
+        token,
+        timeoutMs,
+        publicEndpoint,
+        _reasonRetried,
+        _acknowledgedBlockIds: acknowledged,
+      });
     }
 
     const message =

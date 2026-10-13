@@ -20,7 +20,18 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { SelectField, type SelectOption } from "../../components/ui/FormControls";
 import { Pagination } from "../../components/ui/Pagination";
 import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
-import { closureRangeIsValid, describeClosure } from "../../lib/dayOffClosure";
+import { DayOffHistoryList } from "../../components/dayOffs/DayOffHistoryList";
+import {
+  describeBlockedPeriod,
+  describeOperatingWindow,
+  operatingWindowError,
+} from "../../lib/dayOffClosure";
+import {
+  blockFormError,
+  blockPayload,
+  type BlockFormInput,
+  type WindowChoice,
+} from "../../lib/dayOffs/blockForm";
 import { useDayOffs } from "../../lib/hooks/useDayOffs";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -33,9 +44,9 @@ import {
   createDayOff,
   deleteDayOff,
   updateDayOff,
+  type BlockScope,
   type DayOff,
   type DayOffFilters,
-  type DayOffPayload,
 } from "../../services/dayOffsService";
 
 const PRIMARY = "#0644C7";
@@ -81,29 +92,22 @@ const SORT_ORDER_OPTIONS: { label: string; value: SortOrder }[] = [
   { label: "Descending", value: "desc" },
 ];
 
-/** "What should be blocked?" scope (mirrors the web BlockingScope). */
-type BlockingScope =
-  | "location"
-  | "packages"
-  | "rooms"
-  | "both"
-  | "attractions"
-  | "events";
+/** What a block applies to — one kind of item per block (web BlockingScope). */
+type BlockingScope = BlockScope;
 type ResourceOption = { id: number; name: string; locationName?: string };
 
-/** Same six tiles, order and copy as the web's "What should be blocked?" grid. */
+/** Same five tiles, order and copy as the web block form's scope grid. */
 const SCOPE_OPTIONS: {
   value: BlockingScope;
   title: string;
   sub: string;
   icon: ComponentProps<typeof Feather>["name"];
 }[] = [
-  { value: "location", title: "Entire Location", sub: "All packages & rooms", icon: "home" },
-  { value: "packages", title: "Packages Only", sub: "Select packages", icon: "package" },
-  { value: "rooms", title: "Spaces Only", sub: "Select spaces", icon: "columns" },
-  { value: "both", title: "Both", sub: "Packages & rooms", icon: "layers" },
-  { value: "attractions", title: "Attractions Only", sub: "Select attractions", icon: "grid" },
-  { value: "events", title: "Events Only", sub: "Select events", icon: "calendar" },
+  { value: "location", title: "Entire location", sub: "Everything at this location", icon: "home" },
+  { value: "packages", title: "Birthday packages", sub: "Choose packages", icon: "package" },
+  { value: "rooms", title: "Rooms", sub: "Choose rooms / spaces", icon: "columns" },
+  { value: "attractions", title: "Attractions", sub: "Choose one or more", icon: "grid" },
+  { value: "events", title: "Events", sub: "Choose events", icon: "calendar" },
 ];
 
 /** Which id list each scope requires the user to fill in. */
@@ -114,7 +118,6 @@ const SCOPE_REQUIRES: Record<
   location: [],
   packages: ["packages"],
   rooms: ["rooms"],
-  both: ["packages", "rooms"],
   attractions: ["attractions"],
   events: ["events"],
 };
@@ -174,16 +177,6 @@ function isPastYmd(dateStr: string): boolean {
   return dateStr < ymd(new Date());
 }
 
-const timeRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
-
-const BACKWARDS_CLOSURE = '"Closed Until" has to be later than "Closed From"';
-
-/** Both times set, with the reopening at or before the closing. */
-const closureRangeIsInvalid = (start: string, end: string): boolean =>
-  !!start &&
-  !!end &&
-  !closureRangeIsValid({ timeStart: start, timeEnd: end });
-
 /* ------------------------------------------------------------- components -- */
 
 /** Field label with the web's red required asterisk. */
@@ -199,6 +192,16 @@ function FieldLabel({
       {children}
       {required && <Text className="text-red-500"> *</Text>}
     </Text>
+  );
+}
+
+/** An amber heads-up above the form (older-format or mixed-scope blocks). */
+function Notice({ children }: { children: string }) {
+  return (
+    <View className="flex-row gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-3 dark:border-amber-900/40 dark:bg-amber-900/20">
+      <Feather name="alert-triangle" size={14} color="#B45309" style={{ marginTop: 2 }} />
+      <Text className="flex-1 text-sm text-amber-900 dark:text-amber-200">{children}</Text>
+    </View>
   );
 }
 
@@ -405,78 +408,153 @@ function PickerField({
   );
 }
 
+const WINDOW_OPTIONS: {
+  value: WindowChoice;
+  title: string;
+  sub: string;
+  icon: ComponentProps<typeof Feather>["name"];
+}[] = [
+  { value: "full_day", title: "Closed all day", sub: "Full-day closure", icon: "sun" },
+  {
+    value: "operating_window",
+    title: "Open for set hours",
+    sub: "One continuous window; blocked outside it",
+    icon: "clock",
+  },
+];
+
 /**
- * The Partial Day Closure fields (web parity): Closed From, then Closed Until,
- * the window between them being when the venue is shut — with the closure in
- * plain English beneath, or why it cannot be saved.
+ * "When" (web AvailabilityBlockForm): closed all day, or open only between
+ * Opens at and Closes at — one window, blocked outside it — with the hours and
+ * what they leave blocked in plain English beneath, or why it cannot be saved.
  */
-function ClosureTimeFields({
-  timeStart,
-  timeEnd,
-  onPickStart,
-  onPickEnd,
-  onClearStart,
-  onClearEnd,
+function WindowFields({
+  choice,
+  opensAt,
+  closesAt,
+  onChoose,
+  onPickOpens,
+  onPickCloses,
+  onClearOpens,
+  onClearCloses,
 }: {
-  timeStart: string;
-  timeEnd: string;
-  onPickStart: () => void;
-  onPickEnd: () => void;
-  onClearStart: () => void;
-  onClearEnd: () => void;
+  choice: WindowChoice | null;
+  opensAt: string;
+  closesAt: string;
+  onChoose: (choice: WindowChoice) => void;
+  onPickOpens: () => void;
+  onPickCloses: () => void;
+  onClearOpens: () => void;
+  onClearCloses: () => void;
 }) {
+  const problem = choice === "operating_window" ? operatingWindowError(opensAt, closesAt) : null;
   return (
     <>
-      <Text className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-        These times mark the window that is{" "}
-        <Text className="font-medium">closed</Text>. Leave both empty to close
-        the whole day. Set only &quot;Closed Until&quot; for a delayed opening
-        — that is the time it reopens.
-      </Text>
-      <View className="flex-row gap-3">
-        <View className="flex-1">
-          <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            Closed From
-          </Text>
-          <PickerField
-            icon="clock"
-            value={prettyTime(timeStart)}
-            placeholder="--:-- --"
-            onPress={onPickStart}
-            onClear={onClearStart}
-          />
-          <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-            Blank means closed from opening time
-          </Text>
-        </View>
-        <View className="flex-1">
-          <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            Closed Until
-          </Text>
-          <PickerField
-            icon="clock"
-            value={prettyTime(timeEnd)}
-            placeholder="--:-- --"
-            onPress={onPickEnd}
-            onClear={onClearEnd}
-          />
-          <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-            Reopens at this time; blank means closed for the rest of the day
-          </Text>
-        </View>
+      <View className="gap-2 mb-1">
+        {WINDOW_OPTIONS.map((opt) => {
+          const active = choice === opt.value;
+          return (
+            <Pressable
+              key={opt.value}
+              onPress={() => onChoose(opt.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              className={`flex-row items-start gap-2 rounded-xl border-2 p-3 ${
+                active
+                  ? "border-[#0644C7] bg-blue-50 dark:bg-blue-900/20"
+                  : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+              }`}
+            >
+              <Feather name={opt.icon} size={16} color={active ? PRIMARY : "#6B7280"} />
+              <View className="flex-1">
+                <Text className="text-sm font-medium text-gray-900 dark:text-white">{opt.title}</Text>
+                <Text className="text-[11px] text-gray-500 dark:text-gray-400">{opt.sub}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
       </View>
-      {closureRangeIsInvalid(timeStart, timeEnd) ? (
-        <Text className="text-xs text-red-600 dark:text-red-400 mt-2">
-          {BACKWARDS_CLOSURE}.
-        </Text>
-      ) : (
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-          {describeClosure({
-            timeStart: timeStart || null,
-            timeEnd: timeEnd || null,
-          })}
-        </Text>
+      {choice === "operating_window" && (
+        <View className="flex-row gap-3 mt-2">
+          <View className="flex-1">
+            <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Opens at
+            </Text>
+            <PickerField
+              icon="clock"
+              value={prettyTime(opensAt)}
+              placeholder="--:-- --"
+              onPress={onPickOpens}
+              onClear={onClearOpens}
+            />
+            <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+              Leave blank to open at the usual time.
+            </Text>
+          </View>
+          <View className="flex-1">
+            <Text className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Closes at
+            </Text>
+            <PickerField
+              icon="clock"
+              value={prettyTime(closesAt)}
+              placeholder="--:-- --"
+              onPress={onPickCloses}
+              onClear={onClearCloses}
+            />
+            <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+              Leave blank to close at the usual time. 12:00 AM means midnight.
+            </Text>
+          </View>
+        </View>
       )}
+      {choice === "operating_window" && problem && (opensAt || closesAt) ? (
+        <Text className="text-xs text-red-600 dark:text-red-400 mt-2">{problem}</Text>
+      ) : choice === "operating_window" && !problem ? (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          {`${describeOperatingWindow(opensAt, closesAt)} · ${describeBlockedPeriod(opensAt, closesAt)}`}
+        </Text>
+      ) : choice === "full_day" ? (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">Closed all day</Text>
+      ) : null}
+    </>
+  );
+}
+
+/** Required group/event name and reason (web block form). */
+function GroupAndReasonFields({
+  groupName,
+  reason,
+  onGroupName,
+  onReason,
+}: {
+  groupName: string;
+  reason: string;
+  onGroupName: (text: string) => void;
+  onReason: (text: string) => void;
+}) {
+  const input =
+    "rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-3 text-sm text-gray-900 dark:text-white";
+  return (
+    <>
+      <FieldLabel required>Group or event name</FieldLabel>
+      <TextInput
+        value={groupName}
+        onChangeText={onGroupName}
+        maxLength={150}
+        placeholder="e.g. Acme Corp holiday party"
+        placeholderTextColor="#9CA3AF"
+        className={`${input} mb-4`}
+      />
+      <FieldLabel required>Reason</FieldLabel>
+      <TextInput
+        value={reason}
+        onChangeText={onReason}
+        maxLength={255}
+        placeholder="e.g. Private buyout, maintenance, holiday"
+        placeholderTextColor="#9CA3AF"
+        className={input}
+      />
     </>
   );
 }
@@ -486,7 +564,7 @@ function ScopeGrid({
   scope,
   onChange,
 }: {
-  scope: BlockingScope;
+  scope: BlockingScope | null;
   onChange: (scope: BlockingScope) => void;
 }) {
   return (
@@ -538,6 +616,7 @@ const DayOffCard = ({
   selected,
   onEdit,
   onDelete,
+  onHistory,
   onToggleSelect,
 }: {
   dayOff: DayOff;
@@ -547,6 +626,7 @@ const DayOffCard = ({
   selected: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onHistory: () => void;
   onToggleSelect: () => void;
 }) => (
   <Pressable
@@ -591,6 +671,14 @@ const DayOffCard = ({
       {canManage && !selectionMode && (
         <View className="flex-row items-center gap-1">
           <Pressable
+            onPress={onHistory}
+            hitSlop={8}
+            className="p-2 rounded-full active:bg-gray-100 dark:active:bg-neutral-800"
+            accessibilityLabel="Block history"
+          >
+            <Feather name="clock" size={16} color="#6B7280" />
+          </Pressable>
+          <Pressable
             onPress={onEdit}
             hitSlop={8}
             className="p-2 rounded-full active:bg-gray-100 dark:active:bg-neutral-800"
@@ -609,6 +697,17 @@ const DayOffCard = ({
         </View>
       )}
     </View>
+
+    <Text
+      className={`mt-2 text-sm ${
+        dayOff.groupName
+          ? "font-semibold text-gray-900 dark:text-white"
+          : "italic text-gray-400 dark:text-gray-500"
+      }`}
+      numberOfLines={2}
+    >
+      {dayOff.groupName ?? "No group or event name"}
+    </Text>
 
     <View className="flex-row items-center flex-wrap gap-1.5 mt-3">
       <View
@@ -666,6 +765,15 @@ const DayOffCard = ({
         )}
       </View>
     )}
+    <View className="flex-row items-center gap-1.5 mt-2">
+      <Feather name="user" size={12} color="#9CA3AF" />
+      <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+        Set by {dayOff.setByName ?? "not recorded"}
+        {dayOff.lastChangedByName && dayOff.lastChangedByName !== dayOff.setByName
+          ? ` · changed by ${dayOff.lastChangedByName}`
+          : ""}
+      </Text>
+    </View>
   </Pressable>
 );
 
@@ -688,50 +796,54 @@ type FormState = {
   /** YYYY-MM-DD; empty until the user picks one (required, like the web). */
   date: string;
   reason: string;
+  groupName: string;
   locationId: number | null;
   isRecurring: boolean;
-  /** Partial-day (empty = full day): the window the venue is shut —
-   *  timeStart = Closed From, timeEnd = Closed Until (when it reopens). */
-  timeStart: string;
-  timeEnd: string;
-  scope: BlockingScope;
+  /** Closed all day, or open only between opensAt and closesAt; null until chosen. */
+  windowChoice: WindowChoice | null;
+  opensAt: string;
+  closesAt: string;
+  /** Null until chosen, or for an older block that covered more than one kind. */
+  scope: BlockingScope | null;
   selection: SelectionState;
+  /** The block being edited, for the older-format and mixed-scope notices. */
+  source: DayOff | null;
 };
 
 const emptyForm = (locationId: number | null): FormState => ({
   id: null,
   date: "",
   reason: "",
+  groupName: "",
   locationId,
   isRecurring: false,
-  timeStart: "",
-  timeEnd: "",
+  windowChoice: null,
+  opensAt: "",
+  closesAt: "",
   scope: "location",
   selection: emptySelection(),
+  source: null,
 });
 
-/** Maps the current scope + selections onto the API's four nullable id lists. */
-function scopePayload(scope: BlockingScope, selection: SelectionState) {
-  const ids = (kind: ResourceKind) => [...selection[kind]];
-  const required = SCOPE_REQUIRES[scope];
-  return {
-    package_ids: required.includes("packages") ? ids("packages") : null,
-    room_ids: required.includes("rooms") ? ids("rooms") : null,
-    attraction_ids: required.includes("attractions") ? ids("attractions") : null,
-    event_ids: required.includes("events") ? ids("events") : null,
-  };
-}
-
-/** First unmet "select at least one …" requirement for a scope, if any. */
-function scopeError(
-  scope: BlockingScope,
-  selection: SelectionState,
-): string | null {
-  for (const kind of SCOPE_REQUIRES[scope]) {
-    if (selection[kind].size === 0) return RESOURCE_LABEL[kind].error;
-  }
-  return null;
-}
+/** The form in the shape the shared block rules check and send (lib/dayOffs/blockForm). */
+const blockInput = (
+  f: Pick<FormState, "locationId" | "windowChoice" | "opensAt" | "closesAt" | "scope" | "selection" | "groupName" | "reason" | "isRecurring">,
+): BlockFormInput => ({
+  locationId: f.locationId,
+  windowChoice: f.windowChoice,
+  opensAt: f.opensAt,
+  closesAt: f.closesAt,
+  scope: f.scope,
+  selected: {
+    packages: [...f.selection.packages],
+    rooms: [...f.selection.rooms],
+    attractions: [...f.selection.attractions],
+    events: [...f.selection.events],
+  },
+  groupName: f.groupName,
+  reason: f.reason,
+  isRecurring: f.isRecurring,
+});
 
 /* ------------------------------------------------------------------ screen -- */
 
@@ -760,12 +872,15 @@ const DayOffs = () => {
     | "filters"
     | "form"
     | "formDate"
-    | "formTimeEnd"
-    | "formTimeStart"
+    | "formCloses"
+    | "formOpens"
     | "bulk"
-    | "bulkTimeEnd"
-    | "bulkTimeStart"
+    | "bulkCloses"
+    | "bulkOpens"
+    | "history"
   >(null);
+  // The block whose history is open; null shows every block's changes.
+  const [historyFor, setHistoryFor] = useState<DayOff | null>(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [refreshing, setRefreshing] = useState(false);
@@ -783,17 +898,17 @@ const DayOffs = () => {
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [bulkReason, setBulkReason] = useState("");
+  const [bulkGroupName, setBulkGroupName] = useState("");
   const [bulkIsRecurring, setBulkIsRecurring] = useState(false);
-  // Partial-day closure (empty = full day): timeStart = Closed From,
-  // timeEnd = Closed Until (when it reopens).
-  const [bulkTimeStart, setBulkTimeStart] = useState("");
-  const [bulkTimeEnd, setBulkTimeEnd] = useState("");
+  const [bulkWindowChoice, setBulkWindowChoice] = useState<WindowChoice | null>(null);
+  const [bulkOpensAt, setBulkOpensAt] = useState("");
+  const [bulkClosesAt, setBulkClosesAt] = useState("");
   const [bulkLocationId, setBulkLocationId] = useState<number | null>(
     ownLocationId,
   );
   const [bulkCreating, setBulkCreating] = useState(false);
   // "What should be blocked?" scope + selectable resources for the location.
-  const [bulkScope, setBulkScope] = useState<BlockingScope>("location");
+  const [bulkScope, setBulkScope] = useState<BlockingScope | null>("location");
   const [bulkSelection, setBulkSelection] =
     useState<SelectionState>(emptySelection);
   const [resources, setResources] = useState<
@@ -873,28 +988,22 @@ const DayOffs = () => {
   }, [isCompanyAdmin, ownLocationId, locationFilter, locations]);
 
   const openEdit = useCallback((d: DayOff) => {
-    // Same precedence as the web's applyBlockingScopeFromDayOff: attractions and
-    // events are exclusive scopes, so they win over packages/rooms.
-    const scope: BlockingScope = d.attractionIds.length
-      ? "attractions"
-      : d.eventIds.length
-        ? "events"
-        : d.packageIds.length && d.roomIds.length
-          ? "both"
-          : d.packageIds.length
-            ? "packages"
-            : d.roomIds.length
-              ? "rooms"
-              : "location";
+    // An older closed-hours block has to be re-chosen as a full day or one window (web form).
+    const windowChoice: WindowChoice | null =
+      d.blockType === "legacy_closure" ? null : d.blockType;
     setForm({
       id: d.id,
       date: d.date || ymd(new Date()),
       reason: d.reason ?? "",
+      groupName: d.groupName ?? "",
       locationId: d.locationId,
       isRecurring: d.isRecurring,
-      timeStart: d.timeStart ? d.timeStart.substring(0, 5) : "",
-      timeEnd: d.timeEnd ? d.timeEnd.substring(0, 5) : "",
-      scope,
+      windowChoice,
+      opensAt: d.opensAt ?? "",
+      closesAt: d.closesAt ?? "",
+      // A block that covered more than one kind keeps only the kind chosen now.
+      scope: d.scope === "mixed" ? null : d.scope,
+      source: d,
       selection: {
         packages: new Set(d.packageIds),
         rooms: new Set(d.roomIds),
@@ -934,42 +1043,15 @@ const DayOffs = () => {
   );
 
   const saveForm = useCallback(async () => {
-    if (form.locationId == null) {
-      Alert.alert("Location required", "Please choose a location for this day off.");
+    if (saving) return;
+    const input = blockInput(form);
+    const problem = blockFormError(input, form.date ? [form.date] : []);
+    if (problem) {
+      Alert.alert("Check the block", problem);
       return;
     }
-    if (!form.date) {
-      Alert.alert("Date required", "Please choose a date for this day off.");
-      return;
-    }
-    const selectionError = scopeError(form.scope, form.selection);
-    if (selectionError) {
-      Alert.alert("Selection required", selectionError);
-      return;
-    }
-    if (form.timeStart && !timeRe.test(form.timeStart)) {
-      Alert.alert("Invalid time", '"Closed From" must be in 24-hour HH:mm format.');
-      return;
-    }
-    if (form.timeEnd && !timeRe.test(form.timeEnd)) {
-      Alert.alert("Invalid time", '"Closed Until" must be in 24-hour HH:mm format.');
-      return;
-    }
-    if (closureRangeIsInvalid(form.timeStart, form.timeEnd)) {
-      Alert.alert("Invalid time", BACKWARDS_CLOSURE);
-      return;
-    }
-
-    const payload: DayOffPayload = {
-      location_id: form.locationId,
-      date: form.date,
-      reason: form.reason.trim() || null,
-      is_recurring: form.isRecurring,
-      time_start: form.timeStart || null,
-      time_end: form.timeEnd || null,
-      // package_ids / room_ids / attraction_ids / event_ids from the scope.
-      ...scopePayload(form.scope, form.selection),
-    };
+    // An edit sends the whole block, as the web form does.
+    const payload = blockPayload(input, form.date);
 
     setSaving(true);
     try {
@@ -983,12 +1065,12 @@ const DayOffs = () => {
     } catch (err) {
       Alert.alert(
         "Save failed",
-        err instanceof Error ? err.message : "Could not save this day off.",
+        err instanceof Error ? err.message : "Could not save this block.",
       );
     } finally {
       setSaving(false);
     }
-  }, [form, refetch]);
+  }, [form, saving, refetch]);
 
   /* ---- selection mode ---- */
 
@@ -1049,9 +1131,11 @@ const DayOffs = () => {
     setBulkMonth(new Date(n.getFullYear(), n.getMonth(), 1));
     setBulkDates(new Set());
     setBulkReason("");
+    setBulkGroupName("");
     setBulkIsRecurring(false);
-    setBulkTimeStart("");
-    setBulkTimeEnd("");
+    setBulkWindowChoice(null);
+    setBulkOpensAt("");
+    setBulkClosesAt("");
     setBulkScope("location");
     setBulkSelection(emptySelection());
     setBulkLocationId(isCompanyAdmin ? (locations[0]?.id ?? null) : ownLocationId);
@@ -1171,75 +1255,65 @@ const DayOffs = () => {
   }, []);
 
   const bulkCreate = useCallback(async () => {
-    if (bulkLocationId == null) {
-      Alert.alert("Location required", "Please choose a location for these day offs.");
+    if (bulkCreating) return;
+    const input = blockInput({
+      locationId: bulkLocationId,
+      windowChoice: bulkWindowChoice,
+      opensAt: bulkOpensAt,
+      closesAt: bulkClosesAt,
+      scope: bulkScope,
+      selection: bulkSelection,
+      groupName: bulkGroupName,
+      reason: bulkReason,
+      isRecurring: bulkIsRecurring,
+    });
+    const dates = [...bulkDates].sort();
+    const problem = blockFormError(input, dates);
+    if (problem) {
+      Alert.alert("Check the block", problem);
       return;
     }
-    if (bulkDates.size === 0) {
-      Alert.alert("No dates selected", "Please pick at least one date.");
-      return;
-    }
-    // Scope validation — mirrors the web (require ≥1 of the scoped resource).
-    const selectionError = scopeError(bulkScope, bulkSelection);
-    if (selectionError) {
-      Alert.alert("Selection required", selectionError);
-      return;
-    }
-    if (bulkTimeStart && !timeRe.test(bulkTimeStart)) {
-      Alert.alert("Invalid time", '"Closed From" must be in 24-hour HH:mm format.');
-      return;
-    }
-    if (bulkTimeEnd && !timeRe.test(bulkTimeEnd)) {
-      Alert.alert("Invalid time", '"Closed Until" must be in 24-hour HH:mm format.');
-      return;
-    }
-    if (closureRangeIsInvalid(bulkTimeStart, bulkTimeEnd)) {
-      Alert.alert("Invalid time", BACKWARDS_CLOSURE);
-      return;
-    }
-
-    const scopeIds = scopePayload(bulkScope, bulkSelection);
 
     setBulkCreating(true);
-    const dates = [...bulkDates].sort();
-    let ok = 0;
-    let fail = 0;
+    const failures: { date: string; message: string }[] = [];
     // The web bulk-add loops createDayOff per selected date (no batch endpoint)
     // and tolerates partial failures — mirror that exactly.
     for (const date of dates) {
       try {
-        await createDayOff(getToken() ?? "", {
-          location_id: bulkLocationId,
+        await createDayOff(getToken() ?? "", blockPayload(input, date));
+      } catch (err) {
+        failures.push({
           date,
-          reason: bulkReason.trim() || null,
-          is_recurring: bulkIsRecurring,
-          time_start: bulkTimeStart || null,
-          time_end: bulkTimeEnd || null,
-          ...scopeIds,
+          message: err instanceof Error && err.message ? err.message : "Could not save this date.",
         });
-        ok += 1;
-      } catch {
-        fail += 1;
       }
     }
     setBulkCreating(false);
-    setSheet(null);
     refetch();
-    if (ok > 0) {
-      Alert.alert(
-        "Bulk add complete",
-        `Created ${ok} day off${ok === 1 ? "" : "s"}${fail > 0 ? ` (${fail} failed)` : ""}.`,
-      );
-    } else {
-      Alert.alert("Bulk add failed", "Could not create the selected day offs.");
+    const created = dates.length - failures.length;
+    if (failures.length === 0) {
+      setSheet(null);
+      Alert.alert("Bulk add complete", `Blocked ${created} date${created === 1 ? "" : "s"}.`);
+      return;
     }
+    // Web parity: the dates that did not save stay selected, with why.
+    setBulkDates(new Set(failures.map((f) => f.date)));
+    Alert.alert(
+      created > 0 ? "Some dates were not saved" : "None of the dates were saved",
+      `${created > 0 ? `Blocked ${created} date${created === 1 ? "" : "s"}. The dates still selected were not saved.\n\n` : ""}${failures
+        .map((f) => `${prettyDate(f.date)}: ${f.message}`)
+        .join("\n")}`,
+    );
   }, [
+    bulkCreating,
     bulkLocationId,
     bulkDates,
     bulkScope,
     bulkSelection,
-    bulkTimeStart,
-    bulkTimeEnd,
+    bulkWindowChoice,
+    bulkOpensAt,
+    bulkClosesAt,
+    bulkGroupName,
     bulkReason,
     bulkIsRecurring,
     refetch,
@@ -1282,8 +1356,13 @@ const DayOffs = () => {
   ];
 
   /** Which resource checklists the current scope needs, in the web's order. */
-  const formResourceKinds = SCOPE_REQUIRES[form.scope];
-  const bulkResourceKinds = SCOPE_REQUIRES[bulkScope];
+  const formResourceKinds = form.scope ? SCOPE_REQUIRES[form.scope] : [];
+  const bulkResourceKinds = bulkScope ? SCOPE_REQUIRES[bulkScope] : [];
+  // Saves are recorded against the signed-in employee (web "Recorded as").
+  const recordedAs =
+    [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ") ||
+    currentUser?.email ||
+    "you";
 
   // Editing an existing past-dated day off must keep that date reachable, so the
   // calendar's floor is the earlier of today and the date already on the record.
@@ -1371,6 +1450,23 @@ const DayOffs = () => {
                     className="text-gray-700 dark:text-gray-200 font-semibold text-sm"
                   >
                     Bulk Add
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setHistoryFor(null);
+                    setSheet("history");
+                  }}
+                  className="flex-1 h-12 rounded-xl items-center justify-center flex-row gap-2 border border-gray-200 dark:border-neutral-700"
+                  accessibilityRole="button"
+                  accessibilityLabel="Change history"
+                >
+                  <Feather name="clock" size={16} color={PRIMARY} />
+                  <Text
+                    numberOfLines={1}
+                    className="text-gray-700 dark:text-gray-200 font-semibold text-sm"
+                  >
+                    History
                   </Text>
                 </Pressable>
               </View>
@@ -1521,6 +1617,10 @@ const DayOffs = () => {
                     selectionMode={selectionMode}
                     selected={selectedIds.has(d.id)}
                     onEdit={() => openEdit(d)}
+                    onHistory={() => {
+                      setHistoryFor(d);
+                      setSheet("history");
+                    }}
                     onDelete={() => confirmDelete(d)}
                     onToggleSelect={() => toggleSelect(d.id)}
                   />
@@ -1649,22 +1749,31 @@ const DayOffs = () => {
             />
           </View>
 
-          {/* Reason */}
-          <FieldLabel>Reason</FieldLabel>
-          <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 mb-4">
-            <TextInput
-              value={form.reason}
-              onChangeText={(t) => setForm((f) => ({ ...f, reason: t }))}
-              placeholder="e.g., Holiday, Maintenance, etc."
-              placeholderTextColor="#9CA3AF"
-              className="text-sm text-gray-900 dark:text-white"
-            />
-          </View>
+          {/* Older blocks have to be re-chosen in the current format (web form notices). */}
+          {form.source?.blockType === "legacy_closure" && (
+            <Notice>
+              {`This block was saved in the older format (${form.source.durationLabel}). Choose a full-day closure or the hours it stays open; a day can no longer be split into two separate windows.`}
+            </Notice>
+          )}
+          {form.source?.scope === "mixed" && (
+            <Notice>
+              {`This block covered more than one kind of item (${form.source.scopeLabel}). Choose one kind to keep it on.`}
+            </Notice>
+          )}
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Recorded as{" "}
+            <Text className="font-semibold text-gray-700 dark:text-gray-200">
+              {recordedAs}
+            </Text>
+            {form.source?.setByName && form.source.setByName !== recordedAs
+              ? ` · originally set by ${form.source.setByName}`
+              : ""}
+          </Text>
 
           {/* What should be blocked? (scope) */}
           <SectionCard>
             <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
-              What should be blocked?
+              What should be blocked? <Text className="text-red-500">*</Text>
             </Text>
             <ScopeGrid
               scope={form.scope}
@@ -1683,23 +1792,31 @@ const DayOffs = () => {
             ))}
           </SectionCard>
 
-          {/* Partial Day Closure */}
+          {/* When: closed all day, or open only for set hours */}
           <SectionCard>
-            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-              Partial Day Closure{" "}
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
-                (Optional)
-              </Text>
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+              When <Text className="text-red-500">*</Text>
             </Text>
-            <ClosureTimeFields
-              timeStart={form.timeStart}
-              timeEnd={form.timeEnd}
-              onPickStart={() => setSheet("formTimeStart")}
-              onPickEnd={() => setSheet("formTimeEnd")}
-              onClearStart={() => setForm((f) => ({ ...f, timeStart: "" }))}
-              onClearEnd={() => setForm((f) => ({ ...f, timeEnd: "" }))}
+            <WindowFields
+              choice={form.windowChoice}
+              opensAt={form.opensAt}
+              closesAt={form.closesAt}
+              onChoose={(windowChoice) => setForm((f) => ({ ...f, windowChoice }))}
+              onPickOpens={() => setSheet("formOpens")}
+              onPickCloses={() => setSheet("formCloses")}
+              onClearOpens={() => setForm((f) => ({ ...f, opensAt: "" }))}
+              onClearCloses={() => setForm((f) => ({ ...f, closesAt: "" }))}
             />
           </SectionCard>
+
+          <View className="mb-4">
+            <GroupAndReasonFields
+              groupName={form.groupName}
+              reason={form.reason}
+              onGroupName={(t) => setForm((f) => ({ ...f, groupName: t }))}
+              onReason={(t) => setForm((f) => ({ ...f, reason: t }))}
+            />
+          </View>
 
           {/* Recurring */}
           <Pressable
@@ -1712,7 +1829,7 @@ const DayOffs = () => {
               color={PRIMARY}
             />
             <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              Recurring annually
+              Repeat every year on this date
             </Text>
           </Pressable>
 
@@ -1758,22 +1875,22 @@ const DayOffs = () => {
         }}
       />
       <TimePickerSheet
-        visible={sheet === "formTimeEnd"}
-        value={form.timeEnd}
-        title="Closed Until"
+        visible={sheet === "formCloses"}
+        value={form.closesAt}
+        title="Closes at"
         onClose={() => setSheet("form")}
         onSelect={(time) => {
-          setForm((f) => ({ ...f, timeEnd: time }));
+          setForm((f) => ({ ...f, closesAt: time }));
           setSheet("form");
         }}
       />
       <TimePickerSheet
-        visible={sheet === "formTimeStart"}
-        value={form.timeStart}
-        title="Closed From"
+        visible={sheet === "formOpens"}
+        value={form.opensAt}
+        title="Opens at"
         onClose={() => setSheet("form")}
         onSelect={(time) => {
-          setForm((f) => ({ ...f, timeStart: time }));
+          setForm((f) => ({ ...f, opensAt: time }));
           setSheet("form");
         }}
       />
@@ -1898,22 +2015,18 @@ const DayOffs = () => {
             </>
           )}
 
-          {/* Reason */}
-          <FieldLabel>Reason (applies to all selected dates)</FieldLabel>
-          <View className="bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 mb-4">
-            <TextInput
-              value={bulkReason}
-              onChangeText={setBulkReason}
-              placeholder="e.g. Holiday, Maintenance..."
-              placeholderTextColor="#9CA3AF"
-              className="text-sm text-gray-900 dark:text-white"
-            />
-          </View>
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Recorded as{" "}
+            <Text className="font-semibold text-gray-700 dark:text-gray-200">
+              {recordedAs}
+            </Text>
+            . The same block is added on every selected date.
+          </Text>
 
           {/* What should be blocked? (scope) */}
           <SectionCard>
             <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
-              What should be blocked?
+              What should be blocked? <Text className="text-red-500">*</Text>
             </Text>
             <ScopeGrid scope={bulkScope} onChange={setBulkScope} />
             {bulkResourceKinds.map((kind) => (
@@ -1929,23 +2042,31 @@ const DayOffs = () => {
             ))}
           </SectionCard>
 
-          {/* Partial Day Closure */}
+          {/* When: closed all day, or open only for set hours */}
           <SectionCard>
-            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-              Partial Day Closure{" "}
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
-                (Optional)
-              </Text>
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+              When <Text className="text-red-500">*</Text>
             </Text>
-            <ClosureTimeFields
-              timeStart={bulkTimeStart}
-              timeEnd={bulkTimeEnd}
-              onPickStart={() => setSheet("bulkTimeStart")}
-              onPickEnd={() => setSheet("bulkTimeEnd")}
-              onClearStart={() => setBulkTimeStart("")}
-              onClearEnd={() => setBulkTimeEnd("")}
+            <WindowFields
+              choice={bulkWindowChoice}
+              opensAt={bulkOpensAt}
+              closesAt={bulkClosesAt}
+              onChoose={setBulkWindowChoice}
+              onPickOpens={() => setSheet("bulkOpens")}
+              onPickCloses={() => setSheet("bulkCloses")}
+              onClearOpens={() => setBulkOpensAt("")}
+              onClearCloses={() => setBulkClosesAt("")}
             />
           </SectionCard>
+
+          <View className="mb-4">
+            <GroupAndReasonFields
+              groupName={bulkGroupName}
+              reason={bulkReason}
+              onGroupName={setBulkGroupName}
+              onReason={setBulkReason}
+            />
+          </View>
 
           {/* Recurring */}
           <Pressable
@@ -1958,7 +2079,7 @@ const DayOffs = () => {
               color={PRIMARY}
             />
             <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              Recurring annually
+              Repeat every year on this date
             </Text>
           </Pressable>
 
@@ -1982,25 +2103,50 @@ const DayOffs = () => {
 
       {/* Bulk time pickers */}
       <TimePickerSheet
-        visible={sheet === "bulkTimeEnd"}
-        value={bulkTimeEnd}
-        title="Closed Until"
+        visible={sheet === "bulkCloses"}
+        value={bulkClosesAt}
+        title="Closes at"
         onClose={() => setSheet("bulk")}
         onSelect={(time) => {
-          setBulkTimeEnd(time);
+          setBulkClosesAt(time);
           setSheet("bulk");
         }}
       />
       <TimePickerSheet
-        visible={sheet === "bulkTimeStart"}
-        value={bulkTimeStart}
-        title="Closed From"
+        visible={sheet === "bulkOpens"}
+        value={bulkOpensAt}
+        title="Opens at"
         onClose={() => setSheet("bulk")}
         onSelect={(time) => {
-          setBulkTimeStart(time);
+          setBulkOpensAt(time);
           setSheet("bulk");
         }}
       />
+
+      {/* Change history — one block's, or every block's (web "Change history"). */}
+      <BottomSheet
+        visible={sheet === "history"}
+        onClose={() => {
+          setSheet(null);
+          setHistoryFor(null);
+        }}
+        title={historyFor ? "History" : "Change history"}
+        subtitle={
+          historyFor
+            ? `${prettyDate(historyFor.date)} · ${historyFor.groupName ?? historyFor.scopeLabel}`
+            : undefined
+        }
+      >
+        <ScrollView className="px-5 pb-8" showsVerticalScrollIndicator={false}>
+          {sheet === "history" && (
+            <DayOffHistoryList
+              dayOffId={historyFor?.id}
+              locationId={historyFor ? null : isCompanyAdmin ? locationFilter : null}
+              showLocation={isCompanyAdmin}
+            />
+          )}
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 };

@@ -9,6 +9,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AppUpdateGate } from "../components/AppUpdateGate";
 import { AuthGuard } from "../components/AuthGuard";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { BlockedPeriodHost } from "../components/ui/BlockedPeriodHost";
 import { ChangeReasonHost } from "../components/ui/ChangeReasonHost";
 import {
   AUTH_SCREEN_OPTIONS,
@@ -112,6 +113,8 @@ export default function RootLayout() {
         {/* Prompts for a reason whenever a booking mutation comes back 422
           asking for one, then retries — see lib/changeReasonPrompt.ts. */}
         <ChangeReasonHost />
+        {/* Asks staff to confirm a save inside an availability block — see lib/blockedPeriodPrompt.ts. */}
+        <BlockedPeriodHost />
       </ErrorBoundary>
     </GestureHandlerRootView>
   );
