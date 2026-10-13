@@ -35,6 +35,7 @@ import {
   afterCodes,
   depositFor,
   giftCardTakes,
+  promoTotalChanged,
   toCents,
   unappliedCodeError,
 } from "../../lib/bookings/onsiteCodes";
@@ -1868,6 +1869,16 @@ const CreateBookingScreen = () => {
         (freshFeeBreakdown ? freshFeeBreakdown.total : subtotal) -
           freshSpecialDiscount,
       );
+      // The server takes the promo off total_amount, so it must be the total the promo was
+      // checked on; if that moved, show the new total and ask for Apply again (web OnsiteBooking).
+      if (promoTotalChanged(!!promoResult?.valid, promoAppliedOn, freshSubmitTotal)) {
+        setFeeBreakdown(freshFeeBreakdown);
+        setSpecial(freshSpecial);
+        setPromoAppliedOn(null);
+        setPromoResult({ valid: false, discountAmount: 0, message: TOTAL_CHANGED_MESSAGE, balance: null });
+        setToast({ message: TOTAL_CHANGED_MESSAGE, type: "error" });
+        return;
+      }
       const freshGiftDiscount = giftResult?.valid
         ? giftCardTakes(giftResult.balance ?? giftResult.discountAmount, freshSubmitTotal, promoDiscount)
         : 0;

@@ -6,6 +6,13 @@ export const APPLY_CODES_FIRST =
 export const toCents = (amount: number): number =>
   Math.round(amount * 100) / 100;
 
+// The booking must be sent with the total its promo was checked on (web OnsiteBooking).
+export const promoTotalChanged = (
+  promoApplied: boolean,
+  promoAppliedOn: number | null,
+  total: number,
+): boolean => promoApplied && toCents(total) !== promoAppliedOn;
+
 export const giftCardTakes = (
   balance: number,
   base: number,

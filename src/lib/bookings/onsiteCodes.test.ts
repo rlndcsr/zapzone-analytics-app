@@ -6,6 +6,7 @@ import {
   afterCodes,
   depositFor,
   giftCardTakes,
+  promoTotalChanged,
   toCents,
   unappliedCodeError,
 } from "./onsiteCodes.ts";
@@ -39,5 +40,13 @@ describe("on-site booking codes", () => {
   it("compares a promo's base to the cent", () => {
     assert.equal(toCents(99.999), 100);
     assert.equal(toCents(10.004), 10);
+  });
+
+  it("stops a booking whose total moved off the one its promo was checked on", () => {
+    assert.equal(promoTotalChanged(true, 100, 100), false);
+    assert.equal(promoTotalChanged(true, 100, 100.001), false);
+    assert.equal(promoTotalChanged(true, 100, 105), true);
+    assert.equal(promoTotalChanged(true, null, 100), true);
+    assert.equal(promoTotalChanged(false, 100, 105), false);
   });
 });

@@ -118,7 +118,10 @@ export function LoginForm({ initialEmail, onSuccess }: LoginFormProps = {}) {
         status: error instanceof ApiError ? error.status : "non-api",
         message: error instanceof Error ? error.message : String(error),
       });
-      if (
+      // The sign-in route is throttled; say so plainly instead of "Too Many Attempts." (web Login).
+      if (error instanceof ApiError && error.status === 429) {
+        setFormError("Too many sign-in attempts. Please wait a minute and try again.");
+      } else if (
         error instanceof ApiError &&
         error.status === 422 &&
         error.fieldErrors

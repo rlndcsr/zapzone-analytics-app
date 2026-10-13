@@ -90,6 +90,9 @@ type Envelope<T> = { success?: boolean; data?: T | null; message?: string };
 
 const num = (v: unknown): number => Number(v ?? 0) || 0;
 
+const isFiniteNumber = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v);
+
 function mapFeeBreakdown(raw: RawFeeBreakdown): FeeBreakdown {
   return {
     original_base_price: num(raw.original_base_price),
@@ -142,7 +145,9 @@ type FeeParams = {
 
 /**
  * GET /api/fee-supports/for-entity — the fees applied to a base price for an
- * entity/location. Returns `null` when no fee data comes back.
+ * entity/location. Returns `null` when no fee data comes back, or when it has
+ * no usable total — a missing total would otherwise read as $0 (web
+ * resolveFeeBreakdown), so callers keep the fee they showed instead.
  */
 export async function fetchFeeBreakdown({
   token,
@@ -163,7 +168,7 @@ export async function fetchFeeBreakdown({
     `/api/fee-supports/for-entity?${params.toString()}`,
     { token, signal },
   );
-  if (!res?.success || !res.data) return null;
+  if (!res?.success || !res.data || !isFiniteNumber(res.data.total)) return null;
   return mapFeeBreakdown(res.data);
 }
 
