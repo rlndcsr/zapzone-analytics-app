@@ -54,6 +54,16 @@ export function bucketForCategory(
   return source === "attraction" ? "attractions" : "party_packages";
 }
 
+/** The category decides first; the escape-room switch only claims a package
+ *  whose category is neither Rage Room nor Escape Room. */
+export function bucketForBooking(
+  booking: Pick<CalendarBooking, "packageCategoryRaw" | "packageIsEscapeRoom">,
+): ActivityBucketKey {
+  const byCategory = bucketForCategory(booking.packageCategoryRaw, "booking");
+  if (byCategory !== "party_packages") return byCategory;
+  return booking.packageIsEscapeRoom ? "escape_rooms" : byCategory;
+}
+
 const CANCELLED_BOOKING_STATUSES = ["cancelled"];
 const CANCELLED_PURCHASE_STATUSES = ["cancelled", "refunded"];
 
@@ -117,7 +127,7 @@ export const BUCKET_DEFINITIONS: BucketDefinition[] = [
     primaryUnit: "bookings",
     secondaryUnit: "players",
     explanation:
-      "Escape room activity scheduled for this day, whether it was sold as a package booking or as an attraction ticket. Difficulty labels such as Beginner or Advanced count as escape rooms. Cancelled rows are left out.",
+      "Escape room activity scheduled for this day, whether it was sold as a package booking or as an attraction ticket. Packages switched on as escape rooms count here, and so do difficulty labels such as Beginner or Advanced. A package in the Rage Room category counts under Rage Rooms instead, even with the escape-room switch on. Cancelled rows are left out.",
   },
   {
     key: "rage_rooms",
@@ -125,7 +135,7 @@ export const BUCKET_DEFINITIONS: BucketDefinition[] = [
     primaryUnit: "bookings",
     secondaryUnit: "guests",
     explanation:
-      "Rage room activity scheduled for this day, whether it was sold as a package booking or as an attraction ticket. Smash room is treated as the same thing. Cancelled rows are left out.",
+      "Rage room activity scheduled for this day, whether it was sold as a package booking or as an attraction ticket. Smash room is treated as the same thing, and a Rage Room package counts here even if its escape-room switch is on. Cancelled rows are left out.",
   },
   {
     key: "events",
@@ -217,7 +227,7 @@ export function buildActivityBuckets(input: ActivityInput): ActivityBucket[] {
 
   for (const booking of input.bookings ?? []) {
     const rawCategory = booking.packageCategoryRaw ?? "";
-    const bucket = buckets.get(bucketForCategory(rawCategory, "booking"))!;
+    const bucket = buckets.get(bucketForBooking(booking))!;
     if (!countsAsBooking(booking)) {
       bucket.cancelled += 1;
       continue;

@@ -40,6 +40,8 @@ export type CalendarBooking = {
    * dashboard's Activity by Category buckets on, as the web does.
    */
   packageCategoryRaw?: string;
+  /** The package's escape-room switch (check-in, group photo). */
+  packageIsEscapeRoom?: boolean;
   customerName: string;
   customerEmail: string | null;
   customerPhone: string | null;
@@ -207,6 +209,7 @@ type RawBooking = {
     name?: string | null;
     category?: string | null;
     display_label?: string | null;
+    is_escape_room?: boolean | number | null;
   } | null;
   room_id?: number | null;
   package_id?: number | null;
@@ -406,6 +409,8 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     packageCategory:
       raw.package?.display_label?.trim() || raw.package?.category?.trim() || "",
     packageCategoryRaw: raw.package?.category?.trim() || "",
+    packageIsEscapeRoom:
+      raw.package?.is_escape_room === true || raw.package?.is_escape_room === 1,
     customerName: customerName(raw.customer, raw.guest_name),
     customerEmail:
       raw.customer?.email?.trim() || raw.guest_email?.trim() || null,

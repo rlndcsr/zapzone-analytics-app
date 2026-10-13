@@ -7,6 +7,7 @@ import type { EventPurchaseRow } from "../../services/eventPurchasesService";
 import {
   activityDateLabel,
   attractionsForDate,
+  bucketForBooking,
   bucketForCategory,
   bucketItemCount,
   bucketSubline,
@@ -71,6 +72,45 @@ describe("dashboardCategory / bucketForCategory", () => {
     assert.equal(bucketForCategory("Birthday", "booking"), "party_packages");
     assert.equal(bucketForCategory("", "booking"), "party_packages");
     assert.equal(bucketForCategory("Laser Tag", "attraction"), "attractions");
+  });
+});
+
+describe("bucketForBooking", () => {
+  const cases: [string, boolean, ActivityBucketKey][] = [
+    ["Rage Room", true, "rage_rooms"],
+    ["Rage Room", false, "rage_rooms"],
+    ["Smash Room", true, "rage_rooms"],
+    ["Escape Room", true, "escape_rooms"],
+    ["Escape Room", false, "escape_rooms"],
+    ["Birthday", true, "escape_rooms"],
+    ["Birthday", false, "party_packages"],
+    ["", true, "escape_rooms"],
+  ];
+  for (const [category, flag, expected] of cases) {
+    it(`files "${category}" with the switch ${flag ? "on" : "off"} under ${expected}`, () => {
+      assert.equal(
+        bucketForBooking({ packageCategoryRaw: category, packageIsEscapeRoom: flag }),
+        expected,
+      );
+    });
+  }
+
+  it("counts a rage room with the switch on once, under Rage Rooms only", () => {
+    const get = byKey({
+      bookings: [
+        booking({ id: 1, packageCategoryRaw: "Rage Room", packageIsEscapeRoom: true, participants: 3 }),
+        booking({ id: 2, packageCategoryRaw: "Escape Room", participants: 5 }),
+        booking({ id: 3, packageCategoryRaw: "Birthday", packageIsEscapeRoom: true, participants: 2 }),
+        booking({ id: 4, packageCategoryRaw: "Birthday" }),
+      ],
+    });
+    const ids = (key: ActivityBucketKey) => get(key).bookings.map((b) => b.id);
+    assert.deepEqual(ids("rage_rooms"), [1]);
+    assert.deepEqual(ids("escape_rooms"), [2, 3]);
+    assert.deepEqual(ids("party_packages"), [4]);
+    assert.equal(get("rage_rooms").primary, bucketItemCount(get("rage_rooms")));
+    assert.equal(get("escape_rooms").primary, bucketItemCount(get("escape_rooms")));
+    assert.equal(get("escape_rooms").secondary, 7);
   });
 });
 
