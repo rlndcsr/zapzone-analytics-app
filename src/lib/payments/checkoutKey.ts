@@ -17,3 +17,18 @@ export const newCheckoutKey = (): string =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `ck-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+
+/** A screen's key plus the sale it was last sent for. */
+export type CheckoutKeyState = { key: string; attempt: string | null };
+
+/**
+ * The key for this sale (web `checkoutKeyFor`): a retry of the same sale keeps it, so a
+ * retry after "no answer" cannot charge twice; a changed sale gets a new one, so it is
+ * not told the earlier sale already went through.
+ */
+export function checkoutKeyFor(state: CheckoutKeyState, attempt: unknown[]): string {
+  const fingerprint = JSON.stringify(attempt);
+  if (state.attempt !== null && state.attempt !== fingerprint) state.key = newCheckoutKey();
+  state.attempt = fingerprint;
+  return state.key;
+}

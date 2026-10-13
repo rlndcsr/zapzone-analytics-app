@@ -77,7 +77,11 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
-import { newCheckoutKey } from "../../lib/payments/checkoutKey";
+import {
+  checkoutKeyFor,
+  newCheckoutKey,
+  type CheckoutKeyState,
+} from "../../lib/payments/checkoutKey";
 import { rollbackAttractionPurchase } from "../../lib/payments/rollback";
 import {
   buildAppliedDiscounts,
@@ -619,7 +623,7 @@ const CreatePurchaseScreen = () => {
   /** Sent as `checkout_key` with the order or purchase, so a retry after "no
    *  answer" cannot charge twice; renewed once a purchase goes through (web
    *  `CreatePurchase`). */
-  const checkoutKeyRef = useRef(newCheckoutKey());
+  const checkoutKeyRef = useRef<CheckoutKeyState>({ key: newCheckoutKey(), attempt: null });
   /** Monotonic suffix that keeps two identical order lines distinguishable. */
   const lineSeqRef = useRef(0);
 
@@ -1357,7 +1361,13 @@ const CreatePurchaseScreen = () => {
       notes:
         notes.trim() ||
         `Staff order — ${items.length} item${items.length > 1 ? "s" : ""}`,
-      checkout_key: checkoutKeyRef.current,
+      // a changed order is a new sale; a retry of the same one keeps its key (web CreatePurchase)
+      checkout_key: checkoutKeyFor(checkoutKeyRef.current, [
+        "order",
+        items.map((i) => [i.type, i.id, i.quantity, i.scheduledDate ?? null, i.scheduledTime ?? null]),
+        selectedCustomerId ?? null,
+        customerEmail.trim(),
+      ]),
     });
 
     // One code admits the whole order, so it is stored on the order itself
@@ -1382,7 +1392,7 @@ const CreatePurchaseScreen = () => {
       });
 
       if (outcome.action === "settled") {
-        checkoutKeyRef.current = newCheckoutKey();
+        checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
         markOrderListsStale();
         Alert.alert(
           "Order created",
@@ -1493,7 +1503,7 @@ const CreatePurchaseScreen = () => {
       } catch {
         // The order exists and must not be rolled back over a bookkeeping
         // failure — staff finish it from Payments (web parity).
-        checkoutKeyRef.current = newCheckoutKey();
+        checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
         markOrderListsStale();
         Alert.alert(
           "Order created, payment not recorded",
@@ -1504,7 +1514,7 @@ const CreatePurchaseScreen = () => {
       }
     }
 
-    checkoutKeyRef.current = newCheckoutKey();
+    checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
     markOrderListsStale();
     const chargedNote =
       giftCard && isCardPayment && orderChargeAmount !== order.totalAmount
@@ -1688,7 +1698,15 @@ const CreatePurchaseScreen = () => {
         freshSpecialPricingDiscount > 0 ? freshSpecialPricingDiscount : undefined,
       applied_discounts:
         freshAppliedDiscounts.length > 0 ? freshAppliedDiscounts : undefined,
-      checkout_key: checkoutKeyRef.current,
+      checkout_key: checkoutKeyFor(checkoutKeyRef.current, [
+        "attraction",
+        selected.id,
+        quantity,
+        scheduledDate || null,
+        scheduledTime || null,
+        selectedCustomerId ?? null,
+        customerEmail.trim(),
+      ]),
     };
 
     submitLockRef.current = true;
@@ -1727,7 +1745,7 @@ const CreatePurchaseScreen = () => {
             } as const);
 
         if (outcome.action === "settled") {
-          checkoutKeyRef.current = newCheckoutKey();
+          checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
           setPaymentError("");
           Alert.alert(
             "Purchase confirmed",
@@ -1827,7 +1845,7 @@ const CreatePurchaseScreen = () => {
           return;
         }
 
-        checkoutKeyRef.current = newCheckoutKey();
+        checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
         setPaymentError("");
         Alert.alert(
           "Purchase confirmed",
@@ -1836,14 +1854,18 @@ const CreatePurchaseScreen = () => {
               ? ` · gift card covered ${money(freshTotal - chargeAmount)}`
               : ""
           } · ${selected.name}\n${
-            sendEmail ? "Receipt sent to email." : "Email not sent per request."
+            !sendEmail
+              ? "Email not sent per request."
+              : response.email_sent === false
+                ? "The receipt email was not sent."
+                : "Receipt sent to email."
           }`,
           [{ text: "OK", onPress: () => router.back() }],
         );
         return;
       }
 
-      checkoutKeyRef.current = newCheckoutKey();
+      checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
       Alert.alert("Purchase created", `${money(freshTotal)} · ${selected.name}`, [
         { text: "OK", onPress: () => router.back() },
       ]);

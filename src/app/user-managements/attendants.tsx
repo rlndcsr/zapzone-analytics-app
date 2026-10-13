@@ -38,6 +38,7 @@ import {
   markStaffStale,
 } from "../../lib/hooks/useStaffAccounts";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { staffDeleteMessage } from "../../lib/staffDeleteMessage";
 import {
   fetchLocationById,
   updateLocation,
@@ -958,9 +959,7 @@ const ManageAttendants = () => {
               } catch (err) {
                 Alert.alert(
                   "Delete failed",
-                  err instanceof Error
-                    ? err.message
-                    : "Could not delete this attendant.",
+                  staffDeleteMessage(err, "Failed to delete attendant. Please try again."),
                 );
               } finally {
                 setActionBusy(false);

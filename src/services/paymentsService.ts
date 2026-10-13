@@ -567,6 +567,8 @@ export type PaymentChargeResponse = {
   message?: string;
   transaction_id?: string;
   auth_code?: string;
+  /** False when the charge went through but its receipt email did not. */
+  email_sent?: boolean;
 };
 
 type PublicKeyResponse = {

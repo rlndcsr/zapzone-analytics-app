@@ -26,10 +26,12 @@ import {
 } from "./blockedPeriodPrompt";
 import {
   getCurrentUser,
+  getToken,
   handleUnauthorized,
   isSessionInvalidated,
   touchSession,
 } from "./session";
+import { isStaleSessionReply } from "./staleSessionReply";
 
 const API_BASE_URL = (() => {
   const url = process.env.EXPO_PUBLIC_API_URL;
@@ -289,6 +291,8 @@ export async function apiRequest<T>(
     // 401 → tear down once (idempotent) and swallow silently, so parallel 401s
     // cause no banners and one logout. 403 (role denial) still surfaces below.
     if (response.status === 401 && !publicEndpoint) {
+      // A reply for a token this app has since left must not sign the newer session out.
+      if (isStaleSessionReply(token, getToken())) return neverSettles<T>();
       // TEMP (investigation): names the exact request that tore the session down.
       authDebug("api.401 → handleUnauthorized", { method, path });
       handleUnauthorized();

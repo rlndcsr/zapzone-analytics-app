@@ -43,6 +43,7 @@ import {
 } from "../../lib/hooks/useStaffAccounts";
 import { formatDateET, formatDateTimeET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { staffDeleteMessage } from "../../lib/staffDeleteMessage";
 import {
   fetchLocations,
   type LocationOption,
@@ -1187,7 +1188,7 @@ const ManageAccounts = () => {
               } catch (err) {
                 Alert.alert(
                   "Delete failed",
-                  err instanceof Error ? err.message : "Could not delete this account.",
+                  staffDeleteMessage(err, "Failed to delete account. Please try again."),
                 );
               } finally {
                 setActionBusy(false);

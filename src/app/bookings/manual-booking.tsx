@@ -747,7 +747,8 @@ const ManualBookingScreen = () => {
             token,
             entityType: "package",
             entityId: pkg.id,
-            basePrice: subtotal,
+            // the package's own price, as the on-site and online pages price specials (web ManualBooking)
+            basePrice: pkg.price,
             date: scheduledDate,
             time: scheduledTime || undefined,
             locationId: effectiveLocationId ?? undefined,
@@ -945,6 +946,7 @@ const ManualBookingScreen = () => {
         entityType: "package",
         entityId: pkg.id,
         basePrice: subtotal,
+        specialPricingBasePrice: pkg.price,
         locationId: effectiveLocationId,
         date: scheduledDate,
         time: scheduledTime || undefined,

@@ -60,7 +60,11 @@ import {
   isTestCardNumber,
   validateCardNumber,
 } from "../../lib/payments/cardUtils";
-import { newCheckoutKey } from "../../lib/payments/checkoutKey";
+import {
+  checkoutKeyFor,
+  newCheckoutKey,
+  type CheckoutKeyState,
+} from "../../lib/payments/checkoutKey";
 import { rollbackEventPurchase } from "../../lib/payments/rollback";
 import {
   buildAppliedDiscounts,
@@ -462,7 +466,7 @@ const CreateEventPurchaseScreen = () => {
   const lastSubmitAtRef = useRef(0);
   /** Sent as `checkout_key`, so a retry after "no answer" cannot charge twice;
    *  renewed once the purchase goes through (web `OnsitePurchaseEvent`). */
-  const checkoutKeyRef = useRef(newCheckoutKey());
+  const checkoutKeyRef = useRef<CheckoutKeyState>({ key: newCheckoutKey(), attempt: null });
 
   // Accept.js credentials for the event's location — fetched as soon as the
   // card method is active, exactly like the web `initializeAuthorizeNet`.
@@ -812,7 +816,15 @@ const CreateEventPurchaseScreen = () => {
       applied_fees: freshAppliedFees.length > 0 ? freshAppliedFees : undefined,
       applied_discounts:
         freshAppliedDiscounts.length > 0 ? freshAppliedDiscounts : undefined,
-      checkout_key: checkoutKeyRef.current,
+      // a changed sale is a new checkout; a retry of the same one keeps its key (web OnsitePurchaseEvent)
+      checkout_key: checkoutKeyFor(checkoutKeyRef.current, [
+        selected.id,
+        purchaseDate,
+        purchaseTime,
+        quantity,
+        selectedCustomerId ?? null,
+        selectedCustomerId ? "" : customerEmail.trim(),
+      ]),
     };
 
     submitLockRef.current = true;
@@ -850,7 +862,7 @@ const CreateEventPurchaseScreen = () => {
             } as const);
 
         if (outcome.action === "settled") {
-          checkoutKeyRef.current = newCheckoutKey();
+          checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
           setPaymentError("");
           Alert.alert(
             "Purchase confirmed",
@@ -945,7 +957,7 @@ const CreateEventPurchaseScreen = () => {
           return;
         }
 
-        checkoutKeyRef.current = newCheckoutKey();
+        checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
         setPaymentError("");
         Alert.alert(
           "Purchase confirmed",
@@ -954,14 +966,18 @@ const CreateEventPurchaseScreen = () => {
               ? ` · gift card covered ${money(freshTotal - chargeAmount)}`
               : ""
           } · ${selected.name}\n${
-            sendEmail ? "Receipt sent to email." : "Email not sent per request."
+            !sendEmail
+              ? "Email not sent per request."
+              : response.email_sent === false
+                ? "The receipt email was not sent."
+                : "Receipt sent to email."
           }`,
           [{ text: "OK", onPress: () => router.back() }],
         );
         return;
       }
 
-      checkoutKeyRef.current = newCheckoutKey();
+      checkoutKeyRef.current = { key: newCheckoutKey(), attempt: null };
       Alert.alert("Purchase created", `${money(freshTotal)} · ${selected.name}`, [
         { text: "OK", onPress: () => router.back() },
       ]);

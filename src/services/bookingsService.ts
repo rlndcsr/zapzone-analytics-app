@@ -2820,11 +2820,19 @@ export async function createBooking(
   totalAmount: number;
   amountPaid: number;
 }> {
-  const res = await apiRequest<CreateBookingResponse>("/api/bookings", {
-    method: "POST",
-    token,
-    body: input,
-  });
+  let res: CreateBookingResponse;
+  try {
+    res = await apiRequest<CreateBookingResponse>("/api/bookings", {
+      method: "POST",
+      token,
+      body: input,
+    });
+  } catch (err) {
+    // An earlier attempt that went through (ALREADY_BOOKED) still hands back its rollback token.
+    const refusal = err instanceof ApiError ? (err.body as { booking_id?: number; checkout_token?: unknown } | null) : null;
+    rememberCheckoutToken("booking", refusal?.booking_id, refusal?.checkout_token);
+    throw err;
+  }
   rememberCheckoutToken("booking", res.data.id, res.checkout_token);
   return {
     id: res.data.id,
@@ -2851,7 +2859,7 @@ export async function storeBookingQrCode(
   await apiRequest(`/api/bookings/${bookingId}/qrcode`, {
     method: "POST",
     token,
-    body: { qr_code: qrCode, send_email: sendEmail },
+    body: { qr_code: qrCode, send_email: sendEmail, ...checkoutTokenBody("booking", bookingId) },
   });
 }
 

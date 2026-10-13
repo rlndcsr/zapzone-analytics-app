@@ -31,6 +31,14 @@ import { OverlapOverrideModal } from "../../components/ui/OverlapOverrideModal";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { onlineStartsLost } from "../../lib/bookings/onlineSlotsLost";
 import {
+  TOTAL_CHANGED_MESSAGE,
+  afterCodes,
+  depositFor,
+  giftCardTakes,
+  toCents,
+  unappliedCodeError,
+} from "../../lib/bookings/onsiteCodes";
+import {
   clampAddOnQuantity,
   DEFAULT_MAX_QUANTITY,
   getAddOnMinQuantity,
@@ -723,6 +731,8 @@ const CreateBookingScreen = () => {
   const [promoResult, setPromoResult] = useState<DiscountCodeResult | null>(
     null,
   );
+  // The total the promo was checked against; a different total needs Apply again (web OnsiteBooking).
+  const [promoAppliedOn, setPromoAppliedOn] = useState<number | null>(null);
   const [codeBusy, setCodeBusy] = useState<"gift" | "promo" | null>(null);
   const [foundCustomers, setFoundCustomers] = useState<CustomerHit[]>([]);
   const [showCustomerList, setShowCustomerList] = useState(false);
@@ -818,16 +828,27 @@ const CreateBookingScreen = () => {
     if (!token) return;
     setCodeBusy(kind);
     try {
-      const validate =
-        kind === "gift" ? validateGiftCardCode : validatePromoCode;
-      const result = await validate({
-        token,
-        code,
-        subtotal,
-        locationId: effectiveLocationId,
-      });
-      if (kind === "gift") setGiftResult(result);
-      else setPromoResult(result);
+      // Checked against the total the booking saves; a gift card against what the promo leaves.
+      const base = toCents(submitTotal);
+      if (kind === "gift") {
+        setGiftResult(
+          await validateGiftCardCode({
+            token,
+            code,
+            subtotal: Math.max(0, base - promoDiscount),
+            locationId: effectiveLocationId,
+          }),
+        );
+      } else {
+        const result = await validatePromoCode({
+          token,
+          code,
+          subtotal: base,
+          locationId: effectiveLocationId,
+        });
+        setPromoResult(result);
+        setPromoAppliedOn(result.valid ? base : null);
+      }
     } catch (err) {
       const failed: DiscountCodeResult = {
         valid: false,
@@ -1551,26 +1572,27 @@ const CreateBookingScreen = () => {
     (feeBreakdown ? feeBreakdown.total : subtotal) - specialDiscount,
   );
   // Special pricing plus whatever a validated gift card / promo code takes off.
-  const codeDiscount =
-    (giftResult?.valid ? giftResult.discountAmount : 0) +
-    (promoResult?.valid ? promoResult.discountAmount : 0);
+  const promoDiscount = promoResult?.valid ? promoResult.discountAmount : 0;
+  const giftDiscount = giftResult?.valid
+    ? giftCardTakes(giftResult.balance ?? giftResult.discountAmount, submitTotal, promoDiscount)
+    : 0;
+  const codeDiscount = promoDiscount + giftDiscount;
   const discount = specialDiscount + codeDiscount;
   // The server takes the codes off total_amount itself, so they come off here exactly once (web OnsiteBooking).
-  const displayTotal = Math.max(0, submitTotal - codeDiscount);
+  const displayTotal = afterCodes(submitTotal, promoDiscount, giftDiscount);
 
-  // Quoted off the pre-fee subtotal, as the web's calculatePartialAmount does.
-  const partialDeposit = useMemo(() => {
-    if (!pkg) return 0;
-    if (pkg.partialPaymentPercentage && pkg.partialPaymentPercentage > 0) {
-      return (
-        Math.round(subtotal * (pkg.partialPaymentPercentage / 100) * 100) / 100
-      );
-    }
-    if (pkg.partialPaymentFixed && pkg.partialPaymentFixed > 0) {
-      return Math.min(pkg.partialPaymentFixed, subtotal);
-    }
-    return 0;
-  }, [pkg, subtotal]);
+  // A promo checked against a different total no longer holds.
+  useEffect(() => {
+    if (promoAppliedOn === null || promoAppliedOn === toCents(submitTotal)) return;
+    setPromoAppliedOn(null);
+    setPromoResult({ valid: false, discountAmount: 0, message: TOTAL_CHANGED_MESSAGE, balance: null });
+  }, [submitTotal, promoAppliedOn]);
+
+  // Quoted off what is actually payable, as the web's calculatePartialAmount now is.
+  const partialDeposit = useMemo(
+    () => (pkg ? depositFor(pkg, displayTotal) : 0),
+    [pkg, displayTotal],
+  );
 
   // The partial option is unselectable without a configured deposit.
   useEffect(() => {
@@ -1756,6 +1778,16 @@ const CreateBookingScreen = () => {
       );
       return;
     }
+    const codeProblem = unappliedCodeError(
+      promoCode,
+      !!promoResult?.valid,
+      giftCode,
+      !!giftResult?.valid,
+    );
+    if (codeProblem) {
+      Alert.alert("Apply or clear the code", codeProblem);
+      return;
+    }
     if (
       paymentMethod !== "paylater" &&
       paymentType === "custom" &&
@@ -1836,7 +1868,11 @@ const CreateBookingScreen = () => {
         (freshFeeBreakdown ? freshFeeBreakdown.total : subtotal) -
           freshSpecialDiscount,
       );
-      const freshNetTotal = Math.max(0, freshSubmitTotal - codeDiscount);
+      const freshGiftDiscount = giftResult?.valid
+        ? giftCardTakes(giftResult.balance ?? giftResult.discountAmount, freshSubmitTotal, promoDiscount)
+        : 0;
+      const freshNetTotal = afterCodes(freshSubmitTotal, promoDiscount, freshGiftDiscount);
+      const freshDeposit = depositFor(pkg, freshNetTotal);
       // Same branching as the `dueNow` memo, just fed the fresh total.
       const freshDueNow =
         paymentMethod === "paylater"
@@ -1848,8 +1884,8 @@ const CreateBookingScreen = () => {
                   Math.max(0, Number(customAmount) || 0),
                   freshNetTotal,
                 )
-              : paymentType === "partial" && partialDeposit > 0
-                ? Math.min(partialDeposit, freshNetTotal)
+              : paymentType === "partial" && freshDeposit > 0
+                ? freshDeposit
                 : freshNetTotal;
       const freshAmountPaid = freshDueNow;
 
@@ -1935,7 +1971,8 @@ const CreateBookingScreen = () => {
         try {
           await recordBookingPayment(token, {
             bookingId: id,
-            amount: freshAmountPaid,
+            // never more than the total the server saved (web OnsiteBooking)
+            amount: Math.min(freshAmountPaid, created.totalAmount),
             locationId: effectiveLocationId,
             customerId: customerId ?? null,
           });
@@ -1948,7 +1985,9 @@ const CreateBookingScreen = () => {
       // have confirmed the booking already, and the card is never charged more than it still owes.
       const serverDue =
         Math.round((created.totalAmount - created.amountPaid) * 100) / 100;
-      const chargeAmount = Math.min(freshAmountPaid, serverDue);
+      // Paying in full charges what the server says is due, whatever this screen worked out.
+      const chargeAmount =
+        paymentType === "full" ? serverDue : Math.min(freshAmountPaid, serverDue);
 
       if (isCardPayment && created.status === "confirmed") {
         // Nothing left to charge (a gift card covered it), so no charge sends the confirmation
@@ -2909,7 +2948,7 @@ const CreateBookingScreen = () => {
                     }`}
                   >
                     {giftResult.valid
-                      ? `Applied — ${money(giftResult.discountAmount)} off${
+                      ? `Applied — ${money(giftDiscount)} off${
                           giftResult.balance != null
                             ? ` (balance ${money(giftResult.balance)})`
                             : ""
@@ -2928,6 +2967,7 @@ const CreateBookingScreen = () => {
                         onChangeText={(t) => {
                           setPromoCode(t);
                           setPromoResult(null);
+                          setPromoAppliedOn(null);
                         }}
                         placeholder="PROMO-XXXX"
                         autoCapitalize="characters"
