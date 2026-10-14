@@ -34,6 +34,9 @@ export type ConcernRow = {
   /** Who moved it out of "new", when the backend loaded the handler. */
   handlerName: string;
   createdAt: string;
+  /** List endpoint only: the guest paid for a booking or purchase at this
+   *  venue (same email) after this concern was recorded. */
+  completedBooking: boolean;
 };
 
 type RawConcern = {
@@ -51,6 +54,7 @@ type RawConcern = {
   location?: { name?: string | null } | null;
   handler?: { first_name?: string | null; last_name?: string | null } | null;
   created_at?: string | null;
+  completed_booking?: boolean | number | null;
 };
 
 type ConcernListResponse = {
@@ -110,6 +114,8 @@ function mapConcern(raw: RawConcern): ConcernRow {
     locationName: raw.location?.name?.trim() || "",
     handlerName: handler,
     createdAt: raw.created_at ?? "",
+    completedBooking:
+      raw.completed_booking === true || raw.completed_booking === 1,
   };
 }
 

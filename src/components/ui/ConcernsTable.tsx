@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 
+import { bookedLabel } from "../../lib/concerns/leadFilter";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import type {
   ConcernKind,
@@ -188,7 +189,7 @@ type Column = {
 /**
  * Columns mirror the web page, in order and label: Guest (name over venue) ·
  * Reach them on (phone / email) · What they wanted · Why (kind badge + the
- * guest's own words) · Status (+ who handled it) · When · Actions.
+ * guest's own words) · Booked? · Status (+ who handled it) · When · Actions.
  */
 const COLUMNS: Column[] = [
   {
@@ -282,6 +283,26 @@ const COLUMNS: Column[] = [
         </View>
       );
     },
+  },
+  {
+    key: "booked",
+    label: "Booked?",
+    width: 180,
+    render: (c) =>
+      c.completedBooking ? (
+        <View className="flex-row items-center gap-1 self-start px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30">
+          <Feather name="check-circle" size={11} color="#047857" />
+          <Text className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+            {bookedLabel(c)}
+          </Text>
+        </View>
+      ) : (
+        <View className="self-start px-2 py-0.5 rounded-full bg-gray-50 dark:bg-neutral-800">
+          <Text className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+            {bookedLabel(c)}
+          </Text>
+        </View>
+      ),
   },
   {
     key: "status",

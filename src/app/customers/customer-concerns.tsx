@@ -24,6 +24,12 @@ import { Pagination } from "../../components/ui/Pagination";
 import { SheetSelect, type SheetSelectOption } from "../../components/ui/SheetSelect";
 import { StatTile } from "../../components/ui/StatTile";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
+import {
+  LEAD_FILTER_OPTIONS,
+  bookedLabel,
+  matchesLeadFilter,
+  type LeadFilter,
+} from "../../lib/concerns/leadFilter";
 import { venueDateKey } from "../../lib/date/venueTime";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
@@ -132,6 +138,7 @@ const CustomerConcerns = () => {
 
   // Filters. Status starts on "Needs a call", the default the web page applies.
   const [timeframe, setTimeframe] = useState<Timeframe>("all");
+  const [lead, setLead] = useState<LeadFilter | "all">("all");
   const [status, setStatus] = useState<ConcernStatus | "all">("new");
   const [kind, setKind] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -182,10 +189,10 @@ const CustomerConcerns = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [timeframe, status, kind, search, perPage, activeLocationId]);
+  }, [timeframe, lead, status, kind, search, perPage, activeLocationId]);
 
-  // Timeframe · status · kind · search, all client-side over the loaded set —
-  // the same predicates the web table applies.
+  // Timeframe · lead · status · kind · search, all client-side over the loaded
+  // set — the same predicates the web table applies.
   const filtered = useMemo(() => {
     const window = timeframeWindow(timeframe);
     const term = search.trim().toLowerCase();
@@ -195,6 +202,7 @@ const CustomerConcerns = () => {
         const day = venueDateKey(c.createdAt);
         if (!day || day < window.from || day > window.to) return false;
       }
+      if (!matchesLeadFilter(c, lead)) return false;
       if (status !== "all" && c.status !== status) return false;
       if (kind !== "all" && c.kind !== kind) return false;
       if (term) {
@@ -212,7 +220,7 @@ const CustomerConcerns = () => {
       }
       return true;
     });
-  }, [concerns, timeframe, status, kind, search]);
+  }, [concerns, timeframe, lead, status, kind, search]);
 
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
@@ -220,7 +228,11 @@ const CustomerConcerns = () => {
   );
 
   const filtersActive =
-    timeframe !== "all" || status !== "all" || kind !== "all" || !!search.trim();
+    timeframe !== "all" ||
+    lead !== "all" ||
+    status !== "all" ||
+    kind !== "all" ||
+    !!search.trim();
 
   const setConcernStatus = useCallback(
     async (concern: ConcernRow, next: ConcernStatus) => {
@@ -239,9 +251,12 @@ const CustomerConcerns = () => {
         setConcerns((prev) =>
           prev.map((row) =>
             row.id === concern.id
-              ? // The response carries the new handler; fall back to a local
-                // status flip if the body came back without a row.
-                (updated ?? { ...row, status: next })
+              ? // The PUT response lacks the list-only booked flag, so keep the
+                // row's own; fall back to a local flip if no row came back.
+                {
+                  ...(updated ?? { ...row, status: next }),
+                  completedBooking: row.completedBooking,
+                }
               : row,
           ),
         );
@@ -283,6 +298,7 @@ const CustomerConcerns = () => {
         "What they wanted",
         "Why",
         "Message",
+        "Booked?",
         "Status",
         "Handled by",
         "When",
@@ -297,6 +313,7 @@ const CustomerConcerns = () => {
           describeWanted(c),
           c.kind,
           c.message,
+          bookedLabel(c),
           STATUS_META[c.status]?.label ?? c.status,
           c.handlerName,
           formatReceived(c.createdAt),
@@ -504,7 +521,14 @@ const CustomerConcerns = () => {
             )}
           </View>
 
-          {/* Status + Why filters */}
+          {/* Lead, then Status + Why — the web's filter order. */}
+          <SheetSelect
+            icon="user-check"
+            title="Lead"
+            value={lead}
+            options={LEAD_FILTER_OPTIONS}
+            onSelect={(v) => setLead(v as LeadFilter | "all")}
+          />
           <View className="flex-row gap-3">
             <View className="flex-1">
               <SheetSelect
