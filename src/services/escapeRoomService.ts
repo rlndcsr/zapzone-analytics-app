@@ -698,6 +698,12 @@ export type EscapeRoomGuestRoom = {
   id: number;
   name: string;
   durationMinutes: number;
+  /** The package photo; null when it is missing or too large to show whole. */
+  image: string | null;
+  /** The small preview, once the backend has made it. */
+  imagePreview: string | null;
+  /** The preview is still being made. */
+  imagePending: boolean;
   times: EscapeRoomGuestTime[];
 };
 
@@ -779,7 +785,15 @@ export async function fetchEscapeRoomKiosk(
       date_label: string;
       today?: string;
       ahead?: boolean;
-      rooms: { id: number; name: string; duration_minutes: number; times: ApiGuestTime[] }[];
+      rooms: {
+        id: number;
+        name: string;
+        duration_minutes: number;
+        image?: string | null;
+        image_preview?: string | null;
+        image_pending?: boolean;
+        times: ApiGuestTime[];
+      }[];
       settings?: { inactivity_timeout_seconds?: number };
     };
   }>(`/api/waivers/escape-room/${locationId}?${guestQuery(link)}`, {
@@ -796,6 +810,9 @@ export async function fetchEscapeRoomKiosk(
       id: room.id,
       name: room.name,
       durationMinutes: room.duration_minutes,
+      image: room.image ?? null,
+      imagePreview: room.image_preview ?? null,
+      imagePending: room.image_pending === true,
       times: mapGuestTimes(room.times),
     })),
     inactivityTimeoutSeconds: d.settings?.inactivity_timeout_seconds ?? 120,

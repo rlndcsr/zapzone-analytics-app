@@ -3,15 +3,18 @@ import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { RoomPreviewImage } from "../../components/photos/escapeRooms/RoomPreviewImage";
 import { KioskAdModal } from "../../components/ui/KioskAdModal";
 import { StaffReturnControl } from "../../components/ui/StaffReturnControl";
 import { StatusModal } from "../../components/ui/StatusModal";
@@ -21,9 +24,12 @@ import { ApiError } from "../../lib/api";
 import { formatFullDate } from "../../lib/date/calendar";
 import {
   DATE_KEY,
+  PREVIEW_CHECKS,
+  ROOM_LIST_REFRESH_SECONDS,
   guestOpenTimes as openTimes,
   guestRoomSummary,
   isPinnedGame,
+  previewCheckDelayMs,
 } from "../../lib/escapeRooms/escapeRooms";
 import { useStatusModal } from "../../lib/hooks/useStatusModal";
 import { markWaiversStale } from "../../lib/hooks/useWaivers";
@@ -197,6 +203,9 @@ export default function EscapeRoomKioskScreen() {
   const [formKey, setFormKey] = useState(0);
   // Set once the screen resets for the next guest: the link's finished game is offered only before that.
   const [linkSpent, setLinkSpent] = useState(false);
+  const [previewChecks, setPreviewChecks] = useState(0);
+  // The web's sm breakpoint: the room photo sits above the name from here up.
+  const wide = useWindowDimensions().width >= 640;
 
   const scrollRef = useRef<ScrollView>(null);
   const submitLock = useRef(false);
@@ -254,6 +263,42 @@ export default function EscapeRoomKioskScreen() {
     const timer = setInterval(() => void loadKiosk(), RETRY_SECONDS * 1000);
     return () => clearInterval(timer);
   }, [error, linkBroken, loadKiosk]);
+
+  const pendingPreviews = kiosk ? kiosk.rooms.filter((r) => r.imagePending).length : 0;
+  const chosenRoomPending = !!(room && kiosk?.rooms.find((r) => r.id === room.id)?.imagePending);
+  const previewsGaveUp = previewChecks >= PREVIEW_CHECKS;
+
+  // A preview still being made: re-check a few times (4s, 8s, 12s), as the web does.
+  useEffect(() => {
+    if (pendingPreviews === 0) {
+      setPreviewChecks(0);
+      return;
+    }
+    const delay = previewCheckDelayMs({
+      pendingRooms: pendingPreviews,
+      onRoomStep: phase === "room",
+      chosenRoomPending,
+      checks: previewChecks,
+    });
+    if (delay === null) return;
+    const timer = setTimeout(() => {
+      void loadKiosk().finally(() => setPreviewChecks((count) => count + 1));
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [pendingPreviews, chosenRoomPending, previewChecks, phase, loadKiosk]);
+
+  // The room list refreshes every five minutes and when the app wakes, so a changed photo reaches a device left open.
+  useEffect(() => {
+    if (phase !== "room" || loading || error || justCompleted) return;
+    const timer = setInterval(() => void loadKiosk(), ROOM_LIST_REFRESH_SECONDS * 1000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void loadKiosk();
+    });
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [phase, loading, error, justCompleted, loadKiosk]);
 
   const resetAll = useCallback(() => {
     stepSequence.current++;
@@ -598,6 +643,8 @@ export default function EscapeRoomKioskScreen() {
 
   const stepIndex = STEPS.findIndex((s) => s.key === phase);
   const hasRooms = kiosk.rooms.length > 0;
+  const shownRoom = room ? kiosk.rooms.find((r) => r.id === room.id) ?? room : null;
+  const shownWaiting = !!shownRoom?.imagePending && !previewsGaveUp;
   const noGamesText = kiosk.ahead
     ? "There are no booked games in this room that day. Please check your booking email, or see the front desk."
     : "There are no more games in this room today. Please see the front desk.";
@@ -690,18 +737,32 @@ export default function EscapeRoomKioskScreen() {
                           key={r.id}
                           onPress={() => void chooseRoom(r)}
                           disabled={!hasTimes}
-                          className={`rounded-xl border-2 border-gray-200 px-5 py-4 active:border-[#0644C7] active:bg-blue-50 dark:border-neutral-700 ${
+                          className={`overflow-hidden rounded-xl border-2 border-gray-200 active:border-[#0644C7] active:bg-blue-50 dark:border-neutral-700 ${
                             hasTimes ? "" : "opacity-50"
                           }`}
+                          style={{ flexDirection: wide ? "column" : "row" }}
                           accessibilityRole="button"
                           accessibilityState={{ disabled: !hasTimes }}
                         >
-                          <Text className="text-base font-bold text-gray-900 dark:text-white">
-                            {r.name}
-                          </Text>
-                          <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            {summary.label}
-                          </Text>
+                          <RoomPreviewImage
+                            room={r}
+                            waiting={r.imagePending && !previewsGaveUp}
+                            style={wide ? { width: "100%", aspectRatio: 16 / 9 } : { width: 112, minHeight: 84 }}
+                          />
+                          <View
+                            style={
+                              wide
+                                ? { paddingHorizontal: 20, paddingVertical: 16 }
+                                : { flex: 1, minWidth: 0, paddingHorizontal: 16, paddingVertical: 12 }
+                            }
+                          >
+                            <Text className="text-base font-bold text-gray-900 dark:text-white">
+                              {r.name}
+                            </Text>
+                            <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              {summary.label}
+                            </Text>
+                          </View>
                         </Pressable>
                       );
                     })}
@@ -723,6 +784,12 @@ export default function EscapeRoomKioskScreen() {
 
           {phase === "time" && room && (
             <View className="rounded-xl border border-gray-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+              <RoomPreviewImage
+                room={shownRoom}
+                waiting={shownWaiting}
+                iconSize={24}
+                style={{ width: 112, aspectRatio: 4 / 3, borderRadius: 8, alignSelf: "center", marginBottom: 12 }}
+              />
               <Text className="text-center text-xs font-semibold uppercase tracking-wide text-[#1D4ED8] dark:text-blue-300">
                 {room.name}
               </Text>
@@ -748,14 +815,22 @@ export default function EscapeRoomKioskScreen() {
           {phase === "form" && room && (
             <>
               <View className="mb-4 gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-900/20">
-                <View>
-                  <Text className="text-xs font-semibold uppercase tracking-wide text-[#1D4ED8] dark:text-blue-300">
-                    Your game
-                  </Text>
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                    {room.name} · {time ? time.label : "choose your time"}
-                    {kiosk.ahead && time ? ` · ${kiosk.dateLabel}` : ""}
-                  </Text>
+                <View className="flex-row items-center gap-3">
+                  <RoomPreviewImage
+                    room={shownRoom}
+                    waiting={shownWaiting}
+                    iconSize={20}
+                    style={{ width: 64, aspectRatio: 4 / 3, borderRadius: 6 }}
+                  />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text className="text-xs font-semibold uppercase tracking-wide text-[#1D4ED8] dark:text-blue-300">
+                      Your game
+                    </Text>
+                    <Text className="text-sm font-bold text-gray-900 dark:text-white">
+                      {room.name} · {time ? time.label : "choose your time"}
+                      {kiosk.ahead && time ? ` · ${kiosk.dateLabel}` : ""}
+                    </Text>
+                  </View>
                 </View>
                 <View className="flex-row flex-wrap gap-2">
                   {time && <OutlineButton label="Change time" tone="blue" onPress={changeTime} />}

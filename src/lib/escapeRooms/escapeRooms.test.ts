@@ -12,6 +12,8 @@ import {
   slotHasActivity,
   splitMinutesInput,
   timeUsedExample,
+  previewCheckDelayMs,
+  roomImageCandidates,
 } from "./escapeRooms.ts";
 
 const slot = (over: Partial<Parameters<typeof slotBadge>[0]> = {}) => ({
@@ -188,5 +190,57 @@ describe("isPinnedGame", () => {
     assert.equal(isPinnedGame({ ahead: false, date: "2026-10-13", today: "2026-10-13" }), false);
     assert.equal(isPinnedGame({ ahead: false, date: "2026-10-13", today: null }), false);
     assert.equal(isPinnedGame(null), false);
+  });
+});
+
+describe("roomImageCandidates", () => {
+  const resolve = (p: string) => (p.startsWith("http") ? p : `https://api.test/storage/${p}`);
+
+  it("tries the preview first, then the photo", () => {
+    assert.deepEqual(
+      roomImageCandidates(
+        { image: "images/packages/vault.jpg", imagePreview: "images/previews/vault.jpg" },
+        false,
+        resolve,
+      ),
+      ["https://api.test/storage/images/previews/vault.jpg", "https://api.test/storage/images/packages/vault.jpg"],
+    );
+  });
+
+  it("loads nothing while the preview is being made, so the full photo is never fetched", () => {
+    assert.deepEqual(
+      roomImageCandidates({ image: "images/packages/vault.jpg", imagePreview: null }, true, resolve),
+      [],
+    );
+  });
+
+  it("falls back to the placeholder when there is no usable photo", () => {
+    assert.deepEqual(roomImageCandidates({ image: null, imagePreview: null }, false, resolve), []);
+    assert.deepEqual(roomImageCandidates(null, false, resolve), []);
+  });
+
+  it("lists a hosted photo once when the preview and photo are the same", () => {
+    const url = "https://cdn.test/vault.jpg";
+    assert.deepEqual(roomImageCandidates({ image: url, imagePreview: url }, false, resolve), [url]);
+  });
+});
+
+describe("previewCheckDelayMs", () => {
+  const base = { pendingRooms: 1, onRoomStep: true, chosenRoomPending: false, checks: 0 };
+
+  it("re-checks at 4s, 8s and 12s, then gives up", () => {
+    assert.equal(previewCheckDelayMs(base), 4000);
+    assert.equal(previewCheckDelayMs({ ...base, checks: 1 }), 8000);
+    assert.equal(previewCheckDelayMs({ ...base, checks: 2 }), 12000);
+    assert.equal(previewCheckDelayMs({ ...base, checks: 3 }), null);
+  });
+
+  it("does nothing when no preview is pending", () => {
+    assert.equal(previewCheckDelayMs({ ...base, pendingRooms: 0 }), null);
+  });
+
+  it("past the room list, keeps checking only for the chosen room", () => {
+    assert.equal(previewCheckDelayMs({ ...base, onRoomStep: false }), null);
+    assert.equal(previewCheckDelayMs({ ...base, onRoomStep: false, chosenRoomPending: true }), 4000);
   });
 });

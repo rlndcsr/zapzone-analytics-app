@@ -266,3 +266,39 @@ export function guestRoomSummary(
         : "No more games today",
   };
 }
+
+/* ------------------------------------------------------ room photos (web RoomPreviewImage) -- */
+
+export const ROOM_LIST_REFRESH_SECONDS = 300;
+export const PREVIEW_CHECK_SECONDS = 4;
+export const PREVIEW_CHECKS = 3;
+
+/**
+ * URLs to try for a room's photo, preview first. None while the preview is still
+ * being made, so the full-size photo is never downloaded in the meantime.
+ */
+export function roomImageCandidates(
+  room: { image?: string | null; imagePreview?: string | null } | null | undefined,
+  waiting: boolean,
+  resolve: (path: string) => string | null,
+): string[] {
+  if (waiting || !room) return [];
+  const urls: string[] = [];
+  for (const value of [room.imagePreview, room.image]) {
+    const url = value ? resolve(value) : null;
+    if (url && !urls.includes(url)) urls.push(url);
+  }
+  return urls;
+}
+
+/** Whether the room list should re-check for previews still being made, and after how long. */
+export function previewCheckDelayMs(input: {
+  pendingRooms: number;
+  onRoomStep: boolean;
+  chosenRoomPending: boolean;
+  checks: number;
+}): number | null {
+  if (input.pendingRooms === 0 || input.checks >= PREVIEW_CHECKS) return null;
+  if (!input.onRoomStep && !input.chosenRoomPending) return null;
+  return PREVIEW_CHECK_SECONDS * (input.checks + 1) * 1000;
+}
