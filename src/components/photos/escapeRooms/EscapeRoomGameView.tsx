@@ -79,6 +79,7 @@ import {
   TextAction,
   noticeTextClass,
 } from "./kit";
+import { formsSignedLabel, participantsCoveredLabel } from "../../../lib/waivers/waiverCoverage";
 
 const errorMessage = (e: unknown, fallback: string): string =>
   e instanceof Error && e.message ? e.message : fallback;
@@ -788,7 +789,7 @@ export function EscapeRoomGameView({
       <Card>
         <View className="flex-row flex-wrap items-center justify-between gap-2">
           <Text className="font-semibold text-gray-900 dark:text-white">
-            Players ({game.counts.players})
+            Players ({people})
           </Text>
           {kioskUrl && (
             <Pressable
@@ -803,9 +804,12 @@ export function EscapeRoomGameView({
             </Pressable>
           )}
         </View>
-        <Text className="mb-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
+        <Text className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+          {participantsCoveredLabel(people)} · {formsSignedLabel(game.counts.players)}
+        </Text>
+        <Text className="mb-1 text-xs text-gray-500 dark:text-gray-400">
           {
-            "Everyone who signed the waiver for this room and time. Only these players can receive this game's photo."
+            "Everyone who signed the waiver for this room and time. Minors are covered by the waiver their parent or guardian signed. Only these players can receive this game's photo."
           }
         </Text>
         {game.players.length === 0 ? (

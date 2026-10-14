@@ -7,6 +7,12 @@ import { cardFromPayments } from "../../lib/payments/cardLabel";
 import { resolvePaymentState } from "../../lib/payments/paymentState";
 import { formatDuration } from "../../lib/time";
 import { launchKioskSession } from "../../lib/waivers/kiosk";
+import {
+  countLabel,
+  entityCoverage,
+  peopleOnForm,
+} from "../../lib/waivers/waiverCoverage";
+import { WaiverCoverageLine } from "../ui/WaiverCoverageLine";
 import type { BookingDetail } from "../../services/bookingsService";
 import type {
   ConnectedWaiver,
@@ -303,18 +309,6 @@ export function VerifyBookingDetails({
               </Text>
             </View>
             <View className="flex-row items-center gap-3">
-              <View className="flex-row items-center gap-1">
-                <Feather name="check-circle" size={12} color="#16A34A" />
-                <Text className="text-xs text-green-600 dark:text-green-400">
-                  {waivers.summary.completed} signed
-                </Text>
-              </View>
-              <View className="flex-row items-center gap-1">
-                <Feather name="clock" size={12} color="#D97706" />
-                <Text className="text-xs text-amber-600 dark:text-amber-400">
-                  {waivers.summary.pending} pending
-                </Text>
-              </View>
               {/* Kiosk — opens a prefilled session (Already Completed / form). */}
               <Pressable
                 onPress={openKiosk}
@@ -336,6 +330,12 @@ export function VerifyBookingDetails({
               </Pressable>
             </View>
           </View>
+
+          {waivers.waivers.length > 0 && (
+            <View className="mt-2">
+              <WaiverCoverageLine coverage={entityCoverage(waivers)} />
+            </View>
+          )}
 
           {waivers.waivers.length > 0 ? (
             waivers.waivers.map((w) => {
@@ -369,6 +369,13 @@ export function VerifyBookingDetails({
                           {signed ? "Signed" : "Not signed"}
                         </Text>
                       </View>
+                      {peopleOnForm(w) > 1 && (
+                        <View className="rounded bg-gray-100 px-2 py-0.5 dark:bg-neutral-800">
+                          <Text className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                            {countLabel(peopleOnForm(w), "participant", "participants")}
+                          </Text>
+                        </View>
+                      )}
                       {/* Checked in / Not checked in */}
                       <View
                         className={`rounded px-2 py-0.5 ${

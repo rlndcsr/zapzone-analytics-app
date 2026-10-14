@@ -59,6 +59,8 @@ export type EscapeRoomSlot = {
   bookings: EscapeRoomSlotBooking[];
   playersBooked: number;
   signed: number;
+  /** Signers plus the minors they signed for; null from an older server. */
+  peopleCovered: number | null;
   unsigned: number;
   photos: number;
   sent: number;
@@ -84,6 +86,7 @@ export type EscapeRoomUnsentGame = {
   timeLabel: string;
   roomName: string | null;
   players: number;
+  peopleCovered: number | null;
   hasPhoto: boolean;
 };
 
@@ -105,6 +108,7 @@ export type EscapeRoomPlayer = {
   referenceNumber: string | null;
   name: string;
   minors: number;
+  minorNames: string[];
   emailMasked: string | null;
   hasEmail: boolean;
   photoRelease: boolean | null;
@@ -214,6 +218,7 @@ type ApiSlot = {
   }[];
   players_booked: number;
   signed: number;
+  people_covered?: number;
   unsigned: number;
   photos: number;
   sent: number;
@@ -246,6 +251,7 @@ type ApiDay = {
     time_label: string;
     room_name: string | null;
     players: number;
+    people_covered?: number;
     has_photo: boolean;
   }[];
 };
@@ -255,6 +261,7 @@ type ApiPlayer = {
   reference_number: string | null;
   name: string;
   minors: number;
+  minor_names?: (string | null)[];
   email_masked: string | null;
   has_email: boolean;
   photo_release: boolean | null;
@@ -356,6 +363,7 @@ function mapSlot(raw: ApiSlot): EscapeRoomSlot {
     })),
     playersBooked: raw.players_booked ?? 0,
     signed: raw.signed ?? 0,
+    peopleCovered: raw.people_covered ?? null,
     unsigned: raw.unsigned ?? 0,
     photos: raw.photos ?? 0,
     sent: raw.sent ?? 0,
@@ -390,6 +398,7 @@ function mapDay(raw: ApiDay): EscapeRoomDay {
       timeLabel: g.time_label,
       roomName: g.room_name,
       players: g.players,
+      peopleCovered: g.people_covered ?? null,
       hasPhoto: Boolean(g.has_photo),
     })),
   };
@@ -401,6 +410,7 @@ function mapPlayer(raw: ApiPlayer): EscapeRoomPlayer {
     referenceNumber: raw.reference_number,
     name: raw.name,
     minors: raw.minors ?? 0,
+    minorNames: (raw.minor_names ?? []).filter((n): n is string => !!n),
     emailMasked: raw.email_masked,
     hasEmail: Boolean(raw.has_email),
     photoRelease: raw.photo_release,

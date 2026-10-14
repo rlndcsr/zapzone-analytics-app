@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { Waiver } from "../../services/waiversService";
 import {
+  deskDayCoverage,
+  deskListCoverage,
   deskWaiverState,
   filterDeskWaivers,
   matchesDeskBookingSearch,
@@ -96,6 +98,13 @@ describe("row labels", () => {
     assert.deepEqual(peopleCovered(waiver({ minorsCount: 2 })), {
       count: 3,
       detail: "(adult + 2 minors)",
+    });
+  });
+
+  it("covers nobody on an unsigned waiver, minors or not", () => {
+    assert.deepEqual(peopleCovered(waiver({ status: "pending", minorsCount: 2 })), {
+      count: null,
+      detail: "None until signed",
     });
   });
 
@@ -245,5 +254,43 @@ describe("mergeDeskWaivers", () => {
       waiverTruncationNote(day),
       /some unsigned ones are not listed/,
     );
+  });
+});
+
+describe("desk coverage line", () => {
+  const server = { formsSigned: 4, peopleCovered: 6, minorsCovered: 2, peopleCheckedIn: 3 };
+  const rows = [
+    waiver({ id: 1, minorsCount: 2 }),
+    waiver({ id: 2, status: "pending", minorsCount: 1 }),
+  ];
+
+  it("takes the whole day's totals from the server, with the unsigned count", () => {
+    assert.deepEqual(deskDayCoverage({ waivers: [], total: 3 }, server), {
+      participants: 6,
+      forms: 4,
+      notSigned: 3,
+      minors: 2,
+      participantsCheckedIn: 3,
+    });
+  });
+
+  it("has no day totals without the server's coverage or the unsigned count", () => {
+    assert.equal(deskDayCoverage({ waivers: [], total: 3 }, null), null);
+    assert.equal(deskDayCoverage(null, server), null);
+  });
+
+  it("uses the day's totals unless a search narrows the list", () => {
+    const day = deskDayCoverage({ waivers: [], total: 3 }, server);
+    assert.equal(deskListCoverage(day, "", rows, true).coverage.participants, 6);
+    assert.equal(deskListCoverage(day, "", rows, true).partial, false);
+
+    const searched = deskListCoverage(day, "rhian", rows, false);
+    assert.equal(searched.coverage.participants, 3);
+    assert.equal(searched.coverage.notSigned, 1);
+  });
+
+  it("says it counted only the listed rows when the day was cut short", () => {
+    assert.equal(deskListCoverage(null, "", rows, true).partial, true);
+    assert.equal(deskListCoverage(null, "", rows, false).partial, false);
   });
 });

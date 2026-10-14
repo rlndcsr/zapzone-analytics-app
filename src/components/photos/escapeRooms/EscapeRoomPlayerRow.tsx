@@ -2,7 +2,8 @@ import { Feather } from "@expo/vector-icons";
 import { useState } from "react";
 import { Text, TextInput, View } from "react-native";
 
-import { EXCLUDED_LABELS, plural } from "../../../lib/escapeRooms/escapeRooms";
+import { EXCLUDED_LABELS } from "../../../lib/escapeRooms/escapeRooms";
+import { countLabel } from "../../../lib/waivers/waiverCoverage";
 import {
   canCancelRetryingReview,
   canResendThanks,
@@ -120,10 +121,17 @@ export function EscapeRoomPlayerRow({
           {name}
           {player.minors > 0 && (
             <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
-              {"  "}+ {plural(player.minors, "minor", "minors")}
+              {"  "}
+              {countLabel(1 + player.minors, "participant", "participants")}
             </Text>
           )}
         </Text>
+        {player.minors > 0 && (
+          <Text className="text-xs text-gray-600 dark:text-gray-300">
+            Also covers {countLabel(player.minors, "minor", "minors")}
+            {player.minorNames.length > 0 ? `: ${player.minorNames.join(", ")}` : ""}
+          </Text>
+        )}
         <View className="mt-0.5 flex-row flex-wrap items-center gap-x-3 gap-y-0.5">
           <View className="flex-row items-center gap-1">
             <Feather name="mail" size={11} color="#6B7280" />

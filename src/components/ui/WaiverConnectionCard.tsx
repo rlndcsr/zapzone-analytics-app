@@ -1,16 +1,22 @@
 import * as Clipboard from "expo-clipboard";
 import {
-  Clock,
   FileText,
   Link2,
   ShieldCheck,
   Tablet,
   UserCheck,
+  Users,
 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import { launchKioskSession } from "../../lib/waivers/kiosk";
+import {
+  countLabel,
+  entityCoverage,
+  peopleOnForm,
+} from "../../lib/waivers/waiverCoverage";
+import { WaiverCoverageLine } from "./WaiverCoverageLine";
 import { getToken } from "../../lib/session";
 import {
   checkInAllWaivers,
@@ -119,7 +125,7 @@ const Title = ({ title }: { title: string }) => (
 
 /**
  * The web's `WaiverConnectionPanel`, for one record: its own white card with the
- * signed / pending / checked-in counts, the prefilled kiosk, and one row per
+ * participants covered / forms signed line, the prefilled kiosk, and one row per
  * waiver with Copy link and per-waiver check-in.
  *
  * The caller fetches the waivers (a screen with several of these loads them
@@ -236,6 +242,9 @@ export function WaiverConnectionCard({
     completed: 0,
     pending: 0,
     checkedIn: 0,
+    peopleCovered: null,
+    minorsCovered: null,
+    peopleCheckedIn: null,
   };
 
   const kioskButton = (label: string) => (
@@ -276,31 +285,9 @@ export function WaiverConnectionCard({
 
   return (
     <CardFrame>
-      <View className="mb-3 flex-row flex-wrap items-center justify-between gap-2">
+      <View className="mb-2 flex-row flex-wrap items-center justify-between gap-2">
         <Title title={title} />
         <View className="flex-row flex-wrap items-center gap-2">
-          <View className="flex-row items-center gap-1">
-            <ShieldCheck size={12} color="#059669" />
-            <Text className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-              {summary.completed} signed
-            </Text>
-          </View>
-          {summary.pending > 0 && (
-            <View className="flex-row items-center gap-1">
-              <Clock size={12} color="#D97706" />
-              <Text className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                {summary.pending} pending
-              </Text>
-            </View>
-          )}
-          {checkInActions && summary.checkedIn > 0 && (
-            <View className="flex-row items-center gap-1">
-              <UserCheck size={12} color="#047857" />
-              <Text className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                {summary.checkedIn} checked in
-              </Text>
-            </View>
-          )}
           {kioskButton("Kiosk")}
           {checkInActions && checkableCount > 1 && (
             <Pressable
@@ -322,6 +309,13 @@ export function WaiverConnectionCard({
             </Pressable>
           )}
         </View>
+      </View>
+
+      <View className="mb-3">
+        <WaiverCoverageLine
+          coverage={entityCoverage({ waivers: list, summary })}
+          showCheckedIn={checkInActions}
+        />
       </View>
 
       {!!actionError && (
@@ -352,6 +346,17 @@ export function WaiverConnectionCard({
                 <Pill wrap={style.wrap} text={style.text}>
                   {STATUS_LABEL[w.status] ?? w.status}
                 </Pill>
+                {peopleOnForm(w) > 1 && (
+                  <Pill
+                    wrap="bg-gray-50 border-gray-200 dark:bg-neutral-800 dark:border-neutral-700"
+                    text="text-gray-700 dark:text-gray-300"
+                  >
+                    <Users size={10} color="#374151" />
+                    <Text className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                      {countLabel(peopleOnForm(w), "participant", "participants")}
+                    </Text>
+                  </Pill>
+                )}
                 {checkInActions &&
                   (w.checkedInAt ? (
                     <Pill
@@ -376,7 +381,9 @@ export function WaiverConnectionCard({
                 <Text className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
                   {w.template ? `${w.template} · ` : ""}
                   {formatDate(w.selectedDate)}
-                  {w.minors.length > 0 ? ` · Minors: ${w.minors.join(", ")}` : ""}
+                  {w.minors.length > 0
+                    ? ` · ${w.status === "completed" ? "Minors covered by this waiver" : "Minors"}: ${w.minors.join(", ")}`
+                    : ""}
                   {w.submittedAt ? ` · Signed ${formatDateTime(w.submittedAt)}` : ""}
                   {w.checkedInAt
                     ? ` · Checked in ${formatDateTime(w.checkedInAt)}`

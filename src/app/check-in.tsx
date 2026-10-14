@@ -34,9 +34,11 @@ import { LaunchKioskSheet } from "../components/ui/LaunchKioskSheet";
 import { Pagination } from "../components/ui/Pagination";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../components/ui/ViewToggle";
+import { WaiverCoverageLine } from "../components/ui/WaiverCoverageLine";
 import { useAppUpdateNoticeInset } from "../lib/hooks/useAppUpdateNotice";
 import {
   DESK_WAIVER_LABEL,
+  deskListCoverage,
   deskWaiverState,
   filterDeskWaivers,
   matchesDeskBookingSearch,
@@ -568,6 +570,16 @@ export default function CheckInWaiversScreen() {
     () => filterDeskWaivers(deskWaivers.day.waivers, search),
     [deskWaivers.day.waivers, search],
   );
+  const waiverListCoverage = useMemo(
+    () =>
+      deskListCoverage(
+        deskWaivers.dayCoverage,
+        search,
+        visibleWaivers,
+        deskWaivers.day.truncated,
+      ),
+    [deskWaivers.dayCoverage, search, visibleWaivers, deskWaivers.day.truncated],
+  );
   const bookingTruncated = dayBookingCount.fetched < dayBookingCount.total;
 
   /* Each tab's list is fetched for the day and paged here, so the desk scrolls
@@ -979,7 +991,10 @@ export default function CheckInWaiversScreen() {
                 detail={booking.reviewDetail}
                 variant={detailsOnly ? "details" : "verify"}
                 waivers={booking.waivers}
-                onCheckInWaiver={booking.checkInWaiver}
+                onCheckInWaiver={async (id) => {
+                  // The day list below must show it too, as the web's onChanged does.
+                  if (await booking.checkInWaiver(id)) reloadWaivers();
+                }}
                 checkingWaiverId={booking.checkingWaiverId}
               />
             </View>
@@ -1110,7 +1125,7 @@ export default function CheckInWaiversScreen() {
                 <VerifyMembershipDetails scan={surface.scan} />
               )}
               {surface.kind === "event" && (
-                <VerifyEventTicketDetails ticket={surface.ticket} />
+                <VerifyEventTicketDetails ticket={surface.ticket} waivers={surface.waivers} />
               )}
               {surface.kind === "waiver" && (
                 <VerifyWaiverDetails waiver={surface.waiver} />
@@ -1344,6 +1359,26 @@ export default function CheckInWaiversScreen() {
 
               {listTab === "waivers" ? (
                 <>
+                  {!deskWaivers.loading && deskWaivers.signedLoadFailed && (
+                    <View className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/20">
+                      <Text className="text-xs text-amber-800 dark:text-amber-300">
+                        Signed waivers could not be loaded, so participants covered and forms
+                        signed are not shown. Reopen Check-In to try again.
+                      </Text>
+                    </View>
+                  )}
+                  {!deskWaivers.loading &&
+                    !deskWaivers.signedLoadFailed &&
+                    visibleWaivers.length > 0 && (
+                      <View className="mb-2 gap-1">
+                        <WaiverCoverageLine coverage={waiverListCoverage.coverage} />
+                        {waiverListCoverage.partial && (
+                          <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+                            Counted from the waivers listed below.
+                          </Text>
+                        )}
+                      </View>
+                    )}
                   {!(deskWaivers.loading && deskWaivers.day.waivers.length === 0) &&
                     visibleWaivers.length > 0 && (
                       <View className="mb-2 flex-row items-center">
@@ -1447,7 +1482,9 @@ export default function CheckInWaiversScreen() {
                                   {visitDateLabel(w.selectedDate)}
                                 </Text>
                                 <Text className="text-xs text-gray-500 dark:text-gray-400">
-                                  {people.count} {people.detail}
+                                  {people.count == null
+                                    ? people.detail
+                                    : `${people.count} ${people.detail}`}
                                 </Text>
                               </View>
                             </View>

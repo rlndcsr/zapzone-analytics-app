@@ -42,6 +42,7 @@ import {
   shiftDateKey,
   slotBadge,
 } from "../../lib/escapeRooms/escapeRooms";
+import { formsSignedLabel, participantsCoveredLabel } from "../../lib/waivers/waiverCoverage";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -495,7 +496,10 @@ export default function EscapeRoomsScreen() {
                 <View key={earlier.sessionId} className="mt-1">
                   <Text className={`text-sm ${noticeTextClass("red")}`}>
                     {formatShortDate(earlier.date)} · {earlier.roomName ?? "Escape room"} ·{" "}
-                    {earlier.timeLabel} · {plural(earlier.players, "player", "players")} signed
+                    {earlier.timeLabel} ·{" "}
+                    {earlier.peopleCovered == null
+                      ? formsSignedLabel(earlier.players)
+                      : `${participantsCoveredLabel(earlier.peopleCovered)} · ${formsSignedLabel(earlier.players)}`}
                     {earlier.hasPhoto ? ", photo started" : ""}
                   </Text>
                   <Text

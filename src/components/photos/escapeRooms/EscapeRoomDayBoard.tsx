@@ -12,6 +12,7 @@ import type {
   EscapeRoomDayRoom,
   EscapeRoomSlot,
 } from "../../../services/escapeRoomService";
+import { formsSignedLabel, participantsCoveredLabel } from "../../../lib/waivers/waiverCoverage";
 import { Card, Pill } from "./kit";
 
 /**
@@ -177,7 +178,18 @@ function SlotRow({
         <View className="flex-row items-center gap-1">
           <Feather name="users" size={12} color="#6B7280" />
           <Text className="text-xs text-gray-700 dark:text-gray-300">
-            {slot.signed} signed
+            {slot.peopleCovered == null ? (
+              `${slot.signed} signed`
+            ) : (
+              <>
+                {participantsCoveredLabel(slot.peopleCovered)}
+                {slot.signed > 0 && (
+                  <Text className="text-gray-500 dark:text-gray-400">
+                    {" "}· {formsSignedLabel(slot.signed)}
+                  </Text>
+                )}
+              </>
+            )}
             {slot.unsigned > 0 && (
               <Text className="text-amber-700 dark:text-amber-400">
                 {" "}· {slot.unsigned} not signed

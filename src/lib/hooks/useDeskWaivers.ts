@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "../api";
 import {
+  deskDayCoverage,
   mergeDeskWaivers,
   WAIVER_PAGE_SIZE,
   waiverSignerName,
   type DeskWaiverDay,
 } from "../checkin/checkInWaiverList";
+import type { WaiverCoverage } from "../waivers/waiverCoverage";
 import type { ResultTone } from "../checkin/checkInPhase";
 import { getToken } from "../session";
 import {
@@ -42,6 +44,8 @@ export function useDeskWaivers(
   notify: (tone: ResultTone, message: string) => void,
 ) {
   const [day, setDay] = useState<DeskWaiverDay>(EMPTY_DAY);
+  const [dayCoverage, setDayCoverage] = useState<WaiverCoverage | null>(null);
+  const [signedLoadFailed, setSignedLoadFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const requestRef = useRef(0);
@@ -55,7 +59,11 @@ export function useDeskWaivers(
     const request = ++requestRef.current;
     const isCurrent = () => request === requestRef.current;
     // Another day or location: never show the last scope's rows under it.
-    if (shownScopeRef.current !== scopeKey) setDay(EMPTY_DAY);
+    if (shownScopeRef.current !== scopeKey) {
+      setDay(EMPTY_DAY);
+      setDayCoverage(null);
+      setSignedLoadFailed(false);
+    }
 
     const token = getToken();
     if (!token) return;
@@ -71,7 +79,7 @@ export function useDeskWaivers(
         ),
         fetchWaivers(
           token,
-          { ...base, status: "completed" },
+          { ...base, status: "completed", withCoverage: true },
           1,
           WAIVER_PAGE_SIZE,
         ),
@@ -89,6 +97,13 @@ export function useDeskWaivers(
 
       shownScopeRef.current = scopeKey;
       setDay(mergeDeskWaivers(outcome(unsigned), outcome(signed)));
+      setSignedLoadFailed(signed.status === "rejected");
+      setDayCoverage(
+        deskDayCoverage(
+          outcome(unsigned),
+          signed.status === "fulfilled" ? signed.value.coverage : null,
+        ),
+      );
 
       if (unsigned.status === "rejected") {
         notifyRef.current(
@@ -164,5 +179,5 @@ export function useDeskWaivers(
     [act],
   );
 
-  return { day, loading, busyId, reload: load, checkIn, undo };
+  return { day, dayCoverage, signedLoadFailed, loading, busyId, reload: load, checkIn, undo };
 }

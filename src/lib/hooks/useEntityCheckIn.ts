@@ -56,7 +56,7 @@ export type EntitySurface =
    */
   | { kind: "order"; order: TicketOrderDetail; payments: PaymentRow[] }
   | { kind: "membership"; scan: MembershipScan }
-  | { kind: "event"; ticket: ScannedEventTicket }
+  | { kind: "event"; ticket: ScannedEventTicket; waivers: EntityWaivers | null }
   | { kind: "waiver"; waiver: ScannedWaiver };
 
 /** A short-lived message under the scanner — the mobile stand-in for a toast. */
@@ -282,7 +282,15 @@ export function useEntityCheckIn(): UseEntityCheckIn {
             fail("No event ticket found for that code.");
             return;
           }
-          setSurface({ kind: "event", ticket });
+          // Best-effort, as for tickets: a failed load leaves the Waivers box empty.
+          let waivers: EntityWaivers | null = null;
+          try {
+            waivers = await fetchEntityWaivers(token, "event_purchase", ticket.id, signal);
+          } catch {
+            waivers = null;
+          }
+          if (signal.aborted || !mountedRef.current) return;
+          setSurface({ kind: "event", ticket, waivers });
         });
       } catch (err) {
         if (!signal.aborted) {

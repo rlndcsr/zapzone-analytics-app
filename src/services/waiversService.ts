@@ -303,7 +303,16 @@ type Pagination = {
 
 type WaiversListResponse = {
   success: boolean;
-  data: { waivers: RawWaiver[]; pagination: Pagination };
+  data: {
+    waivers: RawWaiver[];
+    pagination: Pagination;
+    coverage?: {
+      forms_signed?: number | string | null;
+      people_covered?: number | string | null;
+      minors_covered?: number | string | null;
+      people_checked_in?: number | string | null;
+    } | null;
+  };
 };
 
 type WaiverDetailResponse = {
@@ -510,6 +519,16 @@ export type WaiverSearchFilters = {
   customerId?: number;
   source?: WaiverSource;
   marketingConsentStatus?: MarketingConsentStatus;
+  /** Ask for the whole query's participants covered (`with_coverage=1`). */
+  withCoverage?: boolean;
+};
+
+/** Participants covered across every page of a list query, from the server. */
+export type WaiverListCoverage = {
+  formsSigned: number;
+  peopleCovered: number;
+  minorsCovered: number;
+  peopleCheckedIn: number;
 };
 
 export type WaiverListResult = {
@@ -517,6 +536,8 @@ export type WaiverListResult = {
   total: number;
   currentPage: number;
   lastPage: number;
+  /** Only when `withCoverage` was asked for and the server sent it. */
+  coverage: WaiverListCoverage | null;
 };
 
 function buildWaiverParams(
@@ -546,6 +567,7 @@ function buildWaiverParams(
   if (filters.source) params.append("source", filters.source);
   if (filters.marketingConsentStatus)
     params.append("marketing_consent_status", filters.marketingConsentStatus);
+  if (filters.withCoverage) params.append("with_coverage", "1");
   return params;
 }
 
@@ -563,11 +585,20 @@ export async function fetchWaivers(
     { token, signal },
   );
   const pg = res?.data?.pagination;
+  const cov = res?.data?.coverage;
   return {
     waivers: (res?.data?.waivers ?? []).map(mapWaiver),
     total: pg?.total ?? 0,
     currentPage: pg?.current_page ?? page,
     lastPage: pg?.last_page ?? page,
+    coverage: cov
+      ? {
+          formsSigned: Number(cov.forms_signed) || 0,
+          peopleCovered: Number(cov.people_covered) || 0,
+          minorsCovered: Number(cov.minors_covered) || 0,
+          peopleCheckedIn: Number(cov.people_checked_in) || 0,
+        }
+      : null,
   };
 }
 
@@ -1348,6 +1379,10 @@ export type EntityWaivers = {
     pending: number;
     /** Waivers whose participant has been checked in. */
     checkedIn: number;
+    /** Signers plus the minors on their signed forms; null if the server didn't say. */
+    peopleCovered: number | null;
+    minorsCovered: number | null;
+    peopleCheckedIn: number | null;
   };
 };
 
@@ -1926,6 +1961,9 @@ export async function fetchEntityWaivers(
         completed?: number;
         pending?: number;
         checked_in?: number;
+        people_covered?: number;
+        minors_covered?: number;
+        people_checked_in?: number;
       };
     };
   }>(`/api/waivers/for?${params.toString()}`, { token, signal });
@@ -1957,6 +1995,9 @@ export async function fetchEntityWaivers(
       completed: s.completed ?? 0,
       pending: s.pending ?? 0,
       checkedIn: s.checked_in ?? waivers.filter((w) => w.checkedIn).length,
+      peopleCovered: s.people_covered ?? null,
+      minorsCovered: s.minors_covered ?? null,
+      peopleCheckedIn: s.people_checked_in ?? null,
     },
   };
 }

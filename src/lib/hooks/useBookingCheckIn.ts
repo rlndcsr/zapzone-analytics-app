@@ -116,7 +116,8 @@ export type UseBookingCheckIn = {
   /** Record an in-store payment against the reviewed booking; returns success. */
   addPayment: (amount: number) => Promise<boolean>;
   /** Mark a connected waiver's participant as checked in, then refresh. */
-  checkInWaiver: (waiverId: number) => Promise<void>;
+  /** Resolves true once the check-in saved. */
+  checkInWaiver: (waiverId: number) => Promise<boolean>;
   /** Deny → decline check-in and return to the scanner. */
   deny: () => void;
   cancelReview: () => void;
@@ -396,18 +397,20 @@ export function useBookingCheckIn(): UseBookingCheckIn {
   );
 
   // Check a connected waiver's participant in, then refresh the waivers list so
-  // the "Checked In" badge updates.
+  // the "Checked In" badge updates. Resolves true once the check-in itself saved.
   const checkInWaiver = useCallback(
-    async (waiverId: number) => {
-      if (!reviewDetail || checkingWaiverId != null) return;
+    async (waiverId: number): Promise<boolean> => {
+      if (!reviewDetail || checkingWaiverId != null) return false;
       setCheckingWaiverId(waiverId);
+      let saved = false;
       try {
         const token = getToken();
         if (!token) {
           Alert.alert("Session expired", "Please sign in again.");
-          return;
+          return false;
         }
         await checkInWaiverApi(token, waiverId);
+        saved = true;
         const refreshed = await fetchEntityWaivers(
           token,
           "booking",
@@ -424,6 +427,7 @@ export function useBookingCheckIn(): UseBookingCheckIn {
       } finally {
         if (mountedRef.current) setCheckingWaiverId(null);
       }
+      return saved;
     },
     [reviewDetail, checkingWaiverId],
   );

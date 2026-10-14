@@ -1,5 +1,6 @@
 import type { CalendarBooking } from "../../services/bookingsService";
-import type { Waiver } from "../../services/waiversService";
+import type { Waiver, WaiverListCoverage } from "../../services/waiversService";
+import { waiverCoverage, type WaiverCoverage } from "../waivers/waiverCoverage.ts";
 
 /*
  * The check-in desk's Waivers tab (web parity: pages/admin/bookings/CheckIn.tsx
@@ -59,8 +60,9 @@ export function visitDateLabel(value: string | null | undefined): string {
   return month ? `${month} ${Number(m[3])}, ${m[1]}` : "—";
 }
 
-/** The adult plus any minors on the waiver. */
-export function peopleCovered(w: Waiver): { count: number; detail: string } {
+/** The adult plus any minors on the waiver — nobody until it is signed. */
+export function peopleCovered(w: Waiver): { count: number | null; detail: string } {
+  if (w.status !== "completed") return { count: null, detail: "None until signed" };
   const minors = w.minorsCount;
   return {
     count: 1 + minors,
@@ -197,6 +199,42 @@ export function mergeDeskWaivers(
     total: unsignedTotal + signedTotal,
     truncated: !unsignedComplete || signedRows.length < signedTotal,
     unsignedComplete,
+  };
+}
+
+/**
+ * The whole day's coverage from the server (`with_coverage` on the signed
+ * request), or null when it is missing or the unsigned count is unknown.
+ */
+export function deskDayCoverage(
+  unsigned: WaiverPageOutcome,
+  signedCoverage: WaiverListCoverage | null,
+): WaiverCoverage | null {
+  if (!signedCoverage || !unsigned) return null;
+  return {
+    participants: signedCoverage.peopleCovered,
+    forms: signedCoverage.formsSigned,
+    notSigned: unsigned.total,
+    minors: signedCoverage.minorsCovered,
+    participantsCheckedIn: signedCoverage.peopleCheckedIn,
+  };
+}
+
+/**
+ * The line over the Waivers tab: the server's day totals unless a search narrows
+ * the list, else counted from the rows shown — `partial` when those rows are not
+ * the whole day.
+ */
+export function deskListCoverage(
+  dayCoverage: WaiverCoverage | null,
+  search: string,
+  shown: Waiver[],
+  truncated: boolean,
+): { coverage: WaiverCoverage; partial: boolean } {
+  const day = search.trim() ? null : dayCoverage;
+  return {
+    coverage: day ?? waiverCoverage(shown),
+    partial: truncated && !day,
   };
 }
 

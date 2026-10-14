@@ -4,12 +4,18 @@ import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
 import { launchKioskSession } from "../../lib/waivers/kiosk";
+import {
+  countLabel,
+  entityCoverage,
+  peopleOnForm,
+} from "../../lib/waivers/waiverCoverage";
 import type {
   ConnectedWaiver,
   EntityWaivers,
   KioskSourceType,
 } from "../../services/waiversService";
 import { StatusBadge } from "./StatusBadge";
+import { WaiverCoverageLine } from "./WaiverCoverageLine";
 
 const PRIMARY = "#0644C7";
 
@@ -52,11 +58,19 @@ const WaiverRow = ({
     <View className="flex-1 mr-2">
       <Text className="text-sm font-medium text-gray-900 dark:text-white">
         {waiver.adultName}
+        {peopleOnForm(waiver) > 1 && (
+          <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+            {"  "}
+            {countLabel(peopleOnForm(waiver), "participant", "participants")}
+          </Text>
+        )}
       </Text>
       <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
         {waiver.template ? `${waiver.template} · ` : ""}
         {waiver.selectedDate ?? ""}
-        {waiver.minors.length > 0 ? ` · Minors: ${waiver.minors.join(", ")}` : ""}
+        {waiver.minors.length > 0
+          ? ` · ${waiver.status === "completed" ? "Minors covered by this waiver" : "Minors"}: ${waiver.minors.join(", ")}`
+          : ""}
       </Text>
     </View>
     <View className="items-end gap-1.5">
@@ -92,6 +106,7 @@ export function ConnectedWaiversPanel({
   entityLabel,
   waivers,
   loading,
+  emptyMessage,
 }: {
   sourceType: KioskSourceType;
   sourceId: number;
@@ -99,6 +114,7 @@ export function ConnectedWaiversPanel({
   entityLabel: string;
   waivers: EntityWaivers | null;
   loading: boolean;
+  emptyMessage?: string;
 }) {
   const [launching, setLaunching] = useState(false);
 
@@ -133,7 +149,7 @@ export function ConnectedWaiversPanel({
     return (
       <View className="flex-row items-center justify-between gap-3">
         <Text className="flex-1 text-sm text-gray-400 dark:text-gray-500">
-          No waiver connected to this {entityLabel}.
+          {emptyMessage ?? `No waiver connected to this ${entityLabel}.`}
         </Text>
         <KioskButton launching={launching} onPress={openKiosk} />
       </View>
@@ -142,16 +158,10 @@ export function ConnectedWaiversPanel({
 
   return (
     <>
-      <View className="flex-row items-center gap-3 mb-2">
-        <Text className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-          {waivers.summary.completed} complete
-        </Text>
-        {waivers.summary.pending > 0 && (
-          <Text className="text-xs font-medium text-amber-600 dark:text-amber-400">
-            {waivers.summary.pending} pending
-          </Text>
-        )}
-        <View className="flex-1" />
+      <View className="flex-row items-start gap-3 mb-2">
+        <View className="flex-1">
+          <WaiverCoverageLine coverage={entityCoverage(waivers)} showCheckedIn={false} />
+        </View>
         <KioskButton launching={launching} onPress={openKiosk} />
       </View>
       {waivers.waivers.map((w) => (

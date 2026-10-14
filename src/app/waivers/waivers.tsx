@@ -939,7 +939,11 @@ const Waivers = () => {
                       <Text className="font-semibold text-gray-900 dark:text-white">
                         {periodSummary.completed}
                       </Text>{" "}
-                      signed ·{" "}
+                      waiver {periodSummary.completed === 1 ? "form" : "forms"} signed ·{" "}
+                      <Text className="font-semibold text-gray-900 dark:text-white">
+                        {periodSummary.peopleCovered}
+                      </Text>{" "}
+                      {periodSummary.peopleCovered === 1 ? "participant" : "participants"} covered ·{" "}
                       <Text className="font-semibold text-gray-900 dark:text-white">
                         {periodSummary.pending}
                       </Text>{" "}
@@ -947,7 +951,7 @@ const Waivers = () => {
                       <Text className="font-semibold text-gray-900 dark:text-white">
                         {periodSummary.checkedIn}
                       </Text>{" "}
-                      checked in ·{" "}
+                      {periodSummary.checkedIn === 1 ? "form" : "forms"} checked in ·{" "}
                       <Text className="font-semibold text-gray-900 dark:text-white">
                         {periodSummary.minorsCovered}
                       </Text>{" "}

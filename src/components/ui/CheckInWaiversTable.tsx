@@ -191,6 +191,13 @@ export function CheckInWaiversTable({
         width: 150,
         render: (w) => {
           const people = peopleCovered(w);
+          if (people.count == null) {
+            return (
+              <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+                {people.detail}
+              </Text>
+            );
+          }
           return (
             <Text className="text-sm text-gray-900 dark:text-white">
               {people.count}{" "}

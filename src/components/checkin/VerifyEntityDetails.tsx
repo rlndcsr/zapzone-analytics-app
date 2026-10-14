@@ -3,9 +3,11 @@ import React from "react";
 import { Text, View } from "react-native";
 
 import { eventCheckInRefusal } from "../../lib/checkin/eventCheckInRefusal";
+import { countLabel } from "../../lib/waivers/waiverCoverage";
 import type { ScannedEventTicket } from "../../services/eventPurchasesService";
 import type { ScanResult as MembershipScan } from "../../services/membershipsService";
-import type { ScannedWaiver } from "../../services/waiversService";
+import type { EntityWaivers, ScannedWaiver } from "../../services/waiversService";
+import { ConnectedWaiversPanel } from "../ui/ConnectedWaiversPanel";
 
 const PRIMARY = "#0644C7";
 
@@ -229,8 +231,10 @@ export function VerifyMembershipDetails({ scan }: { scan: MembershipScan }) {
  */
 export function VerifyEventTicketDetails({
   ticket,
+  waivers,
 }: {
   ticket: ScannedEventTicket;
+  waivers: EntityWaivers | null;
 }) {
   const partOfOrder = ticket.ticketOrderId != null;
   const alreadyIn = ticket.status === "checked-in" || !!ticket.checkedInAt;
@@ -353,6 +357,22 @@ export function VerifyEventTicketDetails({
           )}
         </View>
       </View>
+
+      <View className={SECTION}>
+        <Text className={SECTION_TITLE}>Waivers</Text>
+        <ConnectedWaiversPanel
+          sourceType="event_purchase"
+          sourceId={ticket.id}
+          entityLabel="event ticket"
+          waivers={waivers}
+          loading={false}
+          emptyMessage={
+            partOfOrder
+              ? "Covered by this order's waiver — one signature per visit day (see the ticket holding it)."
+              : undefined
+          }
+        />
+      </View>
     </View>
   );
 }
@@ -396,7 +416,11 @@ export function VerifyWaiverDetails({ waiver }: { waiver: ScannedWaiver }) {
         <Text className={SECTION_TITLE}>Waiver Information</Text>
 
         <View className="-mx-2 flex-row flex-wrap">
-          <InfoTile icon="user" label="Signed By" value={waiver.adultName} />
+          <InfoTile
+            icon="user"
+            label={waiver.isSigned ? "Signed By" : "Waiver For"}
+            value={waiver.adultName}
+          />
           <InfoTile
             icon="tag"
             label="Reference"
@@ -412,6 +436,20 @@ export function VerifyWaiverDetails({ waiver }: { waiver: ScannedWaiver }) {
             label="Status"
             value={waiver.status}
             valueClass="font-semibold capitalize text-gray-800 dark:text-white"
+          />
+          <InfoTile
+            icon="users"
+            label="Participants Covered"
+            value={
+              waiver.isSigned
+                ? `${1 + waiver.minorsCount} — ${
+                    waiver.minorsCount === 0
+                      ? "the signer"
+                      : `the signer and ${countLabel(waiver.minorsCount, "minor", "minors")}`
+                  }`
+                : "None until this waiver is signed"
+            }
+            full
           />
           {!!waiver.templateTitle && (
             <InfoTile
@@ -442,7 +480,7 @@ export function VerifyWaiverDetails({ waiver }: { waiver: ScannedWaiver }) {
       {waiver.minors.length > 0 && (
         <View className={`mt-4 ${SECTION}`}>
           <Text className={SECTION_TITLE}>
-            Minors ({waiver.minorsCount})
+            Minors covered by this waiver ({waiver.minorsCount})
           </Text>
           {waiver.minors.map((minor) => (
             <View
