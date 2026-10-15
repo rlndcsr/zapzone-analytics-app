@@ -609,6 +609,8 @@ export type EmailNotificationDetail = {
   includeQrCode: boolean;
   isActive: boolean;
   isDefault: boolean;
+  /** A default email's key, e.g. "review_request_customer" (shown in the edit header). */
+  defaultKey: string | null;
   sendBeforeHours: number | null;
   sendAfterHours: number | null;
   locationName: string | null;
@@ -630,6 +632,7 @@ type RawNotificationDetail = RawNotification & {
   body?: string | null;
   custom_emails?: string[] | null;
   excluded_emails?: string[] | null;
+  default_key?: string | null;
   include_qr_code?: boolean | null;
   send_before_hours?: number | null;
   send_after_hours?: number | null;
@@ -674,6 +677,7 @@ export async function fetchEmailNotificationDetail(
     includeQrCode: !!d.include_qr_code,
     isActive: d.is_active !== false,
     isDefault: !!d.is_default,
+    defaultKey: d.default_key ?? null,
     sendBeforeHours: d.send_before_hours ?? null,
     sendAfterHours: d.send_after_hours ?? null,
     locationName: d.location?.name ?? null,
@@ -783,6 +787,8 @@ export async function updateEmailNotification(
   };
   if (input.customEmails?.length) body.custom_emails = input.customEmails;
   if (input.excludedEmails) body.excluded_emails = input.excludedEmails;
+  if (input.sendBeforeHours !== undefined) body.send_before_hours = input.sendBeforeHours;
+  if (input.sendAfterHours !== undefined) body.send_after_hours = input.sendAfterHours;
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
   Object.assign(body, input.visitFields);
   await apiRequest(`/api/email-notifications/${id}`, { method: "PUT", token, body });
@@ -838,6 +844,9 @@ export type CreateEmailNotificationInput = {
    * last address saves — and left as it is on the server when omitted.
    */
   excludedEmails?: string[];
+  /** Reminder / follow-up timing; each sent only when given (null clears it). */
+  sendBeforeHours?: number | null;
+  sendAfterHours?: number | null;
   subject: string;
   body: string;
   includeQrCode: boolean;
@@ -864,6 +873,8 @@ export async function createEmailNotification(
   };
   if (input.customEmails?.length) body.custom_emails = input.customEmails;
   if (input.excludedEmails) body.excluded_emails = input.excludedEmails;
+  if (input.sendBeforeHours !== undefined) body.send_before_hours = input.sendBeforeHours;
+  if (input.sendAfterHours !== undefined) body.send_after_hours = input.sendAfterHours;
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
   Object.assign(body, input.visitFields);
   await apiRequest("/api/email-notifications", { method: "POST", token, body });

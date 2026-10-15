@@ -22,12 +22,15 @@ export function ComposerHeader({
   subtitle,
   onBack,
   actions,
+  badge,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   title: string;
   subtitle: string;
   onBack: () => void;
   actions?: React.ReactNode;
+  /** A pill beside the title (e.g. the web's Default / Custom). */
+  badge?: React.ReactNode;
 }) {
   const { colorScheme } = useColorScheme();
   const iconColor = colorScheme === "dark" ? "#FFFFFF" : "#111827";
@@ -45,10 +48,16 @@ export function ComposerHeader({
         <View className="flex-row items-center gap-2 flex-1">
           <Feather name={icon} size={18} color={PRIMARY} />
           <View className="flex-1">
-            <Text className="text-base font-bold text-gray-900 dark:text-white" numberOfLines={1}>
-              {title}
-            </Text>
-            <Text className="text-[11px] text-gray-500 dark:text-gray-400" numberOfLines={1}>
+            <View className="flex-row items-center gap-2">
+              <Text
+                className="shrink text-base font-bold text-gray-900 dark:text-white"
+                numberOfLines={1}
+              >
+                {title}
+              </Text>
+              {badge}
+            </View>
+            <Text className="text-[11px] text-gray-500 dark:text-gray-400" numberOfLines={2}>
               {subtitle}
             </Text>
           </View>
@@ -142,6 +151,7 @@ export function LabeledInput({
   onFocus,
   keyboardType,
   autoCapitalize,
+  editable = true,
 }: {
   label: string;
   required?: boolean;
@@ -153,6 +163,8 @@ export function LabeledInput({
   onFocus?: () => void;
   keyboardType?: React.ComponentProps<typeof TextInput>["keyboardType"];
   autoCapitalize?: React.ComponentProps<typeof TextInput>["autoCapitalize"];
+  /** False greys the field and blocks typing (the web's locked default name). */
+  editable?: boolean;
 }) {
   return (
     <View className="mb-1">
@@ -169,8 +181,13 @@ export function LabeledInput({
         multiline={multiline}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
+        editable={editable}
         textAlignVertical={multiline ? "top" : "center"}
-        className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700"
+        className={`rounded-xl px-3.5 py-3 text-sm border border-gray-200 dark:border-neutral-700 ${
+          editable
+            ? "bg-gray-50 dark:bg-neutral-800 text-gray-900 dark:text-white"
+            : "bg-gray-100 dark:bg-neutral-800/60 text-gray-500 dark:text-gray-400"
+        }`}
         style={multiline ? { minHeight: 160 } : undefined}
       />
       {!!hint && (

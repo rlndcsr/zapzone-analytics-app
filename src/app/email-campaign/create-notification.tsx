@@ -45,6 +45,17 @@ import {
   visitPayloadFields,
   type VisitActivityFilter,
 } from "../../lib/email/visitEmail";
+import {
+  DEFAULT_NAME_HINT,
+  defaultLocationHint,
+  editSubtitle,
+  hoursError,
+  hoursPayload,
+  hoursSuffix,
+  locationOptions,
+  pickedLocation,
+  triggerTiming,
+} from "../../lib/email/notificationSettings";
 import { markEmailNotificationsStale } from "../../lib/emailStale";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -83,6 +94,8 @@ const CreateNotification = () => {
   const [entityType, setEntityType] = useState<NotificationEntityType>("all");
   const [triggerType, setTriggerType] = useState("booking_created");
   const [active, setActive] = useState(true);
+  // Reminder / follow-up timing (web: send_before_hours / send_after_hours).
+  const [hours, setHours] = useState("");
 
   const [recipients, setRecipients] = useState<NotificationRecipientType[]>(["customer"]);
   const [includeQr, setIncludeQr] = useState(false);
@@ -109,6 +122,7 @@ const CreateNotification = () => {
   const [overrides, setOverrides] = useState<VisitEmailOverride[]>([]);
   const [canEdit, setCanEdit] = useState(true);
   const [isDefault, setIsDefault] = useState(false);
+  const [defaultKey, setDefaultKey] = useState<string | null>(null);
   const [locationId, setLocationId] = useState<number | null>(null);
   const [originalTrigger, setOriginalTrigger] = useState<string | null>(null);
   const [locations, setLocations] = useState<{ id: number; name: string }[]>([]);
@@ -120,11 +134,12 @@ const CreateNotification = () => {
   // Editing a follow-up email needs a role that may set one up (web `visitLocked`).
   const visitLocked =
     isEdit && isVisitEmail && !canSetUpVisitEmail(currentUser?.role, currentUser?.location_id);
-  const visitLocationId = isEdit
-    ? locationId
-    : isCompanyAdmin
-      ? null
-      : (currentUser?.location_id ?? null);
+  const visitLocationId =
+    isEdit || isCompanyAdmin ? locationId : (currentUser?.location_id ?? null);
+  // A default email's name, location, Apply To and trigger are fixed (web parity).
+  const lockDefault = isEdit && isDefault;
+  const timing = triggerTiming(triggerType);
+  const showLocation = isCompanyAdmin && locations.length > 0;
 
   const lastFocused = useRef<"subject" | "body">("body");
 
@@ -148,6 +163,14 @@ const CreateNotification = () => {
         setName(d.name);
         setEntityType(d.entityType as NotificationEntityType);
         setTriggerType(d.triggerType || "booking_created");
+        const savedTiming = triggerTiming(d.triggerType || "");
+        const savedHours =
+          savedTiming === "before"
+            ? d.sendBeforeHours
+            : savedTiming === "after"
+              ? d.sendAfterHours
+              : null;
+        setHours(savedHours != null ? String(savedHours) : "");
         setActive(d.isActive);
         setRecipients(d.recipientTypes as NotificationRecipientType[]);
         setIncludeQr(d.includeQrCode);
@@ -163,6 +186,7 @@ const CreateNotification = () => {
         setOverrides(d.visitOverrides);
         setCanEdit(d.canEdit);
         setIsDefault(d.isDefault);
+        setDefaultKey(d.defaultKey);
         setLocationId(d.locationId);
         setOriginalTrigger(d.triggerType || null);
         if (d.emailTemplateId != null) {
@@ -176,9 +200,10 @@ const CreateNotification = () => {
     };
   }, [isEdit, editId]);
 
-  // Location names for the promo picker's "works only at …" line.
+  // Locations for a company admin's Location picker and the promo picker's
+  // "works only at …" line.
   useEffect(() => {
-    if (!isVisitEmail || locations.length > 0) return;
+    if ((!isVisitEmail && !isCompanyAdmin) || locations.length > 0) return;
     const token = getToken();
     if (!token) return;
     const controller = new AbortController();
@@ -186,7 +211,7 @@ const CreateNotification = () => {
       .then((list) => setLocations(list.map((l) => ({ id: l.id, name: l.name }))))
       .catch(() => {});
     return () => controller.abort();
-  }, [isVisitEmail, locations.length]);
+  }, [isVisitEmail, isCompanyAdmin, locations.length]);
 
   const triggerOptions: SelectOption[] = useMemo(() => {
     const options = triggerGroupsFor(entityType).flatMap((g) =>
@@ -205,9 +230,15 @@ const CreateNotification = () => {
     return options;
   }, [entityType, triggerType, originalTrigger]);
 
+  // A different trigger starts its timing afresh, as on the web.
+  const changeTrigger = (next: string) => {
+    if (next !== triggerType) setHours("");
+    setTriggerType(next);
+  };
+
   const changeEntityType = (next: NotificationEntityType) => {
     setEntityType(next);
-    setTriggerType((current) => triggerForEntity(next, current));
+    changeTrigger(triggerForEntity(next, triggerType));
   };
 
   const applyToOptions: SelectOption[] = useMemo(
@@ -262,6 +293,9 @@ const CreateNotification = () => {
     } else if (!subject.trim() || !body.trim()) {
       return Alert.alert("Incomplete", "A subject and body are required.");
     }
+    const timingError = hoursError(triggerType, hours);
+    if (timingError) return Alert.alert("Timing", timingError);
+    const timingFields = hoursPayload(triggerType, hours);
     if (!isVisitEmail && recipients.includes("custom") && customEmails.length === 0)
       return Alert.alert("Custom emails", "Add at least one custom email address.");
     // An address typed but not added is saved too; a follow-up email saves none.
@@ -280,14 +314,16 @@ const CreateNotification = () => {
         recipientTypes: recipients,
         customEmails: customEmails.length ? customEmails : undefined,
         excludedEmails: excluded.emails,
+        sendBeforeHours: timingFields.send_before_hours,
+        sendAfterHours: timingFields.send_after_hours,
         subject: useTemplate ? "" : subject.trim(),
         body: useTemplate ? "" : body.trim(),
         includeQrCode: includeQr,
         isActive: active,
         emailTemplateId: useTemplate ? templateId : null,
         visitFields: {
-          // Mobile has no location picker, so an admin keeps the email's saved scope (All Locations on create).
-          ...(isEdit && isDefault ? {} : adminLocationField(currentUser?.role, isEdit ? locationId : null)),
+          // A company admin's Location picker (All Locations = null); a default keeps its scope.
+          ...(lockDefault ? {} : adminLocationField(currentUser?.role, locationId)),
           ...(isEdit && isDefault ? defaultVisitPayloadFields : visitPayloadFields)({
             triggerType,
             entityType,
@@ -325,9 +361,10 @@ const CreateNotification = () => {
         title={isEdit ? "Edit Email Notification" : "Create Email Notification"}
         subtitle={
           isEdit
-            ? "Update this automated notification"
+            ? editSubtitle(isDefault, defaultKey)
             : "Set up automated email notifications for events"
         }
+        badge={isEdit ? <KindBadge isDefault={isDefault} /> : undefined}
         onBack={() => router.back()}
         actions={
           <HeaderAction
@@ -362,8 +399,27 @@ const CreateNotification = () => {
               value={name}
               onChangeText={setName}
               placeholder="e.g. Booking Confirmation Email"
+              editable={!lockDefault}
+              hint={lockDefault ? DEFAULT_NAME_HINT : undefined}
             />
+            {/* Web order: Location | Apply To, then Trigger Event. */}
             <View className="flex-row gap-3 mt-3">
+              {showLocation && (
+                <View className="flex-1">
+                  <SelectField
+                    label="Location"
+                    value={locationId ?? ""}
+                    options={locationOptions(locations)}
+                    onSelect={(v) => setLocationId(pickedLocation(v))}
+                    disabled={lockDefault}
+                  />
+                  {lockDefault && (
+                    <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5">
+                      {defaultLocationHint(isVisitEmail)}
+                    </Text>
+                  )}
+                </View>
+              )}
               <View className="flex-1">
                 <SelectField
                   label="Apply To"
@@ -371,18 +427,52 @@ const CreateNotification = () => {
                   value={entityType}
                   options={applyToOptions}
                   onSelect={(v) => changeEntityType(v as NotificationEntityType)}
+                  disabled={lockDefault}
                 />
               </View>
-              <View className="flex-1">
+              {!showLocation && (
+                <View className="flex-1">
+                  <SelectField
+                    label="Trigger Event"
+                    required
+                    value={triggerType}
+                    options={triggerOptions}
+                    onSelect={(v) => changeTrigger(String(v))}
+                    disabled={lockDefault}
+                  />
+                </View>
+              )}
+            </View>
+            {showLocation && (
+              <View className="mt-3">
                 <SelectField
                   label="Trigger Event"
                   required
                   value={triggerType}
                   options={triggerOptions}
-                  onSelect={(v) => setTriggerType(String(v))}
+                  onSelect={(v) => changeTrigger(String(v))}
+                  disabled={lockDefault}
                 />
               </View>
-            </View>
+            )}
+            {timing !== null && (
+              <View className="flex-row flex-wrap items-center gap-2 mt-3 p-3 rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-900/20">
+                <Feather name="clock" size={15} color={PRIMARY} />
+                <Text className="text-sm text-[#0644C7] dark:text-blue-300">Send</Text>
+                <TextInput
+                  value={hours}
+                  onChangeText={setHours}
+                  placeholder="24"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="number-pad"
+                  accessibilityLabel={timing === "before" ? "Hours before" : "Hours after"}
+                  className="w-16 rounded-md border border-blue-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-blue-800 dark:bg-neutral-900 dark:text-white"
+                />
+                <Text className="shrink text-sm text-[#0644C7] dark:text-blue-300">
+                  {hoursSuffix(triggerType, isVisitEmail)}
+                </Text>
+              </View>
+            )}
             <Pressable
               onPress={() => setActive((v) => !v)}
               className="flex-row items-center gap-2.5 mt-3"
@@ -633,6 +723,21 @@ const CreateNotification = () => {
     </View>
   );
 };
+
+/** The web's Default / Custom pill beside "Edit Email Notification". */
+function KindBadge({ isDefault }: { isDefault: boolean }) {
+  return isDefault ? (
+    <View className="flex-row items-center gap-1 rounded-full border border-blue-200 bg-blue-100 px-2 py-0.5 dark:border-blue-900/50 dark:bg-blue-900/30">
+      <Feather name="shield" size={10} color="#1D4ED8" />
+      <Text className="text-[10px] font-semibold text-blue-700 dark:text-blue-300">Default</Text>
+    </View>
+  ) : (
+    <View className="flex-row items-center gap-1 rounded-full border border-purple-200 bg-purple-100 px-2 py-0.5 dark:border-purple-900/50 dark:bg-purple-900/30">
+      <Feather name="star" size={10} color="#7E22CE" />
+      <Text className="text-[10px] font-semibold text-purple-700 dark:text-purple-300">Custom</Text>
+    </View>
+  );
+}
 
 function ReadOnlyBanner({ text }: { text: string }) {
   return (
