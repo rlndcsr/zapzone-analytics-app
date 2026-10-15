@@ -1172,6 +1172,25 @@ const Waivers = () => {
               <Feather name="chevron-right" size={16} color="#9CA3AF" />
             </Pressable>
           )}
+          {/* Web: Manage → Returning Customers, admins and managers only (the
+              API refuses everyone else). */}
+          {canManageSubModules && (
+            <Pressable
+              onPress={() => {
+                setSheet(null);
+                router.push("/waivers/returning-customers" as never);
+              }}
+              className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+              accessibilityRole="button"
+              accessibilityLabel="Returning Customers"
+            >
+              <Feather name="user-check" size={18} color={PRIMARY} />
+              <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
+                Returning Customers
+              </Text>
+              <Feather name="chevron-right" size={16} color="#9CA3AF" />
+            </Pressable>
+          )}
           {/* The sheet is a native Modal, so it closes fully before the share
               sheet opens — two stacked native Modals crash Android's new
               architecture (same guard the filter → calendar hop uses). */}
