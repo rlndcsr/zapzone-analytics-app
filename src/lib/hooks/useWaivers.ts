@@ -205,7 +205,9 @@ export function useWaiverPeriodSummary(scope: WaiverPeriodScope, nonce = 0) {
   const [loading, setLoading] = useState(true);
   const requestIdRef = useRef(0);
 
-  const { all, date, locationId } = scope;
+  // Every field of the scope travels: dropping the visit period made the
+  // server fall back to today, whatever period the list was showing.
+  const { all, timeframe, startDate, endDate, date, locationId } = scope;
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
@@ -215,7 +217,14 @@ export function useWaiverPeriodSummary(scope: WaiverPeriodScope, nonce = 0) {
       return;
     }
     setLoading(true);
-    fetchWaiverPeriodSummary(token, { all, date, locationId })
+    fetchWaiverPeriodSummary(token, {
+      all,
+      timeframe,
+      startDate,
+      endDate,
+      date,
+      locationId,
+    })
       .then((res) => {
         if (requestId !== requestIdRef.current) return;
         setSummary(res);
@@ -230,7 +239,7 @@ export function useWaiverPeriodSummary(scope: WaiverPeriodScope, nonce = 0) {
     return () => {
       requestIdRef.current++;
     };
-  }, [all, date, locationId, nonce]);
+  }, [all, timeframe, startDate, endDate, date, locationId, nonce]);
 
   return { summary, loading };
 }

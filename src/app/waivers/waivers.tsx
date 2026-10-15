@@ -466,9 +466,15 @@ const Waivers = () => {
   // Dashboard-shaped figures for the same period as the list request, fetched
   // separately because they must ignore the status filter — that filter is
   // exactly why the counts and the dashboard looked like they disagreed.
-  // Not narrowed by the workspace location, matching the list request (which
-  // applies location client-side), so the two counts stay comparable.
-  const periodScope = useMemo(() => ({ ...dateScope }), [dateScope]);
+  // Narrowed to the same location the dashboard's waiver card uses — a company
+  // admin's workspace location (web parity: effectiveLocationId); everyone else
+  // is held to their own location server-side — so its total matches the card.
+  const periodLocationId =
+    isCompanyAdmin && activeLocation.id !== "all" ? activeLocation.id : undefined;
+  const periodScope = useMemo(
+    () => ({ ...dateScope, locationId: periodLocationId }),
+    [dateScope, periodLocationId],
+  );
   const { summary: periodSummary } = useWaiverPeriodSummary(
     periodScope,
     statsNonce,
@@ -955,9 +961,9 @@ const Waivers = () => {
                       <Text className="font-semibold text-gray-900 dark:text-white">
                         {periodSummary.minorsCovered}
                       </Text>{" "}
-                      minor{periodSummary.minorsCovered === 1 ? "" : "s"}
+                      minors
                     </Text>
-                    {periodSummary.minorAgeBrackets.some((b) => b.count > 0) && (
+                    {periodSummary.minorAgeBrackets.length > 0 && (
                       <Text className="mt-1 text-xs leading-4 text-gray-500 dark:text-gray-400">
                         Minors by age (at signing):{" "}
                         {periodSummary.minorAgeBrackets
@@ -966,9 +972,10 @@ const Waivers = () => {
                       </Text>
                     )}
                     <Text className="mt-1 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
-                      Counted the way the company dashboard counts, for the same
-                      period — so total should match the dashboard&apos;s waiver
-                      card.
+                      Counted the same way the company dashboard counts, for the
+                      same period and location — so{" "}
+                      <Text className="font-medium">total</Text> should equal the
+                      dashboard&apos;s waiver card.
                     </Text>
                   </View>
                 )}
