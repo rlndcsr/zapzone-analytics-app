@@ -195,6 +195,9 @@ const EventPurchaseDetailsScreen = () => {
 
   const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
   const [waiversLoading, setWaiversLoading] = useState(true);
+  // Only the newest waivers load may fill the card (web parity:
+  // WaiverConnectionPanel's latestLoad), so a slow earlier reply can't land last.
+  const waiversRequestRef = useRef(0);
 
   const deleteLockRef = useRef(false);
 
@@ -255,27 +258,42 @@ const EventPurchaseDetailsScreen = () => {
       setWaiversLoading(false);
       return;
     }
+    const requestId = ++waiversRequestRef.current;
+    const isCurrent = () => requestId === waiversRequestRef.current;
     const controller = new AbortController();
     setWaiversLoading(true);
     fetchEntityWaivers(token, "event_purchase", purchaseId, controller.signal)
-      .then((r) => setWaivers(r))
+      .then((r) => {
+        if (isCurrent()) setWaivers(r);
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setWaivers(null);
+        if (isCurrent()) setWaivers(null);
       })
       .finally(() => {
-        if (!controller.signal.aborted) setWaiversLoading(false);
+        if (isCurrent()) setWaiversLoading(false);
       });
-    return () => controller.abort();
+    // Another purchase (or leaving) outdates whatever reply is still on its way.
+    const requests = waiversRequestRef;
+    return () => {
+      requests.current++;
+      controller.abort();
+    };
   }, [purchaseId]);
 
   // Re-read after a check-in from the waivers card, so its counts follow the server.
   const reloadWaivers = useCallback(async () => {
     const token = getToken();
     if (!token || purchaseId == null || Number.isNaN(purchaseId)) return;
+    const requestId = ++waiversRequestRef.current;
+    const isCurrent = () => requestId === waiversRequestRef.current;
     try {
-      setWaivers(await fetchEntityWaivers(token, "event_purchase", purchaseId));
+      const fresh = await fetchEntityWaivers(token, "event_purchase", purchaseId);
+      if (isCurrent()) setWaivers(fresh);
     } catch {
       // Keep what is showing; the card reports its own action errors.
+    } finally {
+      // This load may have overtaken the first one, so it ends the spinner.
+      if (isCurrent()) setWaiversLoading(false);
     }
   }, [purchaseId]);
 

@@ -1,7 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useEffect, useState, type ComponentProps } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -79,6 +85,20 @@ const STATUS_LABEL: Record<
     text: "text-purple-800 dark:text-purple-300",
   },
 };
+
+/**
+ * Starts a waivers load for one ticket and returns whether it is still that
+ * ticket's newest. Only the newest may fill the card (web parity:
+ * WaiverConnectionPanel's latestLoad), so a slow earlier reply can't land last.
+ */
+function startLineWaiversLoad(
+  requests: Record<number, number>,
+  lineId: number,
+): () => boolean {
+  const requestId = (requests[lineId] ?? 0) + 1;
+  requests[lineId] = requestId;
+  return () => requests[lineId] === requestId;
+}
 
 /** "14:00" | "14:00:00" -> "2:00 PM". */
 function fmtTime(raw: string | null): string | null {
@@ -323,6 +343,7 @@ export default function OrderDetailsScreen() {
   const [waivers, setWaivers] = useState<Record<number, EntityWaivers | null>>(
     {},
   );
+  const waiverRequestsRef = useRef<Record<number, number>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -364,17 +385,35 @@ export default function OrderDetailsScreen() {
       );
       const entries = await Promise.all(
         attractionLines.map(async (line) => {
+          const isCurrent = startLineWaiversLoad(
+            waiverRequestsRef.current,
+            line.id,
+          );
+          let value: EntityWaivers | null;
           try {
-            return [
+            value = await fetchEntityWaivers(
+              token,
+              "attraction_purchase",
               line.id,
-              await fetchEntityWaivers(token, "attraction_purchase", line.id),
-            ] as const;
+            );
           } catch {
-            return [line.id, null] as const;
+            value = null;
           }
+          return { lineId: line.id, value, isCurrent };
         }),
       );
-      setWaivers(Object.fromEntries(entries));
+      // A ticket re-read since this load started keeps that newer answer.
+      const fresh = new Set(
+        entries.filter((e) => e.isCurrent()).map((e) => e.lineId),
+      );
+      setWaivers((shown) => {
+        const next: Record<number, EntityWaivers | null> = {};
+        for (const { lineId, value } of entries) {
+          if (fresh.has(lineId)) next[lineId] = value;
+          else if (lineId in shown) next[lineId] = shown[lineId];
+        }
+        return next;
+      });
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "We could not load that order.",
@@ -503,13 +542,14 @@ export default function OrderDetailsScreen() {
   const reloadLineWaivers = useCallback(async (lineId: number) => {
     const token = getToken();
     if (!token) return;
+    const isCurrent = startLineWaiversLoad(waiverRequestsRef.current, lineId);
     try {
       const fresh = await fetchEntityWaivers(
         token,
         "attraction_purchase",
         lineId,
       );
-      setWaivers((current) => ({ ...current, [lineId]: fresh }));
+      if (isCurrent()) setWaivers((current) => ({ ...current, [lineId]: fresh }));
     } catch {
       // keep what is on screen; the check-in itself already succeeded
     }

@@ -154,6 +154,9 @@ export function useBookingCheckIn(): UseBookingCheckIn {
   const processingRef = useRef(false);
   const mountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
+  // Only the newest waivers load may fill the Waivers box (web parity:
+  // WaiverConnectionPanel's latestLoad), so a slow earlier reply can't land last.
+  const waiversRequestRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -275,6 +278,8 @@ export function useBookingCheckIn(): UseBookingCheckIn {
           detail = null; // fall back to the summary-only review
         }
 
+        // Outdates any re-read still on its way for the booking reviewed before.
+        waiversRequestRef.current++;
         let entityWaivers: EntityWaivers | null = null;
         try {
           entityWaivers = await fetchEntityWaivers(
@@ -411,12 +416,15 @@ export function useBookingCheckIn(): UseBookingCheckIn {
         }
         await checkInWaiverApi(token, waiverId);
         saved = true;
+        const requestId = ++waiversRequestRef.current;
         const refreshed = await fetchEntityWaivers(
           token,
           "booking",
           reviewDetail.id,
         );
-        if (mountedRef.current) setWaivers(refreshed);
+        if (mountedRef.current && requestId === waiversRequestRef.current) {
+          setWaivers(refreshed);
+        }
       } catch (err) {
         const apiErr = err instanceof ApiError ? err : null;
         Alert.alert(

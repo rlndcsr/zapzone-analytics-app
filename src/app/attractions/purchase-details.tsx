@@ -250,7 +250,9 @@ const PurchaseDetailsScreen = () => {
     const controller = new AbortController();
     setWaiversLoading(true);
     fetchEntityWaivers(token, "attraction_purchase", purchaseId, controller.signal)
-      .then((r) => setWaivers(r))
+      .then((r) => {
+        if (!controller.signal.aborted) setWaivers(r);
+      })
       .catch(() => {
         if (!controller.signal.aborted) setWaivers(null);
       })
