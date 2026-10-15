@@ -600,6 +600,8 @@ export type EmailNotificationDetail = {
   entityLabel: string;
   recipientTypes: string[];
   customEmails: string[];
+  /** Don't Send To: addresses this email never goes to. */
+  excludedEmails: string[];
   subject: string;
   body: string;
   templateName: string | null;
@@ -627,6 +629,7 @@ type RawNotificationDetail = RawNotification & {
   subject?: string | null;
   body?: string | null;
   custom_emails?: string[] | null;
+  excluded_emails?: string[] | null;
   include_qr_code?: boolean | null;
   send_before_hours?: number | null;
   send_after_hours?: number | null;
@@ -663,6 +666,7 @@ export async function fetchEmailNotificationDetail(
     entityLabel: humanize(d.entity_type) || "All Entities",
     recipientTypes: Array.isArray(d.recipient_types) ? d.recipient_types : [],
     customEmails: Array.isArray(d.custom_emails) ? d.custom_emails : [],
+    excludedEmails: Array.isArray(d.excluded_emails) ? d.excluded_emails : [],
     subject: d.subject?.trim() || "",
     body: d.body ?? "",
     templateName: d.template?.name ?? null,
@@ -778,6 +782,7 @@ export async function updateEmailNotification(
     is_active: input.isActive,
   };
   if (input.customEmails?.length) body.custom_emails = input.customEmails;
+  if (input.excludedEmails) body.excluded_emails = input.excludedEmails;
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
   Object.assign(body, input.visitFields);
   await apiRequest(`/api/email-notifications/${id}`, { method: "PUT", token, body });
@@ -828,6 +833,11 @@ export type CreateEmailNotificationInput = {
   entityType: NotificationEntityType;
   recipientTypes: NotificationRecipientType[];
   customEmails?: string[];
+  /**
+   * Don't Send To. Sent whenever given — an empty list too, so removing the
+   * last address saves — and left as it is on the server when omitted.
+   */
+  excludedEmails?: string[];
   subject: string;
   body: string;
   includeQrCode: boolean;
@@ -853,6 +863,7 @@ export async function createEmailNotification(
     is_active: input.isActive,
   };
   if (input.customEmails?.length) body.custom_emails = input.customEmails;
+  if (input.excludedEmails) body.excluded_emails = input.excludedEmails;
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
   Object.assign(body, input.visitFields);
   await apiRequest("/api/email-notifications", { method: "POST", token, body });

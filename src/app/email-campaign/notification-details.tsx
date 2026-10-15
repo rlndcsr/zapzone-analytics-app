@@ -613,6 +613,20 @@ const NotificationDetails = () => {
             </View>
           )}
 
+          {detail.excludedEmails.length > 0 && (
+            <View className="mt-3 pt-3 border-t border-gray-200 dark:border-neutral-800">
+              <FieldLabel>Don&apos;t Send To</FieldLabel>
+              <View className="mt-2 flex-row flex-wrap gap-2">
+                {detail.excludedEmails.map((e) => (
+                  <View key={e} className="flex-row items-center gap-1.5 px-2 py-1 rounded bg-red-50 dark:bg-red-900/30">
+                    <Feather name="mail" size={13} color="#B91C1C" />
+                    <Text className="text-sm text-red-700 dark:text-red-300">{e}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
           {detail.triggerType === "visit_completed" && (
             <View className="mt-3 gap-1">
               <FieldLabel>Return-visit promo code</FieldLabel>

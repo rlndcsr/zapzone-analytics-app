@@ -24,7 +24,12 @@ import {
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { SelectField, type SelectOption } from "../../components/ui/FormControls";
 import { VisitEmailSettings } from "../../components/ui/VisitEmailSettings";
-import { firstFieldError } from "../../lib/api";
+import { ApiError, firstFieldError } from "../../lib/api";
+import {
+  addExcludedEmail,
+  excludedEmailsToSave,
+  refusedExcludedEmailMessage,
+} from "../../lib/email/excludedEmails";
 import {
   adminLocationField,
   APPLY_TO_OPTIONS,
@@ -83,6 +88,9 @@ const CreateNotification = () => {
   const [includeQr, setIncludeQr] = useState(false);
   const [customEmails, setCustomEmails] = useState<string[]>([]);
   const [emailDraft, setEmailDraft] = useState("");
+  // Don't Send To (web parity: Create / Edit Email Notification).
+  const [excludedEmails, setExcludedEmails] = useState<string[]>([]);
+  const [excludedDraft, setExcludedDraft] = useState("");
 
   const [useTemplate, setUseTemplate] = useState(false);
   const [templates, setTemplates] = useState<EmailTemplateRow[]>([]);
@@ -144,6 +152,7 @@ const CreateNotification = () => {
         setRecipients(d.recipientTypes as NotificationRecipientType[]);
         setIncludeQr(d.includeQrCode);
         setCustomEmails(d.customEmails);
+        setExcludedEmails(d.excludedEmails);
         setSubject(d.subject);
         setBody(d.body);
         setPromoId(d.promoId);
@@ -227,6 +236,14 @@ const CreateNotification = () => {
     setEmailDraft("");
   };
 
+  const addExcluded = () => {
+    const result = addExcludedEmail(excludedEmails, excludedDraft);
+    if (!result) return;
+    if (!result.ok) return Alert.alert(result.title, result.message);
+    setExcludedEmails(result.list);
+    setExcludedDraft("");
+  };
+
   const templateOptions: SelectOption[] = useMemo(
     () => templates.map((t) => ({ label: t.name, value: t.id })),
     [templates],
@@ -247,6 +264,9 @@ const CreateNotification = () => {
     }
     if (!isVisitEmail && recipients.includes("custom") && customEmails.length === 0)
       return Alert.alert("Custom emails", "Add at least one custom email address.");
+    // An address typed but not added is saved too; a follow-up email saves none.
+    const excluded = excludedEmailsToSave(excludedEmails, excludedDraft, isVisitEmail);
+    if (excluded.error !== null) return Alert.alert("Don't Send To", excluded.error);
 
     const token = getToken();
     if (!token) return Alert.alert("Not signed in", "Please sign in again.");
@@ -259,6 +279,7 @@ const CreateNotification = () => {
         entityType,
         recipientTypes: recipients,
         customEmails: customEmails.length ? customEmails : undefined,
+        excludedEmails: excluded.emails,
         subject: useTemplate ? "" : subject.trim(),
         body: useTemplate ? "" : body.trim(),
         includeQrCode: includeQr,
@@ -285,7 +306,11 @@ const CreateNotification = () => {
     } catch (e) {
       Alert.alert(
         "Failed",
-        firstFieldError(e) ??
+        refusedExcludedEmailMessage(
+          e instanceof ApiError ? e.fieldErrors : undefined,
+          excluded.emails,
+        ) ??
+          firstFieldError(e) ??
           (e instanceof Error ? e.message : "Could not save the notification."),
       );
     } finally {
@@ -466,6 +491,58 @@ const CreateNotification = () => {
                     ))}
                   </View>
                 )}
+              </View>
+            )}
+
+            <View className="h-px bg-gray-100 dark:bg-neutral-800 my-3" />
+            <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Don&apos;t Send To
+            </Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-2">
+              These addresses never get this email, even when they belong to a company
+              admin, manager, or staff account picked above.
+            </Text>
+            <View className="flex-row items-center gap-2">
+              <View className="flex-1 rounded-xl px-3.5 py-2.5 border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800">
+                <TextInput
+                  value={excludedDraft}
+                  onChangeText={setExcludedDraft}
+                  onSubmitEditing={addExcluded}
+                  placeholder="Enter email address to exclude..."
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessibilityLabel="Email address to exclude"
+                  className="text-sm text-gray-900 dark:text-white"
+                  style={{ paddingVertical: 0 }}
+                />
+              </View>
+              <Pressable
+                onPress={addExcluded}
+                accessibilityRole="button"
+                accessibilityLabel="Add to Don't Send To"
+                className="flex-row items-center gap-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-700"
+              >
+                <Feather name="plus" size={14} color={PRIMARY} />
+                <Text className="text-sm font-semibold text-[#0644C7]">Add</Text>
+              </Pressable>
+            </View>
+            <EmailSuggestions value={excludedDraft} onSelect={setExcludedDraft} />
+            {excludedEmails.length > 0 && (
+              <View className="flex-row flex-wrap mt-2">
+                {excludedEmails.map((e) => (
+                  <Pressable
+                    key={e}
+                    onPress={() => setExcludedEmails((prev) => prev.filter((x) => x !== e))}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${e} from Don't Send To`}
+                    className="flex-row items-center gap-1 bg-red-50 dark:bg-red-900/30 px-2.5 py-1 rounded-full mr-2 mb-2"
+                  >
+                    <Text className="text-xs font-medium text-red-700 dark:text-red-300">{e}</Text>
+                    <Feather name="x" size={12} color="#B91C1C" />
+                  </Pressable>
+                ))}
               </View>
             )}
 
