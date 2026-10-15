@@ -19,6 +19,7 @@ import {
 import QRCode from "react-native-qrcode-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DeliveryOutcomePanel } from "../../components/photos/DeliveryOutcomePanel";
 import {
   PhotoCameraView,
   type PhotoCameraState,
@@ -31,6 +32,7 @@ import {
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { needsQrFallback } from "../../lib/photos/deliveryOutcome";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   addCapturedPhoto,
@@ -44,6 +46,7 @@ import {
   uploadSessionPhoto,
   type PhotoCaptureContext,
   type PhotoDeliverySchedule,
+  type PhotoSendOutcome,
   type PhotoSession,
   type PhotoWaiverMatch,
 } from "../../services/photosService";
@@ -58,7 +61,7 @@ const STEP_LABELS: Record<Step, string> = {
   consent: "Consent",
   capture: "Capture",
   delivery: "Delivery",
-  done: "Sent",
+  done: "Result",
 };
 
 /** Delivery status chip colors (same set as the web's status pills). */
@@ -212,7 +215,16 @@ export default function PhotoCaptureScreen() {
   const [searched, setSearched] = useState(false);
   const [selected, setSelected] = useState<PhotoWaiverMatch[]>([]);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
+  const [deliveryOutcome, setDeliveryOutcome] = useState<PhotoSendOutcome | null>(null);
+  const [offerQr, setOfferQr] = useState(false);
+  const [latestResult, setLatestResult] = useState<PhotoSendOutcome["result"] | null>(null);
   const [slideshowOptIn, setSlideshowOptIn] = useState(false);
+
+  // Once a message is known not to have gone out, the QR code stays offered.
+  const handleResultChange = useCallback((result: PhotoSendOutcome["result"]) => {
+    setLatestResult(result);
+    if (needsQrFallback(result)) setOfferQr(true);
+  }, []);
 
   const submitLockRef = useRef(false);
 
@@ -451,6 +463,8 @@ export default function PhotoCaptureScreen() {
       });
       setSession(result.session);
       setDeliveryNote(result.message);
+      setDeliveryOutcome(result.outcome);
+      setOfferQr(needsQrFallback(result.outcome?.result));
       setStep("done");
     } catch (e) {
       showToast({
@@ -474,6 +488,9 @@ export default function PhotoCaptureScreen() {
     setSearched(false);
     setSelected([]);
     setDeliveryNote(null);
+    setDeliveryOutcome(null);
+    setOfferQr(false);
+    setLatestResult(null);
     setSlideshowOptIn(false);
   }, []);
 
@@ -900,7 +917,8 @@ export default function PhotoCaptureScreen() {
               {method === "waiver_message" && (
                 <Card className="mb-4">
                   {(context?.channels.smsNote ||
-                    context?.channels.emailNote) && (
+                    context?.channels.emailNote ||
+                    context?.channels.photoLinkNote) && (
                     <View className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-900/20">
                       <View className="flex-row items-center gap-2">
                         <Feather
@@ -908,8 +926,11 @@ export default function PhotoCaptureScreen() {
                           size={14}
                           color="#B45309"
                         />
-                        <Text className="text-sm font-medium text-amber-900 dark:text-amber-300">
-                          Not every channel is sending
+                        <Text className="flex-1 text-sm font-medium text-amber-900 dark:text-amber-300">
+                          {context?.channels.emailNote || context?.channels.photoLinkNote
+                            ? "Not every channel is sending"
+                            : (context?.channels.smsStatus?.headline ??
+                              "Not every channel is sending")}
                         </Text>
                       </View>
                       {!!context?.channels.emailNote && (
@@ -920,6 +941,11 @@ export default function PhotoCaptureScreen() {
                       {!!context?.channels.smsNote && (
                         <Text className="mt-1 text-sm text-amber-900 dark:text-amber-300">
                           {context.channels.smsNote}
+                        </Text>
+                      )}
+                      {!!context?.channels.photoLinkNote && (
+                        <Text className="mt-1 text-sm text-amber-900 dark:text-amber-300">
+                          {context.channels.photoLinkNote}
                         </Text>
                       )}
                     </View>
@@ -1157,15 +1183,28 @@ export default function PhotoCaptureScreen() {
           {step === "done" && session && (
             <>
               <Card>
-                <Feather name="check-circle" size={30} color="#16A34A" />
-                <Text className="mt-3 text-lg font-bold text-gray-900 dark:text-white">
-                  {session.deliveryMethod === "staff_qr"
-                    ? "Ready to scan"
-                    : "Delivery recorded"}
-                </Text>
-                <Text className="mb-4 mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  {deliveryNote ?? "The session is complete."}
-                </Text>
+                {deliveryOutcome && session.deliveryMethod !== "staff_qr" ? (
+                  <View className="mb-5">
+                    <DeliveryOutcomePanel
+                      key={deliveryOutcome.deliveryIds.join("-")}
+                      outcome={deliveryOutcome}
+                      deliveries={session.deliveries}
+                      onResultChange={handleResultChange}
+                    />
+                  </View>
+                ) : (
+                  <>
+                    <Feather name="check-circle" size={30} color="#16A34A" />
+                    <Text className="mt-3 text-lg font-bold text-gray-900 dark:text-white">
+                      {session.deliveryMethod === "staff_qr"
+                        ? "Ready to scan"
+                        : "Delivery recorded"}
+                    </Text>
+                    <Text className="mb-4 mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {deliveryNote ?? "The session is complete."}
+                    </Text>
+                  </>
+                )}
 
                 <DetailRow label="Photos" value={String(session.photoCount)} />
                 <DetailRow
@@ -1187,7 +1226,7 @@ export default function PhotoCaptureScreen() {
                   />
                 )}
 
-                {session.deliveries.length > 0 && (
+                {!deliveryOutcome && session.deliveries.length > 0 && (
                   <View className="mt-4 border-t border-gray-100 pt-4 dark:border-neutral-800">
                     <Text className="mb-2 text-sm font-medium text-gray-900 dark:text-white">
                       Channels
@@ -1232,8 +1271,16 @@ export default function PhotoCaptureScreen() {
                 </View>
               </Card>
 
-              {session.deliveryMethod === "staff_qr" && (
+              {(session.deliveryMethod === "staff_qr" ||
+                (deliveryOutcome && offerQr && session.qrStatus === "active")) && (
                 <Card className="mt-4 items-center">
+                  {session.deliveryMethod !== "staff_qr" && (
+                    <Text className="mb-4 text-center text-sm font-medium text-gray-900 dark:text-white">
+                      {latestResult === "sent"
+                        ? "Everything has gone out now. They can still scan this code to open their photos."
+                        : "Not every message reached the guest. They can scan this code instead."}
+                    </Text>
+                  )}
                   <View className="rounded-2xl bg-white p-4">
                     <QRCode
                       value={session.qrTargetUrl}

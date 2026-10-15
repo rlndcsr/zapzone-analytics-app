@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DeliveryOutcomePanel } from "../../components/photos/DeliveryOutcomePanel";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CenterModal } from "../../components/ui/CenterModal";
 import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
@@ -41,6 +42,7 @@ import {
   type LibraryPhoto,
   type PhotoDeliverySchedule,
   type PhotoLibrary,
+  type PhotoSendResult,
   type PhotoSessionSource,
   type PhotoWaiverMatch,
 } from "../../services/photosService";
@@ -223,6 +225,8 @@ export default function PhotoLibraryScreen() {
   const [downloading, setDownloading] = useState(false);
 
   const [sendFor, setSendFor] = useState<LibraryPhoto | null>(null);
+  // After a send, the sheet shows how each message went instead of the form.
+  const [sendResult, setSendResult] = useState<PhotoSendResult | null>(null);
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<PhotoWaiverMatch[]>([]);
   const [searching, setSearching] = useState(false);
@@ -456,15 +460,16 @@ export default function PhotoLibraryScreen() {
     if (!sendFor || chosen.length === 0 || !token || sending) return;
     setSending(true);
     try {
-      await sendLibraryPhoto(token, sendFor.id, {
+      const result = await sendLibraryPhoto(token, sendFor.id, {
         waiverIds: chosen,
         schedule,
       });
-      showToast({
-        message: "Sent using the normal waiver message delivery flow.",
-        type: "success",
-      });
-      setSendFor(null);
+      if (result.outcome) {
+        setSendResult(result);
+      } else {
+        showToast({ message: result.message ?? "Sent.", type: "success" });
+        setSendFor(null);
+      }
       setChosen([]);
       setMatches([]);
       setQuery("");
@@ -479,8 +484,14 @@ export default function PhotoLibraryScreen() {
     }
   }, [chosen, load, schedule, sendFor, sending, showToast]);
 
+  const closeSend = useCallback(() => {
+    setSendFor(null);
+    setSendResult(null);
+  }, []);
+
   const openSend = useCallback((photo: LibraryPhoto) => {
     setSendFor(photo);
+    setSendResult(null);
     setChosen([]);
     setMatches([]);
     setQuery("");
@@ -997,132 +1008,145 @@ export default function PhotoLibraryScreen() {
       {/* Send this photo again */}
       <BottomSheet
         visible={!!sendFor}
-        onClose={() => setSendFor(null)}
-        title="Send this photo again"
+        onClose={closeSend}
+        title={sendResult ? "How it went" : "Send this photo again"}
       >
-        <ScrollView
-          className="px-5"
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Text className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            This uses the normal waiver message delivery flow, and the action is
-            recorded in the activity log.
-          </Text>
+        {sendResult?.outcome ? (
+          <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
+            <DeliveryOutcomePanel
+              key={sendResult.outcome.deliveryIds.join("-")}
+              outcome={sendResult.outcome}
+              deliveries={sendResult.session.deliveries}
+            />
+            <View className="mb-8 mt-5">
+              <PrimaryButton label="Done" onPress={closeSend} />
+            </View>
+          </ScrollView>
+        ) : (
+          <ScrollView
+            className="px-5"
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+              This uses the normal waiver message delivery flow, and the action is
+              recorded in the activity log.
+            </Text>
 
-          <View className="mb-4 flex-row items-center gap-2">
-            <View className="h-12 flex-1 flex-row items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
-              <Feather name="search" size={16} color="#9CA3AF" />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                onSubmitEditing={() => void runSearch()}
-                returnKeyType="search"
-                placeholder="Name, phone or email"
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="none"
-                className="flex-1 text-sm text-gray-900 dark:text-white"
-                style={{ paddingVertical: 0 }}
+            <View className="mb-4 flex-row items-center gap-2">
+              <View className="h-12 flex-1 flex-row items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
+                <Feather name="search" size={16} color="#9CA3AF" />
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  onSubmitEditing={() => void runSearch()}
+                  returnKeyType="search"
+                  placeholder="Name, phone or email"
+                  placeholderTextColor="#9CA3AF"
+                  autoCapitalize="none"
+                  className="flex-1 text-sm text-gray-900 dark:text-white"
+                  style={{ paddingVertical: 0 }}
+                />
+              </View>
+              <Pressable
+                onPress={() => void runSearch()}
+                disabled={query.trim().length < 2 || searching}
+                className={`h-12 items-center justify-center rounded-lg bg-[#0644C7] px-5 active:opacity-90 ${
+                  query.trim().length < 2 || searching ? "opacity-60" : ""
+                }`}
+                accessibilityRole="button"
+              >
+                {searching ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text className="text-sm font-semibold text-white">Search</Text>
+                )}
+              </Pressable>
+            </View>
+
+            {matches.map((waiver) => {
+              const checked = chosen.includes(waiver.id);
+              return (
+                <Pressable
+                  key={waiver.id}
+                  onPress={() =>
+                    waiver.contactable &&
+                    setChosen((prev) =>
+                      prev.includes(waiver.id)
+                        ? prev.filter((id) => id !== waiver.id)
+                        : [...prev, waiver.id],
+                    )
+                  }
+                  disabled={!waiver.contactable}
+                  className={`mb-2 flex-row items-start gap-3 rounded-xl border p-3 ${
+                    waiver.contactable
+                      ? checked
+                        ? "border-[#0644C7] bg-blue-50/60 dark:bg-blue-900/20"
+                        : "border-gray-200 dark:border-neutral-700"
+                      : "border-gray-200 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/40"
+                  }`}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{
+                    checked,
+                    disabled: !waiver.contactable,
+                  }}
+                >
+                  <View className="mt-0.5">
+                    <CheckBox checked={checked} />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                      {waiver.name}
+                    </Text>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      {waiver.emailMasked || "no email"} ·{" "}
+                      {waiver.phoneMasked || "no phone"}
+                    </Text>
+                    {!waiver.contactable && (
+                      <Text className="text-[11px] text-amber-800 dark:text-amber-400">
+                        no contact method on this waiver
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
+
+            <View className="mb-5 mt-2">
+              <Pressable
+                onPress={() => setSchedule("immediate")}
+                className="flex-row items-center gap-3 py-2"
+                accessibilityRole="radio"
+                accessibilityState={{ selected: schedule === "immediate" }}
+              >
+                <RadioDot selected={schedule === "immediate"} />
+                <Text className="text-sm text-gray-800 dark:text-gray-200">
+                  Send immediately
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setSchedule("next_day_9am")}
+                className="flex-row items-center gap-3 py-2"
+                accessibilityRole="radio"
+                accessibilityState={{ selected: schedule === "next_day_9am" }}
+              >
+                <RadioDot selected={schedule === "next_day_9am"} />
+                <Text className="text-sm text-gray-800 dark:text-gray-200">
+                  9:00 AM tomorrow, location time
+                </Text>
+              </Pressable>
+            </View>
+
+            <View className="mb-8">
+              <PrimaryButton
+                label={`Send to ${chosen.length} waiver${chosen.length === 1 ? "" : "s"}`}
+                onPress={() => void send()}
+                loading={sending}
+                disabled={chosen.length === 0}
               />
             </View>
-            <Pressable
-              onPress={() => void runSearch()}
-              disabled={query.trim().length < 2 || searching}
-              className={`h-12 items-center justify-center rounded-lg bg-[#0644C7] px-5 active:opacity-90 ${
-                query.trim().length < 2 || searching ? "opacity-60" : ""
-              }`}
-              accessibilityRole="button"
-            >
-              {searching ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text className="text-sm font-semibold text-white">Search</Text>
-              )}
-            </Pressable>
-          </View>
-
-          {matches.map((waiver) => {
-            const checked = chosen.includes(waiver.id);
-            return (
-              <Pressable
-                key={waiver.id}
-                onPress={() =>
-                  waiver.contactable &&
-                  setChosen((prev) =>
-                    prev.includes(waiver.id)
-                      ? prev.filter((id) => id !== waiver.id)
-                      : [...prev, waiver.id],
-                  )
-                }
-                disabled={!waiver.contactable}
-                className={`mb-2 flex-row items-start gap-3 rounded-xl border p-3 ${
-                  waiver.contactable
-                    ? checked
-                      ? "border-[#0644C7] bg-blue-50/60 dark:bg-blue-900/20"
-                      : "border-gray-200 dark:border-neutral-700"
-                    : "border-gray-200 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/40"
-                }`}
-                accessibilityRole="checkbox"
-                accessibilityState={{
-                  checked,
-                  disabled: !waiver.contactable,
-                }}
-              >
-                <View className="mt-0.5">
-                  <CheckBox checked={checked} />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                    {waiver.name}
-                  </Text>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {waiver.emailMasked || "no email"} ·{" "}
-                    {waiver.phoneMasked || "no phone"}
-                  </Text>
-                  {!waiver.contactable && (
-                    <Text className="text-[11px] text-amber-800 dark:text-amber-400">
-                      no contact method on this waiver
-                    </Text>
-                  )}
-                </View>
-              </Pressable>
-            );
-          })}
-
-          <View className="mb-5 mt-2">
-            <Pressable
-              onPress={() => setSchedule("immediate")}
-              className="flex-row items-center gap-3 py-2"
-              accessibilityRole="radio"
-              accessibilityState={{ selected: schedule === "immediate" }}
-            >
-              <RadioDot selected={schedule === "immediate"} />
-              <Text className="text-sm text-gray-800 dark:text-gray-200">
-                Send immediately
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setSchedule("next_day_9am")}
-              className="flex-row items-center gap-3 py-2"
-              accessibilityRole="radio"
-              accessibilityState={{ selected: schedule === "next_day_9am" }}
-            >
-              <RadioDot selected={schedule === "next_day_9am"} />
-              <Text className="text-sm text-gray-800 dark:text-gray-200">
-                9:00 AM tomorrow, location time
-              </Text>
-            </Pressable>
-          </View>
-
-          <View className="mb-8">
-            <PrimaryButton
-              label={`Send to ${chosen.length} waiver${chosen.length === 1 ? "" : "s"}`}
-              onPress={() => void send()}
-              loading={sending}
-              disabled={chosen.length === 0}
-            />
-          </View>
-        </ScrollView>
+          </ScrollView>
+        )}
       </BottomSheet>
 
       <DateRangeSheet

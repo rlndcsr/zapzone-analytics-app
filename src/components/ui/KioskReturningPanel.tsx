@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 
-import { formatPhoneForDisplay } from "../../lib/phone";
+import { formatPhoneForDisplay, phoneForSubmit } from "../../lib/phone";
 import {
   isValidKioskPhone,
   lookupReturningCustomer,
@@ -184,7 +184,7 @@ export function KioskReturningPanel({
     setLooking(true);
     setError(null);
     setOutcome("idle");
-    const res = await lookupReturningCustomer(templateId, value, surname);
+    const res = await lookupReturningCustomer(templateId, phoneForSubmit(value), surname);
     setLooking(false);
 
     if (res.status === "found") {

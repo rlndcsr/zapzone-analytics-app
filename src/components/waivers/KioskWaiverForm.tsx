@@ -11,9 +11,12 @@ import {
 
 import type { useStatusModal } from "../../lib/hooks/useStatusModal";
 import {
+  COUNTRY_CODE_NEEDED,
   formatPhoneForDisplay,
   isCompletePhone,
-  localPhoneDigits,
+  needsCountryCode,
+  PHONE_NOT_RECOGNISED,
+  phoneForSubmit,
 } from "../../lib/phone";
 import {
   minorCapReached,
@@ -317,7 +320,8 @@ export function KioskWaiverForm({
     if (!email.trim()) return "Enter an email address.";
     if (!phone.trim()) return "Enter a phone number.";
     // A returning guest's phone is the masked one on file, which they cannot edit.
-    if (!profile && !isCompletePhone(phone)) return "Enter a 10-digit phone number";
+    if (!profile && needsCountryCode(phone)) return COUNTRY_CODE_NEEDED;
+    if (!profile && !isCompletePhone(phone)) return PHONE_NOT_RECOGNISED;
     if (!toIsoDate(dobYear, dobMonth, dobDay))
       return "Enter the signer's full date of birth.";
     for (const m of minors) {
@@ -351,9 +355,7 @@ export function KioskWaiverForm({
       adult_first_name: firstName.trim(),
       adult_last_name: lastName.trim(),
       adult_email: email.trim(),
-      adult_phone: profile
-        ? phone.trim()
-        : localPhoneDigits(phone) || phone.trim(),
+      adult_phone: profile ? phone.trim() : phoneForSubmit(phone),
       adult_dob: toIsoDate(dobYear, dobMonth, dobDay),
       typed_legal_name: typedName.trim(),
       signature_image: signature,

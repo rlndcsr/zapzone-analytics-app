@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { memo, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
+import { canRetryFromLog, outcomeStyle } from "../../lib/photos/deliveryOutcome";
 import type {
   PhotoDeliveryKind,
   PhotoDeliveryLogRow,
@@ -22,36 +23,6 @@ const HEADER_MIN_HEIGHT = 48;
 const ROW_MIN_HEIGHT = 68;
 
 const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
-
-const STATUS_STYLES: Record<
-  PhotoDeliveryStatus,
-  { wrap: string; text: string }
-> = {
-  sent: {
-    wrap: "bg-green-100 dark:bg-green-900/30",
-    text: "text-green-700 dark:text-green-300",
-  },
-  queued: {
-    wrap: "bg-blue-100 dark:bg-blue-900/30",
-    text: "text-blue-700 dark:text-blue-300",
-  },
-  scheduled: {
-    wrap: "bg-blue-100 dark:bg-blue-900/30",
-    text: "text-blue-700 dark:text-blue-300",
-  },
-  failed: {
-    wrap: "bg-red-100 dark:bg-red-900/30",
-    text: "text-red-700 dark:text-red-400",
-  },
-  canceled: {
-    wrap: "bg-gray-200 dark:bg-neutral-700",
-    text: "text-gray-700 dark:text-gray-200",
-  },
-  skipped: {
-    wrap: "bg-gray-100 dark:bg-neutral-800",
-    text: "text-gray-500 dark:text-gray-400",
-  },
-};
 
 /** The web prints the kind as lower-case prose, not a chip. */
 export const KIND_LABELS: Record<PhotoDeliveryKind, string> = {
@@ -78,6 +49,7 @@ export function sessionContextLine(row: PhotoDeliveryLogRow): string {
 type RowHandlers = {
   onRetry: (row: PhotoDeliveryLogRow) => void;
   onCancel: (row: PhotoDeliveryLogRow) => void;
+  onConfirm: (row: PhotoDeliveryLogRow) => void;
   /** Id with a call in flight, so only that row shows a spinner. */
   busyId: number | null;
 };
@@ -166,16 +138,37 @@ const COLUMNS: Column[] = [
   {
     key: "status",
     label: "Status",
-    width: 120,
+    width: 230,
     render: (row) => {
-      const style = STATUS_STYLES[row.status];
+      const style = outcomeStyle(row.outcomeTone);
+      const detail = row.outcomeDetail ?? row.failureReason;
       return (
-        <View className="flex-row">
-          <View className={`rounded-full px-2.5 py-1 ${style.wrap}`}>
-            <Text className={`text-[10px] font-semibold ${style.text}`}>
-              {row.status}
-            </Text>
+        <View>
+          <View className="flex-row">
+            <View className={`flex-row items-center gap-1 rounded-full px-2.5 py-1 ${style.wrap}`}>
+              {row.awaitingCarrier && <ActivityIndicator size="small" color="#2563EB" />}
+              <Text className={`text-[10px] font-semibold ${style.text}`}>
+                {row.outcomeLabel ?? row.status}
+              </Text>
+            </View>
           </View>
+          {!!detail && (
+            <Text
+              numberOfLines={3}
+              className={`mt-1 text-xs ${
+                row.outcomeTone === "danger" || !row.outcomeTone
+                  ? "text-red-700 dark:text-red-400"
+                  : "text-gray-600 dark:text-gray-400"
+              }`}
+            >
+              {detail}
+            </Text>
+          )}
+          {!!row.receiptConfirmedByName && (
+            <Text numberOfLines={1} className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              confirmed by {row.receiptConfirmedByName}
+            </Text>
+          )}
         </View>
       );
     },
@@ -191,15 +184,7 @@ const COLUMNS: Column[] = [
         </Text>
         {row.linkOpened && (
           <Text className="mt-0.5 text-xs font-medium text-green-700 dark:text-green-400">
-            link opened
-          </Text>
-        )}
-        {!!row.failureReason && (
-          <Text
-            numberOfLines={2}
-            className="mt-0.5 text-xs text-red-700 dark:text-red-400"
-          >
-            {row.failureReason}
+            link opened from this message
           </Text>
         )}
         {row.isDuplicate && (
@@ -216,29 +201,47 @@ const COLUMNS: Column[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 210,
-    render: (row, { onRetry, onCancel, busyId }) => {
+    width: 340,
+    render: (row, { onRetry, onCancel, onConfirm, busyId }) => {
       const busy = busyId === row.id;
       return (
-        <View className="flex-row gap-2">
-          <Pressable
-            onPress={() => onRetry(row)}
-            disabled={busy}
-            className={`flex-row items-center justify-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 dark:border-neutral-700 ${
-              busy ? "opacity-40" : "active:opacity-70"
-            }`}
-            accessibilityRole="button"
-            accessibilityLabel={`Resend to ${row.destinationMasked}`}
-          >
-            {busy ? (
-              <ActivityIndicator size="small" color={PRIMARY} />
-            ) : (
-              <Feather name="refresh-cw" size={13} color="#4B5563" />
-            )}
-            <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-              Resend
-            </Text>
-          </Pressable>
+        <View className="flex-row flex-wrap gap-2">
+          {row.canConfirmReceipt && (
+            <Pressable
+              onPress={() => onConfirm(row)}
+              disabled={busy}
+              className={`flex-row items-center justify-center gap-1.5 rounded-xl border border-green-300 px-3 py-2 dark:border-green-800 ${
+                busy ? "opacity-40" : "active:opacity-70"
+              }`}
+              accessibilityRole="button"
+              accessibilityLabel={`Guest received the text to ${row.destinationMasked}`}
+            >
+              <Feather name="smartphone" size={13} color="#166534" />
+              <Text className="text-xs font-medium text-green-800 dark:text-green-300">
+                Guest received it
+              </Text>
+            </Pressable>
+          )}
+          {canRetryFromLog(row) && (
+            <Pressable
+              onPress={() => onRetry(row)}
+              disabled={busy}
+              className={`flex-row items-center justify-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 dark:border-neutral-700 ${
+                busy ? "opacity-40" : "active:opacity-70"
+              }`}
+              accessibilityRole="button"
+              accessibilityLabel={`Resend to ${row.destinationMasked}`}
+            >
+              {busy ? (
+                <ActivityIndicator size="small" color={PRIMARY} />
+              ) : (
+                <Feather name="refresh-cw" size={13} color="#4B5563" />
+              )}
+              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                Resend
+              </Text>
+            </Pressable>
+          )}
           {isCancelable(row.status) && (
             <Pressable
               onPress={() => onCancel(row)}
@@ -272,11 +275,12 @@ export const PhotoDeliveriesTable = memo(function PhotoDeliveriesTable({
   rows,
   onRetry,
   onCancel,
+  onConfirm,
   busyId,
 }: {
   rows: PhotoDeliveryLogRow[];
 } & RowHandlers) {
-  const handlers: RowHandlers = { onRetry, onCancel, busyId };
+  const handlers: RowHandlers = { onRetry, onCancel, onConfirm, busyId };
 
   return (
     <View

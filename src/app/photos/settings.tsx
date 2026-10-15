@@ -1,9 +1,10 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -28,11 +29,22 @@ import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { escapeRoomEmailNote } from "../../lib/escapeRooms/gameFollowUp";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import {
+  fallbackTextingStatus,
+  TEXTING_STATE_BADGE,
+  TEXTING_STATE_CARD,
+  testTextSizeLine,
+  textingRecentLine,
+  textingTopProblemLine,
+  textingVerifiedLine,
+} from "../../lib/photos/deliveryOutcome";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchPhotoSettings,
   fetchPhotoTemplates,
+  fetchTestMessageStatus,
   resetPhotoTemplate,
+  resetTextingConfirmation,
   rotatePhotoPasscode,
   sendPhotoTestMessage,
   updatePhotoSettings,
@@ -41,8 +53,13 @@ import {
   type PhotoSettings,
   type PhotoTemplates,
   type PhotoTestChannel,
-  type PhotoTestResult,
 } from "../../services/photosService";
+
+const TEST_POLL_INTERVAL_MS = 4000;
+const TEST_POLL_LIMIT = 15;
+
+/** A test send's line under the field; a text stays "info" until the carrier answers. */
+type TestOutcome = { tone: "success" | "error" | "info"; message: string };
 
 const PRIMARY = "#0644C7";
 
@@ -191,6 +208,8 @@ function ChannelCard({
   icon,
   name,
   available,
+  badge,
+  cardClass,
   detail,
   note,
   children,
@@ -198,6 +217,9 @@ function ChannelCard({
   icon: keyof typeof Feather.glyphMap;
   name: string;
   available: boolean;
+  /** Overrides the sending / not sending badge (SMS shows its texting state). */
+  badge?: { label: string; className: string };
+  cardClass?: string;
   detail: React.ReactNode;
   note: string | null;
   children?: React.ReactNode;
@@ -205,9 +227,10 @@ function ChannelCard({
   return (
     <View
       className={`mb-3 rounded-xl border p-4 ${
-        available
+        cardClass ??
+        (available
           ? "border-green-200 bg-green-50/60 dark:border-green-900/40 dark:bg-green-900/10"
-          : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10"
+          : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10")
       }`}
     >
       <View className="flex-row items-center gap-2">
@@ -217,11 +240,11 @@ function ChannelCard({
         </Text>
         <View
           className={`ml-auto rounded-full px-2 py-0.5 ${
-            available ? "bg-green-600" : "bg-amber-500"
+            badge?.className ?? (available ? "bg-green-600" : "bg-amber-500")
           }`}
         >
           <Text className="text-xs text-white">
-            {available ? "sending" : "not sending"}
+            {badge?.label ?? (available ? "sending" : "not sending")}
           </Text>
         </View>
       </View>
@@ -246,6 +269,8 @@ function TestSendRow({
   onSend,
   sending,
   result,
+  size,
+  tracking,
 }: {
   label: string;
   placeholder: string;
@@ -254,7 +279,11 @@ function TestSendRow({
   onChangeText: (v: string) => void;
   onSend: () => void;
   sending: boolean;
-  result: PhotoTestResult | null;
+  result: TestOutcome | null;
+  /** How a real photo text is billed (SMS only). */
+  size?: string | null;
+  /** Still waiting for the carrier to confirm the test text. */
+  tracking?: boolean;
 }) {
   const ready = value.trim().length > 0 && !sending;
   return (
@@ -299,16 +328,24 @@ function TestSendRow({
         />
       ) : null}
       {!!result && (
-        <Text
-          accessibilityLiveRegion="polite"
-          className={`mt-2 text-sm ${
-            result.success
-              ? "text-green-800 dark:text-green-400"
-              : "text-red-700 dark:text-red-400"
-          }`}
-        >
-          {result.message}
-        </Text>
+        <View className="mt-2 flex-row items-start gap-1.5">
+          {tracking && <ActivityIndicator size="small" color="#374151" />}
+          <Text
+            accessibilityLiveRegion="polite"
+            className={`flex-1 text-sm ${
+              result.tone === "success"
+                ? "text-green-800 dark:text-green-400"
+                : result.tone === "error"
+                  ? "text-red-700 dark:text-red-400"
+                  : "text-gray-700 dark:text-gray-300"
+            }`}
+          >
+            {result.message}
+          </Text>
+        </View>
+      )}
+      {!!size && (
+        <Text className="mt-1 text-xs text-gray-600 dark:text-gray-400">{size}</Text>
       )}
     </View>
   );
@@ -413,8 +450,26 @@ export default function PhotoSettingsScreen() {
   const [testTo, setTestTo] = useState({ email: "", sms: "" });
   const [testing, setTesting] = useState<PhotoTestChannel | null>(null);
   const [testResult, setTestResult] = useState<
-    Record<PhotoTestChannel, PhotoTestResult | null>
+    Record<PhotoTestChannel, TestOutcome | null>
   >({ email: null, sms: null });
+  const [testSize, setTestSize] = useState<string | null>(null);
+  // A test text the carrier has not confirmed yet, checked every few seconds.
+  const [smsTracking, setSmsTracking] = useState<{
+    reference: string;
+    token: string;
+    checks: number;
+  } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const [resettingTexting, setResettingTexting] = useState(false);
+  const [showConfirmHelp, setShowConfirmHelp] = useState(false);
+  const canResetTexting = ["company_admin", "admin"].includes(String(user?.role ?? ""));
 
   const [templates, setTemplates] = useState<PhotoMessageTemplate[]>([]);
   const [variables, setVariables] = useState<string[]>([]);
@@ -563,19 +618,118 @@ export default function PhotoSettingsScreen() {
       if (!token || !effectiveLocationId || !destination || testing) return;
       setTesting(channel);
       setTestResult((r) => ({ ...r, [channel]: null }));
+      if (channel === "sms") {
+        setTestSize(null);
+        setSmsTracking(null);
+      }
       try {
         const result = await sendPhotoTestMessage(token, {
           locationId: effectiveLocationId,
           channel,
           destination,
         });
-        setTestResult((r) => ({ ...r, [channel]: result }));
+        // A text accepted by the provider is not yet on the phone, so it reads as pending.
+        const tone = result.success ? (channel === "sms" ? "info" : "success") : "error";
+        setTestResult((r) => ({ ...r, [channel]: { tone, message: result.message } }));
+        if (channel === "sms") {
+          setTestSize(testTextSizeLine(result));
+          if (result.success && result.providerReference && result.checkToken) {
+            setSmsTracking({ reference: result.providerReference, token: result.checkToken, checks: 0 });
+          }
+        }
       } finally {
         setTesting(null);
       }
     },
     [effectiveLocationId, testTo, testing],
   );
+
+  useEffect(() => {
+    if (!smsTracking || !effectiveLocationId) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const token = getToken();
+      if (!token) return;
+      try {
+        const status = await fetchTestMessageStatus(token, {
+          locationId: effectiveLocationId,
+          providerReference: smsTracking.reference,
+          checkToken: smsTracking.token,
+        });
+        if (cancelled || !mounted.current) return;
+        if (status.final) {
+          setTestResult((r) => ({
+            ...r,
+            sms: { tone: status.delivered ? "success" : "error", message: status.message },
+          }));
+          setSmsTracking(null);
+          return;
+        }
+      } catch {
+        if (cancelled || !mounted.current) return;
+      }
+      if (cancelled) return;
+      if (smsTracking.checks + 1 >= TEST_POLL_LIMIT) {
+        setTestResult((r) => ({
+          ...r,
+          sms: {
+            tone: "info",
+            message:
+              "The phone carrier has not confirmed the test yet. Check the phone. If nothing arrives, an administrator can run: php artisan sms:diagnose --sid=" +
+              smsTracking.reference,
+          },
+        }));
+        setSmsTracking(null);
+        return;
+      }
+      setSmsTracking((prev) =>
+        prev && prev.reference === smsTracking.reference ? { ...prev, checks: prev.checks + 1 } : prev,
+      );
+    }, TEST_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [effectiveLocationId, smsTracking]);
+
+  const resetTexting = useCallback(() => {
+    const token = getToken();
+    if (!token || !effectiveLocationId || resettingTexting) return;
+    Alert.alert(
+      "Mark texting as not confirmed?",
+      "It shows as confirmed again once a guest receives a photo text on their phone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Mark not confirmed",
+          style: "destructive",
+          onPress: async () => {
+            setResettingTexting(true);
+            try {
+              const result = await resetTextingConfirmation(token, effectiveLocationId);
+              setData((prev) =>
+                prev && result.texting
+                  ? {
+                      ...prev,
+                      channels: { ...prev.channels, smsStatus: result.texting, smsNote: result.texting.note },
+                    }
+                  : prev,
+              );
+              showToast({ message: result.message, type: "success" });
+            } catch (e) {
+              showToast({ message: errorMessage(e, "That could not be reset."), type: "error" });
+            } finally {
+              setResettingTexting(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [effectiveLocationId, resettingTexting, showToast]);
+
+  const texting = data
+    ? (data.channels.smsStatus ?? fallbackTextingStatus(data.channels.smsAvailable, data.channels.smsNote))
+    : null;
 
   const copy = useCallback(
     async (value: string, label: string) => {
@@ -782,28 +936,115 @@ export default function PhotoSettingsScreen() {
                     result={testResult.email}
                   />
                 </ChannelCard>
-                <ChannelCard
-                  icon="message-square"
-                  name="SMS"
-                  available={data.channels.smsAvailable}
-                  note={data.channels.smsNote}
-                  detail={
-                    <Text className="text-sm text-gray-700 dark:text-gray-200">
-                      Provider: Twilio
-                    </Text>
-                  }
-                >
-                  <TestSendRow
-                    label="Send a test text to"
-                    placeholder="(810) 555-0134"
-                    keyboardType="phone-pad"
-                    value={testTo.sms}
-                    onChangeText={(v) => setTestTo((t) => ({ ...t, sms: v }))}
-                    onSend={() => void sendTest("sms")}
-                    sending={testing === "sms"}
-                    result={testResult.sms}
-                  />
-                </ChannelCard>
+                {texting && (
+                  <ChannelCard
+                    icon="message-square"
+                    name="SMS"
+                    available={data.channels.smsAvailable}
+                    badge={TEXTING_STATE_BADGE[texting.state]}
+                    cardClass={TEXTING_STATE_CARD[texting.state]}
+                    note={null}
+                    detail={
+                      <View>
+                        <Text className="text-sm text-gray-700 dark:text-gray-200">
+                          Provider: Twilio
+                          {!!texting.sender && (
+                            <Text>
+                              {" · sending from "}
+                              <Text className="text-xs text-gray-900 dark:text-white">
+                                {texting.sender}
+                              </Text>
+                              {texting.senderKind === "toll_free" ? " (toll-free)" : ""}
+                            </Text>
+                          )}
+                        </Text>
+                        <Text className="mt-2 text-sm font-medium text-gray-900 dark:text-white">
+                          {texting.headline}
+                        </Text>
+                        {!!data.channels.smsNote && (
+                          <Text className="mt-1 text-sm text-gray-800 dark:text-gray-200">
+                            {data.channels.smsNote}
+                          </Text>
+                        )}
+                        {!!textingVerifiedLine(texting) && (
+                          <Text className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                            {textingVerifiedLine(texting)}
+                          </Text>
+                        )}
+                        {!!textingRecentLine(texting) && (
+                          <Text className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                            {textingRecentLine(texting)}
+                          </Text>
+                        )}
+                        {!!textingTopProblemLine(texting) && (
+                          <Text className="mt-1 text-xs text-red-700 dark:text-red-400">
+                            {textingTopProblemLine(texting)}
+                          </Text>
+                        )}
+                        {(texting.state === "unverified" || texting.state === "failing") && (
+                          <View className="mt-3">
+                            <Pressable
+                              onPress={() => setShowConfirmHelp((v) => !v)}
+                              accessibilityRole="button"
+                              accessibilityState={{ expanded: showConfirmHelp }}
+                              className="flex-row items-center gap-1 active:opacity-70"
+                            >
+                              <Feather
+                                name={showConfirmHelp ? "chevron-down" : "chevron-right"}
+                                size={14}
+                                color="#1F2937"
+                              />
+                              <Text className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                                How to confirm texting works
+                              </Text>
+                            </Pressable>
+                            {showConfirmHelp && (
+                              <View className="mt-2 gap-1 pl-1">
+                                <Text className="text-sm text-gray-800 dark:text-gray-200">
+                                  1. On Photo Capture, send a photo to a real guest&apos;s waiver that has their mobile number.
+                                </Text>
+                                <Text className="text-sm text-gray-800 dark:text-gray-200">
+                                  2. Stay on the result screen until the text shows “Delivered to the phone” or “Not delivered”.
+                                </Text>
+                                <Text className="text-sm text-gray-800 dark:text-gray-200">
+                                  3. Ask the guest to show you the text. If it is there, tap “Guest received it”. The guest opening the link from the text confirms it straight away.
+                                </Text>
+                                <Text className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                                  A staff tap counts once the phone carrier reports that text delivered, or after three days if the carrier reports no problem. The test below only checks the provider and the carrier; it does not confirm texting for guests on its own.
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
+                        {canResetTexting && !!texting.verified && (
+                          <Pressable
+                            onPress={resetTexting}
+                            disabled={resettingTexting}
+                            accessibilityRole="button"
+                            className={`mt-3 self-start ${resettingTexting ? "opacity-50" : "active:opacity-70"}`}
+                          >
+                            <Text className="text-xs text-gray-700 underline dark:text-gray-300">
+                              Mark texting as not confirmed
+                            </Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    }
+                  >
+                    <TestSendRow
+                      label="Send a test text to"
+                      placeholder="(810) 555-0134"
+                      keyboardType="phone-pad"
+                      value={testTo.sms}
+                      onChangeText={(v) => setTestTo((t) => ({ ...t, sms: v }))}
+                      onSend={() => void sendTest("sms")}
+                      sending={testing === "sms"}
+                      result={testResult.sms}
+                      size={testSize}
+                      tracking={!!smsTracking}
+                    />
+                  </ChannelCard>
+                )}
 
                 <PhotoLinkAddress
                   base={data.channels.photoLinkBase}

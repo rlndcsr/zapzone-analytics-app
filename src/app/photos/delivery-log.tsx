@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -38,18 +38,30 @@ import {
   SkeletonBlock,
   usePulse,
 } from "../../components/ui/skeleton/SkeletonBlock";
+import { ApiError } from "../../lib/api";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import {
+  canRetryFromLog,
+  mergeDeliveries,
+  outcomeStyle,
+  pendingDeliveryIds,
+} from "../../lib/photos/deliveryOutcome";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   cancelPhotoDelivery,
+  confirmPhotoTextReceived,
+  deliveryFromError,
   fetchPhotoDeliveryLog,
+  refreshPhotoDeliveryStatus,
   retryPhotoDelivery,
   type PhotoChannel,
   type PhotoDeliveryKind,
   type PhotoDeliveryLog,
   type PhotoDeliveryLogRow,
+  type PhotoDeliveryRow,
   type PhotoDeliveryStatus,
+  type PhotoTextOutcomeFilter,
 } from "../../services/photosService";
 
 const PRIMARY = "#0644C7";
@@ -66,8 +78,22 @@ const STATUS_OPTIONS: FilterOption[] = [
   { label: "Failed", value: "failed" },
   { label: "Scheduled", value: "scheduled" },
   { label: "Canceled", value: "canceled" },
-  { label: "Skipped (duplicate destination)", value: "skipped" },
+  { label: "Not sent (channel off)", value: "skipped" },
 ];
+
+const OUTCOME_OPTIONS: FilterOption[] = [
+  { label: "Any text outcome", value: "" },
+  { label: "Text not delivered", value: "not_delivered" },
+  { label: "Text waiting for the carrier", value: "awaiting_carrier" },
+  { label: "Text reached the phone", value: "reached_phone" },
+];
+
+const CARRIER_RECHECK_MS = 10000;
+const CARRIER_RECHECK_LIMIT = 18;
+const CHECKS_PAUSED =
+  "Checking the newest texts is paused because this sign-in checked very often. Press Refresh in a minute.";
+
+const isRateLimited = (e: unknown): boolean => e instanceof ApiError && e.status === 429;
 
 const CHANNEL_OPTIONS: FilterOption[] = [
   { label: "Both channels", value: "" },
@@ -81,36 +107,6 @@ const KIND_OPTIONS: FilterOption[] = [
   { label: "9:00 AM next day", value: "next_day_9am" },
   { label: "Kiosk", value: "kiosk" },
 ];
-
-const STATUS_STYLES: Record<
-  PhotoDeliveryStatus,
-  { wrap: string; text: string }
-> = {
-  sent: {
-    wrap: "bg-green-100 dark:bg-green-900/30",
-    text: "text-green-800 dark:text-green-300",
-  },
-  queued: {
-    wrap: "bg-blue-100 dark:bg-blue-900/30",
-    text: "text-blue-800 dark:text-blue-300",
-  },
-  scheduled: {
-    wrap: "bg-blue-100 dark:bg-blue-900/30",
-    text: "text-blue-800 dark:text-blue-300",
-  },
-  failed: {
-    wrap: "bg-red-100 dark:bg-red-900/30",
-    text: "text-red-800 dark:text-red-300",
-  },
-  canceled: {
-    wrap: "bg-gray-200 dark:bg-neutral-700",
-    text: "text-gray-700 dark:text-gray-200",
-  },
-  skipped: {
-    wrap: "bg-gray-100 dark:bg-neutral-800",
-    text: "text-gray-500 dark:text-gray-400",
-  },
-};
 
 const errorMessage = (e: unknown, fallback: string): string =>
   e instanceof Error && e.message ? e.message : fallback;
@@ -143,13 +139,16 @@ function DeliveryCard({
   busy,
   onRetry,
   onCancel,
+  onConfirm,
 }: {
   row: PhotoDeliveryLogRow;
   busy: boolean;
   onRetry: () => void;
   onCancel: () => void;
+  onConfirm: () => void;
 }) {
-  const status = STATUS_STYLES[row.status];
+  const status = outcomeStyle(row.outcomeTone);
+  const detail = row.outcomeDetail ?? row.failureReason;
   return (
     <View className="mb-3 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
       <View className="flex-row items-start justify-between gap-3">
@@ -173,8 +172,9 @@ function DeliveryCard({
             </Text>
           )}
         </View>
-        <View className={`rounded-full px-2 py-0.5 ${status.wrap}`}>
-          <Text className={`text-[11px] ${status.text}`}>{row.status}</Text>
+        <View className={`flex-row items-center gap-1 rounded-full px-2 py-0.5 ${status.wrap}`}>
+          {row.awaitingCarrier && <ActivityIndicator size="small" color="#2563EB" />}
+          <Text className={`text-[11px] ${status.text}`}>{row.outcomeLabel ?? row.status}</Text>
         </View>
       </View>
 
@@ -190,7 +190,7 @@ function DeliveryCard({
 
       {row.linkOpened && (
         <Text className="mt-1 text-xs font-medium text-green-700 dark:text-green-400">
-          link opened
+          link opened from this message
         </Text>
       )}
 
@@ -202,31 +202,62 @@ function DeliveryCard({
         </Text>
       )}
 
-      {!!row.failureReason && (
-        <Text className="mt-1 text-xs text-red-700 dark:text-red-400">
-          {row.failureReason}
+      {!!detail && (
+        <Text
+          className={`mt-1 text-xs ${
+            // No tone means an older server, whose only detail is the failure.
+            row.outcomeTone === "danger" || !row.outcomeTone
+              ? "text-red-700 dark:text-red-400"
+              : "text-gray-600 dark:text-gray-400"
+          }`}
+        >
+          {detail}
         </Text>
       )}
 
-      <View className="mt-3 flex-row gap-2">
-        <Pressable
-          onPress={onRetry}
-          disabled={busy}
-          className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 dark:border-neutral-700 ${
-            busy ? "opacity-40" : "active:opacity-70"
-          }`}
-          accessibilityRole="button"
-          accessibilityLabel={`Resend to ${row.destinationMasked}`}
-        >
-          {busy ? (
-            <ActivityIndicator size="small" color={PRIMARY} />
-          ) : (
-            <Feather name="refresh-cw" size={13} color="#4B5563" />
-          )}
-          <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-            Resend
-          </Text>
-        </Pressable>
+      {!!row.receiptConfirmedByName && (
+        <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          confirmed by {row.receiptConfirmedByName}
+        </Text>
+      )}
+
+      <View className="mt-3 flex-row flex-wrap gap-2">
+        {row.canConfirmReceipt && (
+          <Pressable
+            onPress={onConfirm}
+            disabled={busy}
+            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border border-green-300 py-2.5 dark:border-green-800 ${
+              busy ? "opacity-40" : "active:opacity-70"
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel={`Guest received the text to ${row.destinationMasked}`}
+          >
+            <Feather name="smartphone" size={13} color="#166534" />
+            <Text className="text-xs font-medium text-green-800 dark:text-green-300">
+              Guest received it
+            </Text>
+          </Pressable>
+        )}
+        {canRetryFromLog(row) && (
+          <Pressable
+            onPress={onRetry}
+            disabled={busy}
+            className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 dark:border-neutral-700 ${
+              busy ? "opacity-40" : "active:opacity-70"
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel={`Resend to ${row.destinationMasked}`}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={PRIMARY} />
+            ) : (
+              <Feather name="refresh-cw" size={13} color="#4B5563" />
+            )}
+            <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
+              Resend
+            </Text>
+          </Pressable>
+        )}
         {isCancelable(row.status) && (
           <Pressable
             onPress={onCancel}
@@ -280,47 +311,84 @@ export default function PhotoDeliveryLogScreen() {
   const [channel, setChannel] = useState<"" | PhotoChannel>("");
   const [kind, setKind] = useState<"" | PhotoDeliveryKind>("");
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [outcome, setOutcome] = useState<"" | PhotoTextOutcomeFilter>("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   // Table is the default layout everywhere in the app; cards suit narrow phones.
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   // One sheet at a time — two stacked native sheets crash Android.
   const [sheet, setSheet] = useState<
-    null | "status" | "channel" | "kind" | "date"
+    null | "status" | "channel" | "kind" | "outcome" | "date"
   >(null);
+
+  // A newer load, or a row changed by hand, makes an older carrier answer stale.
+  const loadSeq = useRef(0);
+  const rowEdits = useRef(0);
+  const [recheckRounds, setRecheckRounds] = useState(0);
+
+  const applyChecked = useCallback((checked: PhotoDeliveryRow[]) => {
+    setLog((prev) => (prev ? { ...prev, rows: mergeDeliveries(prev.rows, checked) } : prev));
+  }, []);
 
   const load = useCallback(async () => {
     const token = getToken();
     if (!token) return;
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
+    setRecheckRounds(0);
     try {
-      setLog(
-        await fetchPhotoDeliveryLog(token, {
-          locationId: effectiveLocationId,
-          status: status || undefined,
-          channel: channel || undefined,
-          kind: kind || undefined,
-          from: from || undefined,
-          to: to || undefined,
-          includeDuplicates: showDuplicates || undefined,
-        }),
-      );
+      const loadedLog = await fetchPhotoDeliveryLog(token, {
+        locationId: effectiveLocationId,
+        status: status || undefined,
+        channel: channel || undefined,
+        kind: kind || undefined,
+        from: from || undefined,
+        to: to || undefined,
+        includeDuplicates: showDuplicates || undefined,
+        outcome: outcome || undefined,
+      });
+      if (seq !== loadSeq.current) return;
+      setLog(loadedLog);
+      // Texts still on their way are asked about straight away.
+      const waitingIds = pendingDeliveryIds(loadedLog.rows);
+      if (waitingIds.length > 0) {
+        const edits = rowEdits.current;
+        try {
+          const checked = await refreshPhotoDeliveryStatus(token, waitingIds);
+          if (seq !== loadSeq.current) return;
+          if (edits === rowEdits.current) applyChecked(checked.deliveries);
+        } catch (checkError) {
+          if (seq !== loadSeq.current) return;
+          if (isRateLimited(checkError)) setRecheckRounds(CARRIER_RECHECK_LIMIT);
+          showToast({
+            message: isRateLimited(checkError)
+              ? CHECKS_PAUSED
+              : "The text provider could not be asked about the newest texts just now.",
+            type: "info",
+          });
+        }
+      }
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       // Shown in the list area too — a toast disappears, and "no rows" and "the
       // request failed" must not look the same.
       const message = errorMessage(e, "Could not load the delivery log.");
       setError(message);
       showToast({ message, type: "error" });
     } finally {
-      setLoading(false);
-      setLoaded(true);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+        setLoaded(true);
+      }
     }
   }, [
+    applyChecked,
     channel,
     effectiveLocationId,
     from,
     kind,
+    outcome,
     showDuplicates,
     status,
     to,
@@ -330,6 +398,31 @@ export default function PhotoDeliveryLogScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const pendingIds = useMemo(() => pendingDeliveryIds(log?.rows ?? []), [log]);
+
+  // Keep asking about texts still on their way, every 10 s for three minutes.
+  useEffect(() => {
+    if (loading || pendingIds.length === 0 || recheckRounds >= CARRIER_RECHECK_LIMIT) return undefined;
+    const timer = setTimeout(() => {
+      const token = getToken();
+      if (!token) return;
+      const seq = loadSeq.current;
+      const edits = rowEdits.current;
+      refreshPhotoDeliveryStatus(token, pendingIds)
+        .then((checked) => {
+          if (seq !== loadSeq.current) return;
+          if (edits === rowEdits.current) applyChecked(checked.deliveries);
+          setRecheckRounds((n) => n + 1);
+        })
+        .catch((checkError) => {
+          if (seq !== loadSeq.current) return;
+          setRecheckRounds(CARRIER_RECHECK_LIMIT);
+          if (isRateLimited(checkError)) showToast({ message: CHECKS_PAUSED, type: "info" });
+        });
+    }, CARRIER_RECHECK_MS);
+    return () => clearTimeout(timer);
+  }, [applyChecked, loading, pendingIds, recheckRounds, showToast]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -350,7 +443,7 @@ export default function PhotoDeliveryLogScreen() {
         showToast({
           message:
             action === "retry"
-              ? await retryPhotoDelivery(token, row.id)
+              ? (await retryPhotoDelivery(token, row.id)).message
               : await cancelPhotoDelivery(token, row.id),
           type: "success",
         });
@@ -370,6 +463,29 @@ export default function PhotoDeliveryLogScreen() {
       }
     },
     [busyId, load, showToast],
+  );
+
+  /** "Guest received it": staff saw the text on the guest's phone. */
+  const confirmReceived = useCallback(
+    async (row: PhotoDeliveryLogRow) => {
+      const token = getToken();
+      if (!token || busyId !== null) return;
+      rowEdits.current += 1;
+      setBusyId(row.id);
+      try {
+        const result = await confirmPhotoTextReceived(token, row.id);
+        applyChecked([result.row]);
+        showToast({ message: result.message, type: "success" });
+      } catch (e) {
+        const current = deliveryFromError(e);
+        if (current) applyChecked([current]);
+        showToast({ message: errorMessage(e, "That could not be saved."), type: "error" });
+      } finally {
+        rowEdits.current += 1;
+        setBusyId(null);
+      }
+    },
+    [applyChecked, busyId, showToast],
   );
 
   /**
@@ -394,7 +510,12 @@ export default function PhotoDeliveryLogScreen() {
     rows.length === fetchedCount ? (log?.total ?? rows.length) : rows.length;
   const hasDateRange = !!(from && to);
   const anyFilterOn =
-    status !== "" || channel !== "" || kind !== "" || showDuplicates || hasDateRange;
+    status !== "" ||
+    channel !== "" ||
+    kind !== "" ||
+    outcome !== "" ||
+    showDuplicates ||
+    hasDateRange;
 
   const dateLabel = useMemo(
     () =>
@@ -409,6 +530,7 @@ export default function PhotoDeliveryLogScreen() {
     setStatus("");
     setChannel("");
     setKind("");
+    setOutcome("");
     setShowDuplicates(false);
     setFrom("");
     setTo("");
@@ -459,8 +581,9 @@ export default function PhotoDeliveryLogScreen() {
       >
         <View className="mt-5 px-5">
           <Text className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-            Email and SMS are tracked separately, so a session shows as partly
-            delivered when one channel succeeds and another fails.
+            Email and SMS are tracked separately. A text only shows as delivered
+            once the phone carrier confirms it, and as received once the guest
+            opens its link or a staff member sees it on their phone.
           </Text>
 
           <View className="mb-4">
@@ -503,8 +626,16 @@ export default function PhotoDeliveryLogScreen() {
             />
           </FilterPill>
 
-          {/* Date range · deduplicated links · clear (only once something is on) */}
+          {/* Text outcome · date range · deduplicated links · clear (only once something is on) */}
           <FilterPill>
+            <PillSegment
+              label={labelFor(OUTCOME_OPTIONS, outcome)}
+              active={sheet === "outcome" || outcome !== ""}
+              onPress={() => setSheet("outcome")}
+              renderIcon={(c) => (
+                <Feather name="smartphone" size={15} color={c} />
+              )}
+            />
             <PillSegment
               label={dateLabel}
               active={sheet === "date" || hasDateRange}
@@ -570,6 +701,7 @@ export default function PhotoDeliveryLogScreen() {
                 busyId={busyId}
                 onRetry={(row) => void runRowAction(row, "retry")}
                 onCancel={(row) => void runRowAction(row, "cancel")}
+                onConfirm={(row) => void confirmReceived(row)}
               />
             ) : (
               rows.map((row) => (
@@ -579,6 +711,7 @@ export default function PhotoDeliveryLogScreen() {
                   busy={busyId === row.id}
                   onRetry={() => void runRowAction(row, "retry")}
                   onCancel={() => void runRowAction(row, "cancel")}
+                  onConfirm={() => void confirmReceived(row)}
                 />
               ))
             ))}
@@ -607,6 +740,14 @@ export default function PhotoDeliveryLogScreen() {
         value={kind}
         options={KIND_OPTIONS}
         onSelect={(v) => setKind(String(v) as "" | PhotoDeliveryKind)}
+        onClose={() => setSheet(null)}
+      />
+      <FilterOptionSheet
+        visible={sheet === "outcome"}
+        title="Filter by Text Outcome"
+        value={outcome}
+        options={OUTCOME_OPTIONS}
+        onSelect={(v) => setOutcome(String(v) as "" | PhotoTextOutcomeFilter)}
         onClose={() => setSheet(null)}
       />
 

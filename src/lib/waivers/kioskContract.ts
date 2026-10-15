@@ -1,4 +1,4 @@
-import { isCompletePhone } from "../phone.ts";
+import { isCompletePhone, localPhoneDigits } from "../phone.ts";
 
 export type KioskSettings = {
   inactivityTimeoutSeconds: number;
@@ -178,11 +178,11 @@ export function classifyLookupFailure(
 }
 
 /**
- * True for a US phone number with exactly 10 digits once a leading "1"
- * country code is stripped — the same shape the web kiosk's lookup requires.
+ * Any 10 local digits, or a complete number from another country — the same
+ * shape the web kiosk's lookup requires.
  */
 export function isValidKioskPhone(raw: string): boolean {
-  return isCompletePhone(raw);
+  return localPhoneDigits(raw).length === 10 || isCompletePhone(raw);
 }
 
 export function minorCapReached(

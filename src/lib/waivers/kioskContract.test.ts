@@ -334,6 +334,12 @@ describe("validating the kiosk lookup phone number", () => {
   it("rejects an empty string", () => {
     assert.equal(isValidKioskPhone(""), false);
   });
+
+  it("looks up any ten digits, and a number from another country", () => {
+    assert.equal(isValidKioskPhone("0123456789"), true);
+    assert.equal(isValidKioskPhone("+44 20 7946 0958"), true);
+    assert.equal(isValidKioskPhone("+44 20"), false);
+  });
 });
 
 describe("how many children a waiver still has room for", () => {

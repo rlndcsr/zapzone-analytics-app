@@ -55,6 +55,25 @@ export type SessionPhoto = {
   downloadCount: number;
 };
 
+/** How a send actually went — for a text, whether it reached the phone. */
+export type PhotoDeliveryOutcome =
+  | "received"
+  | "delivered"
+  | "awaiting_carrier"
+  | "unconfirmed"
+  | "not_delivered"
+  | "sent"
+  | "failed"
+  | "skipped"
+  | "duplicate"
+  | "scheduled"
+  | "queued"
+  | "canceled";
+
+export type PhotoOutcomeTone = "success" | "info" | "warning" | "danger" | "muted";
+
+export type PhotoTextingState = "not_configured" | "unverified" | "verified" | "failing";
+
 /** One email/SMS row created for a session (email and SMS are tracked apart). */
 export type PhotoDeliveryRow = {
   id: number;
@@ -65,6 +84,63 @@ export type PhotoDeliveryRow = {
   /** Same destination as an earlier row — recorded, but not sent twice. */
   isDuplicate: boolean;
   duplicateOfId: number | null;
+  error: string | null;
+  /** The server's outcome; null from a server that predates delivery tracking. */
+  outcome: PhotoDeliveryOutcome | null;
+  outcomeTone: PhotoOutcomeTone | null;
+  outcomeLabel: string | null;
+  outcomeDetail: string | null;
+  receiptConfirmedByName: string | null;
+  /** The text is with the phone carrier and not yet confirmed either way. */
+  awaitingCarrier: boolean;
+  /** Still worth asking the carrier about; null when the server did not say. */
+  carrierPending: boolean | null;
+  canConfirmReceipt: boolean;
+  /** False when sending again would not help (e.g. the number is blocked). */
+  retryUseful: boolean | null;
+  canRetry: boolean;
+};
+
+/** The server's summary of one send, for the result screen. */
+export type PhotoSendOutcome = {
+  result: "sent" | "partial" | "failed" | "scheduled";
+  headline: string;
+  message: string;
+  carrierPending: number;
+  deliveryIds: number[];
+  confirmableIds: number[];
+  textingState: PhotoTextingState;
+  askForReceipt: boolean;
+  /** Carriers are blocking texts from the sending number right now. */
+  textsBlocked: boolean;
+};
+
+/** Whether photo texts are confirmed to reach phones, for one company. */
+export type PhotoTextingStatus = {
+  state: PhotoTextingState;
+  headline: string;
+  note: string | null;
+  sender: string | null;
+  senderKind: "toll_free" | "standard" | "short_code" | "none";
+  verified: {
+    at: string | null;
+    method: "staff_confirmed" | "guest_opened_link";
+    byName: string | null;
+    locationName: string | null;
+  } | null;
+  problem: { code: string | null; meaning: string } | null;
+  recent: {
+    days: number;
+    attempted: number;
+    received: number;
+    delivered: number;
+    awaitingCarrier: number;
+    unconfirmed: number;
+    notDelivered: number;
+    failed: number;
+    skipped: number;
+    topProblem: { code: string; meaning: string | null; count: number } | null;
+  };
 };
 
 export type PhotoSession = {
@@ -96,6 +172,9 @@ export type PhotoChannelDiagnostics = {
   emailTransport: string;
   smsNote: string | null;
   emailNote: string | null;
+  /** Null from a server that predates texting confirmation. */
+  smsStatus: PhotoTextingStatus | null;
+  photoLinkNote: string | null;
 };
 
 export type PhotoCaptureContext = {
@@ -274,7 +353,105 @@ type ApiDelivery = {
   status: PhotoDeliveryStatus;
   is_duplicate: boolean;
   duplicate_of_id: number | null;
+  error?: string | null;
+  outcome?: PhotoDeliveryOutcome | null;
+  outcome_tone?: PhotoOutcomeTone | null;
+  outcome_label?: string | null;
+  outcome_detail?: string | null;
+  receipt_confirmed_by_name?: string | null;
+  awaiting_carrier?: boolean;
+  carrier_pending?: boolean;
+  can_confirm_receipt?: boolean;
+  retry_useful?: boolean;
+  can_retry?: boolean;
 };
+
+type ApiSendOutcome = {
+  result: PhotoSendOutcome["result"];
+  headline: string;
+  message: string;
+  carrier_pending: number;
+  delivery_ids: number[];
+  confirmable_ids: number[];
+  texting_state: PhotoTextingState;
+  ask_for_receipt: boolean;
+  texts_blocked?: boolean;
+};
+
+type ApiTextingStatus = {
+  state: PhotoTextingState;
+  headline: string;
+  note: string | null;
+  sender: string | null;
+  sender_kind: PhotoTextingStatus["senderKind"];
+  verified: {
+    at: string | null;
+    method: "staff_confirmed" | "guest_opened_link";
+    by_name: string | null;
+    location_name: string | null;
+  } | null;
+  problem: { code: string | null; meaning: string } | null;
+  recent?: {
+    days: number;
+    attempted: number;
+    received: number;
+    delivered: number;
+    awaiting_carrier: number;
+    unconfirmed: number;
+    not_delivered: number;
+    failed: number;
+    skipped: number;
+    top_problem: { code: string; meaning: string | null; count: number } | null;
+  };
+};
+
+function mapSendOutcome(raw: ApiSendOutcome | null | undefined): PhotoSendOutcome | null {
+  if (!raw) return null;
+  return {
+    result: raw.result,
+    headline: raw.headline,
+    message: raw.message,
+    carrierPending: raw.carrier_pending ?? 0,
+    deliveryIds: raw.delivery_ids ?? [],
+    confirmableIds: raw.confirmable_ids ?? [],
+    textingState: raw.texting_state,
+    askForReceipt: Boolean(raw.ask_for_receipt),
+    textsBlocked: Boolean(raw.texts_blocked),
+  };
+}
+
+export function mapTextingStatus(raw: ApiTextingStatus | null | undefined): PhotoTextingStatus | null {
+  if (!raw) return null;
+  const r = raw.recent;
+  return {
+    state: raw.state,
+    headline: raw.headline,
+    note: raw.note ?? null,
+    sender: raw.sender ?? null,
+    senderKind: raw.sender_kind ?? "none",
+    verified: raw.verified
+      ? {
+          at: raw.verified.at,
+          method: raw.verified.method,
+          byName: raw.verified.by_name,
+          locationName: raw.verified.location_name,
+        }
+      : null,
+    problem: raw.problem ?? null,
+    recent: {
+      days: r?.days ?? 14,
+      attempted: r?.attempted ?? 0,
+      received: r?.received ?? 0,
+      delivered: r?.delivered ?? 0,
+      awaitingCarrier: r?.awaiting_carrier ?? 0,
+      unconfirmed: r?.unconfirmed ?? 0,
+      notDelivered: r?.not_delivered ?? 0,
+      failed: r?.failed ?? 0,
+      skipped: r?.skipped ?? 0,
+      topProblem: r?.top_problem ?? null,
+    },
+  };
+}
 
 export type ApiSession = {
   id: number;
@@ -318,6 +495,24 @@ function mapPhoto(raw: ApiPhoto): SessionPhoto {
   };
 }
 
+/** The delivery-tracking fields every delivery payload carries (`presentDelivery`). */
+function mapOutcomeFields(raw: Partial<ApiDelivery>) {
+  return {
+    error: raw.error ?? null,
+    outcome: raw.outcome ?? null,
+    outcomeTone: raw.outcome_tone ?? null,
+    outcomeLabel: raw.outcome_label ?? null,
+    outcomeDetail: raw.outcome_detail ?? null,
+    receiptConfirmedByName: raw.receipt_confirmed_by_name ?? null,
+    awaitingCarrier: Boolean(raw.awaiting_carrier),
+    carrierPending: raw.carrier_pending ?? null,
+    canConfirmReceipt: Boolean(raw.can_confirm_receipt),
+    retryUseful: raw.retry_useful ?? null,
+    // An older server omits it; keep offering the action rather than hide it.
+    canRetry: raw.can_retry !== false,
+  };
+}
+
 function mapDelivery(raw: ApiDelivery): PhotoDeliveryRow {
   return {
     id: raw.id,
@@ -327,7 +522,14 @@ function mapDelivery(raw: ApiDelivery): PhotoDeliveryRow {
     status: raw.status,
     isDuplicate: raw.is_duplicate,
     duplicateOfId: raw.duplicate_of_id,
+    ...mapOutcomeFields(raw),
   };
+}
+
+/** The current row a refused retry / confirm sends back with its 422. */
+export function deliveryFromError(e: unknown): PhotoDeliveryRow | null {
+  const data = e instanceof ApiError ? (e.body as { data?: ApiDelivery } | null)?.data : null;
+  return data && typeof data === "object" && typeof data.id === "number" ? mapDelivery(data) : null;
 }
 
 export function mapSession(raw: ApiSession): PhotoSession {
@@ -384,6 +586,8 @@ export async function fetchCaptureContext(
         email_transport: string;
         sms_note: string | null;
         email_note: string | null;
+        sms_status?: ApiTextingStatus | null;
+        photo_link_note?: string | null;
       };
       retention_days: number;
     };
@@ -412,6 +616,8 @@ export async function fetchCaptureContext(
       emailTransport: d.channels.email_transport,
       smsNote: d.channels.sms_note,
       emailNote: d.channels.email_note,
+      smsStatus: mapTextingStatus(d.channels.sms_status),
+      photoLinkNote: d.channels.photo_link_note ?? null,
     },
     retentionDays: d.retention_days,
   };
@@ -564,6 +770,13 @@ export type DeliverPhotoSessionInput = {
   slideshowOptIn?: boolean;
 };
 
+/** What a send returns: the session, the server's line, and how each message went. */
+export type PhotoSendResult = {
+  session: PhotoSession;
+  message: string | null;
+  outcome: PhotoSendOutcome | null;
+};
+
 /**
  * POST /api/photo-sessions/{id}/deliver — one-shot: a session that already has
  * a delivery method is rejected. Returns the server's own summary line.
@@ -572,8 +785,8 @@ export async function deliverPhotoSession(
   token: string,
   sessionId: number,
   input: DeliverPhotoSessionInput,
-): Promise<{ session: PhotoSession; message: string | null }> {
-  const res = await apiRequest<{ data: ApiSession; message?: string }>(
+): Promise<PhotoSendResult> {
+  const res = await apiRequest<{ data: ApiSession; message?: string; outcome?: ApiSendOutcome }>(
     `/api/photo-sessions/${sessionId}/deliver`,
     {
       method: "POST",
@@ -588,7 +801,11 @@ export async function deliverPhotoSession(
       },
     },
   );
-  return { session: mapSession(res.data), message: res.message ?? null };
+  return {
+    session: mapSession(res.data),
+    message: res.message ?? null,
+    outcome: mapSendOutcome(res.outcome),
+  };
 }
 
 /** DELETE /api/photo-sessions/{id} — discard everything before delivery. */
@@ -705,12 +922,20 @@ export async function sendLibraryPhoto(
   token: string,
   photoId: number,
   input: { waiverIds: number[]; schedule?: PhotoDeliverySchedule },
-): Promise<void> {
-  await apiRequest(`/api/photo-library/${photoId}/send`, {
-    method: "POST",
-    token,
-    body: { waiver_ids: input.waiverIds, schedule: input.schedule },
-  });
+): Promise<PhotoSendResult> {
+  const res = await apiRequest<{ data: ApiSession; message?: string; outcome?: ApiSendOutcome }>(
+    `/api/photo-library/${photoId}/send`,
+    {
+      method: "POST",
+      token,
+      body: { waiver_ids: input.waiverIds, schedule: input.schedule },
+    },
+  );
+  return {
+    session: mapSession(res.data),
+    message: res.message ?? null,
+    outcome: mapSendOutcome(res.outcome),
+  };
 }
 
 /**
@@ -769,27 +994,22 @@ export async function deleteLibraryPhotos(
 export type PhotoDeliveryKind = PhotoDeliverySchedule | "kiosk";
 
 /** One row of the delivery log — an email or SMS send, not a session. */
-export type PhotoDeliveryLogRow = {
-  id: number;
+export type PhotoDeliveryLogRow = PhotoDeliveryRow & {
   sessionId: number | null;
   /** How the session that produced the link was started. */
   sessionSource: PhotoSessionSource | null;
   locationName: string | null;
-  channel: PhotoChannel;
-  destinationMasked: string;
-  recipientName: string | null;
   /** Immediate, held for 9:00 AM the next day, or kiosk (the "kind" column). */
   kind: PhotoDeliveryKind | null;
-  status: PhotoDeliveryStatus;
   /** When this row last moved — sent, else scheduled for, else created. */
   occurredAt: string | null;
   /** The customer followed the link at least once. */
   linkOpened: boolean;
-  /** Same destination as an earlier row — recorded, but not sent twice. */
-  isDuplicate: boolean;
-  duplicateOfId: number | null;
   failureReason: string | null;
 };
+
+/** The web's "Text outcome" filter. */
+export type PhotoTextOutcomeFilter = "not_delivered" | "awaiting_carrier" | "reached_phone";
 
 export type PhotoDeliveryLog = {
   rows: PhotoDeliveryLogRow[];
@@ -813,6 +1033,7 @@ export type PhotoDeliveryLogFilters = {
   to?: string;
   /** The web's "Show deduplicated waiver links" — include suppressed dupes. */
   includeDuplicates?: boolean;
+  outcome?: PhotoTextOutcomeFilter;
 };
 
 type ApiDeliveryLogRow = Partial<ApiDelivery> & {
@@ -884,6 +1105,7 @@ function mapDeliveryLogRow(raw: ApiDeliveryLogRow): PhotoDeliveryLogRow {
       null,
     linkOpened: Boolean(raw.link_opened ?? raw.link_opened_at ?? raw.opened_at),
     failureReason: raw.failure_reason ?? raw.error ?? null,
+    ...mapOutcomeFields(raw),
   };
 }
 
@@ -936,6 +1158,7 @@ export async function fetchPhotoDeliveryLog(
   if (filters.from) params.append("from", filters.from);
   if (filters.to) params.append("to", filters.to);
   if (filters.includeDuplicates) params.append("include_duplicates", "1");
+  if (filters.outcome) params.append("outcome", filters.outcome);
 
   const query = params.toString();
   const res = await apiRequest<Record<string, unknown>>(
@@ -956,16 +1179,55 @@ export async function fetchPhotoDeliveryLog(
   return { rows, total, truncated: Boolean(meta.truncated) };
 }
 
-/** POST /api/photo-deliveries/{id}/retry — sends the same link again. */
+/**
+ * POST /api/photo-deliveries/{id}/retry — sends the same link again. A refusal
+ * is a 422 carrying the current row; read it with {@link deliveryFromError}.
+ */
 export async function retryPhotoDelivery(
   token: string,
   deliveryId: number,
-): Promise<string> {
-  const res = await apiRequest<{ message?: string }>(
+): Promise<{ message: string; row: PhotoDeliveryRow | null }> {
+  const res = await apiRequest<{ message?: string; data?: ApiDelivery }>(
     `${DELIVERY_LOG_PATH}/${deliveryId}/retry`,
     { method: "POST", token },
   );
-  return res.message ?? "That link was sent again.";
+  return {
+    message: res.message ?? "That link was sent again.",
+    row: res.data ? mapDelivery(res.data) : null,
+  };
+}
+
+/**
+ * POST /api/photo-deliveries/status — asks the carrier about texts still on
+ * their way. A 429 means this sign-in checked too often; wait a minute.
+ */
+export async function refreshPhotoDeliveryStatus(
+  token: string,
+  deliveryIds: number[],
+): Promise<{ deliveries: PhotoDeliveryRow[]; outcome: PhotoSendOutcome | null }> {
+  const res = await apiRequest<{
+    data: { deliveries: ApiDelivery[]; outcome: ApiSendOutcome | null };
+  }>(`${DELIVERY_LOG_PATH}/status`, {
+    method: "POST",
+    token,
+    body: { delivery_ids: deliveryIds },
+  });
+  return {
+    deliveries: (res.data?.deliveries ?? []).map(mapDelivery),
+    outcome: mapSendOutcome(res.data?.outcome),
+  };
+}
+
+/** POST /api/photo-deliveries/{id}/confirm-receipt — staff saw the text on the guest's phone. */
+export async function confirmPhotoTextReceived(
+  token: string,
+  deliveryId: number,
+): Promise<{ message: string; row: PhotoDeliveryRow }> {
+  const res = await apiRequest<{ message: string; data: ApiDelivery }>(
+    `${DELIVERY_LOG_PATH}/${deliveryId}/confirm-receipt`,
+    { method: "POST", token },
+  );
+  return { message: res.message, row: mapDelivery(res.data) };
 }
 
 /** POST /api/photo-deliveries/{id}/cancel — drops a queued or scheduled send. */
@@ -1549,7 +1811,6 @@ export type PhotoSettings = {
   /** Settings adds the photo-link base to the shared channel diagnostics. */
   channels: PhotoChannelDiagnostics & {
     photoLinkBase: string | null;
-    photoLinkNote: string | null;
   };
   options: PhotoSettingsOptions;
 };
@@ -1628,6 +1889,7 @@ export async function fetchPhotoSettings(
         email_note: string | null;
         photo_link_base: string | null;
         photo_link_note: string | null;
+        sms_status?: ApiTextingStatus | null;
       };
       options: {
         date_formats: { value: string; preview: string }[];
@@ -1665,6 +1927,7 @@ export async function fetchPhotoSettings(
       emailNote: d.channels.email_note,
       photoLinkBase: d.channels.photo_link_base ?? null,
       photoLinkNote: d.channels.photo_link_note ?? null,
+      smsStatus: mapTextingStatus(d.channels.sms_status),
     },
     options: {
       dateFormats: d.options.date_formats ?? [],
@@ -1723,7 +1986,16 @@ export async function updatePhotoSettings(
 
 export type PhotoTestChannel = "email" | "sms";
 
-export type PhotoTestResult = { success: boolean; message: string };
+export type PhotoTestResult = {
+  success: boolean;
+  message: string;
+  /** A test text's carrier reference and check token, for following it up. */
+  providerReference?: string | null;
+  checkToken?: string | null;
+  characters?: number | null;
+  segments?: number | null;
+  encoding?: string | null;
+};
 
 const firstFieldError = (e: ApiError): string | null =>
   Object.values(e.fieldErrors ?? {})[0]?.[0] ?? null;
@@ -1742,19 +2014,33 @@ export async function sendPhotoTestMessage(
   },
 ): Promise<PhotoTestResult> {
   try {
-    const res = await apiRequest<{ message?: string }>(
-      "/api/photo-settings/test-message",
-      {
-        method: "POST",
-        token,
-        body: {
-          location_id: input.locationId,
-          channel: input.channel,
-          destination: input.destination,
-        },
+    const res = await apiRequest<{
+      message?: string;
+      data?: {
+        provider_reference?: string | null;
+        check_token?: string | null;
+        characters?: number | null;
+        segments?: number | null;
+        encoding?: string | null;
+      };
+    }>("/api/photo-settings/test-message", {
+      method: "POST",
+      token,
+      body: {
+        location_id: input.locationId,
+        channel: input.channel,
+        destination: input.destination,
       },
-    );
-    return { success: true, message: res?.message ?? "Test message sent." };
+    });
+    return {
+      success: true,
+      message: res?.message ?? "Test message sent.",
+      providerReference: res?.data?.provider_reference ?? null,
+      checkToken: res?.data?.check_token ?? null,
+      characters: res?.data?.characters ?? null,
+      segments: res?.data?.segments ?? null,
+      encoding: res?.data?.encoding ?? null,
+    };
   } catch (e) {
     // First validation error, then the server's message — the web's order.
     const fieldError = e instanceof ApiError ? firstFieldError(e) : null;
@@ -1765,6 +2051,41 @@ export async function sendPhotoTestMessage(
         : "The test message could not be sent.");
     return { success: false, message };
   }
+}
+
+/** POST /api/photo-settings/test-message/status — has the carrier delivered the test text? */
+export async function fetchTestMessageStatus(
+  token: string,
+  input: { locationId: number; providerReference: string; checkToken: string },
+): Promise<{ final: boolean; delivered: boolean; message: string }> {
+  const res = await apiRequest<{
+    data: { final: boolean; delivered: boolean; message: string };
+  }>("/api/photo-settings/test-message/status", {
+    method: "POST",
+    token,
+    body: {
+      location_id: input.locationId,
+      provider_reference: input.providerReference,
+      check_token: input.checkToken,
+    },
+  });
+  return {
+    final: Boolean(res.data?.final),
+    delivered: Boolean(res.data?.delivered),
+    message: res.data?.message ?? "",
+  };
+}
+
+/** POST /api/photo-settings/texting/reset — company_admin / admin: mark texting not confirmed. */
+export async function resetTextingConfirmation(
+  token: string,
+  locationId: number,
+): Promise<{ message: string; texting: PhotoTextingStatus | null }> {
+  const res = await apiRequest<{ message: string; data: ApiTextingStatus }>(
+    "/api/photo-settings/texting/reset",
+    { method: "POST", token, body: { location_id: locationId } },
+  );
+  return { message: res.message, texting: mapTextingStatus(res.data) };
 }
 
 /** POST /api/photo-settings/passcode — issues a new device passcode. */
