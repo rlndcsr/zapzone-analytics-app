@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 
+import { bookingImportSummary } from "../../lib/bookings/importSummary";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { bulkImportBookingsCsv } from "../../services/bookingsService";
 import { BottomSheet } from "./BottomSheet";
@@ -71,14 +72,7 @@ export function BookingsImportSheet({ visible, onClose, locationId, onImported }
         skipDuplicates,
       });
 
-      const errorNote =
-        result.errors.length > 0
-          ? `\n${result.errors.length} row error(s) — first: row ${result.errors[0].row}, ${result.errors[0].error}`
-          : "";
-      Alert.alert(
-        "Import complete",
-        `Imported ${result.imported} of ${result.total_rows} row(s). Skipped ${result.skipped}.${errorNote}`,
-      );
+      Alert.alert("Import complete", bookingImportSummary(result));
       setCsv("");
       onImported();
       onClose();

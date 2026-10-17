@@ -1323,7 +1323,13 @@ export async function updateInternalNote(
   return mapSaved(res);
 }
 
-export type PackageOption = { id: number; name: string; price: number | null };
+export type PackageOption = {
+  id: number;
+  name: string;
+  price: number | null;
+  /** False for a backend-only package (hidden from the booking site). */
+  availableOnline: boolean | null;
+};
 export type RoomOption = {
   id: number;
   name: string;
@@ -1355,6 +1361,7 @@ export async function fetchPackages(
     id: Number(p.id),
     name: (p.name ?? "").toString().trim() || `Package #${p.id}`,
     price: p.price != null ? Number(p.price) : null,
+    availableOnline: typeof p.available_online === "boolean" ? p.available_online : null,
   }));
 }
 
@@ -2365,6 +2372,8 @@ export type BulkImportResult = {
   imported: number;
   skipped: number;
   errors: { row: number; error: string }[];
+  /** Imported bookings staff should check, grouped by message (web 37b7e04). */
+  warnings?: { message: string; rows: number[] }[];
   total_rows: number;
 };
 
@@ -2514,6 +2523,8 @@ export type BookablePackage = {
   partialPaymentFixed: number | null;
   locationId: number | null;
   isActive: boolean;
+  /** False for a backend-only package; staff still book it (web 4d165ce). */
+  availableOnline: boolean | null;
   addOns: PackageAddOn[];
   attractions: PackageAttraction[];
   rooms: PackageRoom[];
@@ -2548,6 +2559,7 @@ type RawPackage = {
   partial_payment_fixed?: number | string | null;
   location_id?: number | null;
   location?: { id?: number | null; name?: string | null } | null;
+  available_online?: boolean | null;
   add_ons?: RawPackageAddOn[] | null;
   attractions?: RawPackageAttraction[] | null;
   rooms?: { id: number; name?: string | null }[] | null;
@@ -2620,6 +2632,7 @@ function mapBookablePackage(raw: RawPackage): BookablePackage {
         : null,
     locationId: raw.location_id ?? null,
     isActive: raw.is_active !== false && raw.is_active !== 0,
+    availableOnline: typeof raw.available_online === "boolean" ? raw.available_online : null,
     addOns: (raw.add_ons ?? []).map((a) => ({
       id: Number(a.id),
       name: a.name?.trim() || `Add-on #${a.id}`,
@@ -2662,6 +2675,8 @@ export type PackageListItem = {
   isActive: boolean;
   locationId: number | null;
   locationName: string;
+  /** False for a backend-only package; staff still book it (web 4d165ce). */
+  availableOnline: boolean | null;
 };
 
 function mapPackageListItem(raw: RawPackage): PackageListItem {
@@ -2680,6 +2695,7 @@ function mapPackageListItem(raw: RawPackage): PackageListItem {
     isActive: raw.is_active !== false && raw.is_active !== 0,
     locationId: raw.location?.id ?? raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
+    availableOnline: typeof raw.available_online === "boolean" ? raw.available_online : null,
   };
 }
 

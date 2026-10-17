@@ -26,6 +26,7 @@ import {
   CARD_SHADOW,
   Section,
 } from "../../components/ui/attractionFormKit";
+import { OnlineAvailabilityField } from "../../components/ui/BackendOnly";
 import {
   packageIsCallToBook,
   type PackageScheduleLike,
@@ -45,6 +46,10 @@ import {
   generateScheduleSlots,
   scheduleIntervalMessage,
 } from "../../lib/packages/scheduleSlots";
+import {
+  canChangeOnlineAvailability,
+  CREATE_STAYED_ONLINE,
+} from "../../lib/packages/onlineAvailability";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDuration } from "../../lib/time";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
@@ -248,6 +253,9 @@ const CreatePackage = () => {
   const [packageType, setPackageType] = useState(initialType);
   const [features, setFeatures] = useState<string[]>([""]);
   const [isActive, setIsActive] = useState(true);
+  // Front-End Availability: everyone sees it; only managers and admins send it.
+  const canChangeOnline = canChangeOnlineAvailability(user?.role);
+  const [availableOnline, setAvailableOnline] = useState(true);
 
   // --- Step 2: pricing & participants ---
   const [price, setPrice] = useState("");
@@ -743,7 +751,7 @@ const CreatePackage = () => {
 
     setSubmitting(true);
     try {
-      const id = await createPackage(token, {
+      const created = await createPackage(token, {
         locationId,
         name: name.trim(),
         description: description.trim(),
@@ -782,7 +790,12 @@ const CreatePackage = () => {
 
         promoIds: [],
         giftCardIds: [],
+        ...(canChangeOnline ? { availableOnline } : {}),
       });
+      const id = created.id;
+      // Asked for backend only, but the server predates the setting (web CreatePackage).
+      const stayedOnline =
+        canChangeOnline && !availableOnline && created.availableOnline !== false;
 
       if (id && schedules.length > 0) {
         try {
@@ -803,7 +816,8 @@ const CreatePackage = () => {
       }
 
       markPackagesStale();
-      Alert.alert("Package created", `"${name.trim()}" was created.`);
+      if (stayedOnline) Alert.alert("Package created", CREATE_STAYED_ONLINE);
+      else Alert.alert("Package created", `"${name.trim()}" was created.`);
       router.back();
     } catch (err) {
       Alert.alert(
@@ -1157,6 +1171,7 @@ const CreatePackage = () => {
               <CallToBookNotice
                 active={packageIsCallToBook(schedules.map(toScheduleLike))}
                 itemLabel="package"
+                backendOnly={!availableOnline}
               />
               {schedules.length === 0 && (
                 <View className="items-center rounded-2xl border border-dashed border-gray-300 px-5 py-8 dark:border-neutral-700">
@@ -1898,6 +1913,12 @@ const CreatePackage = () => {
               </View>
             </View>
           </Section>
+
+          <OnlineAvailabilityField
+            checked={availableOnline}
+            canChange={canChangeOnline}
+            onChange={setAvailableOnline}
+          />
 
           {/* Live Preview — how the package will read to a customer, updating
               as the form is filled in. Mirrors the web's sidebar card. */}

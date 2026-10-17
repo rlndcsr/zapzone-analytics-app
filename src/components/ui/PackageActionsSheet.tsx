@@ -10,7 +10,12 @@ import {
   View,
 } from "react-native";
 
-import { getToken } from "../../lib/session";
+import {
+  canChangeOnlineAvailability,
+  DUPLICATE_STAYED_ONLINE,
+  duplicateBackendOnlyNote,
+} from "../../lib/packages/onlineAvailability";
+import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDuration, formatTimeRange } from "../../lib/time";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
@@ -20,6 +25,7 @@ import {
   type PackageDetail,
   type PackageRow,
 } from "../../services/packagesService";
+import { BackendOnlyBadge } from "./BackendOnly";
 import { BottomSheet } from "./BottomSheet";
 import { SelectField } from "./FormControls";
 import { StatusBadge } from "./StatusBadge";
@@ -253,15 +259,29 @@ export function PackageActionsSheet({
     );
   };
 
+  // A manager's or admin's copy of a backend-only package stays backend only.
+  const canChangeOnline = canChangeOnlineAvailability(getCurrentUser()?.role);
+  const sourceBackendOnly = (detail?.availableOnline ?? pkg.availableOnline) === false;
+
   const handleDuplicate = async () => {
     const token = getToken();
     if (!token) return Alert.alert("Not signed in", "Please sign in again.");
     setBusy(true);
     try {
-      await duplicatePackage(token, pkg.id, dupLocationId);
+      const { copyStayedOnline } = await duplicatePackage(
+        token,
+        pkg.id,
+        dupLocationId,
+        canChangeOnline,
+      );
       onChanged();
       onClose();
-      Alert.alert("Duplicated", `"${pkg.name}" was duplicated (inactive).`);
+      Alert.alert(
+        "Duplicated",
+        `"${pkg.name}" was duplicated (inactive).${
+          copyStayedOnline ? `\n\n${DUPLICATE_STAYED_ONLINE}` : ""
+        }`,
+      );
     } catch (err) {
       Alert.alert(
         "Duplicate failed",
@@ -300,11 +320,14 @@ export function PackageActionsSheet({
               <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-2">
                 {detail.name}
               </Text>
-              <View className="flex-row items-center gap-2 mt-1.5">
+              <View className="flex-row flex-wrap items-center gap-2 mt-1.5">
                 <Text className="text-sm text-gray-500 dark:text-gray-400">
                   {normalizeCategory(detail.category) || "No category"}
                 </Text>
                 <StatusBadge status={detail.isActive ? "active" : "inactive"} />
+                {detail.availableOnline === false && (
+                  <BackendOnlyBadge isActive={detail.isActive} />
+                )}
               </View>
 
               {!!detail.description && (
@@ -455,7 +478,7 @@ export function PackageActionsSheet({
                         <ActivePill active={s.isActive} />
                       </View>
 
-                      {s.dayConfiguration.length > 0 && (
+                      {s.dayConfiguration.length > 0 ? (
                         <View className="flex-row flex-wrap gap-1.5 mb-2">
                           {s.dayConfiguration.map((day) => (
                             <View
@@ -468,7 +491,16 @@ export function PackageActionsSheet({
                             </View>
                           ))}
                         </View>
-                      )}
+                      ) : s.availabilityType === "daily" ? (
+                        // A daily schedule carries no day list (web PackageDetails, 4d165ce).
+                        <View className="flex-row mb-2">
+                          <View className="bg-[#0644C7] rounded px-2 py-1">
+                            <Text className="text-[10px] font-semibold text-white">
+                              Every day
+                            </Text>
+                          </View>
+                        </View>
+                      ) : null}
 
                       <View className="flex-row items-center gap-2">
                         <Feather name="clock" size={13} color={PRIMARY} />
@@ -642,6 +674,12 @@ export function PackageActionsSheet({
                 </Text>
               </View>
             </View>
+          )}
+
+          {sourceBackendOnly && (
+            <Text className="text-xs text-amber-700 dark:text-amber-500 mt-3">
+              {duplicateBackendOnlyNote(canChangeOnline)}
+            </Text>
           )}
 
           {dupLocationId != null && Number(dupLocationId) !== Number(pkg.locationId) && (

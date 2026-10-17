@@ -96,12 +96,43 @@ export const isCallToBook = (availability: AvailabilitySchedule[]): boolean =>
 export const CallToBookNotice = ({
   active,
   itemLabel = "attraction",
+  backendOnly = false,
+  switchedOff = false,
 }: {
   /** True when there is no usable schedule — see {@link isCallToBook}. */
   active: boolean;
   itemLabel?: "attraction" | "package" | "event";
+  /** Front-End Availability is off: the booking site never shows it (web 4d165ce). */
+  backendOnly?: boolean;
+  /** The item is switched off, so staff cannot book it yet either. */
+  switchedOff?: boolean;
 }) =>
-  active ? (
+  backendOnly ? (
+    <View className="rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 mb-4">
+      <View className="flex-row items-start gap-2.5">
+        <Feather name="eye-off" size={16} color="#B45309" style={{ marginTop: 2 }} />
+        <View className="flex-1">
+          <Text className="text-sm font-bold text-amber-900 dark:text-amber-200">
+            Backend only — not on the booking site
+          </Text>
+          <Text className="text-xs leading-5 text-amber-900 dark:text-amber-200 mt-1">
+            Front-End Availability is off, so customers cannot see this {itemLabel} or
+            book it online.{" "}
+            {switchedOff
+              ? "It is switched off right now, so staff can book it from the admin booking pages once it is switched on."
+              : "Staff can still book it from the admin booking pages."}
+          </Text>
+          {active && (
+            <Text className="text-xs leading-5 text-amber-900 dark:text-amber-200 mt-1">
+              Its schedule does not give it any bookable dates and times yet.
+              Complete the schedule so staff can pick a date and time when they
+              book it.
+            </Text>
+          )}
+        </View>
+      </View>
+    </View>
+  ) : active ? (
     <View className="rounded-xl border border-teal-200 dark:border-teal-900/40 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 mb-4">
       <View className="flex-row items-start gap-2.5">
         <Feather name="phone-call" size={16} color="#0F766E" style={{ marginTop: 2 }} />

@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-nati
 
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { BackendOnlyBadge } from "./BackendOnly";
 import { fetchAttractions } from "../../services/attractionsService";
 import { fetchPackages } from "../../services/bookingsService";
 import { fetchEvents } from "../../services/eventsService";
@@ -47,7 +48,8 @@ export function targetingPayload(value: TargetingValue): {
   };
 }
 
-type Option = { id: number; name: string };
+/** `backendOnly`: a package hidden from the booking site (web TargetingSelector, 4d165ce). */
+type Option = { id: number; name: string; backendOnly?: boolean };
 
 type GroupKey = keyof TargetingValue;
 
@@ -200,6 +202,7 @@ function Group({
                       >
                         {option.name}
                       </Text>
+                      {option.backendOnly && <BackendOnlyBadge size="xs" />}
                     </Pressable>
                   );
                 })}
@@ -299,7 +302,9 @@ export function TargetingSelector({
       .then(([locs, pkgs, atts, evts]) => {
         if (!active) return;
         setLocations(locs.map((l) => ({ id: l.id, name: l.name })));
-        setPackages(pkgs.map((p) => ({ id: p.id, name: p.name })));
+        setPackages(
+          pkgs.map((p) => ({ id: p.id, name: p.name, backendOnly: p.availableOnline === false })),
+        );
         setAttractions(atts.map((a) => ({ id: a.id, name: a.name })));
         setEvents(evts.map((e) => ({ id: e.id, name: e.name })));
       })

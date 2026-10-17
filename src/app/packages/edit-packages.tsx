@@ -25,6 +25,10 @@ import {
   ToggleRow,
   type SelectOption,
 } from "../../components/ui/FormControls";
+import {
+  BackendOnlyBadge,
+  OnlineAvailabilityField,
+} from "../../components/ui/BackendOnly";
 import { PackageImageField } from "../../components/ui/PackageImageField";
 import { mediaUrl } from "../../lib/api";
 import {
@@ -45,6 +49,10 @@ import {
   packageDurationMinutes,
   validatePackageSetup,
 } from "../../lib/packageSetup";
+import {
+  canChangeOnlineAvailability,
+  EDIT_NOT_APPLIED,
+} from "../../lib/packages/onlineAvailability";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDuration } from "../../lib/time";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
@@ -269,6 +277,10 @@ const EditPackage = () => {
   const [packageType, setPackageType] = useState("regular");
   const [features, setFeatures] = useState<string[]>([""]);
   const [isActive, setIsActive] = useState(true);
+  // Front-End Availability: sent only when a manager or admin changed it.
+  const canChangeOnline = canChangeOnlineAvailability(getCurrentUser()?.role);
+  const [savedAvailableOnline, setSavedAvailableOnline] = useState(true);
+  const [availableOnline, setAvailableOnline] = useState(true);
 
   // --- Step 2: pricing & participants ---
   const [price, setPrice] = useState("");
@@ -375,6 +387,8 @@ const EditPackage = () => {
         setPackageType(detail.packageType || "regular");
         setFeatures(detail.features.length > 0 ? detail.features : [""]);
         setIsActive(detail.isActive);
+        setSavedAvailableOnline(detail.availableOnline !== false);
+        setAvailableOnline(detail.availableOnline !== false);
 
         setPrice(detail.price != null ? String(detail.price) : "");
         setPricePerAdditional(
@@ -811,9 +825,11 @@ const EditPackage = () => {
       useCustomCategory ? customCategory : (category ?? "")
     ).trim();
 
+    const changingOnline = canChangeOnline && availableOnline !== savedAvailableOnline;
+
     setSubmitting(true);
     try {
-      await updatePackage(token, packageId, {
+      const saved = await updatePackage(token, packageId, {
         name: name.trim(),
         description: description.trim(),
         category: categoryValue,
@@ -849,7 +865,15 @@ const EditPackage = () => {
         roomIds: roomSel,
         promoIds: promoSel,
         giftCardIds: giftCardSel,
+        ...(changingOnline ? { availableOnline } : {}),
       });
+      // The server answered with another value: it predates the setting (web EditPackage).
+      const onlineNotApplied = changingOnline && saved.availableOnline !== availableOnline;
+      if (onlineNotApplied) {
+        const serverOnline = saved.availableOnline !== false;
+        setSavedAvailableOnline(serverOnline);
+        setAvailableOnline(serverOnline);
+      }
 
       if (schedules.length > 0) {
         try {
@@ -870,6 +894,11 @@ const EditPackage = () => {
       }
 
       markPackagesStale();
+      if (onlineNotApplied) {
+        // Stay on the form so the reverted switch is visible, as the web does.
+        Alert.alert("Package updated", EDIT_NOT_APPLIED);
+        return;
+      }
       Alert.alert("Package updated", `"${name.trim()}" was saved.`);
       router.back();
     } catch (err) {
@@ -912,6 +941,11 @@ const EditPackage = () => {
         <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
           Update the details of your package deal.
         </Text>
+        {!loadingDetail && !savedAvailableOnline && (
+          <View className="mt-2">
+            <BackendOnlyBadge isActive={isActive} />
+          </View>
+        )}
       </View>
 
       {loadingDetail ? (
@@ -1166,6 +1200,8 @@ const EditPackage = () => {
                 <CallToBookNotice
                   active={packageIsCallToBook(schedules.map(toScheduleLike))}
                   itemLabel="package"
+                  backendOnly={!availableOnline}
+                  switchedOff={!isActive}
                 />
                 {/* Count banner — the web's "N availability schedule(s)
                     configured for this package". */}
@@ -1869,6 +1905,13 @@ const EditPackage = () => {
                 </View>
               </View>
             </Section>
+
+            <OnlineAvailabilityField
+              checked={availableOnline}
+              canChange={canChangeOnline}
+              isActive={isActive}
+              onChange={setAvailableOnline}
+            />
 
             {/* Live Preview — how the package will read to a customer, updating
                 as the form is filled in. Mirrors the web's sidebar card. */}

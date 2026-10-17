@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BackendOnlyBadge } from "../../components/ui/BackendOnly";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
@@ -100,6 +101,10 @@ import { newCheckoutKey } from "../../lib/payments/checkoutKey";
 import { derivePaymentStatus } from "../../lib/payments/paymentState";
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
+import {
+  isStaffLoginRefusal,
+  STAFF_LOGIN_REFUSED,
+} from "../../lib/packages/onlineAvailability";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
 import { formatDuration } from "../../lib/time";
@@ -948,6 +953,7 @@ const CreateBookingScreen = () => {
               isActive: p.isActive,
               locationId: p.locationId,
               locationName: "",
+              availableOnline: p.availableOnline,
             })),
         );
       })
@@ -2125,6 +2131,11 @@ const CreateBookingScreen = () => {
           return;
         }
       }
+      // The login was not accepted, so the backend-only gate treated this as a guest (web 4d165ce).
+      if (isStaffLoginRefusal(err)) {
+        Alert.alert("Booking refused", STAFF_LOGIN_REFUSED);
+        return;
+      }
       Alert.alert(
         "Failed to create booking",
         err instanceof Error ? err.message : "Please try again.",
@@ -2236,6 +2247,9 @@ const CreateBookingScreen = () => {
                             </Text>
                           </View>
                           <View className="mt-2 flex-row flex-wrap items-center gap-2">
+                            {p.availableOnline === false && (
+                              <BackendOnlyBadge size="xs" isActive={p.isActive} />
+                            )}
                             {p.duration > 0 && (
                               <View className="flex-row items-center gap-1 rounded border border-purple-200 px-2 py-1 dark:border-purple-900/50">
                                 <Feather
@@ -2396,6 +2410,9 @@ const CreateBookingScreen = () => {
 
                               {/* Chips: location · category · duration · capacity */}
                               <View className="mt-3 flex-row flex-wrap items-center gap-2">
+                                {p.availableOnline === false && (
+                                  <BackendOnlyBadge size="xs" isActive={p.isActive} />
+                                )}
                                 {!!p.locationName && (
                                   <View className="flex-row items-center gap-1 rounded border border-blue-200 px-2 py-1 dark:border-blue-900/50">
                                     <Feather
@@ -3164,6 +3181,9 @@ const CreateBookingScreen = () => {
                   </Text>
                 )}
                 <View className="mt-3 flex-row flex-wrap items-center gap-2">
+                  {pkg.availableOnline === false && (
+                    <BackendOnlyBadge isActive={pkg.isActive} />
+                  )}
                   {!!pkg.category && (
                     <View className="rounded border border-gray-200 px-2 py-1 dark:border-neutral-700">
                       <Text className="text-[11px] text-gray-700 dark:text-gray-200">
@@ -3803,6 +3823,11 @@ const CreateBookingScreen = () => {
                       <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                         {normalizeCategory(pkg.category)}
                       </Text>
+                    )}
+                    {pkg.availableOnline === false && (
+                      <View className="mt-1">
+                        <BackendOnlyBadge size="xs" isActive={pkg.isActive} />
+                      </View>
                     )}
                     <Text className="mt-1 text-lg font-bold text-gray-900 dark:text-white">
                       {money(pkg.price)}
