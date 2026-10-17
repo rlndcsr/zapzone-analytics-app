@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPatchLog } from "../packages/patchLog";
 import {
   fetchPackages,
   isRegularPackage,
@@ -19,6 +20,10 @@ const cacheKey = (locationId: number | undefined, kind: PackageKind) =>
 // Set after a mutation (e.g. toggling status) so the list screen knows to
 // force a refetch the next time it regains focus.
 let stale = false;
+
+// A switch flipped while a quiet refresh is in flight would be undone by that
+// refresh's older answer, so each change is replayed over any fetch begun first.
+const patches = createPatchLog<PackageRow>();
 
 /** Mark the cached package list stale so it refetches on next focus. */
 export function markPackagesStale(): void {
@@ -93,6 +98,7 @@ export function usePackages({
         setLoading(true);
       }
 
+      const startedAt = patches.mark();
       try {
         // One endpoint serves both screens: /packages shows the regular
         // catalog, Custom Packages everything with another package_type.
@@ -101,8 +107,11 @@ export function usePackages({
           userId: user?.id,
           locationId,
         });
-        const data = all.filter((p) =>
-          kind === "custom" ? !isRegularPackage(p) : isRegularPackage(p),
+        const data = patches.replay(
+          all.filter((p) =>
+            kind === "custom" ? !isRegularPackage(p) : isRegularPackage(p),
+          ),
+          startedAt,
         );
         cache = { key: k, fetchedAt: Date.now(), data };
         if (isCurrent()) {
@@ -136,16 +145,25 @@ export function usePackages({
     return sync({ force: true });
   }, [sync]);
 
-  // Patch a single package's active state in the cache + local list without a
-  // full refetch (used after an optimistic toggle-status call).
-  const applyStatus = useCallback((id: number, active: boolean) => {
+  // Patch one package in the cache + local list without a full refetch (used
+  // after the toggle-status and online-availability calls).
+  const applyPatch = useCallback((id: number, changes: Partial<PackageRow>) => {
+    patches.record(id, changes);
     const patch = (rows: PackageRow[]) =>
-      rows.map((p) =>
-        p.id === id ? { ...p, status: active ? "active" : "inactive" } : p,
-      ) as PackageRow[];
+      rows.map((p) => (p.id === id ? { ...p, ...changes } : p));
     if (cache) cache = { ...cache, data: patch(cache.data) };
     setPackages((prev) => patch(prev));
   }, []);
 
-  return { packages, loading, error, refetch, applyStatus };
+  const applyStatus = useCallback(
+    (id: number, active: boolean) => applyPatch(id, { status: active ? "active" : "inactive" }),
+    [applyPatch],
+  );
+
+  const applyOnline = useCallback(
+    (id: number, availableOnline: boolean) => applyPatch(id, { availableOnline }),
+    [applyPatch],
+  );
+
+  return { packages, loading, error, refetch, applyStatus, applyOnline };
 }

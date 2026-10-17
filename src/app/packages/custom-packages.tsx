@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BackendOnlyBadge } from "../../components/ui/BackendOnly";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { Pagination } from "../../components/ui/Pagination";
 import {
@@ -20,10 +21,17 @@ import {
   markPackagesStale,
   usePackages,
 } from "../../lib/hooks/usePackages";
+import {
+  canChangeOnlineAvailability,
+  ONLINE_NOT_APPLIED,
+  onlineToggleDone,
+  onlineToggleQuestion,
+} from "../../lib/packages/onlineAvailability";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
   deletePackage,
+  setPackageOnlineAvailability,
   togglePackageStatus,
   type PackageRow,
 } from "../../services/packagesService";
@@ -94,9 +102,11 @@ const CustomPackages = () => {
   const user = getCurrentUser();
   // Everything with a package_type other than "regular" — the inverse of the
   // /packages catalog, from the same endpoint.
-  const { packages, loading, error, refetch, applyStatus } = usePackages({
+  const { packages, loading, error, refetch, applyStatus, applyOnline } = usePackages({
     kind: "custom",
   });
+  const canChangeOnline = canChangeOnlineAvailability(user?.role);
+  const [onlineTogglingId, setOnlineTogglingId] = useState<number | null>(null);
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -159,6 +169,48 @@ const CustomPackages = () => {
       }
     },
     [applyStatus],
+  );
+
+  /** Front-End Availability, confirmed first (web CustomPackages handleToggleOnline). */
+  const toggleOnline = useCallback(
+    (pkg: PackageRow) => {
+      const makeBackendOnly = pkg.availableOnline !== false;
+      const isActive = pkg.status === "active";
+      const question = onlineToggleQuestion(pkg.name, makeBackendOnly, isActive);
+      Alert.alert(question.title, question.message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: makeBackendOnly ? "Make backend only" : "Show online",
+          onPress: async () => {
+            const token = getToken();
+            if (!token) {
+              Alert.alert("Not signed in", "Please sign in again.");
+              return;
+            }
+            setOnlineTogglingId(pkg.id);
+            try {
+              const res = await setPackageOnlineAvailability(token, pkg.id, !makeBackendOnly);
+              if (res.availableOnline !== !makeBackendOnly) {
+                Alert.alert("Not changed", ONLINE_NOT_APPLIED);
+                return;
+              }
+              applyOnline(pkg.id, res.availableOnline);
+              Alert.alert("Saved", onlineToggleDone(pkg.name, res.availableOnline, isActive));
+            } catch (err) {
+              Alert.alert(
+                "Update failed",
+                err instanceof Error && err.message
+                  ? err.message
+                  : "Failed to update Front-End Availability. Please try again.",
+              );
+            } finally {
+              setOnlineTogglingId(null);
+            }
+          },
+        },
+      ]);
+    },
+    [applyOnline],
   );
 
   const confirmDelete = useCallback(
@@ -385,6 +437,9 @@ const CustomPackages = () => {
                         </Text>
                       </View>
                     )}
+                    {pkg.availableOnline === false && (
+                      <BackendOnlyBadge isActive={active} />
+                    )}
                     {!active && (
                       <View className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 dark:border-neutral-700 dark:bg-neutral-800">
                         <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -424,6 +479,19 @@ const CustomPackages = () => {
                         router.push(`/packages/edit-packages?id=${pkg.id}`)
                       }
                     />
+                    {canChangeOnline && pkg.availableOnline !== null && (
+                      <IconAction
+                        icon={pkg.availableOnline === false ? "eye-off" : "globe"}
+                        label={
+                          pkg.availableOnline === false
+                            ? `Show ${pkg.name} on the booking site`
+                            : `Make ${pkg.name} backend only`
+                        }
+                        tint={pkg.availableOnline === false ? "#B45309" : PRIMARY}
+                        busy={onlineTogglingId === pkg.id}
+                        onPress={() => toggleOnline(pkg)}
+                      />
+                    )}
                     <IconAction
                       icon="trash-2"
                       label={`Delete ${pkg.name}`}

@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { importStayedOnline } from "../lib/packages/onlineAvailability";
 
 export type PackageStatus = "active" | "inactive";
 
@@ -20,7 +21,12 @@ export type PackageRow = {
   createdAt: string | null;
   packageType: string;
   displayOrder: number;
+  /** Front-End Availability; false is backend only, null when the server does not say. */
+  availableOnline: boolean | null;
 };
+
+/** `available_online` as the server sent it — null when it predates the setting. */
+const onlineFlag = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
 
 /** Raw package as returned by GET /api/mobile/packages (MobilePackageResource). */
 type RawPackage = {
@@ -37,6 +43,7 @@ type RawPackage = {
   display_order?: number | string | null;
   location?: { id?: number; name?: string | null } | null;
   location_id?: number | null;
+  available_online?: boolean | null;
 };
 
 function mapPackage(raw: RawPackage): PackageRow {
@@ -60,6 +67,7 @@ function mapPackage(raw: RawPackage): PackageRow {
     createdAt: raw.created_at ?? null,
     packageType: raw.package_type?.trim() || "",
     displayOrder: Number(raw.display_order ?? 0) || 0,
+    availableOnline: onlineFlag(raw.available_online),
   };
 }
 
@@ -170,6 +178,27 @@ export async function togglePackageStatus(
   return !!res.data?.is_active;
 }
 
+/**
+ * PATCH /api/packages/{id}/online-availability — managers and admins only.
+ * `availableOnline` is what the server saved; null means it predates the
+ * setting and nothing changed. A 503 means the migration has not run yet.
+ */
+export async function setPackageOnlineAvailability(
+  token: string,
+  id: number,
+  availableOnline: boolean,
+): Promise<{ availableOnline: boolean | null; message: string | null }> {
+  const res = await apiRequest<{
+    message?: string;
+    data?: { package_id?: number; available_online?: boolean };
+  }>(`/api/packages/${id}/online-availability`, {
+    method: "PATCH",
+    token,
+    body: { available_online: availableOnline },
+  });
+  return { availableOnline: onlineFlag(res.data?.available_online), message: res.message ?? null };
+}
+
 /* ------------------------------------------------------------------ */
 /* Detail / mutations (View, Edit, Duplicate, Delete)                  */
 /* ------------------------------------------------------------------ */
@@ -222,6 +251,8 @@ export type PackageDetail = {
   category: string;
   packageType: string;
   isActive: boolean;
+  /** Front-End Availability; false is backend only, null when the server does not say. */
+  availableOnline: boolean | null;
   features: string[];
   price: number;
   pricePerAdditional: number | null;
@@ -290,6 +321,7 @@ export async function fetchPackageDetail(
     category: str(d.category) || "Uncategorized",
     packageType: str(d.package_type),
     isActive: !!d.is_active,
+    availableOnline: onlineFlag(d.available_online),
     features: Array.isArray(d.features)
       ? (d.features as unknown[]).filter(
           (f): f is string => typeof f === "string",
@@ -423,16 +455,19 @@ export type UpdatePackageInput = {
   roomIds: number[];
   promoIds: number[];
   giftCardIds: number[];
+  /** Sent only when a manager or admin changed it; omitted leaves it as it is. */
+  availableOnline?: boolean;
 };
 
 /** PUT /api/packages/{id} — update every editable field (mirrors the web admin's
  *  Edit Package save). `image`/`invitation_file` are only sent when a new one was
- *  picked, so we never resend the existing base64 payload. */
+ *  picked, so we never resend the existing base64 payload. Returns the
+ *  Front-End Availability the server saved (null when it does not say). */
 export async function updatePackage(
   token: string,
   id: number,
   input: UpdatePackageInput,
-): Promise<void> {
+): Promise<{ availableOnline: boolean | null }> {
   const body: Record<string, unknown> = {
     name: input.name,
     description: input.description,
@@ -472,7 +507,12 @@ export async function updatePackage(
   if (input.invitationFile !== undefined) {
     body.invitation_file = input.invitationFile;
   }
-  await apiRequest(`/api/packages/${id}`, { method: "PUT", token, body });
+  if (input.availableOnline !== undefined) body.available_online = input.availableOnline;
+  const res = await apiRequest<{ data?: { available_online?: boolean } }>(
+    `/api/packages/${id}`,
+    { method: "PUT", token, body },
+  );
+  return { availableOnline: onlineFlag(res?.data?.available_online) };
 }
 
 /** No duplicate endpoint exists — mirror the web: fetch the source, then POST a
@@ -480,15 +520,19 @@ export async function updatePackage(
  *  forced to their own location by the backend regardless of `locationId`.
  *  Spaces, add-ons and attractions belong to a location, so they're only
  *  carried over when the copy lands in the SAME location as the source —
- *  a cross-location copy would otherwise reference another venue's records. */
+ *  a cross-location copy would otherwise reference another venue's records.
+ *  A backend-only source stays backend only when `keepBackendOnly` (a manager
+ *  or admin); `copyStayedOnline` says the server did not apply that. */
 export async function duplicatePackage(
   token: string,
   id: number,
   locationId?: number | null,
-): Promise<void> {
+  keepBackendOnly = false,
+): Promise<{ copyStayedOnline: boolean }> {
   const d = await fetchPackageDetail(token, id);
   const targetLocationId = locationId ?? d.locationId;
   const sameLocation = Number(targetLocationId) === Number(d.locationId);
+  const askBackendOnly = keepBackendOnly && d.availableOnline === false;
   const body: Record<string, unknown> = {
     name: `${d.name} (Copy)`,
     location_id: targetLocationId,
@@ -521,8 +565,13 @@ export async function duplicatePackage(
     attraction_ids: sameLocation ? d.attractions.map((a) => a.id) : [],
     addon_ids: sameLocation ? d.addOns.map((a) => a.id) : [],
     room_ids: sameLocation ? d.rooms.map((r) => r.id) : [],
+    ...(askBackendOnly ? { available_online: false } : {}),
   };
-  await apiRequest("/api/packages", { method: "POST", token, body });
+  const res = await apiRequest<{ data?: { available_online?: boolean } }>(
+    "/api/packages",
+    { method: "POST", token, body },
+  );
+  return { copyStayedOnline: askBackendOnly && res?.data?.available_online !== false };
 }
 
 /** DELETE /api/packages/{id} — soft-delete (restorable from the web trashed view). */
@@ -550,7 +599,10 @@ export async function reorderPackages(
 export type BulkImportResult = {
   imported: number;
   failed: number;
+  /** One line per failed row: "- name: reason". */
   errors: string[];
+  /** Rows the file marked backend only that the server saved as online. */
+  stayedOnline: number;
 };
 
 /**
@@ -574,12 +626,18 @@ export async function bulkImportPackages(
       location_id: _lid,
       ...rest
     } = p as Record<string, unknown>;
-    return locationId != null ? { ...rest, location_id: locationId } : rest;
+    // Front-End Availability is always sent, as the web does: absent means online.
+    const row = { ...rest, available_online: rest.available_online !== false };
+    return locationId != null ? { ...row, location_id: locationId } : row;
   });
 
   const res = await apiRequest<{
     success?: boolean;
-    data?: { imported_count?: number; failed_count?: number };
+    data?: {
+      imported?: { available_online?: boolean }[];
+      imported_count?: number;
+      failed_count?: number;
+    };
     errors?: unknown[];
     message?: string;
   }>("/api/packages/bulk-import", {
@@ -588,12 +646,25 @@ export async function bulkImportPackages(
     body: { packages },
   });
 
+  const rawErrors = Array.isArray(res?.errors) ? res.errors : [];
+  const failedIndexes = new Set(
+    rawErrors
+      .map((e) => (e as { index?: unknown })?.index)
+      .filter((i): i is number => typeof i === "number"),
+  );
   return {
     imported: Number(res?.data?.imported_count ?? 0),
     failed: Number(res?.data?.failed_count ?? 0),
-    errors: Array.isArray(res?.errors)
-      ? res.errors.map((e) => (typeof e === "string" ? e : JSON.stringify(e)))
-      : [],
+    errors: rawErrors.map((e) => {
+      if (typeof e === "string") return e;
+      const item = e as { name?: unknown; error?: unknown };
+      return `- ${String(item?.name ?? "Package")}: ${String(item?.error ?? "could not be imported")}`;
+    }),
+    stayedOnline: importStayedOnline(
+      packages.map((p) => p.available_online),
+      failedIndexes,
+      (res?.data?.imported ?? []).map((pkg) => onlineFlag(pkg?.available_online)),
+    ),
   };
 }
 
@@ -639,16 +710,18 @@ export type CreatePackageInput = {
   roomIds: number[];
   promoIds: number[];
   giftCardIds: number[];
+  /** Sent only for a manager or admin; others always create an online package. */
+  availableOnline?: boolean;
 };
 
 /** POST /api/packages — create a package (same endpoint + validation as the web).
  *  Availability schedules are NOT accepted here; save them with a follow-up
  *  {@link savePackageAvailabilitySchedules} call, exactly as the web does.
- *  Returns the new package id. */
+ *  Returns the new package id and the Front-End Availability it was saved with. */
 export async function createPackage(
   token: string,
   input: CreatePackageInput,
-): Promise<number> {
+): Promise<{ id: number; availableOnline: boolean | null }> {
   const body: Record<string, unknown> = {
     location_id: input.locationId,
     name: input.name,
@@ -685,13 +758,16 @@ export async function createPackage(
   };
   // Only send an image when one was chosen (base64 data URL, like the web).
   if (input.image) body.image = input.image;
+  if (input.availableOnline !== undefined) body.available_online = input.availableOnline;
 
-  const res = await apiRequest<{ data?: { id?: number } }>("/api/packages", {
-    method: "POST",
-    token,
-    body,
-  });
-  return Number(res.data?.id ?? 0);
+  const res = await apiRequest<{ data?: { id?: number; available_online?: boolean } }>(
+    "/api/packages",
+    { method: "POST", token, body },
+  );
+  return {
+    id: Number(res.data?.id ?? 0),
+    availableOnline: onlineFlag(res.data?.available_online),
+  };
 }
 
 /** One availability window supplied by the Create/Edit form. */

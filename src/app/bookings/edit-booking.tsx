@@ -665,7 +665,10 @@ const EditBookingScreen = () => {
 
   const packageOptions: Option[] = useMemo(() => {
     const opts = packages.map((p) => ({
-      label: p.price != null ? `${p.name} – $${p.price.toFixed(2)}` : p.name,
+      label:
+        (p.price != null ? `${p.name} – $${p.price.toFixed(2)}` : p.name) +
+        // A backend-only package is still the staff's to book (web EditBooking, 4d165ce).
+        (p.availableOnline === false ? " · Backend only" : ""),
       value: p.id,
     }));
     if (

@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BackendOnlyBadge } from "../../components/ui/BackendOnly";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
@@ -32,11 +33,18 @@ import {
   usePackages,
 } from "../../lib/hooks/usePackages";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import {
+  canChangeOnlineAvailability,
+  importStayedOnlineNote,
+  ONLINE_NOT_APPLIED,
+  onlineToggleQuestion,
+} from "../../lib/packages/onlineAvailability";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
   bulkImportPackages,
   deletePackage,
+  setPackageOnlineAvailability,
   togglePackageStatus,
   type PackageRow,
 } from "../../services/packagesService";
@@ -191,6 +199,8 @@ const Packages = () => {
   const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const isCompanyAdmin = getCurrentUser()?.role === "company_admin";
+  // Attendants see the setting but cannot change it (the server refuses them).
+  const canChangeOnline = canChangeOnlineAvailability(getCurrentUser()?.role);
 
   // Location comes from the global workspace selector (shown at the top of the
   // screen), so the list follows the active location without a second control.
@@ -198,7 +208,7 @@ const Packages = () => {
 
   const [showMoreSheet, setShowMoreSheet] = useState(false);
 
-  const { packages, loading, error, refetch, applyStatus } = usePackages();
+  const { packages, loading, error, refetch, applyStatus, applyOnline } = usePackages();
 
   // Refetch when returning to the list after a create/edit/duplicate/delete
   // elsewhere marked the cache stale (mirrors Bookings/Attractions).
@@ -215,6 +225,8 @@ const Packages = () => {
   const [sortAsc, setSortAsc] = useState(true);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [onlineTogglingId, setOnlineTogglingId] = useState<number | null>(null);
+  const [backendOnlyFilter, setBackendOnlyFilter] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Client-side pagination over the filtered list.
@@ -263,6 +275,22 @@ const Packages = () => {
     );
   }, [packages]);
 
+  // "Backend only (N)" counts the workspace location's packages, as on the web.
+  const backendOnlyCount = useMemo(
+    () =>
+      packages.filter(
+        (p) =>
+          p.availableOnline === false &&
+          (activeLocation.id === "all" || p.locationName === activeLocation.name),
+      ).length,
+    [packages, activeLocation],
+  );
+  const backendOnlyFilterOn = backendOnlyFilter && backendOnlyCount > 0;
+
+  useEffect(() => {
+    if (backendOnlyCount === 0) setBackendOnlyFilter(false);
+  }, [backendOnlyCount]);
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     const result = packages.filter((p) => {
@@ -276,7 +304,8 @@ const Packages = () => {
         normalizeCategory(p.category) === normalizeCategory(category);
       const matchesLocation =
         activeLocation.id === "all" || p.locationName === activeLocation.name;
-      return matchesSearch && matchesCategory && matchesLocation;
+      const matchesOnline = !backendOnlyFilterOn || p.availableOnline === false;
+      return matchesSearch && matchesCategory && matchesLocation && matchesOnline;
     });
 
     // Mirrors the web /packages sort: strings compare lowercased, price/display
@@ -302,7 +331,7 @@ const Packages = () => {
     });
 
     return result;
-  }, [packages, search, category, activeLocation, sortKey, sortAsc]);
+  }, [packages, search, category, activeLocation, sortKey, sortAsc, backendOnlyFilterOn]);
 
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
@@ -312,7 +341,7 @@ const Packages = () => {
   // Reset to the first page whenever the result set changes size / filters move.
   useEffect(() => {
     setPage(1);
-  }, [search, category, activeLocation, sortKey, sortAsc, perPage]);
+  }, [search, category, activeLocation, sortKey, sortAsc, perPage, backendOnlyFilterOn]);
 
   const allSelected =
     filtered.length > 0 && filtered.every((p) => selected[p.id]);
@@ -351,6 +380,45 @@ const Packages = () => {
     } finally {
       setTogglingId(null);
     }
+  };
+
+  // Front-End Availability via PATCH /api/packages/{id}/online-availability,
+  // confirmed first (web Packages handleToggleOnline).
+  const handleToggleOnline = (pkg: PackageRow) => {
+    const makeBackendOnly = pkg.availableOnline !== false;
+    const isActive = pkg.status === "active";
+    const question = onlineToggleQuestion(pkg.name, makeBackendOnly, isActive);
+    Alert.alert(question.title, question.message, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: makeBackendOnly ? "Make backend only" : "Show online",
+        onPress: async () => {
+          const token = getToken();
+          if (!token) {
+            Alert.alert("Not signed in", "Please sign in again to update packages.");
+            return;
+          }
+          setOnlineTogglingId(pkg.id);
+          try {
+            const res = await setPackageOnlineAvailability(token, pkg.id, !makeBackendOnly);
+            if (res.availableOnline !== !makeBackendOnly) {
+              Alert.alert("Not changed", ONLINE_NOT_APPLIED);
+              return;
+            }
+            applyOnline(pkg.id, res.availableOnline);
+          } catch (err) {
+            Alert.alert(
+              "Update failed",
+              err instanceof Error && err.message
+                ? err.message
+                : "Failed to update Front-End Availability. Please try again.",
+            );
+          } finally {
+            setOnlineTogglingId(null);
+          }
+        },
+      },
+    ]);
   };
 
   /* --- Per-card actions (eye / pencil / copy / trash) --------------------- */
@@ -479,11 +547,15 @@ const Packages = () => {
       markPackagesStale();
       await refetch();
       setShowMoreSheet(false);
+      // The first few reasons, and any backend-only rows the server left online (web 4d165ce).
+      const reasons = res.errors.slice(0, 3).join("\n");
       Alert.alert(
         "Import complete",
         `Imported ${res.imported} package(s)${
           res.failed ? `, ${res.failed} failed` : ""
-        }.`,
+        }.${reasons ? `\n\n${reasons}` : ""}${
+          res.stayedOnline > 0 ? `\n\n${importStayedOnlineNote(res.stayedOnline)}` : ""
+        }`,
       );
     } catch (err) {
       Alert.alert(
@@ -514,6 +586,8 @@ const Packages = () => {
         max_participants: p.capacity,
         min_booking_notice_hours: p.bufferHours,
         is_active: p.status === "active",
+        // Round-trips through Import, which keeps a backend-only package so.
+        ...(p.availableOnline === false ? { available_online: false } : {}),
         display_order: p.displayOrder,
       }));
       const FileSystem = await import("expo-file-system/legacy");
@@ -779,6 +853,34 @@ const Packages = () => {
                 </Pressable>
               );
             })}
+            {backendOnlyCount > 0 && (
+              <Pressable
+                onPress={() => setBackendOnlyFilter((v) => !v)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: backendOnlyFilterOn }}
+                accessibilityHint="Packages customers cannot see or book online. Staff can still book them."
+                className={`flex-row items-center gap-1.5 px-4 py-2 rounded-lg border ${
+                  backendOnlyFilterOn
+                    ? "bg-[#0644C7] border-[#0644C7]"
+                    : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
+                }`}
+              >
+                <Feather
+                  name="eye-off"
+                  size={13}
+                  color={backendOnlyFilterOn ? "#FFFFFF" : "#6B7280"}
+                />
+                <Text
+                  className={`text-sm font-medium ${
+                    backendOnlyFilterOn
+                      ? "text-white"
+                      : "text-gray-700 dark:text-gray-200"
+                  }`}
+                >
+                  Backend only ({backendOnlyCount})
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Count */}
@@ -931,12 +1033,15 @@ const Packages = () => {
                     )}
 
                     {/* Tags */}
-                    <View className="flex-row items-center gap-2 mt-3">
+                    <View className="flex-row flex-wrap items-center gap-2 mt-3">
                       <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-md">
                         <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
                           {normalizeCategory(pkg.category)}
                         </Text>
                       </View>
+                      {pkg.availableOnline === false && (
+                        <BackendOnlyBadge isActive={isActive} />
+                      )}
                       {pkg.bufferHours != null && (
                         <View className="flex-row items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-md">
                           <Feather name="clock" size={11} color={PRIMARY} />
@@ -980,6 +1085,33 @@ const Packages = () => {
                       >
                         <Feather name="edit-2" size={18} color={PRIMARY} />
                       </Pressable>
+                      {canChangeOnline && pkg.availableOnline !== null && (
+                        <Pressable
+                          onPress={() => handleToggleOnline(pkg)}
+                          disabled={onlineTogglingId === pkg.id}
+                          className={`flex-1 items-center py-2.5 rounded-xl ${
+                            pkg.availableOnline === false
+                              ? "active:bg-amber-50 dark:active:bg-amber-900/20"
+                              : "active:bg-gray-50 dark:active:bg-neutral-800"
+                          } ${onlineTogglingId === pkg.id ? "opacity-50" : ""}`}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            pkg.availableOnline === false
+                              ? `Show ${pkg.name} on the booking site`
+                              : `Make ${pkg.name} backend only`
+                          }
+                        >
+                          {onlineTogglingId === pkg.id ? (
+                            <ActivityIndicator size="small" color={PRIMARY} />
+                          ) : (
+                            <Feather
+                              name={pkg.availableOnline === false ? "eye-off" : "globe"}
+                              size={18}
+                              color={pkg.availableOnline === false ? "#B45309" : PRIMARY}
+                            />
+                          )}
+                        </Pressable>
+                      )}
                       <Pressable
                         onPress={() => openDuplicate(pkg)}
                         className="flex-1 items-center py-2.5 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
@@ -1026,7 +1158,9 @@ const Packages = () => {
               <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
                 {packages.length === 0
                   ? "No packages yet"
-                  : "No packages match your filters"}
+                  : backendOnlyFilterOn
+                    ? "No backend-only packages match your filters"
+                    : "No packages match your filters"}
               </Text>
             </View>
           )}

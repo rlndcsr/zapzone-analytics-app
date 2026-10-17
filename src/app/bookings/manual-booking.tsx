@@ -24,6 +24,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BackendOnlyBadge } from "../../components/ui/BackendOnly";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
@@ -66,6 +67,10 @@ import { newCheckoutKey } from "../../lib/payments/checkoutKey";
 import { rollbackBooking } from "../../lib/payments/rollback";
 import { useQrDataUri } from "../../lib/payments/useQrDataUri";
 import { derivePaymentStatus } from "../../lib/payments/paymentState";
+import {
+  isStaffLoginRefusal,
+  STAFF_LOGIN_REFUSED,
+} from "../../lib/packages/onlineAvailability";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import { ApiError } from "../../lib/api";
@@ -1141,6 +1146,11 @@ const ManualBookingScreen = () => {
           return;
         }
       }
+      // The login was not accepted, so the backend-only gate treated this as a guest (web 4d165ce).
+      if (isStaffLoginRefusal(err)) {
+        Alert.alert("Booking refused", STAFF_LOGIN_REFUSED);
+        return;
+      }
       Alert.alert(
         "Failed to create booking",
         err instanceof Error ? err.message : "Please try again.",
@@ -1328,6 +1338,9 @@ const ManualBookingScreen = () => {
                           </Text>
                         </View>
                       )}
+                      {pkg.availableOnline === false && (
+                        <BackendOnlyBadge size="xs" isActive={pkg.isActive} />
+                      )}
                     </View>
                   </View>
                   <View className="items-end">
@@ -1407,6 +1420,9 @@ const ManualBookingScreen = () => {
                                     Max {p.maxParticipants}
                                   </Text>
                                 </View>
+                              )}
+                              {p.availableOnline === false && (
+                                <BackendOnlyBadge size="xs" isActive={p.isActive} />
                               )}
                             </View>
                           </View>
