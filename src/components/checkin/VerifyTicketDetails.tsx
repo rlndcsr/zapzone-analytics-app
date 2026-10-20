@@ -191,10 +191,14 @@ export function VerifyTicketDetails({
   purchase,
   waivers,
   waiversLoading = false,
+  waiversFailed = false,
+  onRetryWaivers,
 }: {
   purchase: PurchaseRow;
   waivers: EntityWaivers | null;
   waiversLoading?: boolean;
+  waiversFailed?: boolean;
+  onRetryWaivers?: () => Promise<unknown> | void;
 }) {
   const style = STATUS_STYLE[purchase.status] ?? STATUS_STYLE.pending;
   const time = fmtTime(purchase.scheduledTime);
@@ -258,6 +262,8 @@ export function VerifyTicketDetails({
           entityLabel="ticket"
           waivers={waivers}
           loading={waiversLoading}
+          loadFailed={waiversFailed}
+          onRetry={onRetryWaivers}
         />
       </View>
 

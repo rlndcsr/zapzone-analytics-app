@@ -195,6 +195,8 @@ const EventPurchaseDetailsScreen = () => {
 
   const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
   const [waiversLoading, setWaiversLoading] = useState(true);
+  const [waiversFailed, setWaiversFailed] = useState(false);
+  const [waiversAttempt, setWaiversAttempt] = useState(0);
   // Only the newest waivers load may fill the card (web parity:
   // WaiverConnectionPanel's latestLoad), so a slow earlier reply can't land last.
   const waiversRequestRef = useRef(0);
@@ -262,12 +264,16 @@ const EventPurchaseDetailsScreen = () => {
     const isCurrent = () => requestId === waiversRequestRef.current;
     const controller = new AbortController();
     setWaiversLoading(true);
+    setWaiversFailed(false);
     fetchEntityWaivers(token, "event_purchase", purchaseId, controller.signal)
       .then((r) => {
         if (isCurrent()) setWaivers(r);
       })
       .catch(() => {
-        if (isCurrent()) setWaivers(null);
+        if (!isCurrent()) return;
+        setWaivers(null);
+        // a failed lookup is not "no waivers" — the card says so instead of showing empty
+        setWaiversFailed(true);
       })
       .finally(() => {
         if (isCurrent()) setWaiversLoading(false);
@@ -278,7 +284,7 @@ const EventPurchaseDetailsScreen = () => {
       requests.current++;
       controller.abort();
     };
-  }, [purchaseId]);
+  }, [purchaseId, waiversAttempt]);
 
   // Re-read after a check-in from the waivers card, so its counts follow the server.
   const reloadWaivers = useCallback(async () => {
@@ -288,7 +294,10 @@ const EventPurchaseDetailsScreen = () => {
     const isCurrent = () => requestId === waiversRequestRef.current;
     try {
       const fresh = await fetchEntityWaivers(token, "event_purchase", purchaseId);
-      if (isCurrent()) setWaivers(fresh);
+      if (isCurrent()) {
+        setWaivers(fresh);
+        setWaiversFailed(false);
+      }
     } catch {
       // Keep what is showing; the card reports its own action errors.
     } finally {
@@ -753,6 +762,8 @@ const EventPurchaseDetailsScreen = () => {
             waivers={waivers}
             loading={waiversLoading}
             onChanged={reloadWaivers}
+            loadFailed={waiversFailed}
+            onRetry={() => setWaiversAttempt((n) => n + 1)}
           />
         </View>
 

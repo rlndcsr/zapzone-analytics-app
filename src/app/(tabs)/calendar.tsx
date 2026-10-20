@@ -90,6 +90,7 @@ import {
 import { resolvePaymentState } from "../../lib/payments/paymentState";
 import { BookingCellBody } from "../../components/ui/BookingCellBody";
 import { packageColor } from "../../lib/calendar/packageColors";
+import { matchesDeskBookingSearch } from "../../lib/checkin/checkInWaiverList";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import { useAttractionPurchases } from "../../lib/hooks/useAttractionPurchases";
@@ -1054,33 +1055,22 @@ const Calendar = () => {
   const categoryFilter = useCategoryFilter(categories);
   const { shows: showsCategory } = categoryFilter;
 
-  /** True when the customer search box is empty or the row matches it. */
-  const matchesSearch = useCallback(
-    (name: string, phone: string | null) => {
-      const term = search.trim().toLowerCase();
-      if (!term) return true;
-      return `${name} ${phone ?? ""}`.toLowerCase().includes(term);
-    },
-    [search],
-  );
-
+  // The filter box reads bookings the way the web dashboards' calendar does
+  // (utils/bookingSearch `matchesBookingSearch`, ported for the check-in desk).
   const visibleBookings = useMemo(
     () =>
       bookings.filter(
         (b) =>
           showsCategory(categoryKeyOf(b.packageCategory)) &&
-          matchesSearch(b.customerName, b.customerPhone),
+          matchesDeskBookingSearch(b, search),
       ),
-    [bookings, showsCategory, matchesSearch],
+    [bookings, showsCategory, search],
   );
+  // Tickets follow the category tabs only: the web's filter box narrows bookings, never tickets.
   const visiblePurchases = useMemo(
     () =>
-      purchasesInWindow.filter(
-        (p) =>
-          showsCategory(categoryKeyOf(p.category)) &&
-          matchesSearch(p.customerName, p.phone),
-      ),
-    [purchasesInWindow, showsCategory, matchesSearch],
+      purchasesInWindow.filter((p) => showsCategory(categoryKeyOf(p.category))),
+    [purchasesInWindow, showsCategory],
   );
 
   // Group the window's bookings + attraction purchases by day.
@@ -1785,7 +1775,7 @@ const Calendar = () => {
       ? "No activity"
       : "Nothing in the selected categories";
   const emptyGridHint = isSearching
-    ? "Nothing here matches that customer name or phone."
+    ? "No booking here matches that search."
     : "There is nothing scheduled in this period.";
 
   const step = (dir: number) => {
@@ -1984,7 +1974,7 @@ const Calendar = () => {
               <TextInput
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Filter this view by name or phone"
+                placeholder="Filter by name, phone, email or booking #"
                 placeholderTextColor="#9ca3af"
                 className="flex-1 text-sm text-gray-900 dark:text-white"
                 autoCapitalize="none"
@@ -2880,7 +2870,7 @@ const Calendar = () => {
                 </Text>
                 <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
                   {isSearching
-                    ? `Nothing in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()} matches that customer name or phone.`
+                    ? `No booking in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()} matches that search.`
                     : categoryFilter.isAll
                       ? `There are no bookings or attraction purchases in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`
                       : `Nothing matches the selected categories in ${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}.`}

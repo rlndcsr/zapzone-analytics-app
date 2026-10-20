@@ -97,6 +97,10 @@ export type UseBookingCheckIn = {
   reviewDetail: BookingDetail | null;
   /** Waivers connected to the booking under review (null while loading / on failure). */
   waivers: EntityWaivers | null;
+  /** The review is open but its waiver lookup failed — unknown, not "none connected". */
+  waiversFailed: boolean;
+  /** Read the reviewed booking's waivers again after a failed lookup. */
+  retryWaivers: () => Promise<void>;
   result: BookingCheckInResult | null;
   busy: boolean;
   /** True while an Add Payment request is in flight. */
@@ -440,6 +444,21 @@ export function useBookingCheckIn(): UseBookingCheckIn {
     [reviewDetail, checkingWaiverId],
   );
 
+  const retryWaivers = useCallback(async () => {
+    const bookingId = review?.id;
+    const token = getToken();
+    if (bookingId == null || !token) return;
+    const requestId = ++waiversRequestRef.current;
+    try {
+      const refreshed = await fetchEntityWaivers(token, "booking", bookingId);
+      if (mountedRef.current && requestId === waiversRequestRef.current) {
+        setWaivers(refreshed);
+      }
+    } catch {
+      // still unknown, and the Waivers box keeps saying so
+    }
+  }, [review]);
+
   /**
    * Leave whatever booking is on screen. Where that lands depends on how the
    * booking was opened: back to the viewfinder for a scan, back to the landing
@@ -447,6 +466,8 @@ export function useBookingCheckIn(): UseBookingCheckIn {
    * camera running.
    */
   const clearReview = useCallback(() => {
+    // a waivers read still on its way belongs to the booking being left
+    waiversRequestRef.current++;
     setReview(null);
     setReviewDetail(null);
     setWaivers(null);
@@ -488,6 +509,9 @@ export function useBookingCheckIn(): UseBookingCheckIn {
     review,
     reviewDetail,
     waivers,
+    // the review only opens once its waiver lookup has settled, so a missing answer there is a failure
+    waiversFailed: phase === "review" && review != null && waivers == null,
+    retryWaivers,
     result,
     busy,
     paying,

@@ -4,6 +4,7 @@ import {
   locationAddressLine,
 } from "../lib/bookings/bookingDetailFields";
 import { compareCheckInRows } from "../lib/checkin/checkInOrder";
+import { GUEST_NAME_FALLBACK } from "../lib/bookings/bookingSearch";
 import { newestFirst } from "../lib/bookings/bookingSync";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { cardLabelFromPayments } from "../lib/payments/cardLabel";
@@ -391,7 +392,7 @@ function customerName(
   const full = customer
     ? `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim()
     : "";
-  return full || guestName?.trim() || "Guest";
+  return full || guestName?.trim() || GUEST_NAME_FALLBACK;
 }
 
 function mapBooking(raw: RawBooking, date: string): CalendarBooking {
@@ -1726,6 +1727,14 @@ export type ScheduleBooking = {
   customerNotes: string | null;
   specialRequests: string | null;
   internalNotes: string | null;
+  // Read only by the day's search box, so it matches the fields the web's does.
+  guestName?: string | null;
+  guestEmail?: string | null;
+  guestPhone?: string | null;
+  customerEmail?: string | null;
+  customerPhone?: string | null;
+  packageNameRaw?: string | null;
+  locationName?: string | null;
 };
 
 type RawScheduleBooking = {
@@ -1742,6 +1751,8 @@ type RawScheduleBooking = {
   amount_paid?: number | string | null;
   payment_status?: string | null;
   guest_name?: string | null;
+  guest_email?: string | null;
+  guest_phone?: string | null;
   guest_of_honor_name?: string | null;
   guest_of_honor_age?: number | string | null;
   notes?: string | null;
@@ -1752,7 +1763,13 @@ type RawScheduleBooking = {
     name?: string | null;
     category?: string | null;
   } | null;
-  customer?: { first_name?: string | null; last_name?: string | null } | null;
+  customer?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
+  location?: { name?: string | null } | null;
 };
 
 /** Convert a duration + unit to whole minutes (mirrors the web schedule math). */
@@ -1794,6 +1811,13 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
     customerNotes: raw.notes?.trim() || null,
     specialRequests: raw.special_requests?.trim() || null,
     internalNotes: raw.internal_notes?.trim() || null,
+    guestName: raw.guest_name?.trim() || null,
+    guestEmail: raw.guest_email?.trim() || null,
+    guestPhone: raw.guest_phone?.trim() || null,
+    customerEmail: raw.customer?.email?.trim() || null,
+    customerPhone: raw.customer?.phone?.trim() || null,
+    packageNameRaw: raw.package?.name?.trim() || null,
+    locationName: raw.location?.name?.trim() || null,
   };
 }
 

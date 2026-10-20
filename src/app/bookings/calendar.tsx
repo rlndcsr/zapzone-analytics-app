@@ -29,6 +29,7 @@ import {
   useCategoryFilter,
 } from "../../lib/calendar/categoryFilter";
 import { packageColor } from "../../lib/calendar/packageColors";
+import { matchesDeskBookingSearch } from "../../lib/checkin/checkInWaiverList";
 import { venueToday } from "../../lib/date/venueTime";
 import { useCalendarBookings } from "../../lib/hooks/useCalendarBookings";
 import {
@@ -347,28 +348,30 @@ const BookingCalendar = () => {
   }, [refetch]);
 
   // Apply the same filter pipeline as the web (search → packages) over the
-  // window's bookings; the location scope is already applied by the fetch.
+  // window's bookings; the location scope is already applied by the fetch. The
+  // search reads bookings only, as the web's `matchesBookingSearch` does.
   const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
     return bookings.filter((b) => {
+      // the real package name, as the web reads it — a package-less booking's
+      // "Booking" label is display only, so it never matches a package choice
       if (
         selectedPackages.length > 0 &&
-        !selectedPackages.includes(b.packageName)
+        !(b.packageNameRaw && selectedPackages.includes(b.packageNameRaw))
       )
         return false;
-      if (term) {
-        const haystack =
-          `${b.customerName} ${b.packageName} ${b.referenceNumber ?? ""} ${b.locationName}`.toLowerCase();
-        if (!haystack.includes(term)) return false;
-      }
-      return true;
+      return matchesDeskBookingSearch(b, search);
     });
   }, [bookings, search, selectedPackages]);
 
   // Unique packages present in the current view — powers the package filter and
-  // the color legend (matches the web, which derives these from the view set).
+  // the color legend (matches the web, which derives these from the view set and
+  // lists real packages only).
   const viewPackages = useMemo(() => {
-    const names = new Set(bookings.map((b) => b.packageName).filter(Boolean));
+    const names = new Set(
+      bookings
+        .map((b) => b.packageNameRaw)
+        .filter((name): name is string => !!name),
+    );
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [bookings]);
 
@@ -965,7 +968,7 @@ const BookingCalendar = () => {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Customer, package, reference..."
+              placeholder="Name, phone, email or reference"
               placeholderTextColor="#9CA3AF"
               className="flex-1 text-sm text-gray-900 dark:text-white"
             />

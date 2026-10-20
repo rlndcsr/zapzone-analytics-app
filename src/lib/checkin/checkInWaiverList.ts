@@ -1,5 +1,9 @@
-import type { CalendarBooking } from "../../services/bookingsService";
 import type { Waiver, WaiverListCoverage } from "../../services/waiversService";
+import {
+  matchesBookingId,
+  normalizeBookingSearchTerm,
+  searchableCustomerName,
+} from "../bookings/bookingSearch.ts";
 import { waiverCoverage, type WaiverCoverage } from "../waivers/waiverCoverage.ts";
 
 /*
@@ -124,17 +128,39 @@ export function filterDeskWaivers(waivers: Waiver[], search: string): Waiver[] {
   });
 }
 
+/** The booking fields the web's `matchesBookingSearch` reads; a calendar or schedule row fits. */
+export type SearchableBooking = {
+  id: number;
+  customerName: string;
+  guestName?: string | null;
+  guestEmail?: string | null;
+  guestPhone?: string | null;
+  guestOfHonorName?: string | null;
+  referenceNumber?: string | null;
+  customerEmail?: string | null;
+  customerPhone?: string | null;
+  /** The real package name — never the display fallback. */
+  packageNameRaw?: string | null;
+  roomName?: string | null;
+  locationName?: string | null;
+};
+
 /**
  * The same filter box over the Bookings tab (web parity: utils/bookingSearch
  * `matchesBookingSearch`): every word must match the guest, the customer, the
- * guest of honour, the reference, package, room or location — and a word with
- * enough digits matches either phone digit-for-digit.
+ * guest of honour, the reference, package, room or location, or be the booking
+ * id exactly ("#7" reads as 7) — and a word with enough digits matches either
+ * phone digit-for-digit. Both calendars' and the Space Schedule's filter boxes
+ * read bookings the same way, as their web pages do.
  */
 export function matchesDeskBookingSearch(
-  b: CalendarBooking,
+  b: SearchableBooking,
   search: string,
 ): boolean {
-  const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = normalizeBookingSearchTerm(search)
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean);
   if (terms.length === 0) return true;
   const text = [
     b.guestName,
@@ -142,7 +168,7 @@ export function matchesDeskBookingSearch(
     b.guestPhone,
     b.guestOfHonorName,
     b.referenceNumber,
-    b.customerName,
+    searchableCustomerName(b.customerName, b.guestName),
     b.customerEmail,
     b.customerPhone,
     b.packageNameRaw,
@@ -159,6 +185,7 @@ export function matchesDeskBookingSearch(
 
   return terms.every((term) => {
     if (text.includes(term)) return true;
+    if (matchesBookingId(b.id, term)) return true;
     const termDigits = digitsOnly(term);
     return termDigits.length >= MIN_PHONE_DIGITS && phones.includes(termDigits);
   });

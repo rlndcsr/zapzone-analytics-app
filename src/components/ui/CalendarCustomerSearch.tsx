@@ -1,4 +1,11 @@
-import { CalendarDays, Phone, Search, User, XCircle } from "lucide-react-native";
+import {
+  CalendarDays,
+  Mail,
+  Phone,
+  Search,
+  User,
+  XCircle,
+} from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -9,11 +16,20 @@ import {
   TextInput,
   View,
 } from "react-native";
+import {
+  isIdTerm,
+  normalizeBookingSearchTerm,
+  rankBookingSearchResults,
+} from "../../lib/bookings/bookingSearch";
 import { formatPhoneForDisplay } from "../../lib/phone";
 import { getToken } from "../../lib/session";
 import { searchBookings, type CalendarBooking } from "../../services/bookingsService";
 
 const MIN_TERM_LENGTH = 2;
+
+// a booking id can be a single digit ("#7"), so the length minimum only applies to other text
+const isSearchable = (term: string): boolean =>
+  term.length >= MIN_TERM_LENGTH || isIdTerm(term);
 const DEBOUNCE_MS = 350;
 const RESULT_LIMIT = 20;
 
@@ -71,7 +87,7 @@ type Props = {
 export function CalendarCustomerSearch({
   locationId,
   onSelect,
-  placeholder = "Search customer name or phone",
+  placeholder = "Search name, phone, email or booking #",
 }: Props) {
   const [term, setTerm] = useState("");
   const [debouncedTerm, setDebouncedTerm] = useState("");
@@ -83,12 +99,16 @@ export function CalendarCustomerSearch({
   const requestRef = useRef(0);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedTerm(term.trim()), DEBOUNCE_MS);
+    // "7" and "#7" normalise to the same term, so retyping the "#" sends no second request
+    const timer = setTimeout(
+      () => setDebouncedTerm(normalizeBookingSearchTerm(term)),
+      DEBOUNCE_MS,
+    );
     return () => clearTimeout(timer);
   }, [term]);
 
   useEffect(() => {
-    if (debouncedTerm.length < MIN_TERM_LENGTH) {
+    if (!isSearchable(debouncedTerm)) {
       requestRef.current += 1;
       setResults([]);
       setError(null);
@@ -119,7 +139,7 @@ export function CalendarCustomerSearch({
     })
       .then((rows) => {
         if (requestRef.current !== requestId) return;
-        setResults(rows);
+        setResults(rankBookingSearchResults(rows, debouncedTerm));
       })
       .catch(() => {
         if (requestRef.current !== requestId) return;
@@ -152,7 +172,7 @@ export function CalendarCustomerSearch({
     [onSelect, reset],
   );
 
-  const showPanel = open && debouncedTerm.length >= MIN_TERM_LENGTH;
+  const showPanel = open && isSearchable(debouncedTerm);
   const emptyMessage = loading
     ? null
     : error
@@ -180,7 +200,7 @@ export function CalendarCustomerSearch({
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
-          accessibilityLabel="Search bookings by customer name or phone number"
+          accessibilityLabel="Search bookings by customer name, phone number, email or booking ID"
         />
         {loading ? (
           <ActivityIndicator size="small" color="#9ca3af" />
@@ -228,6 +248,8 @@ export function CalendarCustomerSearch({
             >
               {results.map((booking, index) => {
                 const phone = formatPhoneForDisplay(booking.customerPhone);
+                // the guest's own email first, as the web's customerEmailOf reads it
+                const email = booking.guestEmail || booking.customerEmail;
                 const time = formatResultTime(booking.time);
                 const [badgeBg, badgeFg] = (
                   STATUS_TONE[booking.status] ?? "bg-gray-100 text-gray-600"
@@ -259,7 +281,7 @@ export function CalendarCustomerSearch({
                       </View>
                     </View>
 
-                    <View className="flex-row items-center gap-3 mt-1">
+                    <View className="flex-row flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
                       <View className="flex-row items-center gap-1">
                         <CalendarDays size={11} color="#9ca3af" />
                         <Text className="text-xs text-gray-600 dark:text-gray-400">
@@ -275,16 +297,28 @@ export function CalendarCustomerSearch({
                           </Text>
                         </View>
                       )}
+                      {!!email && (
+                        <View className="flex-row items-center gap-1 shrink">
+                          <Mail size={11} color="#9ca3af" />
+                          <Text
+                            className="shrink text-xs text-gray-600 dark:text-gray-400"
+                            numberOfLines={1}
+                          >
+                            {email}
+                          </Text>
+                        </View>
+                      )}
                     </View>
 
                     <Text
                       className="text-xs text-gray-500 dark:text-gray-500 mt-0.5"
                       numberOfLines={1}
                     >
-                      {booking.packageName || "No package"}
+                      {`#${booking.id}`}
                       {booking.referenceNumber
                         ? ` · ${booking.referenceNumber}`
                         : ""}
+                      {` · ${booking.packageName || "No package"}`}
                     </Text>
                   </Pressable>
                 );

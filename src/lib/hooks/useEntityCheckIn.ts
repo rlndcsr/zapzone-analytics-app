@@ -48,7 +48,13 @@ import { KIND_LABELS } from "../checkin/resolveScannedCode";
  * sits beside rather than duplicates.
  */
 export type EntitySurface =
-  | { kind: "ticket"; purchase: PurchaseRow; waivers: EntityWaivers | null }
+  /** `waiversFailed`: the lookup failed — unknown, which is not the same as none connected. */
+  | {
+      kind: "ticket";
+      purchase: PurchaseRow;
+      waivers: EntityWaivers | null;
+      waiversFailed: boolean;
+    }
   /**
    * `order.cardLabel` is null here — the show endpoint doesn't eager-load
    * payments — so `payments` is fetched separately, the same way
@@ -56,7 +62,12 @@ export type EntitySurface =
    */
   | { kind: "order"; order: TicketOrderDetail; payments: PaymentRow[] }
   | { kind: "membership"; scan: MembershipScan }
-  | { kind: "event"; ticket: ScannedEventTicket; waivers: EntityWaivers | null }
+  | {
+      kind: "event";
+      ticket: ScannedEventTicket;
+      waivers: EntityWaivers | null;
+      waiversFailed: boolean;
+    }
   | { kind: "waiver"; waiver: ScannedWaiver };
 
 /** A short-lived message under the scanner — the mobile stand-in for a toast. */
@@ -86,6 +97,8 @@ export type UseEntityCheckIn = {
   confirm: (lineIds?: number[]) => Promise<void>;
   /** Mark the participant on a scanned waiver as checked in. */
   confirmWaiver: () => Promise<void>;
+  /** Read the waivers of the ticket or event on screen again after a failed lookup. */
+  retryWaivers: () => Promise<void>;
   /** Leave the surface, clearing any notice with it. */
   close: () => void;
   setNotice: (notice: EntityNotice | null) => void;
@@ -171,8 +184,9 @@ export function useEntityCheckIn(): UseEntityCheckIn {
           }
 
           // Connected waivers are extra context, never a reason to refuse the
-          // ticket — a failure here leaves the panel empty, not the desk stuck.
+          // ticket — a failure here marks the panel unknown, not the desk stuck.
           let waivers: EntityWaivers | null = null;
+          let waiversFailed = false;
           try {
             waivers = await fetchEntityWaivers(
               token,
@@ -181,10 +195,15 @@ export function useEntityCheckIn(): UseEntityCheckIn {
               signal,
             );
           } catch {
-            waivers = null;
+            waiversFailed = true;
           }
           if (signal.aborted || !mountedRef.current) return;
-          setSurface({ kind: "ticket", purchase: res.purchase, waivers });
+          setSurface({
+            kind: "ticket",
+            purchase: res.purchase,
+            waivers,
+            waiversFailed,
+          });
         });
       } catch (err) {
         if (!signal.aborted) fail(reason(err, "Ticket not found."));
@@ -282,15 +301,16 @@ export function useEntityCheckIn(): UseEntityCheckIn {
             fail("No event ticket found for that code.");
             return;
           }
-          // Best-effort, as for tickets: a failed load leaves the Waivers box empty.
+          // Best-effort, as for tickets: a failed load marks the Waivers box unknown.
           let waivers: EntityWaivers | null = null;
+          let waiversFailed = false;
           try {
             waivers = await fetchEntityWaivers(token, "event_purchase", ticket.id, signal);
           } catch {
-            waivers = null;
+            waiversFailed = true;
           }
           if (signal.aborted || !mountedRef.current) return;
-          setSurface({ kind: "event", ticket, waivers });
+          setSurface({ kind: "event", ticket, waivers, waiversFailed });
         });
       } catch (err) {
         if (!signal.aborted) {
@@ -515,6 +535,35 @@ export function useEntityCheckIn(): UseEntityCheckIn {
     setLoading(false);
   }, []);
 
+  const retryWaivers = useCallback(async () => {
+    const shown = surface;
+    if (!shown || (shown.kind !== "ticket" && shown.kind !== "event")) return;
+    const token = getToken();
+    if (!token) return;
+    const id = shown.kind === "ticket" ? shown.purchase.id : shown.ticket.id;
+    let waivers: EntityWaivers;
+    try {
+      waivers = await fetchEntityWaivers(
+        token,
+        shown.kind === "ticket" ? "attraction_purchase" : "event_purchase",
+        id,
+      );
+    } catch {
+      return; // still unknown, and the panel keeps saying so
+    }
+    if (!mountedRef.current) return;
+    // the desk may have closed this record or moved on to another while the request ran
+    setSurface((current) => {
+      if (current?.kind === "ticket" && shown.kind === "ticket" && current.purchase.id === id) {
+        return { ...current, waivers, waiversFailed: false };
+      }
+      if (current?.kind === "event" && shown.kind === "event" && current.ticket.id === id) {
+        return { ...current, waivers, waiversFailed: false };
+      }
+      return current;
+    });
+  }, [surface]);
+
   return {
     surface,
     loading,
@@ -528,6 +577,7 @@ export function useEntityCheckIn(): UseEntityCheckIn {
     openEventByReference,
     confirm,
     confirmWaiver,
+    retryWaivers,
     close,
     setNotice,
   };

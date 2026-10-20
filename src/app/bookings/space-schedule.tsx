@@ -95,6 +95,7 @@ import {
   resolveSlotMinute,
 } from "../../lib/calendar/dayGridSlots";
 import { packageColor } from "../../lib/calendar/packageColors";
+import { matchesDeskBookingSearch } from "../../lib/checkin/checkInWaiverList";
 import { venueNow, venueToday } from "../../lib/date/venueTime";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
@@ -1517,7 +1518,6 @@ const SpaceScheduleScreen = () => {
   );
 
   const filteredBookings = useMemo(() => {
-    const term = searchInput.trim().toLowerCase();
     return activeBookings.filter((b) => {
       if (
         effectiveCategory !== "all" &&
@@ -1527,12 +1527,7 @@ const SpaceScheduleScreen = () => {
         return false;
       }
       if (statusFilter !== "all" && b.status !== statusFilter) return false;
-      if (term) {
-        const haystack =
-          `${b.customerName} ${b.referenceNumber ?? ""} ${b.packageName}`.toLowerCase();
-        if (!haystack.includes(term)) return false;
-      }
-      return true;
+      return matchesDeskBookingSearch(b, searchInput);
     });
   }, [activeBookings, effectiveCategory, statusFilter, searchInput]);
 

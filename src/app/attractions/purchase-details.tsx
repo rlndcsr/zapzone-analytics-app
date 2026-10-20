@@ -185,6 +185,8 @@ const PurchaseDetailsScreen = () => {
 
   const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
   const [waiversLoading, setWaiversLoading] = useState(true);
+  const [waiversFailed, setWaiversFailed] = useState(false);
+  const [waiversAttempt, setWaiversAttempt] = useState(0);
 
   const deleteLockRef = useRef(false);
   const calendarLockRef = useRef(false);
@@ -249,18 +251,22 @@ const PurchaseDetailsScreen = () => {
     }
     const controller = new AbortController();
     setWaiversLoading(true);
+    setWaiversFailed(false);
     fetchEntityWaivers(token, "attraction_purchase", purchaseId, controller.signal)
       .then((r) => {
         if (!controller.signal.aborted) setWaivers(r);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setWaivers(null);
+        if (controller.signal.aborted) return;
+        setWaivers(null);
+        // a failed lookup is not "no waivers" — the panel says so instead of showing empty
+        setWaiversFailed(true);
       })
       .finally(() => {
         if (!controller.signal.aborted) setWaiversLoading(false);
       });
     return () => controller.abort();
-  }, [purchaseId]);
+  }, [purchaseId, waiversAttempt]);
 
   const confirmDelete = () => {
     if (!detail) return;
@@ -618,6 +624,8 @@ const PurchaseDetailsScreen = () => {
             entityLabel="attraction purchase"
             waivers={waivers}
             loading={waiversLoading}
+            loadFailed={waiversFailed}
+            onRetry={() => setWaiversAttempt((n) => n + 1)}
           />
         </SectionCard>
 

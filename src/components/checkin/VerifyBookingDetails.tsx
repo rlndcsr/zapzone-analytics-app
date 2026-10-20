@@ -12,6 +12,7 @@ import {
   entityCoverage,
   peopleOnForm,
 } from "../../lib/waivers/waiverCoverage";
+import { ConnectedWaiversPanel } from "../ui/ConnectedWaiversPanel";
 import { WaiverCoverageLine } from "../ui/WaiverCoverageLine";
 import type { BookingDetail } from "../../services/bookingsService";
 import type {
@@ -187,11 +188,16 @@ export function VerifyBookingDetails({
   onCheckInWaiver,
   checkingWaiverId,
   variant = "verify",
+  waiversFailed = false,
+  onRetryWaivers,
 }: {
   detail: BookingDetail;
   waivers: EntityWaivers | null;
   onCheckInWaiver: (waiverId: number) => void;
   checkingWaiverId: number | null;
+  /** The waiver lookup failed — shown as unknown, never as "none connected". */
+  waiversFailed?: boolean;
+  onRetryWaivers?: () => Promise<unknown> | void;
   /**
    * "verify" heads the body with the scan review's Scheduled + Valid Booking
    * banners and its "check this person in now?" prompt. "details" heads it with
@@ -447,6 +453,25 @@ export function VerifyBookingDetails({
               No waivers connected to this booking.
             </Text>
           )}
+        </View>
+      )}
+      {!waivers && waiversFailed && (
+        <View className="mt-4 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+          <View className="mb-2 flex-row items-center gap-2">
+            <Feather name="shield" size={16} color="#0644C7" />
+            <Text className="text-base font-bold text-gray-900 dark:text-white">
+              Waivers
+            </Text>
+          </View>
+          <ConnectedWaiversPanel
+            sourceType="booking"
+            sourceId={detail.id}
+            entityLabel="booking"
+            waivers={null}
+            loading={false}
+            loadFailed
+            onRetry={onRetryWaivers}
+          />
         </View>
       )}
 

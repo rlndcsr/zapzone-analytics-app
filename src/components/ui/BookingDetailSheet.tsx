@@ -5,6 +5,7 @@ import {
   CreditCard,
   DoorOpen,
   Eye,
+  LogIn,
   MapPin,
   Package,
   Pencil,
@@ -14,6 +15,7 @@ import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -21,19 +23,30 @@ import {
   View,
 } from "react-native";
 import type { clashSummary } from "../../lib/bookings/bookingCell";
-import { isBookingSyncInProgress } from "../../lib/bookings/bookingListCache";
-import { phoneDialUrl } from "../../lib/phone";
-import { getToken } from "../../lib/session";
 import {
+  isCheckInEligible,
+  outstandingBalanceOf,
+} from "../../lib/bookings/bookingCheckIn";
+import { isBookingSyncInProgress } from "../../lib/bookings/bookingListCache";
+import { resolvePaymentState } from "../../lib/payments/paymentState";
+import { phoneDialUrl } from "../../lib/phone";
+import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  checkInBooking,
   fetchBookingDetail,
   type BookingDetail,
 } from "../../services/bookingsService";
+import {
+  fetchEntityWaivers,
+  type EntityWaivers,
+} from "../../services/waiversService";
 import { BookingChangeHistory } from "./BookingChangeHistory";
 import { BookingFullView } from "./BookingFullView";
 import { BottomSheet } from "./BottomSheet";
 import { InternalNotesLog } from "./InternalNotesLog";
 import { PaymentStatusBadge } from "./PaymentStatusBadge";
 import { ProcessPaymentSheet } from "./ProcessPaymentSheet";
+import { WaiverConnectionCard } from "./WaiverConnectionCard";
 
 const MONTH_NAMES = [
   "January",
@@ -134,6 +147,185 @@ const Badge = ({ text, className }: { text: string; className: string }) => {
     </View>
   );
 };
+
+/** The booking's connected waivers, read-only (web: WaiverConnectionPanel with checkInActions off). */
+function BookingWaivers({ bookingId }: { bookingId: number }) {
+  const [waivers, setWaivers] = useState<EntityWaivers | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  // Only the newest lookup may fill the card, so a slow earlier reply can't land last.
+  const requestRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const load = useCallback(async () => {
+    const requestId = ++requestRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setLoading(true);
+    setFailed(false);
+    try {
+      const token = getToken();
+      if (!token) throw new Error("Not authenticated");
+      const next = await fetchEntityWaivers(
+        token,
+        "booking",
+        bookingId,
+        controller.signal,
+      );
+      if (requestId === requestRef.current) setWaivers(next);
+    } catch {
+      if (requestId !== requestRef.current) return;
+      setWaivers(null);
+      setFailed(true);
+    } finally {
+      if (requestId === requestRef.current) setLoading(false);
+    }
+  }, [bookingId]);
+
+  useEffect(() => {
+    void load();
+    return () => {
+      requestRef.current++;
+      controllerRef.current?.abort();
+    };
+  }, [load]);
+
+  return (
+    <WaiverConnectionCard
+      type="booking"
+      id={bookingId}
+      waivers={waivers}
+      loading={loading}
+      loadFailed={failed}
+      onRetry={load}
+      compact
+      checkInActions={false}
+    />
+  );
+}
+
+const CHECK_IN_FAILED = "Check-in failed. Please try again.";
+
+/**
+ * The quick view's Check In button and its confirmation (web:
+ * BookingCheckInAction). Keyed by booking, so a request still running for a
+ * booking the sheet has moved away from can't show its outcome on another.
+ */
+function BookingCheckInAction({
+  booking,
+  onCheckedIn,
+}: {
+  booking: BookingDetail & { referenceNumber: string };
+  /** Called only after the API has confirmed the check-in. */
+  onCheckedIn: () => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
+  const confirmingRef = useRef(false);
+
+  const amounts = {
+    payment_status: booking.paymentStatus,
+    total_amount: booking.totalAmount,
+    amount_paid: booking.amountPaid,
+  };
+  const payment = resolvePaymentState(amounts);
+  const balance = outstandingBalanceOf(amounts);
+  const owing = !payment.isSettled;
+
+  const submit = async () => {
+    if (submittingRef.current) return;
+    const token = getToken();
+    if (!token) {
+      setError("Please sign in again to check in this booking.");
+      return;
+    }
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await checkInBooking(token, booking.referenceNumber, getCurrentUser()?.id);
+      onCheckedIn();
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : CHECK_IN_FAILED);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  const confirm = () => {
+    if (submittingRef.current || confirmingRef.current) return;
+    confirmingRef.current = true;
+    const settle = () => {
+      confirmingRef.current = false;
+    };
+
+    let message = `Booking ${booking.referenceNumber} will be marked as checked in.`;
+    if (owing) {
+      const paidPart =
+        payment.amountPaid > 0
+          ? ` (${formatMoney(payment.amountPaid)} of ${formatMoney(payment.total)} paid)`
+          : "";
+      message =
+        `This booking is ${payment.label.toLowerCase()}` +
+        (balance !== null
+          ? ` and has an outstanding balance of ${formatMoney(balance)}${paidPart}.`
+          : ".") +
+        "\n\nChecking in does not take or record a payment. The balance stays due until it is collected with Process Payment.";
+    }
+
+    Alert.alert(
+      owing ? "Check in with a balance due?" : "Confirm check-in for this party?",
+      message,
+      [
+        { text: "Cancel", style: "cancel", onPress: settle },
+        {
+          text: owing ? "Check in anyway" : "Check in",
+          style: owing ? "destructive" : "default",
+          onPress: () => {
+            settle();
+            void submit();
+          },
+        },
+      ],
+      { cancelable: true, onDismiss: settle },
+    );
+  };
+
+  return (
+    <View className="mb-3">
+      <Pressable
+        onPress={confirm}
+        disabled={submitting}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: submitting, busy: submitting }}
+        style={({ pressed }) => (pressed && !submitting ? { opacity: 0.7 } : null)}
+        className={`py-3 rounded-xl border border-emerald-300 dark:border-emerald-800 items-center flex-row justify-center gap-2 ${
+          submitting ? "opacity-60" : ""
+        }`}
+      >
+        {submitting ? (
+          <ActivityIndicator size="small" color="#047857" />
+        ) : (
+          <LogIn size={16} color="#047857" />
+        )}
+        <Text className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+          {submitting ? "Checking in..." : "Check In"}
+        </Text>
+      </Pressable>
+      {!!error && (
+        <Text
+          accessibilityRole="alert"
+          className="mt-1 text-xs text-red-600 dark:text-red-400"
+        >
+          {error}
+        </Text>
+      )}
+    </View>
+  );
+}
 
 type Props = {
   bookingId: number | null;
@@ -245,6 +437,13 @@ export function BookingDetailSheet({
   const remaining = detail
     ? Math.max(0, detail.totalAmount - detail.amountPaid)
     : 0;
+  const balanceDue = detail
+    ? outstandingBalanceOf({
+        payment_status: detail.paymentStatus,
+        total_amount: detail.totalAmount,
+        amount_paid: detail.amountPaid,
+      })
+    : null;
 
   return (
     <>
@@ -356,6 +555,7 @@ export function BookingDetailSheet({
               {/* Booking info */}
               <SectionTitle>Booking Information</SectionTitle>
               <Card>
+                <Row label="Booking ID" value={`#${detail.id}`} />
                 <Row
                   label="Reference Number"
                   value={detail.referenceNumber ?? "—"}
@@ -520,6 +720,39 @@ export function BookingDetailSheet({
                 </>
               )}
 
+              {/* The guest's own words — booking.notes is emailed back to them, so it
+                  is never labelled internal (web parity: "Notes & Requests"). */}
+              {(!!detail.specialRequests || !!detail.customerNotes) && (
+                <>
+                  <SectionTitle>Notes &amp; Requests</SectionTitle>
+                  <Card>
+                    {!!detail.specialRequests && (
+                      <View>
+                        <Text className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                          Special Requests
+                        </Text>
+                        <Text className="mt-1 text-sm text-gray-900 dark:text-white">
+                          {detail.specialRequests}
+                        </Text>
+                      </View>
+                    )}
+                    {!!detail.specialRequests && !!detail.customerNotes && (
+                      <View className="my-3 h-px bg-gray-200 dark:bg-neutral-700" />
+                    )}
+                    {!!detail.customerNotes && (
+                      <View>
+                        <Text className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                          Note from the guest
+                        </Text>
+                        <Text className="mt-1 text-sm text-gray-900 dark:text-white">
+                          {detail.customerNotes}
+                        </Text>
+                      </View>
+                    )}
+                  </Card>
+                </>
+              )}
+
               {/* Payment */}
               <SectionTitle>Payment</SectionTitle>
               <Card>
@@ -557,6 +790,16 @@ export function BookingDetailSheet({
                   label="Amount Paid"
                   value={formatMoney(detail.amountPaid)}
                 />
+                {balanceDue !== null && (
+                  <View className="flex-row items-center justify-between py-1">
+                    <Text className="text-sm text-gray-500 dark:text-gray-400">
+                      Balance Due
+                    </Text>
+                    <Text className="text-sm font-medium text-red-600 dark:text-red-400">
+                      {formatMoney(balanceDue)}
+                    </Text>
+                  </View>
+                )}
 
                 {detail.appliedFees.length > 0 && (
                   <View className="border-t border-gray-200 dark:border-neutral-700 mt-2 pt-2">
@@ -601,6 +844,12 @@ export function BookingDetailSheet({
                   </View>
                 )}
               </Card>
+
+              {!showFull && (
+                <View className="mt-4">
+                  <BookingWaivers bookingId={detail.id} />
+                </View>
+              )}
 
               {/* Change history — the backend's permanent booking change log
                   (web parity). Skipped while the full view is stacked on top,
@@ -655,6 +904,22 @@ export function BookingDetailSheet({
                     </Text>
                   </Pressable>
                 </View>
+                {isCheckInEligible(detail) && !!detail.referenceNumber && (
+                  <BookingCheckInAction
+                    key={detail.id}
+                    booking={{ ...detail, referenceNumber: detail.referenceNumber }}
+                    onCheckedIn={() => {
+                      const checkedInId = detail.id;
+                      // the sheet may have been closed or moved to another booking while the request ran
+                      setDetail((current) =>
+                        current && current.id === checkedInId
+                          ? { ...current, status: "checked-in" }
+                          : current,
+                      );
+                      onChanged?.();
+                    }}
+                  />
+                )}
                 <Pressable
                   onPress={onClose}
                   style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}

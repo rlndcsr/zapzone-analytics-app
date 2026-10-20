@@ -107,6 +107,8 @@ export function ConnectedWaiversPanel({
   waivers,
   loading,
   emptyMessage,
+  loadFailed = false,
+  onRetry,
 }: {
   sourceType: KioskSourceType;
   sourceId: number;
@@ -115,8 +117,13 @@ export function ConnectedWaiversPanel({
   waivers: EntityWaivers | null;
   loading: boolean;
   emptyMessage?: string;
+  /** The caller's lookup failed — not the same answer as "none connected". */
+  loadFailed?: boolean;
+  /** Read the waivers again after a failed lookup; one tap, one request. */
+  onRetry?: () => Promise<unknown> | void;
 }) {
   const [launching, setLaunching] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const openKiosk = async () => {
     setLaunching(true);
@@ -141,6 +148,44 @@ export function ConnectedWaiversPanel({
     return (
       <View className="py-4 items-center">
         <ActivityIndicator color={PRIMARY} />
+      </View>
+    );
+  }
+
+  if (loadFailed) {
+    const retry = async () => {
+      if (!onRetry || retrying) return;
+      setRetrying(true);
+      try {
+        await onRetry();
+      } finally {
+        setRetrying(false);
+      }
+    };
+    return (
+      <View className="flex-row items-start justify-between gap-3">
+        <Text
+          accessibilityRole="alert"
+          className="flex-1 text-sm text-red-600 dark:text-red-400"
+        >
+          Waivers could not be loaded, so their status is unknown. This does not
+          mean none are connected.
+        </Text>
+        {!!onRetry && (
+          <Pressable
+            onPress={() => void retry()}
+            disabled={retrying}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Try loading waivers again"
+            className="active:opacity-70"
+            style={retrying ? { opacity: 0.5 } : undefined}
+          >
+            <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+              {retrying ? "Retrying…" : "Try again"}
+            </Text>
+          </Pressable>
+        )}
       </View>
     );
   }

@@ -232,9 +232,13 @@ export function VerifyMembershipDetails({ scan }: { scan: MembershipScan }) {
 export function VerifyEventTicketDetails({
   ticket,
   waivers,
+  waiversFailed = false,
+  onRetryWaivers,
 }: {
   ticket: ScannedEventTicket;
   waivers: EntityWaivers | null;
+  waiversFailed?: boolean;
+  onRetryWaivers?: () => Promise<unknown> | void;
 }) {
   const partOfOrder = ticket.ticketOrderId != null;
   const alreadyIn = ticket.status === "checked-in" || !!ticket.checkedInAt;
@@ -366,6 +370,8 @@ export function VerifyEventTicketDetails({
           entityLabel="event ticket"
           waivers={waivers}
           loading={false}
+          loadFailed={waiversFailed}
+          onRetry={onRetryWaivers}
           emptyMessage={
             partOfOrder
               ? "Covered by this order's waiver — one signature per visit day (see the ticket holding it)."

@@ -142,6 +142,8 @@ export function WaiverConnectionCard({
   compact = false,
   checkInActions = true,
   emptyMessage,
+  loadFailed = false,
+  onRetry,
 }: {
   type: Exclude<WaiverEntityType, "customer">;
   id: number;
@@ -153,8 +155,16 @@ export function WaiverConnectionCard({
   compact?: boolean;
   checkInActions?: boolean;
   emptyMessage?: string;
+  /**
+   * The caller's lookup failed. A failed lookup says nothing about whether a
+   * waiver exists, so it must not fall through to the empty state.
+   */
+  loadFailed?: boolean;
+  /** Read the waivers again after a failed lookup; one tap, one request. */
+  onRetry?: () => Promise<unknown> | void;
 }) {
   const [launching, setLaunching] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | "all" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -232,6 +242,47 @@ export function WaiverConnectionCard({
         <View className="items-center py-3">
           <ActivityIndicator color={PRIMARY} />
         </View>
+      </CardFrame>
+    );
+  }
+
+  if (loadFailed) {
+    const retry = async () => {
+      if (!onRetry || retrying) return;
+      setRetrying(true);
+      try {
+        await onRetry();
+      } finally {
+        setRetrying(false);
+      }
+    };
+    return (
+      <CardFrame>
+        <View className="mb-1 flex-row items-center justify-between">
+          <Title title={title} />
+          {!!onRetry && (
+            <Pressable
+              onPress={() => void retry()}
+              disabled={retrying}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Try loading waivers again"
+              className="rounded px-2 py-1 active:opacity-70"
+              style={retrying ? { opacity: 0.5 } : undefined}
+            >
+              <Text className="text-[11px] font-semibold text-[#0644C7] dark:text-blue-300">
+                {retrying ? "Retrying…" : "Try again"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+        <Text
+          accessibilityRole="alert"
+          className="text-xs text-red-600 dark:text-red-400"
+        >
+          Waivers could not be loaded, so their status is unknown. This does not
+          mean none are connected.
+        </Text>
       </CardFrame>
     );
   }

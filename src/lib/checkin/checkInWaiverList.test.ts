@@ -212,6 +212,109 @@ describe("matchesDeskBookingSearch", () => {
   it("matches everything on a blank term", () => {
     assert.equal(matchesDeskBookingSearch(booking, " "), true);
   });
+
+  it("matches email, reference and room, ignoring case and extra spaces", () => {
+    assert.equal(matchesDeskBookingSearch(booking, "SONOAXE@gmail"), true);
+    assert.equal(matchesDeskBookingSearch(booking, "#BK20260926"), true);
+    assert.equal(matchesDeskBookingSearch(booking, "room 2"), true);
+    assert.equal(matchesDeskBookingSearch(booking, "  tom \t  witching  "), true);
+    assert.equal(matchesDeskBookingSearch(booking, "nobody@x.com"), false);
+  });
+
+  it("matches the booking id exactly, with or without a #", () => {
+    const byId = (id: number) =>
+      ({
+        ...booking,
+        id,
+        guestPhone: null,
+        referenceNumber: "BKABCDEF",
+      }) as unknown as CalendarBooking;
+    assert.equal(matchesDeskBookingSearch(byId(7), "7"), true);
+    assert.equal(matchesDeskBookingSearch(byId(7), "#7"), true);
+    assert.equal(matchesDeskBookingSearch(byId(7), "#8"), false);
+    assert.equal(matchesDeskBookingSearch(byId(1234), " #1234 "), true);
+    assert.equal(matchesDeskBookingSearch(byId(1234), "1234"), true);
+    assert.equal(matchesDeskBookingSearch(byId(1234), "123"), false);
+    assert.equal(matchesDeskBookingSearch(byId(1234), "12345"), false);
+    assert.equal(matchesDeskBookingSearch(byId(1234), "tom #1234"), true);
+  });
+
+  it("matches the guest and the customer account separately", () => {
+    const split = {
+      ...booking,
+      guestName: "Kim Lee",
+      guestEmail: "kim@lee.com",
+      guestPhone: null,
+      customerName: "Tom Andersen",
+      customerEmail: "tom@acct.com",
+      customerPhone: "+1 (586) 441-6556",
+    } as unknown as CalendarBooking;
+    assert.equal(matchesDeskBookingSearch(split, "kim"), true);
+    assert.equal(matchesDeskBookingSearch(split, "ANDERSEN   Tom"), true);
+    assert.equal(matchesDeskBookingSearch(split, "kim@lee"), true);
+    assert.equal(matchesDeskBookingSearch(split, "tom@acct"), true);
+    assert.equal(matchesDeskBookingSearch(split, "5864416556"), true);
+    assert.equal(matchesDeskBookingSearch(split, "586-441"), true);
+    assert.equal(matchesDeskBookingSearch(split, "586-999"), false);
+  });
+
+  it("matches everything on a bare #", () => {
+    assert.equal(matchesDeskBookingSearch(booking, "#"), true);
+    assert.equal(matchesDeskBookingSearch(booking, " ## "), true);
+  });
+
+  it("searches the real package name, not the display fallback", () => {
+    const noPackage = {
+      ...booking,
+      packageName: "Booking",
+      packageNameRaw: null,
+    } as unknown as CalendarBooking;
+    assert.equal(matchesDeskBookingSearch(noPackage, "booking"), false);
+    assert.equal(matchesDeskBookingSearch(booking, "WITCHING"), true);
+  });
+
+  it("never matches the Guest label shown for a booking with no name", () => {
+    const nameless = {
+      ...booking,
+      guestName: null,
+      customerName: "Guest",
+    } as unknown as CalendarBooking;
+    assert.equal(matchesDeskBookingSearch(nameless, "guest"), false);
+    assert.equal(matchesDeskBookingSearch(nameless, "witching"), true);
+    const realGuest = {
+      ...booking,
+      guestName: "Guest Smith",
+      customerName: "Guest Smith",
+    } as unknown as CalendarBooking;
+    assert.equal(matchesDeskBookingSearch(realGuest, "guest"), true);
+  });
+
+  it("reads a Space Schedule row the same way", () => {
+    const row = {
+      id: 1234,
+      customerName: "Tom Andersen",
+      guestName: "Tom Andersen",
+      guestEmail: "tom@x.com",
+      guestPhone: "(586) 441-6556",
+      referenceNumber: "BKABCDEF",
+      packageName: "Booking",
+      packageNameRaw: "Laser Tag Party",
+      roomName: null,
+      guestOfHonorName: "Mia",
+      locationName: "Canton",
+    };
+    assert.equal(matchesDeskBookingSearch(row, "andersen tom"), true);
+    assert.equal(matchesDeskBookingSearch(row, "laser tag"), true);
+    assert.equal(matchesDeskBookingSearch(row, "TOM@X"), true);
+    assert.equal(matchesDeskBookingSearch(row, "5864416556"), true);
+    assert.equal(matchesDeskBookingSearch(row, "mia canton"), true);
+    assert.equal(matchesDeskBookingSearch(row, "#1234"), true);
+    assert.equal(matchesDeskBookingSearch(row, "123"), false);
+    assert.equal(
+      matchesDeskBookingSearch({ ...row, packageNameRaw: null }, "booking"),
+      false,
+    );
+  });
 });
 
 describe("mergeDeskWaivers", () => {

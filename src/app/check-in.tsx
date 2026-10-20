@@ -996,6 +996,8 @@ export default function CheckInWaiversScreen() {
                   if (await booking.checkInWaiver(id)) reloadWaivers();
                 }}
                 checkingWaiverId={booking.checkingWaiverId}
+                waiversFailed={booking.waiversFailed}
+                onRetryWaivers={booking.retryWaivers}
               />
             </View>
           )}
@@ -1110,6 +1112,8 @@ export default function CheckInWaiversScreen() {
                 <VerifyTicketDetails
                   purchase={surface.purchase}
                   waivers={surface.waivers}
+                  waiversFailed={surface.waiversFailed}
+                  onRetryWaivers={entity.retryWaivers}
                 />
               )}
               {surface.kind === "order" && (
@@ -1125,7 +1129,12 @@ export default function CheckInWaiversScreen() {
                 <VerifyMembershipDetails scan={surface.scan} />
               )}
               {surface.kind === "event" && (
-                <VerifyEventTicketDetails ticket={surface.ticket} waivers={surface.waivers} />
+                <VerifyEventTicketDetails
+                  ticket={surface.ticket}
+                  waivers={surface.waivers}
+                  waiversFailed={surface.waiversFailed}
+                  onRetryWaivers={entity.retryWaivers}
+                />
               )}
               {surface.kind === "waiver" && (
                 <VerifyWaiverDetails waiver={surface.waiver} />

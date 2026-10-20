@@ -196,7 +196,7 @@ function LineCard({
   line: TicketOrderLine;
   order: TicketOrderDetail;
   busy: number | "all" | null;
-  /** `undefined` while loading; `null` when the fetch failed (shown as none, like the web). */
+  /** `undefined` while loading; `null` when the fetch failed (shown as unknown, never as none, like the web). */
   waivers: EntityWaivers | null | undefined;
   onCheckIn: () => void;
   onEdit: () => void;
@@ -322,6 +322,8 @@ function LineCard({
             waivers={waivers ?? null}
             loading={waivers === undefined}
             onChanged={onWaiversChanged}
+            loadFailed={waivers === null}
+            onRetry={onWaiversChanged}
             compact
             emptyMessage="Covered by this order's waiver — one signature per visit day (see the ticket holding it)."
           />
