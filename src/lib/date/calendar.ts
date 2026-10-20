@@ -46,6 +46,17 @@ export const parseKey = (s?: string | null): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
+/**
+ * A calendar date as "YYYY-MM-DD" — from a date, or from a timestamp such as an
+ * event's "2026-10-26T04:00:00.000000Z" (the venue's midnight in UTC) — or ""
+ * when there is none to read. The day is taken as written, never re-read through
+ * the device's time zone, which would move it a day on a device west of the venue.
+ */
+export const dateKeyOf = (s?: string | null): string => {
+  const m = /^\d{4}-\d{2}-\d{2}/.exec((s ?? "").trim());
+  return m && parseKey(m[0]) ? m[0] : "";
+};
+
 /** "2026-01-05" -> "Jan 5, 2026" for compact display. */
 export const formatShortDate = (s?: string | null): string => {
   const d = parseKey(s);
@@ -69,6 +80,18 @@ export const formatFullDate = (s?: string | null): string => {
   const d = parseKey(s);
   return d
     ? `${WEEKDAYS_FULL[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+    : "";
+};
+
+/**
+ * "2026-10-26", or an event's "2026-10-26T04:00:00.000000Z", -> "Mon, Oct 26":
+ * the calendar day as written, never shifted by the device's time zone (web
+ * parity: the cart's `parseLocalDate(...).toLocaleDateString` line date).
+ */
+export const formatDayMonth = (s?: string | null): string => {
+  const d = parseKey(s);
+  return d
+    ? `${WEEKDAYS_FULL[d.getDay()].slice(0, 3)}, ${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`
     : "";
 };
 

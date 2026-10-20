@@ -52,7 +52,13 @@ import {
   attractionIsCallToBook,
   eventIsCallToBook,
 } from "../../lib/callToBook";
-import { toKey } from "../../lib/date/calendar";
+import {
+  dateKeyOf,
+  formatDayMonth,
+  formatShortDate,
+  toKey,
+} from "../../lib/date/calendar";
+import { eventSaleDates } from "../../lib/events/eventSaleDates";
 import {
   amountDueAfterGiftCard,
   giftCardCodeField,
@@ -447,9 +453,12 @@ const EventCard = ({
           {event.name}
         </Text>
         <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
-          {event.startDate}
-          {event.endDate && event.endDate !== event.startDate
-            ? ` – ${event.endDate}`
+          {/* the API sends these as timestamps; show the calendar days they name */}
+          {formatShortDate(event.startDate) || event.startDate}
+          {event.dateType === "date_range" &&
+          dateKeyOf(event.endDate) &&
+          dateKeyOf(event.endDate) !== dateKeyOf(event.startDate)
+            ? ` – ${formatShortDate(event.endDate)}`
             : ""}
         </Text>
         <Text className="text-lg font-bold text-[#0644C7] dark:text-blue-400">
@@ -832,7 +841,9 @@ const CreatePurchaseScreen = () => {
    */
   useEffect(() => {
     const eventId = selectedEvent?.id;
-    const date = eventDate || selectedEvent?.startDate;
+    // the endpoint counts sold tickets by `purchase_date = {date}`, so it needs
+    // the bare day — a timestamp matches nothing and reads every slot as empty
+    const date = dateKeyOf(eventDate || selectedEvent?.startDate);
     if (eventId == null || !date) {
       setEventSlots([]);
       setEventSlotsLeft(null);
@@ -957,19 +968,10 @@ const CreatePurchaseScreen = () => {
   }, [orderMode, itemTab, orderLocationId, eventsCatalogKey, user?.id]);
 
   /** The dates an event ticket may be sold for — the web's date input range. */
-  const eventDateOptions = useMemo(() => {
-    if (!selectedEvent?.startDate) return [];
-    const out: string[] = [];
-    const cursor = new Date(`${selectedEvent.startDate}T00:00:00`);
-    const last = new Date(
-      `${selectedEvent.endDate ?? selectedEvent.startDate}T00:00:00`,
-    );
-    while (cursor <= last && out.length < 60) {
-      out.push(toKey(cursor));
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    return out;
-  }, [selectedEvent]);
+  const eventDateOptions = useMemo(
+    () => (selectedEvent ? eventSaleDates(selectedEvent) : []),
+    [selectedEvent],
+  );
 
   /**
    * The item currently being configured, as an order line — or null while it is
@@ -980,7 +982,7 @@ const CreatePurchaseScreen = () => {
   const currentLine = useMemo<CartItem | null>(() => {
     if (itemTab === "events") {
       if (!selectedEvent || selectedEvent.locationId == null) return null;
-      const date = eventDate || selectedEvent.startDate;
+      const date = dateKeyOf(eventDate || selectedEvent.startDate);
       if (!date) return null;
       // A capped event needs its slot before it can be priced or sold.
       if (eventNeedsTime && !eventTime) return null;
@@ -2003,6 +2005,7 @@ const CreatePurchaseScreen = () => {
                     <Pressable
                       onPress={() => {
                         setSelectedEvent(null);
+                        setEventDate("");
                         setEventTime("");
                       }}
                       hitSlop={8}
@@ -2035,7 +2038,8 @@ const CreatePurchaseScreen = () => {
                       >
                         {eventDateOptions.map((date) => {
                           const active =
-                            (eventDate || selectedEvent.startDate) === date;
+                            (eventDate || dateKeyOf(selectedEvent.startDate)) ===
+                            date;
                           return (
                             <Pressable
                               key={date}
@@ -2056,7 +2060,7 @@ const CreatePurchaseScreen = () => {
                                     : "text-gray-700 dark:text-gray-200"
                                 }`}
                               >
-                                {date}
+                                {formatDayMonth(date) || date}
                               </Text>
                             </Pressable>
                           );
@@ -2201,7 +2205,8 @@ const CreatePurchaseScreen = () => {
                       onPress={() => {
                         setSelectedEvent(e);
                         setEventQty(1);
-                        setEventDate(e.startDate);
+                        // the bare day: `start_date` arrives as a timestamp
+                        setEventDate(dateKeyOf(e.startDate));
                         setEventTime("");
                       }}
                     />
@@ -2741,7 +2746,10 @@ const CreatePurchaseScreen = () => {
                           {line.quantity}× {line.name}
                         </Text>
                         <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {line.scheduledDate ?? ""}
+                          {/* the line's day as "Mon, Oct 26", as the web cart shows it */}
+                          {line.scheduledDate
+                            ? formatDayMonth(line.scheduledDate) || line.scheduledDate
+                            : ""}
                           {line.scheduledTime
                             ? ` · ${convertTo12Hour(line.scheduledTime)}`
                             : ""}
