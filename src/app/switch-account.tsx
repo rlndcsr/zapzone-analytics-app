@@ -28,6 +28,7 @@ import {
 } from "../lib/accounts/switchAccount";
 // TEMP: investigation instrumentation — see docs/MAX_UPDATE_DEPTH_DEBUG_REPORT.md
 import { authDebug } from "../lib/debug/authDebug";
+import { safeReturnPath } from "../lib/registrationForms/registrationForms";
 import { isAuthenticated } from "../lib/session";
 
 const DOT_PULSE_MS = 420;
@@ -69,10 +70,13 @@ export default function SwitchAccount() {
   const router = useRouter();
   const { colorScheme } = useColorScheme();
   // A manager's location switch reuses this bridge only to remount the app; nothing is pending.
-  const { userId, locationName } = useLocalSearchParams<{
+  const { userId, locationName, returnTo } = useLocalSearchParams<{
     userId?: string;
     locationName?: string;
+    returnTo?: string;
   }>();
+  // Web 64a9eee: a switch made from a record's error page reopens that record.
+  const reopenPath = locationName ? safeReturnPath(returnTo) : null;
 
   const accounts = useSavedAccounts();
   const target = accounts.find((a) => a.userId === Number(userId));
@@ -108,6 +112,7 @@ export default function SwitchAccount() {
       if (committed || isAuthenticated()) {
         authDebug('switch-account router.replace("/home")', { committed });
         router.replace("/home");
+        if (reopenPath) router.push(reopenPath as never);
       } else {
         authDebug('switch-account router.replace("/")', { committed });
         router.replace("/");
@@ -115,7 +120,7 @@ export default function SwitchAccount() {
     };
 
     void run();
-  }, [router]);
+  }, [router, reopenPath]);
 
   return (
     <View

@@ -60,6 +60,13 @@ describe("suggesting a domain", () => {
     assert.deepEqual(suggestEmails("jamie@zap-zone.com"), []);
   });
 
+  it("accepts short real domains and .ca addresses as typed", () => {
+    for (const domain of ["att.com", "gm.com", "ge.com", "hp.com", "hotmail.ca", "live.ca", "yahoo.ca"]) {
+      assert.deepEqual(suggestEmails(`jamie@${domain}`), [], domain);
+    }
+    assert.equal(suggestEmails("JAMIE@GM.COM").length, 0);
+  });
+
   it("corrects a mistyped domain, transpositions included", () => {
     const suggestions = suggestEmails("jamie@gmial.com");
     assert.equal(suggestions[0].domain, "gmail.com");

@@ -81,6 +81,7 @@ type RowContext = {
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onRegistrationForm?: () => void;
 };
 
 type Column = {
@@ -95,10 +96,10 @@ type Column = {
  * Event (name over location and date type) · Date · Time · Price · Status ·
  * Actions. The web's `defaultVisible: false` columns (Event #, Location,
  * Description, Date Type, Schedule, Time slot, Max groups, Add-ons,
- * Created, Updated) are omitted here too. Actions carries the web's two: Edit
- * (the pencil, opening Edit Event) and Delete.
+ * Created, Updated) are omitted here too. Actions carries the web's Edit (the
+ * pencil, opening Edit Event), Registration form (admins and managers) and Delete.
  */
-function buildColumns(fmt: EventFormatters): Column[] {
+function buildColumns(fmt: EventFormatters, withRegistration: boolean): Column[] {
   return [
     {
       key: "event",
@@ -171,7 +172,7 @@ function buildColumns(fmt: EventFormatters): Column[] {
     {
       key: "actions",
       label: "Actions",
-      width: 120,
+      width: withRegistration ? 160 : 120,
       render: (e, ctx) => (
         <View className="flex-row items-center gap-2">
           <Pressable
@@ -183,6 +184,17 @@ function buildColumns(fmt: EventFormatters): Column[] {
           >
             <Feather name="edit-2" size={15} color="#0644C7" />
           </Pressable>
+          {ctx.onRegistrationForm && (
+            <Pressable
+              onPress={ctx.onRegistrationForm}
+              disabled={ctx.busy}
+              accessibilityRole="button"
+              accessibilityLabel={`Registration form for ${e.name}`}
+              className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center active:opacity-70"
+            >
+              <Feather name="clipboard" size={15} color="#4B5563" />
+            </Pressable>
+          )}
           <Pressable
             onPress={ctx.onDelete}
             disabled={ctx.busy}
@@ -227,6 +239,7 @@ export const EventsTable = memo(function EventsTable({
   onToggleStatus,
   onEdit,
   onDelete,
+  onRegistrationForm,
 }: {
   events: EventRow[];
   formatters: EventFormatters;
@@ -235,8 +248,10 @@ export const EventsTable = memo(function EventsTable({
   onToggleStatus: (event: EventRow) => void;
   onEdit: (event: EventRow) => void;
   onDelete: (event: EventRow) => void;
+  /** Omitted for roles that can't manage registration forms. */
+  onRegistrationForm?: (event: EventRow) => void;
 }) {
-  const columns = buildColumns(formatters);
+  const columns = buildColumns(formatters, Boolean(onRegistrationForm));
   const tableWidth = columns.reduce((sum, c) => sum + c.width, 0);
 
   return (
@@ -279,6 +294,9 @@ export const EventsTable = memo(function EventsTable({
               onToggle: () => onToggleStatus(event),
               onEdit: () => onEdit(event),
               onDelete: () => onDelete(event),
+              onRegistrationForm: onRegistrationForm
+                ? () => onRegistrationForm(event)
+                : undefined,
             };
             return (
               <View

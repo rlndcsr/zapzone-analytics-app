@@ -1,4 +1,9 @@
 import { ApiError, apiRequest, apiUrl } from "../lib/api";
+import {
+  multipartEntries,
+  registrationCreateBody,
+  registrationUpdateBody,
+} from "../lib/registrationForms/registrationPayload";
 
 export type RegistrationFormStatus = "open" | "closed" | "past";
 
@@ -6,6 +11,27 @@ export type RegistrationEdition = {
   id: number;
   name: string;
   eventDate: string;
+};
+
+/** The Manage Events event a form is for (always at the form's own location). */
+export type RegistrationLinkedEvent = {
+  id: number;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+};
+
+/** GET /registration-events/event-options — an event a form can start from. */
+export type RegistrationEventOption = RegistrationLinkedEvent & {
+  locationId: number;
+  locationName: string | null;
+  description: string | null;
+  /** Stored image path; null when there's none or it's an inline data URI. */
+  image: string | null;
+  hasImage: boolean;
+  isActive: boolean;
+  /** Forms already linked to this event at its own location. */
+  registrationFormIds: number[];
 };
 
 export type RegistrationCounts = {
@@ -31,6 +57,7 @@ export type RegistrationFormRow = {
   headerImagePath: string | null;
   locationId: number;
   locationName: string | null;
+  event: RegistrationLinkedEvent | null;
   previousEdition: RegistrationEdition | null;
   nextEdition: RegistrationEdition | null;
   totalEntries: number;
@@ -121,17 +148,36 @@ export type RegistrationHistory = {
 /** A picked header image, kept in its original encoding for the upload. */
 export type RegistrationFormImage = { uri: string; name: string; type: string };
 
-export type RegistrationFormInput = {
+/** POST /registration-events — one form per location in `locationIds`. */
+export type RegistrationFormCreateInput = {
+  name: string;
+  locationIds: number[];
+  eventDate: string;
+  description: string;
+  confirmationMessage: string;
+  previousEditionId: number | null;
+  /** The event the form starts from; `eventLinks` maps location → its own event. */
+  eventId: number | null;
+  eventLinks: Record<number, number>;
+  useEventImage: boolean;
+  copyHeaderImageFrom: number | null;
+  isOpen: boolean;
+  headerImage: RegistrationFormImage | null;
+};
+
+/** POST /registration-events/{id} — only the fields present are changed. */
+export type RegistrationFormUpdate = Partial<{
   name: string;
   locationId: number;
   eventDate: string;
   description: string;
   confirmationMessage: string;
   previousEditionId: number | null;
+  eventId: number | null;
   isOpen: boolean;
-  headerImage?: RegistrationFormImage | null;
-  removeHeaderImage?: boolean;
-};
+  headerImage: RegistrationFormImage;
+  removeHeaderImage: boolean;
+}>;
 
 /* --------------------------------------------------------------- mapping -- */
 
@@ -151,6 +197,32 @@ function mapEdition(raw: unknown): RegistrationEdition | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Raw;
   return { id: num(r.id), name: str(r.name), eventDate: str(r.event_date) };
+}
+
+function mapLinkedEvent(raw: unknown): RegistrationLinkedEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Raw;
+  return {
+    id: num(r.id),
+    name: str(r.name),
+    startDate: strOrNull(r.start_date),
+    endDate: strOrNull(r.end_date),
+  };
+}
+
+function mapEventOption(r: Raw): RegistrationEventOption {
+  return {
+    ...(mapLinkedEvent(r) as RegistrationLinkedEvent),
+    locationId: num(r.location_id),
+    locationName: strOrNull(r.location_name),
+    description: strOrNull(r.description),
+    image: strOrNull(r.image),
+    hasImage: r.has_image === true,
+    isActive: r.is_active === true,
+    registrationFormIds: Array.isArray(r.registration_form_ids)
+      ? r.registration_form_ids.map(num).filter((id) => id > 0)
+      : [],
+  };
 }
 
 function mapCounts(raw: unknown): RegistrationCounts {
@@ -181,6 +253,7 @@ function mapForm(r: Raw): RegistrationFormRow {
     headerImagePath: strOrNull(r.header_image_path),
     locationId: num(r.location_id),
     locationName: strOrNull(r.location_name),
+    event: mapLinkedEvent(r.event),
     previousEdition: mapEdition(r.previous_edition),
     nextEdition: mapEdition(r.next_edition),
     totalEntries: num(r.total_entries),
@@ -247,42 +320,30 @@ export async function fetchRegistrationForm(
   return mapDetail((res?.data ?? {}) as Raw);
 }
 
-function toBody(input: Partial<RegistrationFormInput>): Raw {
-  const body: Raw = {};
-  if (input.name !== undefined) body.name = input.name;
-  if (input.locationId !== undefined) body.location_id = input.locationId;
-  if (input.eventDate !== undefined) body.event_date = input.eventDate;
-  if (input.description !== undefined) body.description = input.description;
-  if (input.confirmationMessage !== undefined)
-    body.confirmation_message = input.confirmationMessage;
-  if (input.previousEditionId !== undefined)
-    body.previous_edition_id = input.previousEditionId;
-  if (input.isOpen !== undefined) body.is_open = input.isOpen;
-  if (input.removeHeaderImage) body.remove_header_image = true;
-  return body;
-}
+type SaveResponse = Envelope & { created?: unknown };
 
-/** The same fields as multipart, for a save that carries a new header image. */
-async function submitMultipart(
+/** JSON through apiRequest, or multipart when a new header image travels with it. */
+async function send(
   path: string,
   token: string,
-  input: Partial<RegistrationFormInput>,
-): Promise<RegistrationFormDetail> {
+  body: Record<string, unknown>,
+  image: RegistrationFormImage | null | undefined,
+): Promise<SaveResponse> {
+  if (!image) {
+    return apiRequest<SaveResponse>(path, { method: "POST", token, body });
+  }
   const form = new FormData();
-  Object.entries(toBody(input)).forEach(([key, value]) => {
-    if (value === null) form.append(key, "");
-    else if (typeof value === "boolean") form.append(key, value ? "1" : "0");
-    else form.append(key, String(value));
-  });
-  form.append("header_image", input.headerImage as unknown as Blob);
+  multipartEntries(body).forEach(([key, value]) => form.append(key, value));
+  form.append("header_image", image as unknown as Blob);
 
+  // A direct fetch, so React Native sets the multipart boundary itself.
   const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
     body: form,
   });
   const data = (await res.json().catch(() => null)) as
-    (Envelope & { errors?: Record<string, string[]> }) | null;
+    (SaveResponse & { errors?: Record<string, string[]> }) | null;
   if (!res.ok) {
     throw new ApiError(
       data?.message || "The form could not be saved. Please try again.",
@@ -291,22 +352,50 @@ async function submitMultipart(
       data,
     );
   }
-  return mapDetail((data?.data ?? {}) as Raw);
+  return data ?? {};
 }
 
-export async function saveRegistrationForm(
+/**
+ * POST /registration-events — creates one form per chosen location in one go.
+ * `form` is the first one created; `createdCount` says how many there were.
+ */
+export async function createRegistrationForms(
   token: string,
-  id: number | null,
-  input: Partial<RegistrationFormInput>,
+  input: RegistrationFormCreateInput,
+): Promise<{ form: RegistrationFormDetail; createdCount: number }> {
+  const res = await send(BASE, token, registrationCreateBody(input), input.headerImage);
+  const created = Array.isArray(res.created) ? res.created.length : 1;
+  return {
+    form: mapDetail((res.data ?? {}) as Raw),
+    createdCount: Math.max(1, created),
+  };
+}
+
+/** POST /registration-events/{id} — send only what changed (see changedFormFields). */
+export async function updateRegistrationForm(
+  token: string,
+  id: number,
+  patch: RegistrationFormUpdate,
 ): Promise<RegistrationFormDetail> {
-  const path = id == null ? BASE : `${BASE}/${id}`;
-  if (input.headerImage) return submitMultipart(path, token, input);
-  const res = await apiRequest<Envelope>(path, {
-    method: "POST",
+  const res = await send(`${BASE}/${id}`, token, registrationUpdateBody(patch), patch.headerImage);
+  return mapDetail((res.data ?? {}) as Raw);
+}
+
+/**
+ * GET /registration-events/event-options — Manage Events events at the
+ * signed-in staff member's locations, each with the forms already linked to it.
+ */
+export async function fetchEventOptions(
+  token: string,
+  id?: number,
+  signal?: AbortSignal,
+): Promise<RegistrationEventOption[]> {
+  const query = id != null ? `?id=${id}` : "";
+  const res = await apiRequest<Envelope>(`${BASE}/event-options${query}`, {
     token,
-    body: toBody(input),
+    signal,
   });
-  return mapDetail((res?.data ?? {}) as Raw);
+  return list((res?.data as Raw | undefined)?.events).map(mapEventOption);
 }
 
 export async function deleteRegistrationForm(

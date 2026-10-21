@@ -15,6 +15,7 @@ import {
   fieldErrorsFrom,
   fileSlug,
   filterOptions,
+  foldLocationErrors,
   formTally,
   headerImageProblem,
   historyButtonLabel,
@@ -49,6 +50,7 @@ const form = (over: Partial<RegistrationFormRow> = {}): RegistrationFormRow => (
   headerImagePath: null,
   locationId: 4,
   locationName: "Brighton | Zap Zone",
+  event: null,
   previousEdition: null,
   nextEdition: null,
   totalEntries: 0,
@@ -172,22 +174,29 @@ describe("display helpers", () => {
 describe("listSummary — the page range against the server's totals", () => {
   it("counts contacts across every page, not just this one", () => {
     assert.equal(
-      listSummary({ currentPage: 2, lastPage: 3, perPage: 25, total: 60 }, 74),
+      listSummary({ currentPage: 2, lastPage: 3, perPage: 25, total: 60 }, 74, true),
       "Showing 26–50 of 60 contacts · 74 entries",
     );
     assert.equal(
-      listSummary({ currentPage: 3, lastPage: 3, perPage: 25, total: 60 }, 74),
+      listSummary({ currentPage: 3, lastPage: 3, perPage: 25, total: 60 }, 74, true),
       "Showing 51–60 of 60 contacts · 74 entries",
     );
     assert.equal(
-      listSummary({ currentPage: 1, lastPage: 1, perPage: 25, total: 1 }, 1),
+      listSummary({ currentPage: 1, lastPage: 1, perPage: 25, total: 1 }, 1, true),
       "Showing 1–1 of 1 contact · 1 entry",
+    );
+  });
+
+  it("drops the form's entry total once a search or filter narrows the list", () => {
+    assert.equal(
+      listSummary({ currentPage: 1, lastPage: 1, perPage: 25, total: 3 }, 74, false),
+      "Showing 1–3 of 3 contacts",
     );
   });
 
   it("says so when nothing matches", () => {
     assert.equal(
-      listSummary({ currentPage: 1, lastPage: 1, perPage: 25, total: 0 }, 12),
+      listSummary({ currentPage: 1, lastPage: 1, perPage: 25, total: 0 }, 12, true),
       "No matching contacts",
     );
   });
@@ -237,16 +246,34 @@ describe("editionOptions — candidates for last year's edition", () => {
 });
 
 describe("validateRegistrationForm — the web form's own checks", () => {
-  it("requires a name, a location and a date", () => {
-    assert.deepEqual(validateRegistrationForm({ name: "  ", locationId: null, eventDate: "" }), {
-      name: "Please give the form a name.",
-      location_id: "Choose a location for this form.",
-      event_date: "Choose the event date.",
-    });
+  it("requires a name, at least one location and a date", () => {
     assert.deepEqual(
-      validateRegistrationForm({ name: "Bash", locationId: 4, eventDate: "2026-10-31" }),
+      validateRegistrationForm({ name: "  ", locationIds: [], eventDate: "", editing: false }),
+      {
+        name: "Please give the form a name.",
+        location_ids: "Choose at least one location.",
+        event_date: "Choose the event date.",
+      },
+    );
+    assert.deepEqual(
+      validateRegistrationForm({ name: "Bash", locationIds: [4, 5], eventDate: "2026-10-31", editing: false }),
       {},
     );
+  });
+
+  it("files a missing location under location_id when editing one form", () => {
+    assert.deepEqual(
+      validateRegistrationForm({ name: "Bash", locationIds: [], eventDate: "2026-10-31", editing: true }),
+      { location_id: "Choose at least one location." },
+    );
+  });
+
+  it("shows a 422 on one of several locations under the location list", () => {
+    assert.deepEqual(foldLocationErrors({ "location_ids.1": "Choose a location from the list." }), {
+      "location_ids.1": "Choose a location from the list.",
+      location_ids: "Choose a location from the list.",
+    });
+    assert.deepEqual(foldLocationErrors({ name: "x" }), { name: "x" });
   });
 });
 
@@ -268,23 +295,30 @@ describe("headerImageProblem — the web's PNG/JPEG/WebP, 8 MB rule", () => {
 });
 
 describe("registrationExportTable — the web's CSV columns", () => {
-  it("writes each entry in the web's order, phone formatted, flags as Yes/No", () => {
-    const table = registrationExportTable([
-      {
-        entryId: 7,
-        registeredAt: "2026-10-01T21:06:00Z",
-        name: "Ann Lee",
-        email: "ann@example.com",
-        phone: "8105889748",
-        contactId: 3,
-        sameContactEntries: 2,
-        isDuplicate: true,
-        returning: false,
-        registeredPreviousEdition: true,
-      },
-    ]);
+  const row = {
+    entryId: 7,
+    registeredAt: "2026-10-01T21:06:00Z",
+    name: "Ann Lee",
+    email: "ann@example.com",
+    phone: "8105889748",
+    contactId: 3,
+    sameContactEntries: 2,
+    isDuplicate: true,
+    returning: false,
+    registeredPreviousEdition: true,
+  };
+
+  it("leaves the last-year column out when no edition is linked", () => {
+    const table = registrationExportTable([row], "");
+    assert.equal(table.headers.length, 9);
+    assert.equal(table.headers[8], "Registered before");
+    assert.equal(table.rows[0].length, 9);
+  });
+
+  it("writes each entry in the web's order, the last-year column named for that edition", () => {
+    const table = registrationExportTable([row], "Halloween Bash (2025)");
     assert.equal(table.headers.length, 10);
-    assert.equal(table.headers[9], "Registered for last year's edition");
+    assert.equal(table.headers[9], "Registered for Halloween Bash (2025)");
     assert.deepEqual(table.rows[0], [
       7,
       "October 1, 2026 at 5:06 PM ET",

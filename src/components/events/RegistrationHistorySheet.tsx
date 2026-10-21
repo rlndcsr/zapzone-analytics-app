@@ -109,7 +109,7 @@ export function RegistrationHistorySheet({
                       {item.eventName}
                     </Text>
                     {item.isCurrentEvent && (
-                      <Chip label="This form" tone="blue" />
+                      <Chip label="This form" tone="gray" />
                     )}
                     {item.isPreviousEdition && (
                       <Chip label={"Last year's edition"} tone="gray" />

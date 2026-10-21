@@ -50,6 +50,17 @@ export const EMAIL_DOMAINS: string[] = [
   "zap-zone.com",
 ];
 
+// Real domains one or two letters from a listed one — never "correct" them (web 64a9eee).
+const KNOWN_VALID_DOMAINS = new Set([
+  "att.com",
+  "gm.com",
+  "ge.com",
+  "hp.com",
+  "hotmail.ca",
+  "live.ca",
+  "yahoo.ca",
+]);
+
 /** Offered as soon as the "@" is typed, before any domain characters. */
 const POPULAR_DOMAINS: string[] = [
   "gmail.com",
@@ -157,7 +168,7 @@ export const suggestEmails = (
     }));
   }
 
-  if (domains.includes(domain)) return [];
+  if (domains.includes(domain) || KNOWN_VALID_DOMAINS.has(domain)) return [];
 
   const prefixed = domains.filter((d) => d.startsWith(domain));
   if (prefixed.length > 0) {

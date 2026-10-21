@@ -35,17 +35,22 @@ import { formatPhoneForDisplay } from "../../lib/phone";
 import {
   DELETE_WARNING,
   REGISTRATIONS_PER_PAGE,
+  canRetryFailure,
   describeFailure,
   duplicateHint,
+  editionLabel,
   emptyListMessage,
   entryWord,
   filterOptions,
+  formatEventDates,
+  hiddenEntriesLink,
   historyButtonLabel,
   listSummary,
   locationDisplayName,
   markRegistrationFormsStale,
   registrationExportTable,
   registrationsCsvFilename,
+  totalEntriesHint,
   type StaffRequestFailure,
 } from "../../lib/registrationForms/registrationForms";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -55,8 +60,8 @@ import {
   exportRegistrations,
   fetchRegistrationForm,
   fetchRegistrations,
-  saveRegistrationForm,
   setRegistrationEntryHidden,
+  updateRegistrationForm,
   type RegistrationCounts,
   type RegistrationEntry,
   type RegistrationFormDetail,
@@ -67,6 +72,9 @@ import {
 import { switchStaffLocation } from "../../services/staffLocationService";
 
 const PRIMARY = "#0644C7";
+
+/** The backend refuses a search longer than this. */
+const MAX_SEARCH = 100;
 
 type IconName = ComponentProps<typeof Feather>["name"];
 
@@ -306,6 +314,7 @@ const RegistrationFormDetails = () => {
         message: "This registration form could not be loaded.",
         unavailable: false,
         switchLocationId: null,
+        status: null,
       });
       setLoadingForm(false);
       return;
@@ -379,7 +388,7 @@ const RegistrationFormDetails = () => {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSearch(searchInput.trim());
+      setSearch(searchInput.trim().slice(0, MAX_SEARCH));
       setPage(1);
     }, 350);
     return () => clearTimeout(timer);
@@ -403,12 +412,25 @@ const RegistrationFormDetails = () => {
       params: { id: String(id) },
     } as never);
 
+  // A copy a year forward, linked back to this form (the editor builds it from `nextFrom`).
+  const startNextEdition = () =>
+    router.push({
+      pathname: "/events/registration-form-editor",
+      params: { nextFrom: String(formId) },
+    } as never);
+
+  const openLinkedEvent = (eventId: number) =>
+    router.push({
+      pathname: "/events/edit-event",
+      params: { id: String(eventId) },
+    } as never);
+
   const toggleOpen = async () => {
     const token = getToken();
     if (!form || !token) return;
     setActing("toggle");
     try {
-      const updated = await saveRegistrationForm(token, form.id, {
+      const updated = await updateRegistrationForm(token, form.id, {
         isOpen: !form.isOpen,
       });
       setForm(updated);
@@ -441,7 +463,7 @@ const RegistrationFormDetails = () => {
           setActing("delete");
           try {
             await deleteRegistrationForm(token, form.id);
-            markRegistrationFormsStale();
+            markRegistrationFormsStale(`Deleted "${form.name}"`);
             router.back();
           } catch (err) {
             notify(
@@ -502,7 +524,10 @@ const RegistrationFormDetails = () => {
     setActing("export");
     try {
       const result = await exportRegistrations(token, form.id);
-      const table = registrationExportTable(result.rows);
+      const table = registrationExportTable(
+        result.rows,
+        editionLabel(form.previousEdition),
+      );
       const csv = toCsv(table.headers, table.rows);
       // Loaded lazily so these native modules never run at app startup.
       const FileSystem = await import("expo-file-system/legacy");
@@ -550,7 +575,10 @@ const RegistrationFormDetails = () => {
       if (router.canDismiss()) router.dismissAll();
       router.replace({
         pathname: "/switch-account",
-        params: { locationName: name },
+        params: {
+          locationName: name,
+          returnTo: `/events/registration-form-details?id=${formId}`,
+        },
       } as never);
     } catch (err) {
       setSwitching(false);
@@ -614,6 +642,18 @@ const RegistrationFormDetails = () => {
               </Text>
             </Pressable>
           )}
+          {failure && canRetryFailure(failure) && (
+            <Pressable
+              onPress={() => {
+                setLoadingForm(true);
+                void loadForm();
+              }}
+              className="px-5 py-3 rounded-xl bg-[#0644C7] active:opacity-90"
+              accessibilityRole="button"
+            >
+              <Text className="text-sm font-semibold text-white">Try again</Text>
+            </Pressable>
+          )}
           <Pressable
             onPress={() => router.back()}
             className="flex-row items-center gap-2 px-5 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
@@ -621,7 +661,7 @@ const RegistrationFormDetails = () => {
           >
             <Feather name="arrow-left" size={15} color={headerIcon} />
             <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Back to registration forms
+              Back to Registration Forms
             </Text>
           </Pressable>
         </View>
@@ -631,7 +671,8 @@ const RegistrationFormDetails = () => {
 
   const tallies = counts ?? form.counts;
   const past = form.status === "past";
-  const previousName = form.previousEdition?.name ?? "";
+  const previousName = editionLabel(form.previousEdition);
+  const unfiltered = filter === "all" && !search;
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -668,6 +709,25 @@ const RegistrationFormDetails = () => {
                 </View>
               )}
             </View>
+            {form.event && (
+              <View className="flex-row flex-wrap items-center gap-x-1.5">
+                <Feather name="check-square" size={14} color="#9CA3AF" />
+                <Text className="text-sm text-gray-600 dark:text-gray-400">
+                  For the event
+                </Text>
+                <Pressable
+                  onPress={() => openLinkedEvent(form.event!.id)}
+                  accessibilityRole="link"
+                >
+                  <Text className="text-sm font-medium text-[#0644C7] dark:text-blue-400">
+                    {form.event.name}
+                  </Text>
+                </Pressable>
+                <Text className="text-sm text-gray-600 dark:text-gray-400">
+                  · {formatEventDates(form.event)}
+                </Text>
+              </View>
+            )}
             {form.previousEdition && (
               <Pressable
                 onPress={() => openEdition(form.previousEdition!.id)}
@@ -696,6 +756,14 @@ const RegistrationFormDetails = () => {
                 disabled={acting !== null}
                 onPress={openEditor}
               />
+              {!form.nextEdition && (
+                <ActionButton
+                  label={"Next year's edition"}
+                  icon="copy"
+                  disabled={acting !== null}
+                  onPress={startNextEdition}
+                />
+              )}
               <ActionButton
                 label={
                   form.isOpen ? "Close registration" : "Reopen registration"
@@ -730,7 +798,7 @@ const RegistrationFormDetails = () => {
               <Tile
                 label="Total entries"
                 value={tallies.totalEntries}
-                hint="Every form submitted, including repeats."
+                hint={totalEntriesHint(tallies)}
               />
               <Tile
                 label="Unique registrations"
@@ -762,6 +830,20 @@ const RegistrationFormDetails = () => {
                 "These numbers count registrations only. They don't show who attended."
               }
             </Text>
+            {tallies.hiddenEntries > 0 && filter !== "hidden" && (
+              <Pressable
+                onPress={() => {
+                  setFilter("hidden");
+                  setPage(1);
+                }}
+                accessibilityRole="button"
+                className="self-start mt-1 py-1"
+              >
+                <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-400">
+                  {hiddenEntriesLink(tallies.hiddenEntries)}
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Registrations */}
@@ -788,6 +870,7 @@ const RegistrationFormDetails = () => {
                 <TextInput
                   value={searchInput}
                   onChangeText={setSearchInput}
+                  maxLength={MAX_SEARCH}
                   placeholder="Search name, email or phone"
                   placeholderTextColor="#9CA3AF"
                   autoCapitalize="none"
@@ -816,7 +899,7 @@ const RegistrationFormDetails = () => {
 
               {pagination && (
                 <Text className="text-xs text-gray-500 dark:text-gray-400">
-                  {listSummary(pagination, tallies.totalEntries)}
+                  {listSummary(pagination, tallies.totalEntries, unfiltered)}
                 </Text>
               )}
             </View>
@@ -845,6 +928,12 @@ const RegistrationFormDetails = () => {
                 <Text className="text-sm text-gray-500 dark:text-gray-400 text-center">
                   {emptyListMessage(filter, search)}
                 </Text>
+                {unfiltered && (
+                  <Text className="text-xs text-gray-400 dark:text-gray-500 text-center mt-1">
+                    Share the QR code or link above. Registrations show up here
+                    as soon as guests submit the form.
+                  </Text>
+                )}
               </View>
             ) : (
               <View style={{ opacity: listLoading ? 0.6 : 1 }}>

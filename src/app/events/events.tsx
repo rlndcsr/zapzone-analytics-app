@@ -152,9 +152,11 @@ const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
 const EventCard = ({
   event,
   onEdit,
+  onRegistrationForm,
 }: {
   event: EventRow;
   onEdit: () => void;
+  onRegistrationForm?: () => void;
 }) => {
   const timeRange = formatTimeRange(event.timeStart, event.timeEnd);
   // a count of separate parties, not people — say so beside the people icon
@@ -206,6 +208,17 @@ const EventCard = ({
           >
             <Feather name="edit-2" size={15} color="#0644C7" />
           </Pressable>
+          {onRegistrationForm && (
+            <Pressable
+              onPress={onRegistrationForm}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`Registration form for ${event.name}`}
+              className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center active:opacity-70"
+            >
+              <Feather name="clipboard" size={15} color="#4B5563" />
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -560,6 +573,14 @@ const Events = () => {
     router.push(`/events/edit-event?id=${event.id}`);
   }, []);
 
+  // Web 64a9eee: one linked form opens it, several list them, none starts a new one.
+  const handleRegistrationForm = useCallback((event: EventRow) => {
+    router.push({
+      pathname: "/events/registration-forms",
+      params: { fromEvent: String(event.id) },
+    } as never);
+  }, []);
+
   const handleDelete = useCallback(
     (event: EventRow) => {
       Alert.alert(
@@ -903,6 +924,11 @@ const Events = () => {
                     onToggleStatus={handleToggleStatus}
                     onEdit={handleEdit}
                     onDelete={handleDelete}
+                    onRegistrationForm={
+                      canManageRegistrationForms
+                        ? handleRegistrationForm
+                        : undefined
+                    }
                   />
                 ) : (
                   paged.map((event) => (
@@ -910,6 +936,11 @@ const Events = () => {
                       key={event.id}
                       event={event}
                       onEdit={() => handleEdit(event)}
+                      onRegistrationForm={
+                        canManageRegistrationForms
+                          ? () => handleRegistrationForm(event)
+                          : undefined
+                      }
                     />
                   ))
                 )}

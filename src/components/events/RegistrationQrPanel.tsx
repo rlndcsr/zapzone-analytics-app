@@ -8,8 +8,8 @@ import {
   kioskUrl,
   locationDisplayName,
   previewUrl,
+  signDateLine,
 } from "../../lib/registrationForms/registrationForms";
-import { formatDateLong } from "../../lib/waivers/returningCustomers";
 import type { RegistrationFormRow } from "../../services/registrationFormsService";
 import type { ToastType } from "../ui/Toast";
 
@@ -131,7 +131,7 @@ export function RegistrationQrPanel({
       const base64 = await readPng();
       if (!base64) throw new Error();
       const where = [
-        formatDateLong(form.eventDate),
+        signDateLine(form),
         form.locationName ? locationDisplayName(form.locationName) : null,
       ]
         .filter(Boolean)
@@ -237,8 +237,11 @@ export function RegistrationQrPanel({
           onPress={() => void preview()}
         />
       </View>
+      {/* Web 64a9eee previews only for a browser signed in to the admin; the app's browser usually isn't. */}
       <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-        Preview shows exactly what guests see but never saves a registration.
+        {
+          "Preview shows exactly what guests see but never saves a registration. It opens in your browser and only previews when you're signed in to the ZapZone admin there; otherwise it shows a note and the real form."
+        }
       </Text>
 
       <View className="mt-4 rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800 p-3 gap-2">

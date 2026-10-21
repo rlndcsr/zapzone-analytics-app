@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,18 +21,41 @@ import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
   DELETE_WARNING,
+  EVENT_NOT_FOUND,
   consumeRegistrationFormsStale,
   describeFailure,
   formTally,
+  formatEventDates,
+  fromEventOutcome,
   locationDisplayName,
+  takeRegistrationFormsNotice,
 } from "../../lib/registrationForms/registrationForms";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDateLong } from "../../lib/waivers/returningCustomers";
 import {
   deleteRegistrationForm,
+  fetchEventOptions,
   fetchRegistrationForms,
+  type RegistrationEventOption,
   type RegistrationFormRow,
 } from "../../services/registrationFormsService";
+
+/** The Manage Events event whose forms the list is narrowed to. */
+type EventFilter = {
+  id: number;
+  name: string;
+  dates: string;
+  locationId: number;
+  venue: string | null;
+};
+
+const filterFrom = (option: RegistrationEventOption): EventFilter => ({
+  id: option.id,
+  name: option.name.trim(),
+  dates: formatEventDates(option),
+  locationId: option.locationId,
+  venue: option.locationName ? locationDisplayName(option.locationName) : null,
+});
 
 const PRIMARY = "#0644C7";
 
@@ -54,6 +77,12 @@ const openEditor = (id?: number) =>
   router.push({
     pathname: "/events/registration-form-editor",
     params: id != null ? { id: String(id) } : {},
+  } as never);
+
+const newFormForEvent = (eventId: number) =>
+  router.push({
+    pathname: "/events/registration-form-editor",
+    params: { fromEvent: String(eventId) },
   } as never);
 
 const FormRow = ({
@@ -102,6 +131,14 @@ const FormRow = ({
           </Text>
         </View>
       </View>
+      {form.event && (
+        <View className="flex-row items-center gap-1">
+          <Feather name="check-square" size={12} color="#9CA3AF" />
+          <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+            Event: {form.event.name} · {formatEventDates(form.event)}
+          </Text>
+        </View>
+      )}
       {form.previousEdition && (
         <Text className="text-xs text-gray-500 dark:text-gray-400">
           Last year: {form.previousEdition.name}
@@ -151,16 +188,38 @@ const RegistrationForms = () => {
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
+  const params = useLocalSearchParams<{ fromEvent?: string }>();
+  const fromEvent = Number(params.fromEvent ?? 0);
+
   const activeLocation = useActiveLocation();
   const activeLocationId =
     activeLocation.id === "all" ? undefined : activeLocation.id;
   const showVenue =
     getCurrentUser()?.role === "company_admin" && activeLocationId == null;
 
+  const [eventFilter, setEventFilter] = useState<EventFilter | null>(null);
+  // Manage Events' button lands here first; the list waits until its event resolves.
+  const [resolving, setResolving] = useState(fromEvent > 0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [toast, showToast] = useTransientAlert<{
+    message: string;
+    type: ToastType;
+  }>();
+  const resolvedEvent = useRef(false);
+  const lastLocation = useRef(activeLocationId);
+
   const loader = useCallback(
     async ({ token }: { token: string }) => {
+      if (resolving) return [];
       try {
-        return await fetchRegistrationForms(token, activeLocationId);
+        const rows = await fetchRegistrationForms(
+          token,
+          eventFilter ? eventFilter.locationId : activeLocationId,
+        );
+        return eventFilter
+          ? rows.filter((form) => form.event?.id === eventFilter.id)
+          : rows;
       } catch (err) {
         throw new Error(
           describeFailure(err, "Registration forms could not be loaded.")
@@ -168,22 +227,62 @@ const RegistrationForms = () => {
         );
       }
     },
-    [activeLocationId],
+    [activeLocationId, eventFilter, resolving],
   );
   const { data: forms, loading, error, refetch } = useAsyncList(loader);
 
-  const [refreshing, setRefreshing] = useState(false);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [toast, showToast] = useTransientAlert<{
-    message: string;
-    type: ToastType;
-  }>();
+  useEffect(() => {
+    if (!fromEvent || resolvedEvent.current) return;
+    resolvedEvent.current = true;
+    const token = getToken();
+    if (!token) {
+      setResolving(false);
+      return;
+    }
+    fetchEventOptions(token, fromEvent)
+      .then((options) => {
+        const outcome = fromEventOutcome(options[0]);
+        if (outcome.kind === "open") {
+          router.replace({
+            pathname: "/events/registration-form-details",
+            params: { id: String(outcome.formId) },
+          } as never);
+        } else if (outcome.kind === "create") {
+          router.replace({
+            pathname: "/events/registration-form-editor",
+            params: { fromEvent: String(fromEvent) },
+          } as never);
+        } else {
+          if (outcome.kind === "list") setEventFilter(filterFrom(options[0]));
+          else showToast({ message: EVENT_NOT_FOUND, type: "info" });
+          setResolving(false);
+        }
+      })
+      .catch((err: unknown) => {
+        const failure = describeFailure(
+          err,
+          "That event's registration forms couldn't be opened. Please try again.",
+        );
+        if (failure.status !== 401 && failure.status !== 403)
+          showToast({ message: failure.message, type: "error" });
+        setResolving(false);
+      });
+  }, [fromEvent, showToast]);
+
+  // Switching the workspace location drops the event filter, as on the web.
+  useEffect(() => {
+    if (lastLocation.current === activeLocationId) return;
+    lastLocation.current = activeLocationId;
+    setEventFilter(null);
+  }, [activeLocationId]);
 
   // A save, toggle or delete elsewhere marks the list stale.
   useFocusEffect(
     useCallback(() => {
       if (consumeRegistrationFormsStale()) void refetch();
-    }, [refetch]),
+      const notice = takeRegistrationFormsNotice();
+      if (notice) showToast({ message: notice, type: "success" });
+    }, [refetch, showToast]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -275,17 +374,49 @@ const RegistrationForms = () => {
               onPress={() => openEditor()}
               className="flex-row items-center justify-center gap-2 mt-4 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
               accessibilityRole="button"
-              accessibilityLabel="New registration form"
+              accessibilityLabel="New Registration Form"
             >
               <Feather name="plus" size={16} color="#FFFFFF" />
               <Text
                 numberOfLines={1}
                 className="shrink-0 text-sm font-semibold text-white"
               >
-                New registration form
+                New Registration Form
               </Text>
             </Pressable>
           </View>
+
+          {eventFilter && (
+            <View className="mb-4 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 gap-2">
+              <Text className="text-sm text-gray-800 dark:text-gray-100">
+                Forms for{" "}
+                <Text className="font-semibold">{eventFilter.name}</Text> ·{" "}
+                {eventFilter.dates}
+                {eventFilter.venue ? ` · ${eventFilter.venue}` : ""}
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
+                <Pressable
+                  onPress={() => newFormForEvent(eventFilter.id)}
+                  accessibilityRole="button"
+                  className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+                >
+                  <Feather name="plus" size={14} color={PRIMARY} />
+                  <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                    New form for this event
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setEventFilter(null)}
+                  accessibilityRole="button"
+                  className="px-3 py-2 rounded-lg active:opacity-70"
+                >
+                  <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-400">
+                    Show all forms
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
           <View
             className="bg-white dark:bg-neutral-900 rounded-2xl overflow-hidden border border-gray-100 dark:border-neutral-800 shadow-sm"
@@ -300,7 +431,7 @@ const RegistrationForms = () => {
               </Text>
             </View>
 
-            {loading && forms.length === 0 ? (
+            {resolving || (loading && forms.length === 0) ? (
               <View className="py-16 items-center">
                 <ActivityIndicator color={PRIMARY} />
               </View>
