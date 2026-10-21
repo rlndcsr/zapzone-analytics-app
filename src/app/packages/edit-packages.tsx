@@ -53,6 +53,10 @@ import {
   canChangeOnlineAvailability,
   EDIT_NOT_APPLIED,
 } from "../../lib/packages/onlineAvailability";
+import {
+  MONTHLY_OCCURRENCES,
+  monthlyPatternLabel,
+} from "../../lib/packages/scheduleDays";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDuration } from "../../lib/time";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
@@ -109,19 +113,6 @@ const WEEKDAYS = [
   "sunday",
 ];
 
-const OCCURRENCES: SelectOption[] = [
-  { label: "First", value: "first" },
-  { label: "Second", value: "second" },
-  { label: "Third", value: "third" },
-  { label: "Fourth", value: "fourth" },
-  { label: "Last", value: "last" },
-];
-
-const WEEKDAY_OPTIONS: SelectOption[] = WEEKDAYS.map((d) => ({
-  label: d[0].toUpperCase() + d.slice(1),
-  value: d,
-}));
-
 const parseNum = (s: string): number | null => {
   const t = s.trim();
   if (!t) return null;
@@ -159,12 +150,13 @@ const toHHMM = (v: string | null): string => (v ? v.substring(0, 5) : "");
 const fileNameOf = (path: string): string =>
   path.split("/").pop() || "Invitation file";
 
+/** Local schedule row; weekly and monthly days are kept apart, like the web's checkboxes. */
 type SchedRow = {
   key: number;
   type: "daily" | "weekly" | "monthly";
   weekDays: string[];
-  occurrence: string;
-  monthlyDay: string;
+  /** "first-saturday" style patterns, as many as the web allows. */
+  monthlyDays: string[];
   start: string;
   end: string;
   interval: string;
@@ -175,11 +167,7 @@ type SchedRow = {
 const toScheduleLike = (s: SchedRow): PackageScheduleLike => ({
   availabilityType: s.type,
   dayConfiguration:
-    s.type === "weekly"
-      ? s.weekDays
-      : s.type === "monthly"
-        ? [`${s.occurrence}-${s.monthlyDay}`]
-        : [],
+    s.type === "weekly" ? s.weekDays : s.type === "monthly" ? s.monthlyDays : [],
   timeSlotStart: s.start || null,
   timeSlotEnd: s.end || null,
   isActive: s.isActive,
@@ -230,19 +218,14 @@ const seedSchedules = (detail: PackageDetail): SchedRow[] =>
       s.availabilityType === "weekly" || s.availabilityType === "monthly"
         ? s.availabilityType
         : "daily";
-    let occurrence = "first";
-    let monthlyDay = "monday";
-    if (type === "monthly" && s.dayConfiguration[0]) {
-      const [occ, day] = s.dayConfiguration[0].split("-");
-      if (occ) occurrence = occ;
-      if (day) monthlyDay = day;
-    }
+    // Every stored day is kept — the old single picker saved only the first
+    // monthly day and silently dropped the rest.
+    const days = s.dayConfiguration.map((d) => d.toLowerCase());
     return {
       key: i,
       type,
-      weekDays: type === "weekly" ? s.dayConfiguration : [],
-      occurrence,
-      monthlyDay,
+      weekDays: type === "weekly" ? days : [],
+      monthlyDays: type === "monthly" ? days : [],
       start: toHHMM(s.timeSlotStart) || "09:00",
       end: toHHMM(s.timeSlotEnd) || "17:00",
       interval: String(s.timeSlotInterval ?? 30),
@@ -559,8 +542,7 @@ const EditPackage = () => {
         key: scheduleKey.current++,
         type: "daily",
         weekDays: [],
-        occurrence: "first",
-        monthlyDay: "monday",
+        monthlyDays: [],
         start: "09:00",
         end: "17:00",
         interval: "30",
@@ -707,7 +689,8 @@ const EditPackage = () => {
         .join(", ");
       return `${days}${window}`;
     }
-    return `${s.occurrence} ${s.monthlyDay}${window}`;
+    if (s.monthlyDays.length === 0) return `No days selected${window}`;
+    return `${s.monthlyDays.map((p) => monthlyPatternLabel(p)).join(", ")}${window}`;
   }, [schedules]);
 
   /**
@@ -753,11 +736,7 @@ const EditPackage = () => {
     schedules.map((s, index) => ({
       availabilityType: s.type,
       dayConfiguration:
-        s.type === "weekly"
-          ? s.weekDays
-          : s.type === "monthly"
-            ? [`${s.occurrence}-${s.monthlyDay}`]
-            : [],
+        s.type === "weekly" ? s.weekDays : s.type === "monthly" ? s.monthlyDays : [],
       timeSlotStart: normalizeTime(s.start) ?? "09:00",
       timeSlotEnd: normalizeTime(s.end) ?? "17:00",
       timeSlotInterval: parseIntOrNull(s.interval) ?? 30,
@@ -796,6 +775,11 @@ const EditPackage = () => {
         return Alert.alert(
           "Pick days",
           "Select at least one day for a weekly schedule.",
+        );
+      if (s.type === "monthly" && s.monthlyDays.length === 0)
+        return Alert.alert(
+          "Pick days",
+          "Select at least one day for a monthly schedule.",
         );
     }
 
@@ -1246,8 +1230,12 @@ const EditPackage = () => {
                             label={t.label}
                             selected={s.type === t.value}
                             onPress={() =>
+                              // A different type starts with no days chosen (web 8198ae3).
+                              t.value !== s.type &&
                               patchSchedule(s.key, {
                                 type: t.value as SchedRow["type"],
+                                weekDays: [],
+                                monthlyDays: [],
                               })
                             }
                           />
@@ -1298,27 +1286,35 @@ const EditPackage = () => {
                     )}
 
                     {s.type === "monthly" && (
-                      <View className="flex-row gap-3">
-                        <View className="flex-1">
-                          <SelectField
-                            label="Occurrence"
-                            value={s.occurrence}
-                            options={OCCURRENCES}
-                            onSelect={(v) =>
-                              patchSchedule(s.key, { occurrence: String(v) })
-                            }
-                          />
-                        </View>
-                        <View className="flex-1">
-                          <SelectField
-                            label="Day"
-                            value={s.monthlyDay}
-                            options={WEEKDAY_OPTIONS}
-                            onSelect={(v) =>
-                              patchSchedule(s.key, { monthlyDay: String(v) })
-                            }
-                          />
-                        </View>
+                      <View>
+                        <SectionLabel>Select Occurrences</SectionLabel>
+                        {MONTHLY_OCCURRENCES.map((occ) => (
+                          <View key={occ}>
+                            <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 capitalize">
+                              {occ}
+                            </Text>
+                            <View className="flex-row flex-wrap">
+                              {WEEKDAYS.map((d) => {
+                                const value = `${occ}-${d}`;
+                                const on = s.monthlyDays.includes(value);
+                                return (
+                                  <Chip
+                                    key={value}
+                                    label={d[0].toUpperCase() + d.slice(1, 3)}
+                                    selected={on}
+                                    onPress={() =>
+                                      patchSchedule(s.key, {
+                                        monthlyDays: on
+                                          ? s.monthlyDays.filter((x) => x !== value)
+                                          : [...s.monthlyDays, value],
+                                      })
+                                    }
+                                  />
+                                );
+                              })}
+                            </View>
+                          </View>
+                        ))}
                       </View>
                     )}
 

@@ -62,8 +62,10 @@ export function usePackages({
   // Only the latest sync may write state (guards against stale responses).
   const requestIdRef = useRef(0);
 
+  // Resolves true once the list holds what the server has now, false when the
+  // load failed — so a caller can say the list is out of date.
   const sync = useCallback(
-    async ({ force = false }: { force?: boolean } = {}) => {
+    async ({ force = false }: { force?: boolean } = {}): Promise<boolean> => {
       const k = cacheKey(locationId, kind);
       const fresh =
         !!cache && cache.key === k && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
@@ -72,7 +74,7 @@ export function usePackages({
         setPackages(cache!.data);
         setError(null);
         setLoading(false);
-        return;
+        return true;
       }
 
       const requestId = ++requestIdRef.current;
@@ -86,7 +88,7 @@ export function usePackages({
           setError("Not authenticated");
           setLoading(false);
         }
-        return;
+        return false;
       }
       const user = getCurrentUser();
 
@@ -118,6 +120,7 @@ export function usePackages({
           setPackages(data);
           setError(null);
         }
+        return true;
       } catch (err) {
         console.error("Packages error:", err);
         if (isCurrent()) {
@@ -126,6 +129,7 @@ export function usePackages({
           );
           if (!cache) setPackages([]);
         }
+        return false;
       } finally {
         if (isCurrent()) setLoading(false);
       }

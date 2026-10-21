@@ -15,6 +15,8 @@ import {
   DUPLICATE_STAYED_ONLINE,
   duplicateBackendOnlyNote,
 } from "../../lib/packages/onlineAvailability";
+import { monthlyPatternLabel } from "../../lib/packages/scheduleDays";
+import { requestErrorMessage } from "../../lib/requestError";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDuration, formatTimeRange } from "../../lib/time";
 import { normalizeCategory } from "../../lib/venueCategories";
@@ -248,7 +250,7 @@ export function PackageActionsSheet({
             } catch (err) {
               Alert.alert(
                 "Delete failed",
-                err instanceof Error ? err.message : "Could not delete package.",
+                requestErrorMessage(err, "Could not delete package."),
               );
             } finally {
               setBusy(false);
@@ -486,7 +488,9 @@ export function PackageActionsSheet({
                               className="bg-[#0644C7] rounded px-2 py-1"
                             >
                               <Text className="text-[10px] font-semibold text-white capitalize">
-                                {day}
+                                {s.availabilityType === "monthly"
+                                  ? monthlyPatternLabel(day)
+                                  : day}
                               </Text>
                             </View>
                           ))}

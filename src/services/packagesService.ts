@@ -1,5 +1,6 @@
 import { apiRequest } from "../lib/api";
 import { importStayedOnline } from "../lib/packages/onlineAvailability";
+import { scheduleDayEntries } from "../lib/packages/scheduleDays";
 
 export type PackageStatus = "active" | "inactive";
 
@@ -390,11 +391,7 @@ export async function fetchPackageDetail(
     schedules: rel(d.availability_schedules).map((s) => ({
       id: Number(s.id),
       availabilityType: str(s.availability_type) || "daily",
-      dayConfiguration: Array.isArray(s.day_configuration)
-        ? (s.day_configuration as unknown[]).filter(
-            (x): x is string => typeof x === "string",
-          )
-        : [],
+      dayConfiguration: scheduleDayEntries(s.day_configuration),
       timeSlotStart: (s.time_slot_start as string) ?? null,
       timeSlotEnd: (s.time_slot_end as string) ?? null,
       timeSlotInterval: numOrNull(s.time_slot_interval),

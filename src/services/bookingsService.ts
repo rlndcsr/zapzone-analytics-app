@@ -7,6 +7,7 @@ import { compareCheckInRows } from "../lib/checkin/checkInOrder";
 import { GUEST_NAME_FALLBACK } from "../lib/bookings/bookingSearch";
 import { newestFirst } from "../lib/bookings/bookingSync";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
+import { scheduleCoversDate, scheduleDayEntries } from "../lib/packages/scheduleDays";
 import { cardLabelFromPayments } from "../lib/payments/cardLabel";
 import { checkoutTokenBody, rememberCheckoutToken } from "../lib/payments/checkoutTokens";
 import { roomIsAvailable } from "../lib/rooms";
@@ -1636,6 +1637,22 @@ export async function createRoom(
   });
 }
 
+/**
+ * The space was created but could not be added to the package. It exists at
+ * the location, so staff must be told rather than shown it as selectable
+ * (web ManualBooking, 8198ae3). `linkError` is the failed link request.
+ */
+export class SpaceNotLinkedError extends Error {
+  constructor(
+    readonly spaceName: string,
+    readonly linkError: unknown,
+  ) {
+    super(`The space "${spaceName}" was created but could not be added to this package.`);
+    this.name = "SpaceNotLinkedError";
+  }
+}
+
+/** POST /api/rooms then /api/packages/room/create; throws SpaceNotLinkedError when only the first worked. */
 export async function createPackageSpace(
   token: string,
   input: { name: string; locationId: number; packageId: number },
@@ -1658,8 +1675,8 @@ export async function createPackageSpace(
       token,
       body: { package_id: input.packageId, room_id: created.id },
     });
-  } catch {
-    // Linking is not fatal; the space exists and stays selectable.
+  } catch (err) {
+    throw new SpaceNotLinkedError(created.name?.trim() || input.name, err);
   }
 
   return {
@@ -1967,52 +1984,12 @@ export type AvailableSlot = {
   minParticipants: number | null;
 };
 
-const WEEKDAY_NAMES = [
-  "sunday",
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-];
-
-function weekdayOccurrence(date: Date): number {
-  return Math.ceil(date.getDate() / 7);
-}
-function isLastWeekdayOccurrence(date: Date): boolean {
-  const next = new Date(date);
-  next.setDate(date.getDate() + 7);
-  return next.getMonth() !== date.getMonth();
-}
-
+/** Whether an active schedule runs on `date` — the server's rule, shared with the web. */
 export function scheduleMatchesDate(
   schedule: PackageAvailabilitySchedule,
   date: Date,
 ): boolean {
-  if (!schedule.isActive) return false;
-  const dayName = WEEKDAY_NAMES[date.getDay()];
-  switch (schedule.availabilityType) {
-    case "daily":
-      return true;
-    case "weekly":
-      return !!schedule.dayConfiguration?.includes(dayName);
-    case "monthly":
-      return !!schedule.dayConfiguration?.some((config) => {
-        const [occurrence, cfgDay] = config.toLowerCase().split("-");
-        if (cfgDay !== dayName) return false;
-        if (occurrence === "last") return isLastWeekdayOccurrence(date);
-        const map: Record<string, number> = {
-          first: 1,
-          second: 2,
-          third: 3,
-          fourth: 4,
-        };
-        return map[occurrence] === weekdayOccurrence(date);
-      });
-    default:
-      return false;
-  }
+  return schedule.isActive && scheduleCoversDate(schedule, date);
 }
 
 /** True when at least one active schedule allows booking on `date` (no schedules → unrestricted). */
@@ -2036,9 +2013,10 @@ export async function fetchPackageAvailabilitySchedules(
   const schedules = res?.data?.schedules ?? [];
   return (Array.isArray(schedules) ? schedules : []).map((s: any) => ({
     availabilityType: s.availability_type ?? "",
-    dayConfiguration: Array.isArray(s.day_configuration)
-      ? s.day_configuration.map((d: string) => String(d).toLowerCase())
-      : null,
+    dayConfiguration:
+      s.day_configuration == null
+        ? null
+        : scheduleDayEntries(s.day_configuration).map((d) => d.toLowerCase()),
     isActive: s.is_active !== false,
     timeSlotStart: s.time_slot_start ?? null,
     timeSlotEnd: s.time_slot_end ?? null,

@@ -71,6 +71,7 @@ import {
   isStaffLoginRefusal,
   STAFF_LOGIN_REFUSED,
 } from "../../lib/packages/onlineAvailability";
+import { requestErrorMessage } from "../../lib/requestError";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import { ApiError } from "../../lib/api";
@@ -107,6 +108,7 @@ import {
   fetchPackageList,
   isDateBookable,
   recordBookingPayment,
+  SpaceNotLinkedError,
   type AvailableSlot,
   type BookablePackage,
   type BookingStatus,
@@ -512,8 +514,16 @@ const ManualBookingScreen = () => {
       );
       setSelectedRoomId(room.id);
       setNewSpaceName("");
-    } catch {
-      Alert.alert("Couldn't add space", "Please try again.");
+    } catch (err) {
+      if (err instanceof SpaceNotLinkedError) {
+        const reason = requestErrorMessage(err.linkError, "");
+        Alert.alert(
+          "Space not added to package",
+          `${err.message}${reason ? ` ${reason}` : ""}`,
+        );
+      } else {
+        Alert.alert("Couldn't add space", requestErrorMessage(err, "Please try again."));
+      }
     } finally {
       setCreatingSpace(false);
     }

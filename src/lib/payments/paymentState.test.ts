@@ -33,6 +33,12 @@ describe("statusAfterPayment — a payment never rewinds a visit", () => {
       status: "confirmed",
     });
   });
+
+  it("keeps a cancelled booking cancelled when a payment is recorded", () => {
+    assert.equal(statusAfterPayment("cancelled"), undefined);
+    assert.deepEqual(bookingUpdateAfterPayment(40, "cancelled"), { amountPaid: 40 });
+    assert.equal("status" in bookingUpdateAfterPayment(40, "cancelled"), false);
+  });
 });
 
 describe("resolvePaymentState — the money cases", () => {

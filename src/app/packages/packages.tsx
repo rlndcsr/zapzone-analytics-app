@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
 } from "react";
@@ -39,6 +40,7 @@ import {
   ONLINE_NOT_APPLIED,
   onlineToggleQuestion,
 } from "../../lib/packages/onlineAvailability";
+import { requestErrorMessage } from "../../lib/requestError";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
@@ -246,6 +248,9 @@ const Packages = () => {
   const [busyAction, setBusyAction] = useState<
     null | "import" | "export" | "delete"
   >(null);
+  // Held from the first tap on Import Packages until it settles, so a double
+  // tap can't open the picker twice and import the file twice (web 8198ae3).
+  const importingRef = useRef(false);
 
   // Filter options derived from the fetched data. Normalized on the way in, so
   // the escape-room difficulties ("Beginner", "Advanced", …) collapse into one
@@ -343,6 +348,12 @@ const Packages = () => {
     setPage(1);
   }, [search, category, activeLocation, sortKey, sortAsc, perPage, backendOnlyFilterOn]);
 
+  // A new workspace location starts with nothing selected, so Delete Packages
+  // can't act on packages the list no longer shows (web 8198ae3).
+  useEffect(() => {
+    setSelected({});
+  }, [activeLocation.id]);
+
   const allSelected =
     filtered.length > 0 && filtered.every((p) => selected[p.id]);
 
@@ -375,7 +386,7 @@ const Packages = () => {
       applyStatus(pkg.id, !next); // revert on failure
       Alert.alert(
         "Update failed",
-        err instanceof Error ? err.message : "Could not update package status.",
+        requestErrorMessage(err, "Could not update package status."),
       );
     } finally {
       setTogglingId(null);
@@ -457,14 +468,18 @@ const Packages = () => {
             setDeletingId(pkg.id);
             try {
               await deletePackage(token, pkg.id);
+              setSelected((prev) => {
+                if (!prev[pkg.id]) return prev;
+                const next = { ...prev };
+                delete next[pkg.id];
+                return next;
+              });
               markPackagesStale();
               await refetch();
             } catch (err) {
               Alert.alert(
                 "Delete failed",
-                err instanceof Error
-                  ? err.message
-                  : "Could not delete package.",
+                requestErrorMessage(err, "Could not delete package."),
               );
             } finally {
               setDeletingId(null);
@@ -496,11 +511,13 @@ const Packages = () => {
 
   // ---- Import Packages (JSON, mirrors the web bulk-import) ----------------
   const runImport = useCallback(async () => {
+    if (importingRef.current) return;
     const token = getToken();
     if (!token) {
       Alert.alert("Not authenticated", "Please sign in again.");
       return;
     }
+    importingRef.current = true;
     try {
       const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
@@ -545,8 +562,14 @@ const Packages = () => {
         importLocationId,
       );
       markPackagesStale();
-      await refetch();
+      const listRefreshed = await refetch();
       setShowMoreSheet(false);
+      // The import already happened, so a list that could not reload must not
+      // read as a failed import — staff would import the file again (web 8198ae3).
+      const refreshNote =
+        listRefreshed || res.imported === 0
+          ? ""
+          : "\n\nThe list could not refresh. Pull down to reload it and see the imported packages - do not import the file again.";
       // The first few reasons, and any backend-only rows the server left online (web 4d165ce).
       const reasons = res.errors.slice(0, 3).join("\n");
       Alert.alert(
@@ -555,14 +578,18 @@ const Packages = () => {
           res.failed ? `, ${res.failed} failed` : ""
         }.${reasons ? `\n\n${reasons}` : ""}${
           res.stayedOnline > 0 ? `\n\n${importStayedOnlineNote(res.stayedOnline)}` : ""
-        }`,
+        }${refreshNote}`,
       );
     } catch (err) {
       Alert.alert(
         "Import failed",
-        err instanceof Error ? err.message : "Could not import packages.",
+        requestErrorMessage(
+          err,
+          "Error importing packages. Please check the format and try again.",
+        ),
       );
     } finally {
+      importingRef.current = false;
       setBusyAction(null);
     }
   }, [importLocationId, refetch]);
@@ -646,9 +673,7 @@ const Packages = () => {
             } catch (err) {
               Alert.alert(
                 "Delete failed",
-                err instanceof Error
-                  ? err.message
-                  : "Could not delete the selected packages.",
+                requestErrorMessage(err, "Could not delete the selected packages."),
               );
             } finally {
               setBusyAction(null);

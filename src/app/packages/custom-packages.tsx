@@ -27,6 +27,7 @@ import {
   onlineToggleDone,
   onlineToggleQuestion,
 } from "../../lib/packages/onlineAvailability";
+import { requestErrorMessage } from "../../lib/requestError";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
@@ -160,9 +161,7 @@ const CustomPackages = () => {
         applyStatus(pkg.id, !next);
         Alert.alert(
           "Update failed",
-          err instanceof Error
-            ? err.message
-            : "Could not update package status.",
+          requestErrorMessage(err, "Could not update package status."),
         );
       } finally {
         setTogglingId(null);
@@ -237,9 +236,7 @@ const CustomPackages = () => {
               } catch (err) {
                 Alert.alert(
                   "Delete failed",
-                  err instanceof Error
-                    ? err.message
-                    : "Could not delete package.",
+                  requestErrorMessage(err, "Could not delete package."),
                 );
               } finally {
                 setDeletingId(null);
