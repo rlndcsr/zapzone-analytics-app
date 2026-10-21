@@ -31,6 +31,7 @@ import {
 import { EventsTable } from "../../components/ui/EventsTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { NavRowCard } from "../../components/ui/NavRowCard";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
@@ -41,7 +42,7 @@ import {
   useEvents,
 } from "../../lib/hooks/useEvents";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteEvent,
   toggleEventStatus,
@@ -291,6 +292,9 @@ const Events = () => {
   const activeLocation = useActiveLocation();
   const activeLocationId =
     activeLocation.id === "all" ? undefined : activeLocation.id;
+  const role = getCurrentUser()?.role;
+  const canManageRegistrationForms =
+    role === "company_admin" || role === "location_manager";
 
   const { events, loading, error, refetch, applyStatus, remove } = useEvents({
     locationId: activeLocationId,
@@ -737,6 +741,20 @@ const Events = () => {
               </View>
             </Pressable>
           </View>
+
+          {/* Web 571430c: Registration Forms sits under Events for admins and managers. */}
+          {canManageRegistrationForms && (
+            <View className="mt-3">
+              <NavRowCard
+                icon="clipboard"
+                title="Registration Forms"
+                desc="Free sign-up forms with a QR code for each event"
+                onPress={() =>
+                  router.push("/events/registration-forms" as never)
+                }
+              />
+            </View>
+          )}
 
           {/* Create New Event — the primary filled CTA, full width (same as the
               Attractions module). Export CSV lives in the header. */}
