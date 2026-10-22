@@ -1,27 +1,34 @@
 import type {
-  RegistrationFormCreateInput,
+  RegistrationEventGroupInput,
   RegistrationFormDetail,
   RegistrationFormUpdate,
 } from "../../services/registrationFormsService.ts";
 
-/** Create: every field, one form per location in `location_ids`. */
-export function registrationCreateBody(
-  input: RegistrationFormCreateInput,
+/** An event create or update: only the keys present, as the web's groupFormData sends them. */
+export function registrationGroupBody(
+  input: RegistrationEventGroupInput,
 ): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    name: input.name,
-    location_ids: input.locationIds,
-    event_date: input.eventDate,
-    description: input.description,
-    confirmation_message: input.confirmationMessage,
-    previous_edition_id: input.previousEditionId,
-    event_id: input.eventId,
-    event_links: input.eventLinks,
-    is_open: input.isOpen,
-  };
+  const body: Record<string, unknown> = {};
+  if (input.name !== undefined) body.name = input.name;
+  if (input.eventDate !== undefined) body.event_date = input.eventDate;
+  if (input.description !== undefined) body.description = input.description;
+  if (input.confirmationMessage !== undefined)
+    body.confirmation_message = input.confirmationMessage;
+  if (input.locationIds !== undefined) body.location_ids = input.locationIds;
+  if (input.eventId !== undefined) body.event_id = input.eventId;
+  if (input.eventLinks) body.event_links = input.eventLinks;
   if (input.useEventImage) body.use_event_image = true;
-  if (input.copyHeaderImageFrom)
-    body.copy_header_image_from = input.copyHeaderImageFrom;
+  if (input.copyHeaderImageFromGroup)
+    body.copy_header_image_from_group = input.copyHeaderImageFromGroup;
+  if (input.previousGroupId !== undefined)
+    body.previous_group_id = input.previousGroupId;
+  if (input.isOpen !== undefined) body.is_open = input.isOpen;
+  if (!input.headerImage && input.removeHeaderImage)
+    body.remove_header_image = true;
+  if (input.confirmRemove) body.confirm_remove = true;
+  if (input.moveFormIds?.length) body.move_form_ids = input.moveFormIds;
+  if (input.expectedLocationIds)
+    body.expected_location_ids = input.expectedLocationIds;
   return body;
 }
 
@@ -31,13 +38,10 @@ export function registrationUpdateBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   if (patch.name !== undefined) body.name = patch.name;
-  if (patch.locationId !== undefined) body.location_id = patch.locationId;
   if (patch.eventDate !== undefined) body.event_date = patch.eventDate;
   if (patch.description !== undefined) body.description = patch.description;
   if (patch.confirmationMessage !== undefined)
     body.confirmation_message = patch.confirmationMessage;
-  if (patch.previousEditionId !== undefined)
-    body.previous_edition_id = patch.previousEditionId;
   if (patch.eventId !== undefined) body.event_id = patch.eventId;
   if (patch.isOpen !== undefined) body.is_open = patch.isOpen;
   if (!patch.headerImage && patch.removeHeaderImage)
@@ -74,31 +78,26 @@ export function multipartEntries(
 
 export type RegistrationFormDraft = {
   name: string;
-  locationId: number | null;
   eventDate: string;
   description: string;
   confirmationMessage: string;
-  previousEditionId: number | null;
   eventId: number | null;
   isOpen: boolean;
 };
 
+/** One location form's edit; a form in an event takes its name from the event, so it's never sent. */
 export function changedFormFields(
   original: RegistrationFormDetail,
   draft: RegistrationFormDraft,
 ): RegistrationFormUpdate {
   const patch: RegistrationFormUpdate = {};
   const name = draft.name.trim();
-  if (name !== original.name) patch.name = name;
-  if (draft.locationId !== null && draft.locationId !== original.locationId)
-    patch.locationId = draft.locationId;
+  if (original.group === null && name !== original.name) patch.name = name;
   if (draft.eventDate !== original.eventDate) patch.eventDate = draft.eventDate;
   if (draft.description !== (original.description ?? ""))
     patch.description = draft.description;
   if (draft.confirmationMessage !== (original.confirmationMessage ?? ""))
     patch.confirmationMessage = draft.confirmationMessage;
-  if (draft.previousEditionId !== (original.previousEdition?.id ?? null))
-    patch.previousEditionId = draft.previousEditionId;
   if (draft.eventId !== (original.event?.id ?? null))
     patch.eventId = draft.eventId;
   if (draft.isOpen !== original.isOpen) patch.isOpen = draft.isOpen;

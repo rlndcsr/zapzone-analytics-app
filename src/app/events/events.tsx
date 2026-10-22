@@ -573,7 +573,7 @@ const Events = () => {
     router.push(`/events/edit-event?id=${event.id}`);
   }, []);
 
-  // Web 64a9eee: one linked form opens it, several list them, none starts a new one.
+  // Web d5a759e: a linked form opens; otherwise a new event starts from it, offering any existing one to join.
   const handleRegistrationForm = useCallback((event: EventRow) => {
     router.push({
       pathname: "/events/registration-forms",

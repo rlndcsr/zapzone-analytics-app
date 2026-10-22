@@ -1,13 +1,19 @@
 import type {
   RegistrationCounts,
   RegistrationEdition,
+  RegistrationEventGroupDetail,
+  RegistrationEventGroupInput,
+  RegistrationEventGroupSummary,
   RegistrationEventOption,
   RegistrationExportRow,
   RegistrationFormDetail,
   RegistrationFormRow,
   RegistrationFormStatus,
+  RegistrationGroupExportRow,
   RegistrationLinkedEvent,
   RegistrationListFilter,
+  RegistrationMergeCandidate,
+  RegistrationOptionGroup,
   RegistrationPagination,
 } from "../../services/registrationFormsService.ts";
 import { formatDateTimeET } from "../date/venueTime.ts";
@@ -24,8 +30,35 @@ export const STATUS_LABELS: Record<RegistrationFormStatus, string> = {
 export const MODULE_UNAVAILABLE_MESSAGE =
   "Registration forms are not set up yet.";
 
-export const DELETE_WARNING = (name: string): string =>
-  `Delete "${name}"? Its QR code and link will stop working and its registrations will no longer count in other forms' history. To stop new sign-ups but keep everything, close the form instead.`;
+/** Removing a form: one among others leaves the event; the last (or an ungrouped) one deletes it. */
+export function formRemoval(form: RegistrationFormDetail): {
+  label: string;
+  message: string;
+  failure: string;
+  leavesEvent: boolean;
+} {
+  const grouped = form.group !== null;
+  const lastForm = grouped && form.groupFormCount <= 1;
+  const eventName = form.group?.name ?? form.name;
+  const venue = form.locationName ? locationDisplayName(form.locationName) : null;
+  const leavesEvent = grouped && !lastForm;
+  return {
+    label: leavesEvent ? "Remove location" : lastForm ? "Delete event" : "Delete form",
+    message: leavesEvent
+      ? `Remove ${venue ?? "this location"} from "${eventName}"? Its QR code and link stop working and its registrations no longer count in other forms' history.`
+      : `Delete "${eventName}"? Its form, QR code and registration list will be removed.`,
+    failure: leavesEvent ? "The location could not be removed." : "The event could not be deleted.",
+    leavesEvent,
+  };
+}
+
+const plural = (count: number, word: string): string =>
+  `${count} ${word}${count === 1 ? "" : "s"}`;
+
+export const groupDeleteWarning = (group: RegistrationEventGroupDetail): string => {
+  const count = group.locationFormsTotal;
+  return `Delete "${group.name}"? Its ${plural(count, "location form")}, QR code${count === 1 ? "" : "s"} and registration list${count === 1 ? "" : "s"} will be removed.`;
+};
 
 export const REGISTRATIONS_PER_PAGE = 25;
 
@@ -102,6 +135,10 @@ export function locationDisplayName(name: string): string {
   return parts[0] || name;
 }
 
+/** "Brighton (Zap Zone)" → "Brighton", for breadcrumbs and per-location copy. */
+export const shortVenueName = (name: string | null): string | null =>
+  name ? locationDisplayName(name).replace(/\s*\(.*\)\s*$/, "") : null;
+
 export const kioskUrl = (publicUrl: string): string => `${publicUrl}?kiosk=1`;
 
 export const previewUrl = (publicUrl: string): string =>
@@ -110,11 +147,8 @@ export const previewUrl = (publicUrl: string): string =>
 export const entryWord = (count: number): string =>
   count === 1 ? "entry" : "entries";
 
-export const formTally = (form: RegistrationFormRow): string =>
-  `${form.totalEntries} total ${entryWord(form.totalEntries)} · ${form.uniqueRegistrations} unique`;
-
 export const duplicateHint = (counts: RegistrationCounts): string =>
-  `${counts.duplicateGroups} group${counts.duplicateGroups === 1 ? "" : "s"} covering ${counts.entriesInDuplicateGroups} ${entryWord(counts.entriesInDuplicateGroups)}.`;
+  `${plural(counts.duplicateGroups, "contact")} with multiple entries.`;
 
 /** The form's entry total sits beside the page range only when nothing narrows the list. */
 export function listSummary(
@@ -182,35 +216,80 @@ export function filterOptions(
   ];
 }
 
-export function editionOptions(
-  forms: RegistrationFormRow[],
-  formId: number | null,
-  eventDate: string,
-  previousEditionId: number | null,
-): RegistrationFormRow[] {
-  return forms
-    .filter((f) => f.id !== formId)
-    .filter(
-      (f) =>
-        !eventDate || f.eventDate < eventDate || f.id === previousEditionId,
-    )
-    .sort((a, b) => b.eventDate.localeCompare(a.eventDate));
-}
-
-/** The web form's own checks before it sends anything. */
+/** A location form's own checks; a form in an event takes its name from the event. */
 export function validateRegistrationForm(input: {
   name: string;
-  locationIds: number[];
   eventDate: string;
-  editing: boolean;
+  grouped: boolean;
 }): Record<string, string> {
   const errors: Record<string, string> = {};
-  if (!input.name.trim()) errors.name = "Please give the form a name.";
-  if (input.locationIds.length === 0)
-    errors[input.editing ? "location_id" : "location_ids"] =
-      "Choose at least one location.";
+  if (!input.grouped && !input.name.trim()) errors.name = "Please give the form a name.";
   if (!input.eventDate) errors.event_date = "Choose the event date.";
   return errors;
+}
+
+export type RegistrationEventMode = "create" | "edit" | "add";
+
+/** The event editor's checks before it sends anything. */
+export function validateRegistrationEvent(input: {
+  mode: RegistrationEventMode;
+  name: string;
+  locationIds: number[];
+  addedCount: number;
+  eventDate: string;
+}): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const adding = input.mode === "add";
+  if (!adding && !input.name.trim()) errors.name = "Please give the event a name.";
+  if (input.locationIds.length === 0) errors.location_ids = "Choose at least one location.";
+  if (adding && input.addedCount === 0) errors.location_ids = "Tick the locations to add.";
+  if (!adding && !input.eventDate) errors.event_date = "Choose the event date.";
+  return errors;
+}
+
+/** The year picker: every year with events, plus this year and the one shown, newest first. */
+export const yearChoices = (years: number[], thisYear: number, year: number): number[] =>
+  Array.from(new Set([...years, thisYear, year])).sort((a, b) => b - a);
+
+/** One location's name for a single-location event, otherwise a count. */
+export function venueSummary(names: string[], count: number): string {
+  if (count === 1 && names.length === 1) return locationDisplayName(names[0]);
+  return plural(count, "location form");
+}
+
+/** Whether the event page shows every location in the event or only the user's. */
+export function groupScope(group: RegistrationEventGroupDetail): {
+  allLocations: boolean;
+  soleVenue: string | null;
+  label: string;
+} {
+  const allLocations = group.forms.length === group.locationFormsTotal;
+  const only = group.forms.length === 1 ? group.forms[0].locationName : null;
+  const soleVenue = only ? locationDisplayName(only) : null;
+  return {
+    allLocations,
+    soleVenue,
+    label: allLocations
+      ? "All participating locations"
+      : soleVenue
+        ? `${soleVenue} only`
+        : `${group.forms.length} of your locations`,
+  };
+}
+
+/** "Last year's event" choices: earlier events (plus the current pick), latest first. */
+export function previousGroupChoices(
+  options: RegistrationEventGroupSummary[],
+  groupId: number | null,
+  eventDate: string,
+  previousGroupId: number | null,
+): RegistrationEventGroupSummary[] {
+  const unique = new Map<number, RegistrationEventGroupSummary>();
+  options.forEach((option) => unique.set(option.id, option));
+  return Array.from(unique.values())
+    .filter((option) => option.id !== groupId)
+    .filter((option) => !eventDate || option.eventDate < eventDate || option.id === previousGroupId)
+    .sort((a, b) => b.eventDate.localeCompare(a.eventDate));
 }
 
 /** A 422 on one of several locations (`location_ids.2`) shows under the list. */
@@ -279,8 +358,37 @@ export function registrationExportTable(
   };
 }
 
-export const registrationsCsvFilename = (formName: string, today: string) =>
-  `${fileSlug(formName, "registrations")}-registrations-${today}.csv`;
+export const registrationsCsvFilename = (
+  formName: string,
+  locationName: string | null,
+  today: string,
+) => {
+  const venue = locationName ? `${fileSlug(locationName, "location")}-` : "";
+  return `${fileSlug(formName, "registrations")}-${venue}registrations-${today}.csv`;
+};
+
+/** The web's event CSV: the form columns led by each entry's location. */
+export function groupExportTable(
+  rows: RegistrationGroupExportRow[],
+  hasPreviousGroup: boolean,
+): { headers: string[]; rows: (string | number)[][] } {
+  const formTable = registrationExportTable(rows, "");
+  return {
+    headers: [
+      "Location",
+      ...formTable.headers,
+      ...(hasPreviousGroup ? ["Registered for last year's event"] : []),
+    ],
+    rows: rows.map((row, index) => [
+      row.locationName ? locationDisplayName(row.locationName) : "",
+      ...formTable.rows[index],
+      ...(hasPreviousGroup ? [yesNo(row.registeredPreviousEdition)] : []),
+    ]),
+  };
+}
+
+export const groupCsvFilename = (eventName: string, today: string) =>
+  `${fileSlug(eventName, "event")}-registrations-${today}.csv`;
 
 /* ------------------------------------------------ linking to Manage Events -- */
 
@@ -457,34 +565,248 @@ export function nextYearDate(value: string): string {
   return `${Number(match[1]) + 1}-${match[2]}-${day}`;
 }
 
-export type RegistrationFormPrefill = {
+export type RegistrationEventPrefill = {
   name: string;
-  locationIds: number[];
   eventDate: string;
   description: string;
   confirmationMessage: string;
-  previousEditionId: number;
-  copyHeaderImageFrom: number | null;
+  locationIds: number[];
+  previousGroupId: number;
+  previousGroupName: string;
+  copyHeaderFromGroup: number | null;
   headerImagePath: string | null;
 };
 
-/** "Next year's edition": the form copied a year forward, linked back to it, at its location. */
-export function nextEditionPrefill(form: RegistrationFormDetail): RegistrationFormPrefill {
-  const shifted = yearShift(form.name, 1);
+/** "Next year's event": copied a year forward at the same locations and linked back to this one. */
+export function nextEventPrefill(group: RegistrationEventGroupDetail): RegistrationEventPrefill {
+  const shifted = yearShift(group.name, 1);
   return {
     name:
-      shifted !== form.name
+      shifted !== group.name
         ? shifted
-        : `${form.name} ${Number(form.eventDate.slice(0, 4)) + 1}`,
-    locationIds: [form.locationId],
-    eventDate: nextYearDate(form.eventDate),
-    description: form.description ?? "",
-    confirmationMessage: form.confirmationMessage ?? "",
-    previousEditionId: form.id,
-    copyHeaderImageFrom: form.headerImagePath ? form.id : null,
-    headerImagePath: form.headerImagePath,
+        : `${group.name} ${Number(group.eventDate.slice(0, 4)) + 1}`,
+    eventDate: nextYearDate(group.eventDate),
+    description: group.description ?? "",
+    confirmationMessage: group.confirmationMessage ?? "",
+    locationIds: group.forms.map((form) => form.locationId),
+    previousGroupId: group.id,
+    previousGroupName: group.name,
+    copyHeaderFromGroup: group.headerImagePath ? group.id : null,
+    headerImagePath: group.headerImagePath,
   };
 }
+
+/** Every form's open flag: all open, or a mix the editor shows as undecided. */
+export function groupOpenState(group: RegistrationEventGroupDetail): {
+  allOpen: boolean;
+  mixedOpen: boolean;
+} {
+  const states = group.forms.map((form) => form.isOpen);
+  return {
+    allOpen: states.length > 0 && states.every(Boolean),
+    mixedOpen: states.some(Boolean) && states.some((open) => !open),
+  };
+}
+
+/** The server lists the best merge candidate first; one per location. */
+export function candidatesByLocation(
+  candidates: RegistrationMergeCandidate[],
+): Map<number, RegistrationMergeCandidate> {
+  const byLocation = new Map<number, RegistrationMergeCandidate>();
+  candidates.forEach((candidate) => {
+    if (!byLocation.has(candidate.locationId)) byLocation.set(candidate.locationId, candidate);
+  });
+  return byLocation;
+}
+
+export type RegistrationLocationChange = {
+  /** The full set of locations wanted. */
+  locationIds: number[];
+  /** Each new location's own Manage Events event. */
+  eventLinks: Record<number, number>;
+  /** Existing forms moved in instead of new ones. */
+  moveFormIds: number[];
+};
+
+/** Adding or removing locations: the whole set, checked against what the screen showed. */
+export function groupAddInput(
+  group: RegistrationEventGroupDetail,
+  change: RegistrationLocationChange,
+): RegistrationEventGroupInput {
+  return {
+    locationIds: change.locationIds,
+    expectedLocationIds: group.forms.map((form) => form.locationId),
+    eventLinks: change.eventLinks,
+    ...(change.moveFormIds.length > 0 ? { moveFormIds: change.moveFormIds } : {}),
+  };
+}
+
+export type RegistrationEventDraft = RegistrationLocationChange & {
+  name: string;
+  eventDate: string;
+  description: string;
+  confirmationMessage: string;
+  previousGroupId: number | null;
+  isOpen: boolean;
+  /** Open/closed is only sent once staff touch it, so a mix of states survives a save. */
+  openTouched: boolean;
+};
+
+/** Edit event: only what changed, so a stale screen can't undo someone else's edit. */
+export function groupEditInput(
+  group: RegistrationEventGroupDetail,
+  draft: RegistrationEventDraft,
+): RegistrationEventGroupInput {
+  const input: RegistrationEventGroupInput = {};
+  const name = draft.name.trim();
+  if (name !== group.name) input.name = name;
+  if (draft.eventDate !== group.eventDate) input.eventDate = draft.eventDate;
+  if (draft.description !== (group.description ?? "")) input.description = draft.description;
+  if (draft.confirmationMessage !== (group.confirmationMessage ?? ""))
+    input.confirmationMessage = draft.confirmationMessage;
+  if (draft.previousGroupId !== (group.previousGroup?.id ?? null))
+    input.previousGroupId = draft.previousGroupId;
+  const existing = group.forms.map((form) => form.locationId);
+  const changedVenues =
+    draft.locationIds.some((id) => !existing.includes(id)) ||
+    existing.some((id) => !draft.locationIds.includes(id));
+  if (changedVenues) Object.assign(input, groupAddInput(group, draft));
+  const { allOpen, mixedOpen } = groupOpenState(group);
+  if (draft.openTouched && (mixedOpen || draft.isOpen !== allOpen)) input.isOpen = draft.isOpen;
+  return input;
+}
+
+/** What the amber note says happens to a moved form's old event. */
+export function moveSourceLine(
+  candidate: RegistrationMergeCandidate,
+  move: boolean,
+  movingFromSameGroup: number,
+  place: string,
+): string | null {
+  if (!candidate.groupName) return null;
+  const source = `“${candidate.groupName}”${candidate.groupEventDate ? ` (${formatDateLong(candidate.groupEventDate)})` : ""}`;
+  if (!move) return `${place} will then have two forms: the existing one stays in the other event ${source}.`;
+  const staying = candidate.groupLocationForms - movingFromSameGroup;
+  return staying <= 0
+    ? `Its other event ${source} will be merged into this one.`
+    : `It's part of the other event ${source}; ${staying} of its ${candidate.groupLocationForms} location forms will stay there.`;
+}
+
+/** The existing event to offer joining: one that won't split another, then the widest reach, then the biggest. */
+export function existingGroupFor(
+  source: RegistrationEventOption,
+  listedIds: number[],
+  options: RegistrationEventOption[],
+  today: string,
+  tickedIds: number[],
+): RegistrationOptionGroup | null {
+  const related = [
+    source,
+    ...listedIds
+      .filter((id) => id !== source.locationId)
+      .map((id) => matchingEventAt(source, id, options, today)),
+  ];
+  const found = new Map<number, RegistrationOptionGroup>();
+  related.forEach((option) =>
+    option?.registrationGroups.forEach((candidate) => {
+      if (!found.has(candidate.id)) found.set(candidate.id, candidate);
+    }),
+  );
+  if (found.size === 0) return null;
+  const ticked = new Set(tickedIds);
+  const groups = Array.from(found.values());
+  const reach = (candidate: RegistrationOptionGroup) =>
+    candidate.forms.filter((form) => !ticked.has(form.locationId)).length;
+  const splitsOther = (candidate: RegistrationOptionGroup) =>
+    groups.some(
+      (other) =>
+        other.id !== candidate.id &&
+        other.forms.some(
+          (form) =>
+            ticked.has(form.locationId) &&
+            form.eventId === null &&
+            !candidate.forms.some((own) => own.locationId === form.locationId),
+        ) &&
+        other.forms.some((form) => !ticked.has(form.locationId) || form.eventId !== null),
+    );
+  const safe = new Set(groups.filter((candidate) => !splitsOther(candidate)).map((c) => c.id));
+  return [...groups].sort(
+    (a, b) =>
+      Number(safe.has(b.id)) - Number(safe.has(a.id)) ||
+      reach(b) - reach(a) ||
+      b.forms.length - a.forms.length,
+  )[0];
+}
+
+/** Ticked locations against an existing event: which can join, which have an unlinked form there, which are in. */
+export function groupSuggestion(
+  group: RegistrationOptionGroup,
+  tickedIds: number[],
+  linkFor: (locationId: number) => RegistrationEventOption | null,
+): {
+  joinVenues: number[];
+  unlinked: { locationId: number; formId: number; eventId: number; formDate: string }[];
+  already: { locationId: number; formId: number }[];
+} {
+  const formAt = (id: number) => group.forms.find((form) => form.locationId === id) ?? null;
+  const joinVenues = tickedIds.filter((id) => {
+    if (formAt(id)) return false;
+    const link = linkFor(id);
+    return !link || link.registrationFormIds.length === 0;
+  });
+  const unlinked = tickedIds.flatMap((id) => {
+    const form = formAt(id);
+    const link = linkFor(id);
+    return form && form.eventId === null && link && link.registrationFormIds.length === 0
+      ? [{ locationId: id, formId: form.id, eventId: link.id, formDate: form.eventDate }]
+      : [];
+  });
+  const already = tickedIds.flatMap((id) => {
+    const form = formAt(id);
+    if (!form || unlinked.some((item) => item.locationId === id)) return [];
+    const link = linkFor(id);
+    return link && link.registrationFormIds.length > 0 ? [] : [{ locationId: id, formId: form.id }];
+  });
+  return { joinVenues, unlinked, already };
+}
+
+/** Joining an existing event: the locations not in it yet, or who's already there. */
+export function pendingAddLocations(
+  group: RegistrationEventGroupDetail,
+  locationIds: number[],
+): { fresh: number[]; alreadyMessage: string | null } {
+  const inEvent = new Set(group.forms.map((form) => form.locationId));
+  const fresh = locationIds.filter((id) => !inEvent.has(id));
+  if (fresh.length > 0) return { fresh, alreadyMessage: null };
+  const names = group.forms
+    .filter((form) => locationIds.includes(form.locationId))
+    .map((form) => (form.locationName ? locationDisplayName(form.locationName) : "That location"));
+  return {
+    fresh,
+    alreadyMessage: `${names.join(", ") || "That location"} ${names.length > 1 ? "are" : "is"} already in this event.`,
+  };
+}
+
+/** `1:5,2:7` ⇄ { 1: 5, 2: 7 } — event links carried in a route param. */
+export const encodeEventLinks = (links: Record<number, number>): string =>
+  Object.entries(links)
+    .map(([locationId, eventId]) => `${locationId}:${eventId}`)
+    .join(",");
+
+export function decodeEventLinks(value: string | undefined): Record<number, number> {
+  const links: Record<number, number> = {};
+  (value ?? "").split(",").forEach((pair) => {
+    const [locationId, eventId] = pair.split(":").map(Number);
+    if (locationId > 0 && eventId > 0) links[locationId] = eventId;
+  });
+  return links;
+}
+
+export const decodeIds = (value: string | undefined): number[] =>
+  (value ?? "")
+    .split(",")
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0);
 
 /** The QR sign's date: the linked event's span when the form closes on its last day. */
 export function signDateLine(form: RegistrationFormRow): string {
@@ -500,17 +822,17 @@ export function signDateLine(form: RegistrationFormRow): string {
 export type FromEventOutcome =
   | { kind: "missing" }
   | { kind: "open"; formId: number }
-  | { kind: "list" }
   | { kind: "create" };
 
-/** Manage Events' Registration form button: one form opens, several list, none creates. */
+/** Manage Events' Registration form button (web d5a759e): the newest linked form opens, else a new event starts. */
 export function fromEventOutcome(
   option: RegistrationEventOption | undefined,
 ): FromEventOutcome {
   if (!option) return { kind: "missing" };
   const linked = option.registrationFormIds;
-  if (linked.length === 1) return { kind: "open", formId: linked[0] };
-  return linked.length > 1 ? { kind: "list" } : { kind: "create" };
+  return linked.length > 0
+    ? { kind: "open", formId: linked[linked.length - 1] }
+    : { kind: "create" };
 }
 
 export const EVENT_NOT_FOUND =

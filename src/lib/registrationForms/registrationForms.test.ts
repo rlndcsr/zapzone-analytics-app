@@ -1,22 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type {
-  RegistrationCounts,
-  RegistrationFormRow,
-} from "../../services/registrationFormsService.ts";
+import type { RegistrationCounts } from "../../services/registrationFormsService.ts";
 import {
   MODULE_UNAVAILABLE_MESSAGE,
   consumeRegistrationFormsStale,
   describeFailure,
   duplicateHint,
-  editionOptions,
   emptyListMessage,
   fieldErrorsFrom,
   fileSlug,
   filterOptions,
   foldLocationErrors,
-  formTally,
   headerImageProblem,
   historyButtonLabel,
   kioskUrl,
@@ -36,27 +31,6 @@ const apiError = (
   body?: unknown,
   fieldErrors?: Record<string, string[]>,
 ) => Object.assign(new Error(message), { status, body, fieldErrors });
-
-const form = (over: Partial<RegistrationFormRow> = {}): RegistrationFormRow => ({
-  id: 1,
-  name: "Halloween Bash 2026",
-  publicCode: "abc12345",
-  publicUrl: "https://zap.example/register/abc12345",
-  eventDate: "2026-10-31",
-  status: "open",
-  isOpen: true,
-  description: null,
-  confirmationMessage: null,
-  headerImagePath: null,
-  locationId: 4,
-  locationName: "Brighton | Zap Zone",
-  event: null,
-  previousEdition: null,
-  nextEdition: null,
-  totalEntries: 0,
-  uniqueRegistrations: 0,
-  ...over,
-});
 
 const counts = (over: Partial<RegistrationCounts> = {}): RegistrationCounts => ({
   totalEntries: 0,
@@ -143,19 +117,21 @@ describe("display helpers", () => {
     assert.equal(fileSlug("Halloween Bash 2026!", "registrations"), "halloween-bash-2026");
     assert.equal(fileSlug("!!!", "registrations"), "registrations");
     assert.equal(
-      registrationsCsvFilename("Halloween Bash", "2026-10-21"),
+      registrationsCsvFilename("Halloween Bash", null, "2026-10-21"),
       "halloween-bash-registrations-2026-10-21.csv",
     );
   });
 
-  it("tallies a form's list row from the server's totals", () => {
-    assert.equal(formTally(form({ totalEntries: 1, uniqueRegistrations: 1 })), "1 total entry · 1 unique");
-    assert.equal(formTally(form({ totalEntries: 3, uniqueRegistrations: 1 })), "3 total entries · 1 unique");
+  it("names a location form's CSV after its location too", () => {
+    assert.equal(
+      registrationsCsvFilename("Halloween Bash", "Brighton | Zap Zone", "2026-10-21"),
+      "halloween-bash-brighton-zap-zone-registrations-2026-10-21.csv",
+    );
   });
 
   it("describes the same-contact groups", () => {
-    assert.equal(duplicateHint(counts({ duplicateGroups: 1, entriesInDuplicateGroups: 1 })), "1 group covering 1 entry.");
-    assert.equal(duplicateHint(counts({ duplicateGroups: 2, entriesInDuplicateGroups: 5 })), "2 groups covering 5 entries.");
+    assert.equal(duplicateHint(counts({ duplicateGroups: 1, entriesInDuplicateGroups: 1 })), "1 contact with multiple entries.");
+    assert.equal(duplicateHint(counts({ duplicateGroups: 2, entriesInDuplicateGroups: 5 })), "2 contacts with multiple entries.");
   });
 
   it("labels the history button with the other forms", () => {
@@ -218,54 +194,17 @@ describe("filterOptions — the list's Show dropdown", () => {
   });
 });
 
-describe("editionOptions — candidates for last year's edition", () => {
-  const forms = [
-    form({ id: 1, name: "Halloween 2024", eventDate: "2024-10-31" }),
-    form({ id: 2, name: "Halloween 2025", eventDate: "2025-10-31" }),
-    form({ id: 3, name: "Halloween 2026", eventDate: "2026-10-31" }),
-    form({ id: 4, name: "Christmas 2026", eventDate: "2026-12-24" }),
-  ];
-
-  it("lists earlier forms only, newest first, never the form itself", () => {
+describe("validateRegistrationForm — one location form's own checks", () => {
+  it("requires a name and a date on a form that isn't in an event", () => {
     assert.deepEqual(
-      editionOptions(forms, 3, "2026-10-31", null).map((f) => f.id),
-      [2, 1],
+      validateRegistrationForm({ name: "  ", eventDate: "", grouped: false }),
+      { name: "Please give the form a name.", event_date: "Choose the event date." },
     );
+    assert.deepEqual(validateRegistrationForm({ name: "Bash", eventDate: "2026-10-31", grouped: false }), {});
   });
 
-  it("keeps the current pick listed even if the date moved before it", () => {
-    assert.deepEqual(
-      editionOptions(forms, 3, "2025-01-01", 2).map((f) => f.id),
-      [2, 1],
-    );
-  });
-
-  it("lists every other form until a date is chosen", () => {
-    assert.deepEqual(editionOptions(forms, null, "", null).map((f) => f.id), [4, 3, 2, 1]);
-  });
-});
-
-describe("validateRegistrationForm — the web form's own checks", () => {
-  it("requires a name, at least one location and a date", () => {
-    assert.deepEqual(
-      validateRegistrationForm({ name: "  ", locationIds: [], eventDate: "", editing: false }),
-      {
-        name: "Please give the form a name.",
-        location_ids: "Choose at least one location.",
-        event_date: "Choose the event date.",
-      },
-    );
-    assert.deepEqual(
-      validateRegistrationForm({ name: "Bash", locationIds: [4, 5], eventDate: "2026-10-31", editing: false }),
-      {},
-    );
-  });
-
-  it("files a missing location under location_id when editing one form", () => {
-    assert.deepEqual(
-      validateRegistrationForm({ name: "Bash", locationIds: [], eventDate: "2026-10-31", editing: true }),
-      { location_id: "Choose at least one location." },
-    );
+  it("never asks for a name on a form that takes it from its event", () => {
+    assert.deepEqual(validateRegistrationForm({ name: "", eventDate: "2026-10-31", grouped: true }), {});
   });
 
   it("shows a 422 on one of several locations under the location list", () => {

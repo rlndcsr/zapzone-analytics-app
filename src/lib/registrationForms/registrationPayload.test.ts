@@ -5,7 +5,7 @@ import type { RegistrationFormDetail } from "../../services/registrationFormsSer
 import {
   changedFormFields,
   multipartEntries,
-  registrationCreateBody,
+  registrationGroupBody,
   registrationUpdateBody,
   type RegistrationFormDraft,
 } from "./registrationPayload.ts";
@@ -23,6 +23,7 @@ const original: RegistrationFormDetail = {
   headerImagePath: null,
   locationId: 4,
   locationName: "Brighton | Zap Zone",
+  group: null,
   event: { id: 7, name: "Halloween Bash", startDate: "2026-10-31", endDate: "2026-10-31" },
   previousEdition: { id: 30, name: "Halloween Bash", eventDate: "2025-10-31" },
   nextEdition: null,
@@ -38,16 +39,16 @@ const original: RegistrationFormDetail = {
     hiddenEntries: 0,
   },
   locationLocked: false,
+  canManageEvent: true,
+  groupFormCount: 1,
 };
 
 /** The editor as loaded from `original`, before any change. */
 const untouched: RegistrationFormDraft = {
   name: "Halloween Bash",
-  locationId: 4,
   eventDate: "2026-10-31",
   description: "",
   confirmationMessage: "See you at 6!",
-  previousEditionId: 30,
   eventId: 7,
   isOpen: true,
 };
@@ -72,23 +73,29 @@ describe("changedFormFields — an edit sends only what changed", () => {
     assert.deepEqual(changedFormFields(original, { ...untouched, name: "  Halloween Bash  " }), {});
   });
 
-  it("sends a cleared link or edition as an explicit null", () => {
-    const patch = changedFormFields(original, { ...untouched, eventId: null, previousEditionId: null });
-    assert.deepEqual(patch, { eventId: null, previousEditionId: null });
-    assert.deepEqual(registrationUpdateBody(patch), { event_id: null, previous_edition_id: null });
+  it("sends a cleared event link as an explicit null", () => {
+    const patch = changedFormFields(original, { ...untouched, eventId: null });
+    assert.deepEqual(patch, { eventId: null });
+    assert.deepEqual(registrationUpdateBody(patch), { event_id: null });
   });
 
-  it("sends a new location, date and texts", () => {
+  it("sends a new date and texts", () => {
     assert.deepEqual(
       changedFormFields(original, {
         ...untouched,
-        locationId: 5,
         eventDate: "2026-11-01",
         description: "Costumes",
         confirmationMessage: "",
       }),
-      { locationId: 5, eventDate: "2026-11-01", description: "Costumes", confirmationMessage: "" },
+      { eventDate: "2026-11-01", description: "Costumes", confirmationMessage: "" },
     );
+  });
+
+  it("never renames a form in an event, which the backend refuses", () => {
+    const grouped = { ...original, group: { id: 9, name: "Halloween Bash", eventDate: "2026-10-31" } };
+    assert.deepEqual(changedFormFields(grouped, { ...untouched, name: "Spooky Night", isOpen: false }), {
+      isOpen: false,
+    });
   });
 });
 
@@ -108,40 +115,62 @@ describe("registrationUpdateBody", () => {
   });
 });
 
-describe("registrationCreateBody — one form per location", () => {
-  const input = {
+describe("registrationGroupBody — an event and its location forms", () => {
+  const create = {
     name: "Halloween Bash",
-    locationIds: [1, 2],
     eventDate: "2026-10-31",
     description: "",
     confirmationMessage: "",
-    previousEditionId: null,
+    locationIds: [1, 2],
     eventId: 7,
     eventLinks: { 1: 7, 2: 9 },
     useEventImage: false,
-    copyHeaderImageFrom: null,
+    copyHeaderImageFromGroup: null,
+    previousGroupId: 12,
     isOpen: true,
     headerImage: null,
   };
 
-  it("sends the locations, the source event and each location's own event", () => {
-    assert.deepEqual(registrationCreateBody(input), {
+  it("sends the locations, the source event, each location's own event and last year's event", () => {
+    assert.deepEqual(registrationGroupBody(create), {
       name: "Halloween Bash",
-      location_ids: [1, 2],
       event_date: "2026-10-31",
       description: "",
       confirmation_message: "",
-      previous_edition_id: null,
+      location_ids: [1, 2],
       event_id: 7,
       event_links: { 1: 7, 2: 9 },
+      previous_group_id: 12,
       is_open: true,
     });
   });
 
-  it("only asks for the event's picture or a copied header when wanted", () => {
-    const body = registrationCreateBody({ ...input, useEventImage: true, copyHeaderImageFrom: 40 });
+  it("only asks for the event's picture, a copied header or a removal when wanted", () => {
+    const body = registrationGroupBody({ ...create, useEventImage: true, copyHeaderImageFromGroup: 40 });
     assert.equal(body.use_event_image, true);
-    assert.equal(body.copy_header_image_from, 40);
+    assert.equal(body.copy_header_image_from_group, 40);
+    assert.equal("confirm_remove" in body, false);
+    assert.equal("move_form_ids" in body, false);
+  });
+
+  it("sends only the keys present on an update, with the locations it expects", () => {
+    assert.deepEqual(
+      registrationGroupBody({
+        locationIds: [1, 3],
+        expectedLocationIds: [1, 2],
+        eventLinks: {},
+        moveFormIds: [55],
+        confirmRemove: true,
+      }),
+      {
+        location_ids: [1, 3],
+        expected_location_ids: [1, 2],
+        event_links: {},
+        move_form_ids: [55],
+        confirm_remove: true,
+      },
+    );
+    assert.deepEqual(registrationGroupBody({ previousGroupId: null }), { previous_group_id: null });
   });
 });
 

@@ -20,22 +20,19 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RegistrationHistorySheet } from "../../components/events/RegistrationHistorySheet";
+import { RegistrationLoadFailure } from "../../components/events/RegistrationLoadFailure";
 import { RegistrationQrPanel } from "../../components/events/RegistrationQrPanel";
 import { RegistrationStatusPill } from "../../components/events/RegistrationStatusPill";
+import { RegistrationTile } from "../../components/events/RegistrationTile";
+import { BottomSheet } from "../../components/ui/BottomSheet";
 import { SelectField } from "../../components/ui/FormControls";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { toCsv } from "../../lib/attractions/attractionsCsv";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
-import {
-  canSwitchLocation,
-  workLocationsOf,
-} from "../../lib/location/staffLocation";
 import { formatPhoneForDisplay } from "../../lib/phone";
 import {
-  DELETE_WARNING,
   REGISTRATIONS_PER_PAGE,
-  canRetryFailure,
   describeFailure,
   duplicateHint,
   editionLabel,
@@ -50,13 +47,14 @@ import {
   markRegistrationFormsStale,
   registrationExportTable,
   registrationsCsvFilename,
+  shortVenueName,
   totalEntriesHint,
   type StaffRequestFailure,
 } from "../../lib/registrationForms/registrationForms";
-import { getCurrentUser, getToken } from "../../lib/session";
+import { shareCsvFile } from "../../lib/registrationForms/shareCsv";
+import { getToken } from "../../lib/session";
 import { formatDateLong } from "../../lib/waivers/returningCustomers";
 import {
-  deleteRegistrationForm,
   exportRegistrations,
   fetchRegistrationForm,
   fetchRegistrations,
@@ -69,7 +67,6 @@ import {
   type RegistrationListFilter,
   type RegistrationPagination,
 } from "../../services/registrationFormsService";
-import { switchStaffLocation } from "../../services/staffLocationService";
 
 const PRIMARY = "#0644C7";
 
@@ -77,30 +74,6 @@ const PRIMARY = "#0644C7";
 const MAX_SEARCH = 100;
 
 type IconName = ComponentProps<typeof Feather>["name"];
-
-const Tile = ({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: number;
-  hint: string;
-}) => (
-  <View className="w-1/2 p-1.5">
-    <View className="flex-1 bg-white dark:bg-neutral-900 rounded-xl border border-gray-200 dark:border-neutral-800 p-3">
-      <Text className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        {label}
-      </Text>
-      <Text className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-        {value}
-      </Text>
-      <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        {hint}
-      </Text>
-    </View>
-  </View>
-);
 
 const Chip = ({
   label,
@@ -133,14 +106,12 @@ const Chip = ({
 const ActionButton = ({
   label,
   icon,
-  danger,
   loading,
   disabled,
   onPress,
 }: {
   label: string;
   icon: IconName;
-  danger?: boolean;
   loading?: boolean;
   disabled?: boolean;
   onPress: () => void;
@@ -150,124 +121,172 @@ const ActionButton = ({
     disabled={disabled}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className={`flex-row items-center gap-1.5 px-3 py-2 rounded-lg border active:opacity-70 ${
-      danger
-        ? "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/30"
-        : "border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-    } ${disabled ? "opacity-50" : ""}`}
+    className={`flex-row items-center gap-1.5 px-3 py-2 rounded-lg border active:opacity-70 border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 ${
+      disabled ? "opacity-50" : ""
+    }`}
   >
     {loading ? (
-      <ActivityIndicator size="small" color={danger ? "#EF4444" : PRIMARY} />
+      <ActivityIndicator size="small" color={PRIMARY} />
     ) : (
-      <Feather name={icon} size={14} color={danger ? "#EF4444" : PRIMARY} />
+      <Feather name={icon} size={14} color={PRIMARY} />
     )}
-    <Text
-      className={`text-xs font-semibold ${
-        danger ? "text-red-600" : "text-gray-700 dark:text-gray-200"
-      }`}
-    >
+    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
       {label}
     </Text>
   </Pressable>
 );
 
-const GroupCard = ({
+/** One contact: a compact row (web d5a759e) that opens to its details and entries. */
+const ContactRow = ({
   group,
+  open,
   previousName,
-  showHistory,
   disabled,
-  onHistory,
+  onToggle,
+  onMenu,
   onToggleEntry,
 }: {
   group: RegistrationGroup;
+  open: boolean;
   previousName: string;
-  showHistory: boolean;
   disabled: boolean;
-  onHistory: () => void;
+  onToggle: () => void;
+  onMenu: () => void;
   onToggleEntry: (entry: RegistrationEntry) => void;
-}) => (
-  <View className="px-4 py-4 gap-3 border-t border-gray-100 dark:border-neutral-800">
-    <View className="gap-1">
-      <Text className="font-medium text-gray-900 dark:text-white">
-        {group.email}
-      </Text>
-      <Text className="text-sm text-gray-600 dark:text-gray-400">
-        {formatPhoneForDisplay(group.phone) || group.phone} · {group.entryCount}{" "}
-        {entryWord(group.entryCount)}
-      </Text>
-      {(group.isDuplicate || group.registeredBeforeOtherName) && (
-        <View className="flex-row flex-wrap items-center gap-1.5">
-          {group.isDuplicate && (
-            <Chip label={`Same contact ×${group.entryCount}`} tone="amber" />
-          )}
-          {group.registeredBeforeOtherName && (
-            <Text className="text-xs text-gray-500 dark:text-gray-400">
-              These contact details registered before under another name
-            </Text>
-          )}
-        </View>
-      )}
-      {showHistory && (
+}) => {
+  const primaryName = group.entries[0]?.name ?? group.names[0] ?? group.email;
+  const otherNames = Math.max(group.names.length - 1, 0);
+  return (
+    <View className="border-t border-gray-100 dark:border-neutral-800">
+      <View className="flex-row items-center gap-2 px-4 py-3">
         <Pressable
-          onPress={onHistory}
+          onPress={onToggle}
           accessibilityRole="button"
-          className="flex-row items-center gap-1.5 self-start py-1 active:opacity-70"
+          accessibilityState={{ expanded: open }}
+          className="flex-1 gap-0.5 active:opacity-70"
         >
-          <Feather name="clock" size={13} color={PRIMARY} />
-          <Text className="text-xs font-semibold text-[#0644C7]">
-            {historyButtonLabel(group.otherEventCount)}
+          <View className="flex-row flex-wrap items-center gap-2">
+            <Text numberOfLines={1} className="shrink font-medium text-gray-900 dark:text-white">
+              {primaryName}
+              {otherNames > 0 ? ` +${otherNames}` : ""}
+            </Text>
+            {group.isDuplicate && (
+              <Chip label={`Same contact ×${group.entryCount}`} tone="amber" />
+            )}
+          </View>
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {group.entryCount} {entryWord(group.entryCount)}
+            {group.lastRegisteredAt
+              ? ` · ${formatDateLong(group.lastRegisteredAt.slice(0, 10))}`
+              : ""}
           </Text>
         </Pressable>
-      )}
-    </View>
-
-    <View className="rounded-xl border border-gray-100 dark:border-neutral-800">
-      {group.entries.map((entry, index) => (
-        <View
-          key={entry.id}
-          // Divider width via style: a dark: class added after mount crashes css-interop.
-          className="px-3 py-2.5 flex-row items-start gap-2 border-gray-100 dark:border-neutral-800"
-          style={{ borderTopWidth: index > 0 ? 1 : 0 }}
+        <Feather name={open ? "chevron-up" : "chevron-down"} size={16} color="#9CA3AF" />
+        <Pressable
+          onPress={onMenu}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`Actions for ${primaryName}`}
+          className="p-2 rounded-lg active:opacity-70"
         >
-          <View className="flex-1 gap-1">
-            <Text className="text-sm font-medium text-gray-900 dark:text-white">
-              {entry.name}
+          <Feather name="more-vertical" size={16} color="#6B7280" />
+        </Pressable>
+      </View>
+
+      {open && (
+        <View className="px-4 pb-4 gap-3">
+          <View className="rounded-xl border border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800 px-3 py-2 gap-1">
+            <Text selectable className="text-sm text-gray-700 dark:text-gray-300">
+              {group.email}
             </Text>
-            <Text className="text-xs text-gray-500 dark:text-gray-400">
-              Registered {formatDateTimeET(entry.registeredAt)}
+            <Text selectable className="text-sm text-gray-700 dark:text-gray-300">
+              {formatPhoneForDisplay(group.phone) || group.phone}
             </Text>
-            {(entry.returning || entry.registeredPreviousEdition) && (
-              <View className="flex-row flex-wrap gap-1.5">
-                {entry.returning && (
-                  <Chip label="Registered before" tone="blue" />
+            {(group.isDuplicate || group.registeredBeforeOtherName) && (
+              <View className="flex-row flex-wrap items-center gap-1.5 pt-1">
+                {group.isDuplicate && (
+                  <Chip label={`Same contact ×${group.entryCount}`} tone="amber" />
                 )}
-                {entry.registeredPreviousEdition && (
-                  <Chip label={`Registered for ${previousName}`} tone="gray" />
+                {group.registeredBeforeOtherName && (
+                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    These contact details registered before under another name
+                  </Text>
                 )}
               </View>
             )}
           </View>
-          <Pressable
-            onPress={() => onToggleEntry(entry)}
-            disabled={disabled}
-            accessibilityRole="button"
-            className={`flex-row items-center gap-1 px-2 py-1 rounded-md active:opacity-70 ${
-              disabled ? "opacity-50" : ""
-            }`}
-          >
-            <Feather
-              name={entry.hiddenAt === null ? "eye-off" : "rotate-ccw"}
-              size={13}
-              color="#6B7280"
-            />
-            <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">
-              {entry.hiddenAt === null ? "Hide" : "Restore"}
-            </Text>
-          </Pressable>
+
+          <View className="rounded-xl border border-gray-100 dark:border-neutral-800">
+            {group.entries.map((entry, index) => (
+              <View
+                key={entry.id}
+                // Divider width via style: a dark: class added after mount crashes css-interop.
+                className="px-3 py-2.5 flex-row items-start gap-2 border-gray-100 dark:border-neutral-800"
+                style={{ borderTopWidth: index > 0 ? 1 : 0 }}
+              >
+                <View className="flex-1 gap-1">
+                  <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                    {entry.name}
+                  </Text>
+                  <Text className="text-xs text-gray-500 dark:text-gray-400">
+                    Registered {formatDateTimeET(entry.registeredAt)}
+                  </Text>
+                  {(entry.returning || entry.registeredPreviousEdition) && (
+                    <View className="flex-row flex-wrap gap-1.5">
+                      {entry.returning && (
+                        <Chip label="Registered before" tone="blue" />
+                      )}
+                      {entry.registeredPreviousEdition && (
+                        <Chip label={`Registered for ${previousName}`} tone="gray" />
+                      )}
+                    </View>
+                  )}
+                </View>
+                <Pressable
+                  onPress={() => onToggleEntry(entry)}
+                  disabled={disabled}
+                  accessibilityRole="button"
+                  className={`flex-row items-center gap-1 px-2 py-1 rounded-md active:opacity-70 ${
+                    disabled ? "opacity-50" : ""
+                  }`}
+                >
+                  <Feather
+                    name={entry.hiddenAt === null ? "eye-off" : "rotate-ccw"}
+                    size={13}
+                    color="#6B7280"
+                  />
+                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                    {entry.hiddenAt === null ? "Hide" : "Restore"}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
         </View>
-      ))}
+      )}
     </View>
-  </View>
+  );
+};
+
+const MenuItem = ({
+  label,
+  icon,
+  onPress,
+}: {
+  label: string;
+  icon: IconName;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    className="flex-row items-center gap-3 px-1 py-3.5 active:opacity-70"
+  >
+    <Feather name={icon} size={17} color="#374151" />
+    <Text className="text-sm font-medium text-gray-800 dark:text-gray-100">
+      {label}
+    </Text>
+  </Pressable>
 );
 
 const RegistrationFormDetails = () => {
@@ -294,7 +313,8 @@ const RegistrationFormDetails = () => {
   const [reloadTick, setReloadTick] = useState(0);
   const [acting, setActing] = useState<string | null>(null);
   const [historyContactId, setHistoryContactId] = useState<number | null>(null);
-  const [switching, setSwitching] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [menuGroup, setMenuGroup] = useState<RegistrationGroup | null>(null);
   const [toast, showToast] = useTransientAlert<{
     message: string;
     type: ToastType;
@@ -400,6 +420,14 @@ const RegistrationFormDetails = () => {
     if (filter === "previous_edition" && !hasPreviousEdition) setFilter("all");
   }, [filter, hasPreviousEdition]);
 
+  const toggleExpanded = (contactId: number) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(contactId)) next.delete(contactId);
+      else next.add(contactId);
+      return next;
+    });
+
   const openEditor = () =>
     router.push({
       pathname: "/events/registration-form-editor",
@@ -412,12 +440,17 @@ const RegistrationFormDetails = () => {
       params: { id: String(id) },
     } as never);
 
-  // A copy a year forward, linked back to this form (the editor builds it from `nextFrom`).
-  const startNextEdition = () =>
-    router.push({
-      pathname: "/events/registration-form-editor",
-      params: { nextFrom: String(formId) },
+  // Back to the form's event, popping to it when it's already open underneath.
+  const openParentEvent = () => {
+    if (!form?.group) {
+      router.dismissTo("/events/registration-forms" as never);
+      return;
+    }
+    router.dismissTo({
+      pathname: "/events/registration-event",
+      params: { id: String(form.group.id) },
     } as never);
+  };
 
   const openLinkedEvent = (eventId: number) =>
     router.push({
@@ -448,33 +481,6 @@ const RegistrationFormDetails = () => {
     } finally {
       setActing(null);
     }
-  };
-
-  const remove = () => {
-    if (!form) return;
-    Alert.alert("Delete registration form", DELETE_WARNING(form.name), [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          const token = getToken();
-          if (!token) return;
-          setActing("delete");
-          try {
-            await deleteRegistrationForm(token, form.id);
-            markRegistrationFormsStale(`Deleted "${form.name}"`);
-            router.back();
-          } catch (err) {
-            notify(
-              describeFailure(err, "The form could not be deleted.").message,
-              "error",
-            );
-            setActing(null);
-          }
-        },
-      },
-    ]);
   };
 
   const applyEntryToggle = async (entry: RegistrationEntry) => {
@@ -528,31 +534,18 @@ const RegistrationFormDetails = () => {
         result.rows,
         editionLabel(form.previousEdition),
       );
-      const csv = toCsv(table.headers, table.rows);
-      // Loaded lazily so these native modules never run at app startup.
-      const FileSystem = await import("expo-file-system/legacy");
-      const Sharing = await import("expo-sharing");
       const today = new Date().toISOString().slice(0, 10);
-      const uri = `${FileSystem.cacheDirectory}${registrationsCsvFilename(form.name, today)}`;
-      await FileSystem.writeAsStringAsync(uri, csv, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          mimeType: "text/csv",
-          dialogTitle: "Export registrations",
-          UTI: "public.comma-separated-values-text",
-        });
-      } else {
-        notify("Sharing isn't available on this device.", "error");
-        return;
-      }
-      if (result.capped) {
+      const shared = await shareCsvFile(
+        registrationsCsvFilename(form.name, form.locationName, today),
+        toCsv(table.headers, table.rows),
+        "Export registrations",
+      );
+      if (!shared) notify("Sharing isn't available on this device.", "error");
+      else if (result.capped)
         notify(
           `The export holds the first ${result.rows.length.toLocaleString()} of ${result.total.toLocaleString()} entries.`,
           "info",
         );
-      }
     } catch (err) {
       notify(
         describeFailure(err, "The export failed. Please try again.").message,
@@ -560,32 +553,6 @@ const RegistrationFormDetails = () => {
       );
     } finally {
       setActing(null);
-    }
-  };
-
-  // A manager opening another of their locations' forms: switch there, as the web does.
-  const switchToLocation = async (locationId: number) => {
-    const user = getCurrentUser();
-    const name =
-      workLocationsOf(user).find((l) => l.id === locationId)?.name ??
-      "the new location";
-    setSwitching(true);
-    try {
-      await switchStaffLocation(locationId);
-      if (router.canDismiss()) router.dismissAll();
-      router.replace({
-        pathname: "/switch-account",
-        params: {
-          locationName: name,
-          returnTo: `/events/registration-form-details?id=${formId}`,
-        },
-      } as never);
-    } catch (err) {
-      setSwitching(false);
-      Alert.alert(
-        "Couldn't switch locations",
-        describeFailure(err, "Please try again.").message,
-      );
     }
   };
 
@@ -601,7 +568,7 @@ const RegistrationFormDetails = () => {
           <Feather name="chevron-left" size={20} color={headerIcon} />
         </Pressable>
         <Text className="text-gray-900 dark:text-white text-lg font-bold">
-          Registration Form
+          Location Form
         </Text>
         <View style={{ width: 36 }} />
       </View>
@@ -620,51 +587,19 @@ const RegistrationFormDetails = () => {
   }
 
   if (failure || !form) {
-    const switchId = failure?.switchLocationId ?? null;
     return (
       <View className="flex-1 bg-gray-50 dark:bg-black">
         {header}
-        <View className="flex-1 items-center justify-center px-6 gap-4">
-          <Feather name="alert-circle" size={44} color="#EF4444" />
-          <Text className="text-lg font-bold text-gray-900 dark:text-white text-center">
-            {failure?.message ?? "This registration form could not be loaded."}
-          </Text>
-          {switchId != null && canSwitchLocation(getCurrentUser()) && (
-            <Pressable
-              onPress={() => void switchToLocation(switchId)}
-              disabled={switching}
-              className="flex-row items-center gap-2 px-5 py-3 rounded-xl bg-[#0644C7] active:opacity-90"
-              accessibilityRole="button"
-            >
-              {switching && <ActivityIndicator size="small" color="#FFFFFF" />}
-              <Text className="text-sm font-semibold text-white">
-                Switch to that location
-              </Text>
-            </Pressable>
-          )}
-          {failure && canRetryFailure(failure) && (
-            <Pressable
-              onPress={() => {
-                setLoadingForm(true);
-                void loadForm();
-              }}
-              className="px-5 py-3 rounded-xl bg-[#0644C7] active:opacity-90"
-              accessibilityRole="button"
-            >
-              <Text className="text-sm font-semibold text-white">Try again</Text>
-            </Pressable>
-          )}
-          <Pressable
-            onPress={() => router.back()}
-            className="flex-row items-center gap-2 px-5 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
-            accessibilityRole="button"
-          >
-            <Feather name="arrow-left" size={15} color={headerIcon} />
-            <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Back to Registration Forms
-            </Text>
-          </Pressable>
-        </View>
+        <RegistrationLoadFailure
+          failure={failure}
+          fallback="This registration form could not be loaded."
+          returnTo={`/events/registration-form-details?id=${formId}`}
+          iconColor={headerIcon}
+          onRetry={() => {
+            setLoadingForm(true);
+            void loadForm();
+          }}
+        />
       </View>
     );
   }
@@ -673,6 +608,9 @@ const RegistrationFormDetails = () => {
   const past = form.status === "past";
   const previousName = editionLabel(form.previousEdition);
   const unfiltered = filter === "all" && !search;
+  const venue = form.locationName ? locationDisplayName(form.locationName) : "This location";
+  const shortVenue = shortVenueName(form.locationName) ?? venue;
+  const eventName = form.group?.name ?? form.name;
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -685,29 +623,39 @@ const RegistrationFormDetails = () => {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
         <View className="px-5 pt-5 gap-5">
-          {/* Title, date, venue and the edition links. */}
+          {/* Breadcrumb, then this location's title, the event, and the year links. */}
           <View className="gap-2">
+            <View className="flex-row flex-wrap items-center gap-1.5">
+              <Pressable
+                onPress={() => router.dismissTo("/events/registration-forms" as never)}
+                accessibilityRole="link"
+              >
+                <Text className="text-sm text-gray-500 dark:text-gray-400">All events</Text>
+              </Pressable>
+              {form.group && (
+                <>
+                  <Text className="text-sm text-gray-400">/</Text>
+                  <Pressable onPress={openParentEvent} accessibilityRole="link">
+                    <Text className="text-sm font-medium text-[#0644C7] dark:text-blue-400">
+                      {eventName}
+                    </Text>
+                  </Pressable>
+                </>
+              )}
+              <Text className="text-sm text-gray-400">/</Text>
+              <Text className="text-sm text-gray-700 dark:text-gray-300">{shortVenue}</Text>
+            </View>
             <View className="flex-row flex-wrap items-center gap-2">
               <Text className="text-2xl font-bold text-gray-900 dark:text-white">
-                {form.name}
+                {venue}
               </Text>
               <RegistrationStatusPill status={form.status} />
             </View>
-            <View className="flex-row flex-wrap items-center gap-x-4 gap-y-1">
-              <View className="flex-row items-center gap-1.5">
-                <Feather name="calendar" size={14} color="#9CA3AF" />
-                <Text className="text-sm text-gray-600 dark:text-gray-400">
-                  {formatDateLong(form.eventDate)}
-                </Text>
-              </View>
-              {!!form.locationName && (
-                <View className="flex-row items-center gap-1.5">
-                  <Feather name="map-pin" size={14} color="#9CA3AF" />
-                  <Text className="text-sm text-gray-600 dark:text-gray-400">
-                    {locationDisplayName(form.locationName)}
-                  </Text>
-                </View>
-              )}
+            <View className="flex-row items-center gap-1.5">
+              <Feather name="calendar" size={14} color="#9CA3AF" />
+              <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
+                {eventName} · {formatDateLong(form.eventDate)}
+              </Text>
             </View>
             {form.event && (
               <View className="flex-row flex-wrap items-center gap-x-1.5">
@@ -734,7 +682,7 @@ const RegistrationFormDetails = () => {
                 accessibilityRole="link"
               >
                 <Text className="text-sm text-[#0644C7] dark:text-blue-400">
-                  {`Last year's edition: ${form.previousEdition.name}`}
+                  {`Last year's form: ${previousName}`}
                 </Text>
               </Pressable>
             )}
@@ -744,26 +692,26 @@ const RegistrationFormDetails = () => {
                 accessibilityRole="link"
               >
                 <Text className="text-sm text-[#0644C7] dark:text-blue-400">
-                  Next edition: {form.nextEdition.name}
+                  {`Next year's form: ${form.nextEdition.name}`}
                 </Text>
               </Pressable>
             )}
 
             <View className="flex-row flex-wrap gap-2 mt-1">
+              {form.group && (
+                <ActionButton
+                  label={eventName}
+                  icon="arrow-left"
+                  disabled={acting !== null}
+                  onPress={openParentEvent}
+                />
+              )}
               <ActionButton
-                label="Edit"
+                label="Edit form"
                 icon="edit-2"
                 disabled={acting !== null}
                 onPress={openEditor}
               />
-              {!form.nextEdition && (
-                <ActionButton
-                  label={"Next year's edition"}
-                  icon="copy"
-                  disabled={acting !== null}
-                  onPress={startNextEdition}
-                />
-              )}
               <ActionButton
                 label={
                   form.isOpen ? "Close registration" : "Reopen registration"
@@ -772,14 +720,6 @@ const RegistrationFormDetails = () => {
                 loading={acting === "toggle"}
                 disabled={past || acting !== null}
                 onPress={() => void toggleOpen()}
-              />
-              <ActionButton
-                label="Delete"
-                icon="trash-2"
-                danger
-                loading={acting === "delete"}
-                disabled={acting !== null}
-                onPress={remove}
               />
             </View>
             {past && (
@@ -790,45 +730,48 @@ const RegistrationFormDetails = () => {
             )}
           </View>
 
-          <RegistrationQrPanel form={form} onNotify={notify} />
+          <View className="flex-row items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
+            <Feather name="map-pin" size={15} color={PRIMARY} />
+            <Text className="flex-1 text-sm text-gray-800 dark:text-gray-100">
+              <Text className="font-semibold">This event</Text> · {shortVenue} only
+            </Text>
+          </View>
 
-          {/* Count tiles — the whole form's tallies, never one page's. */}
+          {/* Count tiles — this location form's tallies, never one page's or the event's. */}
           <View>
             <View className="flex-row flex-wrap -m-1.5">
-              <Tile
+              <RegistrationTile
                 label="Total entries"
                 value={tallies.totalEntries}
                 hint={totalEntriesHint(tallies)}
               />
-              <Tile
+              <RegistrationTile
                 label="Unique registrations"
                 value={tallies.uniqueRegistrations}
-                hint="Entries with the same phone and the same email count once — e.g. a parent who registers 3 children with their own details: 3 entries, 1 unique."
+                hint="Entries with the same phone and the same email count once."
               />
-              <Tile
+              <RegistrationTile
                 label="Same-contact groups"
                 value={tallies.duplicateGroups}
                 hint={duplicateHint(tallies)}
               />
-              <Tile
+              <RegistrationTile
                 label="Registered before"
                 value={tallies.returningContacts}
                 hint="Registered for an earlier event that had already taken place."
               />
               {hasPreviousEdition && (
-                <Tile
+                <RegistrationTile
                   label={`Registered for ${previousName}`}
                   value={tallies.previousEditionRegistrants}
                   hint={
-                    "The same person also registered for last year's edition."
+                    "The same person also registered for last year's edition here."
                   }
                 />
               )}
             </View>
             <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              {
-                "These numbers count registrations only. They don't show who attended."
-              }
+              {`Registration totals for ${shortVenue}'s ${eventName} form only. They don't show who attended.`}
             </Text>
             {tallies.hiddenEntries > 0 && filter !== "hidden" && (
               <Pressable
@@ -846,12 +789,14 @@ const RegistrationFormDetails = () => {
             )}
           </View>
 
+          <RegistrationQrPanel form={form} onNotify={notify} />
+
           {/* Registrations */}
           <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-100 dark:border-neutral-800">
             <View className="p-4 gap-3">
               <View className="flex-row items-center justify-between gap-2">
                 <View className="flex-row items-center gap-2">
-                  <Feather name="users" size={17} color="#6B7280" />
+                  <Feather name="users" size={17} color={PRIMARY} />
                   <Text className="text-base font-semibold text-gray-900 dark:text-white">
                     Registrations
                   </Text>
@@ -938,13 +883,14 @@ const RegistrationFormDetails = () => {
             ) : (
               <View style={{ opacity: listLoading ? 0.6 : 1 }}>
                 {groups.map((group) => (
-                  <GroupCard
+                  <ContactRow
                     key={group.contactId}
                     group={group}
+                    open={expanded.has(group.contactId)}
                     previousName={previousName}
-                    showHistory={filter !== "hidden"}
                     disabled={acting !== null}
-                    onHistory={() => setHistoryContactId(group.contactId)}
+                    onToggle={() => toggleExpanded(group.contactId)}
+                    onMenu={() => setMenuGroup(group)}
                     onToggleEntry={toggleEntry}
                   />
                 ))}
@@ -997,6 +943,42 @@ const RegistrationFormDetails = () => {
           </View>
         </View>
       </ScrollView>
+
+      {/* The web row menu: details, and history except in the Hidden list. */}
+      <BottomSheet
+        visible={menuGroup !== null}
+        onClose={() => setMenuGroup(null)}
+        title={
+          menuGroup
+            ? (menuGroup.entries[0]?.name ?? menuGroup.names[0] ?? menuGroup.email)
+            : ""
+        }
+      >
+        {menuGroup && (
+          <View>
+            <MenuItem
+              label={expanded.has(menuGroup.contactId) ? "Hide details" : "Show details"}
+              icon={expanded.has(menuGroup.contactId) ? "chevron-up" : "chevron-down"}
+              onPress={() => {
+                toggleExpanded(menuGroup.contactId);
+                setMenuGroup(null);
+              }}
+            />
+            {filter !== "hidden" && (
+              <MenuItem
+                label={historyButtonLabel(menuGroup.otherEventCount)}
+                icon="clock"
+                onPress={() => {
+                  const contactId = menuGroup.contactId;
+                  setMenuGroup(null);
+                  // After the menu closes, so two native Modals are never mounted at once.
+                  setTimeout(() => setHistoryContactId(contactId), 280);
+                }}
+              />
+            )}
+          </View>
+        )}
+      </BottomSheet>
 
       <RegistrationHistorySheet
         formId={form.id}

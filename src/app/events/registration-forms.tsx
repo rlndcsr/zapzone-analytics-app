@@ -4,7 +4,6 @@ import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,48 +13,32 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RegistrationStatusPill } from "../../components/events/RegistrationStatusPill";
+import { RegistrationTile } from "../../components/events/RegistrationTile";
+import { SelectField } from "../../components/ui/FormControls";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Toast, type ToastType } from "../../components/ui/Toast";
-import { useAsyncList } from "../../lib/hooks/useAsyncList";
+import { venueDateKey } from "../../lib/date/venueTime";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
-  DELETE_WARNING,
   EVENT_NOT_FOUND,
   consumeRegistrationFormsStale,
   describeFailure,
-  formTally,
-  formatEventDates,
+  entryWord,
   fromEventOutcome,
   locationDisplayName,
   takeRegistrationFormsNotice,
+  venueSummary,
+  yearChoices,
 } from "../../lib/registrationForms/registrationForms";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDateLong } from "../../lib/waivers/returningCustomers";
 import {
-  deleteRegistrationForm,
   fetchEventOptions,
-  fetchRegistrationForms,
-  type RegistrationEventOption,
-  type RegistrationFormRow,
+  fetchRegistrationEventGroups,
+  type RegistrationEventGroupList,
+  type RegistrationEventGroupSummary,
 } from "../../services/registrationFormsService";
-
-/** The Manage Events event whose forms the list is narrowed to. */
-type EventFilter = {
-  id: number;
-  name: string;
-  dates: string;
-  locationId: number;
-  venue: string | null;
-};
-
-const filterFrom = (option: RegistrationEventOption): EventFilter => ({
-  id: option.id,
-  name: option.name.trim(),
-  dates: formatEventDates(option),
-  locationId: option.locationId,
-  venue: option.locationName ? locationDisplayName(option.locationName) : null,
-});
 
 const PRIMARY = "#0644C7";
 
@@ -67,122 +50,55 @@ const CARD_SHADOW = {
   elevation: 2,
 } as const;
 
-const openDetails = (id: number) =>
+const openEvent = (id: number) =>
   router.push({
-    pathname: "/events/registration-form-details",
+    pathname: "/events/registration-event",
     params: { id: String(id) },
   } as never);
 
-const openEditor = (id?: number) =>
-  router.push({
-    pathname: "/events/registration-form-editor",
-    params: id != null ? { id: String(id) } : {},
-  } as never);
+const openNewEvent = () =>
+  router.push("/events/registration-event-editor" as never);
 
-const newFormForEvent = (eventId: number) =>
-  router.push({
-    pathname: "/events/registration-form-editor",
-    params: { fromEvent: String(eventId) },
-  } as never);
-
-const FormRow = ({
-  form,
-  showVenue,
-  busy,
-  onDelete,
-}: {
-  form: RegistrationFormRow;
-  showVenue: boolean;
-  busy: boolean;
-  onDelete: () => void;
-}) => (
-  <View className="px-4 py-4 border-b border-gray-100 dark:border-neutral-800">
-    <Pressable
-      onPress={() => openDetails(form.id)}
-      accessibilityRole="button"
-      accessibilityLabel={`View ${form.name}`}
-      className="gap-1.5 active:opacity-70"
-    >
+const EventRow = ({ group }: { group: RegistrationEventGroupSummary }) => (
+  <Pressable
+    onPress={() => openEvent(group.id)}
+    accessibilityRole="button"
+    accessibilityLabel={`View ${group.name}`}
+    className="px-4 py-4 border-b border-gray-100 dark:border-neutral-800 flex-row items-center gap-3 active:opacity-70"
+  >
+    <View className="flex-1 gap-1.5">
       <View className="flex-row flex-wrap items-center gap-2">
         <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-          {form.name}
+          {group.name}
         </Text>
-        <RegistrationStatusPill status={form.status} />
+        <RegistrationStatusPill status={group.status} />
       </View>
       <View className="flex-row flex-wrap items-center gap-x-4 gap-y-1">
         <View className="flex-row items-center gap-1.5">
           <Feather name="calendar" size={13} color="#9CA3AF" />
           <Text className="text-sm text-gray-600 dark:text-gray-400">
-            {formatDateLong(form.eventDate)}
+            {formatDateLong(group.eventDate)}
           </Text>
         </View>
-        {showVenue && !!form.locationName && (
-          <View className="flex-row items-center gap-1.5">
-            <Feather name="map-pin" size={13} color="#9CA3AF" />
-            <Text className="text-sm text-gray-600 dark:text-gray-400">
-              {locationDisplayName(form.locationName)}
-            </Text>
-          </View>
-        )}
+        <View className="flex-row items-center gap-1.5 shrink">
+          <Feather name="map-pin" size={13} color="#9CA3AF" />
+          <Text numberOfLines={1} className="shrink text-sm text-gray-600 dark:text-gray-400">
+            {venueSummary(group.locationNames, group.locationForms)}
+          </Text>
+        </View>
         <View className="flex-row items-center gap-1.5">
           <Feather name="users" size={13} color="#9CA3AF" />
           <Text className="text-sm text-gray-600 dark:text-gray-400">
-            {formTally(form)}
+            {group.totalEntries} {entryWord(group.totalEntries)}
           </Text>
         </View>
       </View>
-      {form.event && (
-        <View className="flex-row items-center gap-1">
-          <Feather name="check-square" size={12} color="#9CA3AF" />
-          <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
-            Event: {form.event.name} · {formatEventDates(form.event)}
-          </Text>
-        </View>
-      )}
-      {form.previousEdition && (
-        <Text className="text-xs text-gray-500 dark:text-gray-400">
-          Last year: {form.previousEdition.name}
-        </Text>
-      )}
-    </Pressable>
-
-    <View className="flex-row items-center gap-2 mt-3">
-      <Pressable
-        onPress={() => openDetails(form.id)}
-        accessibilityRole="button"
-        className="px-4 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-      >
-        <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-          View
-        </Text>
-      </Pressable>
-      <Pressable
-        onPress={() => openEditor(form.id)}
-        accessibilityRole="button"
-        accessibilityLabel={`Edit ${form.name}`}
-        className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center active:opacity-70"
-      >
-        <Feather name="edit-2" size={15} color="#6B7280" />
-      </Pressable>
-      <Pressable
-        onPress={onDelete}
-        disabled={busy}
-        accessibilityRole="button"
-        accessibilityLabel={`Delete ${form.name}`}
-        className={`w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/30 items-center justify-center active:opacity-70 ${
-          busy ? "opacity-50" : ""
-        }`}
-      >
-        {busy ? (
-          <ActivityIndicator size="small" color="#EF4444" />
-        ) : (
-          <Feather name="trash-2" size={15} color="#EF4444" />
-        )}
-      </Pressable>
     </View>
-  </View>
+    <Feather name="chevron-right" size={18} color="#9CA3AF" />
+  </Pressable>
 );
 
+/** Web d5a759e "All events": one row per event across its location forms, by year. */
 const RegistrationForms = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -191,45 +107,55 @@ const RegistrationForms = () => {
   const params = useLocalSearchParams<{ fromEvent?: string }>();
   const fromEvent = Number(params.fromEvent ?? 0);
 
+  const user = getCurrentUser();
+  const isCompanyAdmin = user?.role === "company_admin";
   const activeLocation = useActiveLocation();
   const activeLocationId =
     activeLocation.id === "all" ? undefined : activeLocation.id;
-  const showVenue =
-    getCurrentUser()?.role === "company_admin" && activeLocationId == null;
 
-  const [eventFilter, setEventFilter] = useState<EventFilter | null>(null);
+  const [thisYear] = useState(
+    () => Number((venueDateKey(new Date().toISOString()) ?? "").slice(0, 4)) || new Date().getFullYear(),
+  );
+  const [year, setYear] = useState(thisYear);
+  const [data, setData] = useState<{ key: string; result: RegistrationEventGroupList } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Manage Events' button lands here first; the list waits until its event resolves.
   const [resolving, setResolving] = useState(fromEvent > 0);
   const [refreshing, setRefreshing] = useState(false);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [toast, showToast] = useTransientAlert<{
     message: string;
     type: ToastType;
   }>();
+  const sequence = useRef(0);
   const resolvedEvent = useRef(false);
-  const lastLocation = useRef(activeLocationId);
+  const requestKey = `${year}|${activeLocationId ?? "all"}`;
 
-  const loader = useCallback(
-    async ({ token }: { token: string }) => {
-      if (resolving) return [];
-      try {
-        const rows = await fetchRegistrationForms(
-          token,
-          eventFilter ? eventFilter.locationId : activeLocationId,
-        );
-        return eventFilter
-          ? rows.filter((form) => form.event?.id === eventFilter.id)
-          : rows;
-      } catch (err) {
-        throw new Error(
-          describeFailure(err, "Registration forms could not be loaded.")
-            .message,
-        );
-      }
-    },
-    [activeLocationId, eventFilter, resolving],
-  );
-  const { data: forms, loading, error, refetch } = useAsyncList(loader);
+  const load = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+    const current = ++sequence.current;
+    const key = `${year}|${activeLocationId ?? "all"}`;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const result = await fetchRegistrationEventGroups(token, {
+        year,
+        locationId: activeLocationId,
+      });
+      if (current === sequence.current) setData({ key, result });
+    } catch (err) {
+      if (current === sequence.current)
+        setLoadError(describeFailure(err, "Registration events could not be loaded.").message);
+    } finally {
+      if (current === sequence.current) setLoading(false);
+    }
+  }, [year, activeLocationId]);
+
+  useEffect(() => {
+    if (resolving) return;
+    void load();
+  }, [load, resolving]);
 
   useEffect(() => {
     if (!fromEvent || resolvedEvent.current) return;
@@ -249,19 +175,18 @@ const RegistrationForms = () => {
           } as never);
         } else if (outcome.kind === "create") {
           router.replace({
-            pathname: "/events/registration-form-editor",
+            pathname: "/events/registration-event-editor",
             params: { fromEvent: String(fromEvent) },
           } as never);
         } else {
-          if (outcome.kind === "list") setEventFilter(filterFrom(options[0]));
-          else showToast({ message: EVENT_NOT_FOUND, type: "info" });
+          showToast({ message: EVENT_NOT_FOUND, type: "info" });
           setResolving(false);
         }
       })
       .catch((err: unknown) => {
         const failure = describeFailure(
           err,
-          "That event's registration forms couldn't be opened. Please try again.",
+          "That event's registration form couldn't be opened. Please try again.",
         );
         if (failure.status !== 401 && failure.status !== 403)
           showToast({ message: failure.message, type: "error" });
@@ -269,61 +194,38 @@ const RegistrationForms = () => {
       });
   }, [fromEvent, showToast]);
 
-  // Switching the workspace location drops the event filter, as on the web.
-  useEffect(() => {
-    if (lastLocation.current === activeLocationId) return;
-    lastLocation.current = activeLocationId;
-    setEventFilter(null);
-  }, [activeLocationId]);
-
-  // A save, toggle or delete elsewhere marks the list stale.
+  // A save or delete elsewhere marks the list stale.
   useFocusEffect(
     useCallback(() => {
-      if (consumeRegistrationFormsStale()) void refetch();
+      if (consumeRegistrationFormsStale()) void load();
       const notice = takeRegistrationFormsNotice();
       if (notice) showToast({ message: notice, type: "success" });
-    }, [refetch, showToast]),
+    }, [load, showToast]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refetch();
+      await load();
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [load]);
 
-  const confirmDelete = (form: RegistrationFormRow) => {
-    Alert.alert("Delete registration form", DELETE_WARNING(form.name), [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          const token = getToken();
-          if (!token) return;
-          setDeletingId(form.id);
-          try {
-            await deleteRegistrationForm(token, form.id);
-            showToast({
-              message: "Registration form deleted",
-              type: "success",
-            });
-            void refetch();
-          } catch (err) {
-            showToast({
-              message: describeFailure(err, "The form could not be deleted.")
-                .message,
-              type: "error",
-            });
-          } finally {
-            setDeletingId(null);
-          }
-        },
-      },
-    ]);
-  };
+  const scopeLabel = isCompanyAdmin
+    ? activeLocationId != null
+      ? locationDisplayName(activeLocation.name)
+      : "All locations"
+    : user?.location?.name
+      ? locationDisplayName(user.location.name)
+      : "Your location";
+  const scoped = !isCompanyAdmin || activeLocationId != null;
+  // Totals belong to one year + location; never show another request's.
+  const shown = data && data.key === requestKey ? data.result : null;
+  const years = yearChoices(data?.result.years ?? [], thisYear, year);
+  const totals = shown?.totals ?? null;
+  const groups = shown?.groups ?? [];
+  const where = scoped ? ` at ${scopeLabel}` : "";
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
@@ -367,56 +269,61 @@ const RegistrationForms = () => {
               Registration Forms
             </Text>
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              A separate sign-up form and QR code for each event. Forms close
-              automatically after the event date.
+              Manage events and their participating location forms.
             </Text>
             <Pressable
-              onPress={() => openEditor()}
+              onPress={openNewEvent}
               className="flex-row items-center justify-center gap-2 mt-4 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
               accessibilityRole="button"
-              accessibilityLabel="New Registration Form"
+              accessibilityLabel="New event"
             >
               <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                numberOfLines={1}
-                className="shrink-0 text-sm font-semibold text-white"
-              >
-                New Registration Form
+              <Text numberOfLines={1} className="shrink-0 text-sm font-semibold text-white">
+                New event
               </Text>
             </Pressable>
           </View>
 
-          {eventFilter && (
-            <View className="mb-4 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 gap-2">
-              <Text className="text-sm text-gray-800 dark:text-gray-100">
-                Forms for{" "}
-                <Text className="font-semibold">{eventFilter.name}</Text> ·{" "}
-                {eventFilter.dates}
-                {eventFilter.venue ? ` · ${eventFilter.venue}` : ""}
+          <View className="mb-4 rounded-2xl bg-white dark:bg-neutral-900 border border-gray-100 dark:border-neutral-800 px-4 py-3 gap-2">
+            <View className="flex-row items-center gap-2">
+              <Feather name="calendar" size={15} color={PRIMARY} />
+              <Text numberOfLines={1} className="flex-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+                All events · {scopeLabel}
               </Text>
-              <View className="flex-row flex-wrap gap-2">
-                <Pressable
-                  onPress={() => newFormForEvent(eventFilter.id)}
-                  accessibilityRole="button"
-                  className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
-                >
-                  <Feather name="plus" size={14} color={PRIMARY} />
-                  <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                    New form for this event
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setEventFilter(null)}
-                  accessibilityRole="button"
-                  className="px-3 py-2 rounded-lg active:opacity-70"
-                >
-                  <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-400">
-                    Show all forms
-                  </Text>
-                </Pressable>
-              </View>
             </View>
-          )}
+            <SelectField
+              value={year}
+              options={years.map((option) => ({ label: String(option), value: option }))}
+              onSelect={(value) => setYear(Number(value))}
+            />
+          </View>
+
+          <View className="flex-row flex-wrap -m-1.5">
+            <RegistrationTile
+              label="Total entries"
+              value={totals?.totalEntries ?? null}
+              hint="Every form submitted, including repeats."
+            />
+            <RegistrationTile
+              label="Unique registrations"
+              value={totals?.uniqueRegistrations ?? null}
+              hint="Entries with the same phone and email count once."
+            />
+            <RegistrationTile
+              label="Events"
+              value={totals?.events ?? null}
+              hint={`Total events in ${year}.`}
+            />
+            <RegistrationTile
+              label="Location forms"
+              value={totals?.locationForms ?? null}
+              hint="Total location forms across all events."
+            />
+          </View>
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-4">
+            Totals include all {year} events and their location forms{where}.
+            They count registrations only, not who attended.
+          </Text>
 
           <View
             className="bg-white dark:bg-neutral-900 rounded-2xl overflow-hidden border border-gray-100 dark:border-neutral-800 shadow-sm"
@@ -424,24 +331,18 @@ const RegistrationForms = () => {
           >
             <View className="flex-row items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-neutral-800">
               <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                {forms.length} form{forms.length === 1 ? "" : "s"}
+                {year} events
               </Text>
               <Text className="text-xs text-gray-500 dark:text-gray-400">
                 Newest event first
               </Text>
             </View>
 
-            {resolving || (loading && forms.length === 0) ? (
-              <View className="py-16 items-center">
-                <ActivityIndicator color={PRIMARY} />
-              </View>
-            ) : error ? (
+            {loadError ? (
               <View className="p-6 items-center gap-3">
-                <Text className="text-sm text-red-600 text-center">
-                  {error}
-                </Text>
+                <Text className="text-sm text-red-600 text-center">{loadError}</Text>
                 <Pressable
-                  onPress={() => void refetch()}
+                  onPress={() => void load()}
                   className="px-4 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-70"
                   accessibilityRole="button"
                 >
@@ -450,29 +351,28 @@ const RegistrationForms = () => {
                   </Text>
                 </Pressable>
               </View>
-            ) : forms.length === 0 ? (
+            ) : resolving || !shown ? (
+              <View className="py-16 items-center">
+                <ActivityIndicator color={PRIMARY} />
+              </View>
+            ) : groups.length === 0 ? (
               <View className="px-6 py-12 items-center">
-                <Feather name="clipboard" size={34} color="#D1D5DB" />
-                <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3">
-                  No registration forms yet
+                <Feather name="calendar" size={34} color="#D1D5DB" />
+                <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3 text-center">
+                  No events in {year}{where} yet
                 </Text>
                 <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1">
-                  Create a form for an event like Halloween or Christmas. Guests
-                  scan its QR code, enter their name, phone and email, and you
-                  see every registration here. To try it end to end, make a test
-                  form, register, then delete it.
+                  Create an event like Trunk or Treat, pick the locations
+                  running it, and each one gets its own sign-up form, QR code
+                  and registration list.
                 </Text>
               </View>
             ) : (
-              forms.map((form) => (
-                <FormRow
-                  key={form.id}
-                  form={form}
-                  showVenue={showVenue}
-                  busy={deletingId === form.id}
-                  onDelete={() => confirmDelete(form)}
-                />
-              ))
+              <View style={{ opacity: loading ? 0.6 : 1 }}>
+                {groups.map((group) => (
+                  <EventRow key={group.id} group={group} />
+                ))}
+              </View>
             )}
           </View>
         </View>

@@ -8,6 +8,7 @@ import {
   kioskUrl,
   locationDisplayName,
   previewUrl,
+  shortVenueName,
   signDateLine,
 } from "../../lib/registrationForms/registrationForms";
 import type { RegistrationFormRow } from "../../services/registrationFormsService";
@@ -70,6 +71,7 @@ export function RegistrationQrPanel({
   const printRef = useRef<SvgHandle | null>(null);
   const [busy, setBusy] = useState<"save" | "print" | null>(null);
   const kiosk = kioskUrl(form.publicUrl);
+  const venue = shortVenueName(form.locationName);
 
   const readPng = () =>
     new Promise<string | null>((resolve) => {
@@ -178,11 +180,11 @@ export function RegistrationQrPanel({
       </View>
 
       <Text className="text-base font-semibold text-gray-900 dark:text-white">
-        QR code and link
+        {venue ? `${venue} form · QR code & link` : "QR code & link"}
       </Text>
       <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
         Guests scan this code to open this form on their phone. It never
-        changes, even if you rename the form.
+        changes, even if the event is renamed.
       </Text>
 
       {/* White plate keeps the code scannable in dark mode. */}
@@ -272,9 +274,7 @@ export function RegistrationQrPanel({
           {kiosk}
         </Text>
         <Text className="text-xs text-gray-500 dark:text-gray-400">
-          {
-            "The kiosk link clears each guest's details after they register. Open it in a browser that is not signed in to ZapZone, turn off the browser's autofill, and use Guided Access (iPad) or screen pinning (Android)."
-          }
+          {`Use this link on ${venue ? `${venue}'s` : "the venue"} sign-up tablet. It clears each guest's details after they register. Open it in a browser that is not signed in to ZapZone, turn off autofill, and use Guided Access (iPad) or screen pinning (Android).`}
         </Text>
       </View>
     </View>

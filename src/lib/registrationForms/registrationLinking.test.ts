@@ -16,7 +16,6 @@ import {
   hiddenEntriesLink,
   markRegistrationFormsStale,
   matchingEventAt,
-  nextEditionPrefill,
   nextYearDate,
   safeReturnPath,
   signDateLine,
@@ -39,6 +38,7 @@ const option = (over: Partial<RegistrationEventOption> = {}): RegistrationEventO
   hasImage: false,
   isActive: true,
   registrationFormIds: [],
+  registrationGroups: [],
   ...over,
 });
 
@@ -65,6 +65,7 @@ const detail = (over: Partial<RegistrationFormDetail> = {}): RegistrationFormDet
   headerImagePath: "registration-headers/a.jpg",
   locationId: 4,
   locationName: "Brighton | Zap Zone",
+  group: null,
   event: null,
   previousEdition: null,
   nextEdition: null,
@@ -72,6 +73,8 @@ const detail = (over: Partial<RegistrationFormDetail> = {}): RegistrationFormDet
   uniqueRegistrations: 0,
   counts,
   locationLocked: false,
+  canManageEvent: true,
+  groupFormCount: 1,
   ...over,
 });
 
@@ -163,25 +166,6 @@ describe("next year's edition", () => {
     assert.equal(nextYearDate("bad"), "bad");
   });
 
-  it("copies the form forward at its location and links back to it", () => {
-    assert.deepEqual(nextEditionPrefill(detail()), {
-      name: "Halloween Bash 2027",
-      locationIds: [4],
-      eventDate: "2027-10-31",
-      description: "Costumes welcome",
-      confirmationMessage: "See you at 6!",
-      previousEditionId: 40,
-      copyHeaderImageFrom: 40,
-      headerImagePath: "registration-headers/a.jpg",
-    });
-  });
-
-  it("adds next year to a name without one, and copies no image when there's none", () => {
-    const prefill = nextEditionPrefill(detail({ name: "Halloween Bash", headerImagePath: null }));
-    assert.equal(prefill.name, "Halloween Bash 2027");
-    assert.equal(prefill.copyHeaderImageFrom, null);
-  });
-
   it("labels an edition with its year unless the name already has it", () => {
     assert.equal(editionLabel(null), "");
     assert.equal(editionLabel({ id: 1, name: "Halloween Bash", eventDate: "2025-10-31" }), "Halloween Bash (2025)");
@@ -208,9 +192,9 @@ describe("linked event dates", () => {
 });
 
 describe("fromEventOutcome — Manage Events' Registration form button", () => {
-  it("opens the one form, lists several, creates when there's none", () => {
+  it("opens the newest linked form, and starts a new event when there's none", () => {
     assert.deepEqual(fromEventOutcome(option({ registrationFormIds: [12] })), { kind: "open", formId: 12 });
-    assert.deepEqual(fromEventOutcome(option({ registrationFormIds: [12, 13] })), { kind: "list" });
+    assert.deepEqual(fromEventOutcome(option({ registrationFormIds: [12, 13] })), { kind: "open", formId: 13 });
     assert.deepEqual(fromEventOutcome(option()), { kind: "create" });
     assert.deepEqual(fromEventOutcome(undefined), { kind: "missing" });
   });
