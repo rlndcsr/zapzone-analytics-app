@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 
+import { Confetti } from "./motion/Confetti";
+
 type Props = {
   visible: boolean;
   waiverReference: string | null;
@@ -141,6 +143,7 @@ export function WaiverSuccessModal({
           )}
         </View>
         </ScrollView>
+        {visible && <Confetti />}
       </View>
     </Modal>
   );

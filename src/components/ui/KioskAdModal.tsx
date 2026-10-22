@@ -17,6 +17,7 @@ import {
   type AdLearnMoreChannel,
   type KioskAd,
 } from "../../services/waiversService";
+import { Confetti } from "./motion/Confetti";
 
 const CONFIRM_BEAT_SECONDS = 2;
 const CHOOSING_FLOOR_SECONDS = 25;
@@ -269,6 +270,7 @@ export function KioskAdModal({
           </View>
         </View>
         </ScrollView>
+        {visible && <Confetti />}
       </View>
     </Modal>
   );
