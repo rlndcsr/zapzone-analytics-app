@@ -1051,29 +1051,34 @@ const EventEditorForm = ({
 
             {formError && <Text className="text-sm text-red-600">{formError}</Text>}
 
-            <Pressable
-              onPress={() => void save()}
-              disabled={busy || waitingForEvents}
-              className={`flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 ${busy || waitingForEvents ? "opacity-70" : ""}`}
-              accessibilityRole="button"
-              accessibilityLabel={saveLabel}
-            >
-              {saving || waitingForEvents ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text numberOfLines={1} className="shrink-0 text-sm font-semibold text-white">
-                  {saveLabel}
-                </Text>
-              )}
-            </Pressable>
-            <Pressable
-              onPress={() => !busy && router.back()}
-              disabled={busy}
-              className="items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
-              accessibilityRole="button"
-            >
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Cancel</Text>
-            </Pressable>
+            {/* Side by side (web b72a992); a label too long to share the row wraps rather than truncates. */}
+            <View className="flex-row flex-wrap gap-2">
+              <Pressable
+                onPress={() => !busy && router.back()}
+                disabled={busy}
+                style={{ flexGrow: 1 }}
+                className="items-center justify-center px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                accessibilityRole="button"
+              >
+                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void save()}
+                disabled={busy || waitingForEvents}
+                style={{ flexGrow: 1 }}
+                className={`flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 ${busy || waitingForEvents ? "opacity-70" : ""}`}
+                accessibilityRole="button"
+                accessibilityLabel={saveLabel}
+              >
+                {saving || waitingForEvents ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text numberOfLines={1} className="shrink-0 text-sm font-semibold text-white">
+                    {saveLabel}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
             {editing && group?.canManage && (
               <Pressable
                 onPress={() => void remove()}

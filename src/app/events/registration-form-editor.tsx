@@ -451,34 +451,37 @@ const RegistrationFormEditor = () => {
                 <Text className="text-sm text-red-600">{formError}</Text>
               )}
 
-              <Pressable
-                onPress={() => void save()}
-                disabled={busy}
-                className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-                accessibilityRole="button"
-                accessibilityLabel="Save changes"
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text
-                    numberOfLines={1}
-                    className="shrink-0 text-sm font-semibold text-white"
-                  >
-                    Save changes
+              {/* Cancel and Save side by side (web b72a992). */}
+              <View className="flex-row gap-2">
+                <Pressable
+                  onPress={() => !busy && router.back()}
+                  disabled={busy}
+                  className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    Cancel
                   </Text>
-                )}
-              </Pressable>
-              <Pressable
-                onPress={() => !busy && router.back()}
-                disabled={busy}
-                className="items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
-                accessibilityRole="button"
-              >
-                <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                  Cancel
-                </Text>
-              </Pressable>
+                </Pressable>
+                <Pressable
+                  onPress={() => void save()}
+                  disabled={busy}
+                  className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+                  accessibilityRole="button"
+                  accessibilityLabel="Save changes"
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text
+                      numberOfLines={1}
+                      className="shrink-0 text-sm font-semibold text-white"
+                    >
+                      Save changes
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
               {detail.canManageEvent && (
                 <Pressable
                   onPress={remove}

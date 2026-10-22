@@ -15,7 +15,7 @@ export function RegistrationTile({
         <Text className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           {label}
         </Text>
-        <Text className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+        <Text className="mt-0.5 text-xl font-bold text-gray-900 dark:text-white">
           {value === null ? "—" : value.toLocaleString()}
         </Text>
         <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">

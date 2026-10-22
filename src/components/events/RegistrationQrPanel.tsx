@@ -179,24 +179,28 @@ export function RegistrationQrPanel({
         />
       </View>
 
-      <Text className="text-base font-semibold text-gray-900 dark:text-white">
-        {venue ? `${venue} form · QR code & link` : "QR code & link"}
-      </Text>
-      <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-        Guests scan this code to open this form on their phone. It never
-        changes, even if the event is renamed.
-      </Text>
-
-      {/* White plate keeps the code scannable in dark mode. */}
-      <View className="self-center my-4 rounded-2xl border border-gray-100 bg-white p-3">
-        <QRCode
-          value={form.publicUrl}
-          size={176}
-          quietZone={8}
-          ecl="M"
-          backgroundColor="#FFFFFF"
-          color="#000000"
-        />
+      {/* Web b72a992: a small code beside its title; Save QR and Print still use the full-size copy above. */}
+      <View className="flex-row items-center gap-3 mb-3">
+        {/* White plate keeps the code scannable in dark mode. */}
+        <View className="rounded-xl border border-gray-100 bg-white p-1.5">
+          <QRCode
+            value={form.publicUrl}
+            size={96}
+            quietZone={6}
+            ecl="M"
+            backgroundColor="#FFFFFF"
+            color="#000000"
+          />
+        </View>
+        <View className="flex-1">
+          <Text className="text-base font-semibold text-gray-900 dark:text-white">
+            {venue ? `${venue} form · QR code & link` : "QR code & link"}
+          </Text>
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Guests scan this code to open this form on their phone. It never
+            changes, even if the event is renamed.
+          </Text>
+        </View>
       </View>
 
       <View className="flex-row items-center gap-2">
