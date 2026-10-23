@@ -10,6 +10,7 @@ import {
   needsQrFallback,
   outcomeStyle,
   pendingDeliveryIds,
+  recipientLabel,
   resultStyleKey,
   testTextSizeLine,
   textingRecentLine,
@@ -22,6 +23,8 @@ const row = (patch: Partial<PhotoDeliveryRow> = {}): PhotoDeliveryRow => ({
   channel: "sms",
   destinationMasked: "***-***-9748",
   recipientName: null,
+  recipientSource: null,
+  registrationEntryId: null,
   status: "sent",
   isDuplicate: false,
   duplicateOfId: null,
@@ -37,6 +40,18 @@ const row = (patch: Partial<PhotoDeliveryRow> = {}): PhotoDeliveryRow => ({
   retryUseful: true,
   canRetry: true,
   ...patch,
+});
+
+describe("recipientLabel", () => {
+  it("adds Event registration only to a registrant's row", () => {
+    assert.equal(recipientLabel(row({ recipientName: "Sam Lee", recipientSource: "waiver" })), "Sam Lee");
+    assert.equal(
+      recipientLabel(row({ recipientName: "Sam Lee", recipientSource: "registration" })),
+      "Sam Lee · Event registration",
+    );
+    assert.equal(recipientLabel(row({ recipientName: null, recipientSource: "registration" })), "Event registration");
+    assert.equal(recipientLabel(row()), "");
+  });
 });
 
 describe("delivery states", () => {

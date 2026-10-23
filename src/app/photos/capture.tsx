@@ -13,7 +13,6 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
@@ -24,6 +23,7 @@ import {
   PhotoCameraView,
   type PhotoCameraState,
 } from "../../components/photos/PhotoCameraView";
+import { RecipientPicker } from "../../components/photos/RecipientPicker";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import {
   CONTROL_RADIUS,
@@ -32,7 +32,8 @@ import {
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
-import { needsQrFallback } from "../../lib/photos/deliveryOutcome";
+import { needsQrFallback, recipientLabel } from "../../lib/photos/deliveryOutcome";
+import { receivingCount, recipientIds } from "../../lib/photos/photoRecipients";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   addCapturedPhoto,
@@ -41,14 +42,13 @@ import {
   fetchCaptureContext,
   removeSessionPhoto,
   reorderSessionPhotos,
-  searchPhotoWaivers,
   startPhotoSession,
   uploadSessionPhoto,
   type PhotoCaptureContext,
   type PhotoDeliverySchedule,
+  type PhotoRecipientMatch,
   type PhotoSendOutcome,
   type PhotoSession,
-  type PhotoWaiverMatch,
 } from "../../services/photosService";
 
 const PRIMARY = "#0644C7";
@@ -84,26 +84,6 @@ const DEFAULT_STATUS_STYLE = {
   wrap: "bg-gray-100 dark:bg-neutral-800",
   text: "text-gray-700 dark:text-gray-300",
 };
-
-/** Waiver badge tones, matching the web pill colors. */
-const BADGE_TONES = {
-  amber: {
-    wrap: "bg-amber-100 dark:bg-amber-900/30",
-    text: "text-amber-800 dark:text-amber-300",
-  },
-  gray: {
-    wrap: "bg-gray-100 dark:bg-neutral-800",
-    text: "text-gray-700 dark:text-gray-300",
-  },
-  red: {
-    wrap: "bg-red-100 dark:bg-red-900/30",
-    text: "text-red-800 dark:text-red-300",
-  },
-  muted: {
-    wrap: "bg-gray-200 dark:bg-neutral-700",
-    text: "text-gray-700 dark:text-gray-200",
-  },
-} as const;
 
 const errorMessage = (e: unknown, fallback: string): string =>
   e instanceof Error && e.message ? e.message : fallback;
@@ -154,22 +134,6 @@ function RadioDot({ selected }: { selected: boolean }) {
   );
 }
 
-/** Small pill used for waiver channel/consent badges. */
-function Badge({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: keyof typeof BADGE_TONES;
-}) {
-  const style = BADGE_TONES[tone];
-  return (
-    <View className={`rounded-full px-2 py-0.5 ${style.wrap}`}>
-      <Text className={`text-[11px] ${style.text}`}>{label}</Text>
-    </View>
-  );
-}
-
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row items-center justify-between py-1.5">
@@ -209,11 +173,8 @@ export default function PhotoCaptureScreen() {
     null,
   );
   const [schedule, setSchedule] = useState<PhotoDeliverySchedule>("immediate");
-  const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<PhotoWaiverMatch[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [selected, setSelected] = useState<PhotoWaiverMatch[]>([]);
+  const [selected, setSelected] = useState<PhotoRecipientMatch[]>([]);
+  const [textRegistrants, setTextRegistrants] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
   const [deliveryOutcome, setDeliveryOutcome] = useState<PhotoSendOutcome | null>(null);
   const [offerQr, setOfferQr] = useState(false);
@@ -246,7 +207,7 @@ export default function PhotoCaptureScreen() {
     () => (session?.photos ?? []).filter((p) => p.processingStatus === "ready"),
     [session],
   );
-  const selectableCount = selected.filter((w) => w.contactable).length;
+  const selectableCount = receivingCount(selected, textRegistrants);
 
   useEffect(() => {
     if (!effectiveLocationId) {
@@ -283,7 +244,14 @@ export default function PhotoCaptureScreen() {
     submitLockRef.current = true;
     setBusy(true);
     try {
-      setSession(await startPhotoSession(token, effectiveLocationId));
+      // Fresh context too, so the overlay line names today's frame (an
+      // event-day frame can start since the screen was opened).
+      const [created, freshContext] = await Promise.all([
+        startPhotoSession(token, effectiveLocationId),
+        fetchCaptureContext(token, effectiveLocationId).catch(() => null),
+      ]);
+      setSession(created);
+      if (freshContext) setContext(freshContext);
       setStep("capture");
     } catch (e) {
       showToast({
@@ -419,33 +387,10 @@ export default function PhotoCaptureScreen() {
     [session, showToast],
   );
 
-  const runSearch = useCallback(async () => {
-    const token = getToken();
-    if (query.trim().length < 2 || !token) return;
-    setSearching(true);
-    setSearched(false);
-    try {
-      setMatches(
-        await searchPhotoWaivers(token, query.trim(), effectiveLocationId),
-      );
-      setSearched(true);
-    } catch (e) {
-      showToast({
-        message: errorMessage(e, "The waiver search failed."),
-        type: "error",
-      });
-    } finally {
-      setSearching(false);
-    }
-  }, [effectiveLocationId, query, showToast]);
-
-  const toggleWaiver = useCallback((waiver: PhotoWaiverMatch) => {
-    setSelected((prev) =>
-      prev.some((w) => w.id === waiver.id)
-        ? prev.filter((w) => w.id !== waiver.id)
-        : [...prev, waiver],
-    );
-  }, []);
+  const showError = useCallback(
+    (message: string) => showToast({ message, type: "error" }),
+    [showToast],
+  );
 
   const deliver = useCallback(async () => {
     const token = getToken();
@@ -457,8 +402,10 @@ export default function PhotoCaptureScreen() {
       const result = await deliverPhotoSession(token, session.id, {
         method,
         schedule: method === "waiver_message" ? schedule : undefined,
-        waiverIds:
-          method === "waiver_message" ? selected.map((w) => w.id) : undefined,
+        recipients:
+          method === "waiver_message"
+            ? recipientIds(selected, textRegistrants)
+            : undefined,
         slideshowOptIn,
       });
       setSession(result.session);
@@ -475,7 +422,7 @@ export default function PhotoCaptureScreen() {
       submitLockRef.current = false;
       setBusy(false);
     }
-  }, [method, schedule, selected, session, showToast, slideshowOptIn]);
+  }, [method, schedule, selected, session, showToast, slideshowOptIn, textRegistrants]);
 
   const resetAll = useCallback(() => {
     setSession(null);
@@ -483,10 +430,8 @@ export default function PhotoCaptureScreen() {
     setConsent(false);
     setMethod(null);
     setSchedule("immediate");
-    setQuery("");
-    setMatches([]);
-    setSearched(false);
     setSelected([]);
+    setTextRegistrants(false);
     setDeliveryNote(null);
     setDeliveryOutcome(null);
     setOfferQr(false);
@@ -750,7 +695,7 @@ export default function PhotoCaptureScreen() {
                   This session ({photoCount}/{maxPhotos})
                 </Text>
                 <Text className="mb-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Each photo already carries the location overlay and the
+                  Each photo already carries today&apos;s overlay and the
                   capture date.
                 </Text>
 
@@ -878,16 +823,17 @@ export default function PhotoCaptureScreen() {
                 <View className="mb-2 flex-row items-center gap-2">
                   <Feather name="mail" size={18} color={PRIMARY} />
                   <Text className="flex-1 font-bold text-gray-900 dark:text-white">
-                    Waiver message delivery
+                    Send by email or text
                   </Text>
                   <Text className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     Default
                   </Text>
                 </View>
                 <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  Search completed waivers by name, phone or email. Every
-                  available email and mobile number on the waivers you pick
-                  receives the secure link.
+                  Search waivers and event registrations by name, phone or
+                  email. Every available email and mobile number on the waivers
+                  you pick receives the secure link. Event registrations get it
+                  by email, and by text only when the guest asked for one.
                 </Text>
               </Pressable>
 
@@ -951,143 +897,17 @@ export default function PhotoCaptureScreen() {
                     </View>
                   )}
 
-                  <Text className="mb-3 font-bold text-gray-900 dark:text-white">
-                    Find the waiver
-                  </Text>
-
-                  <View className="mb-4 flex-row items-center gap-2">
-                    <View className="h-12 flex-1 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
-                      <Feather name="search" size={16} color="#9CA3AF" />
-                      <TextInput
-                        value={query}
-                        onChangeText={setQuery}
-                        onSubmitEditing={() => void runSearch()}
-                        returnKeyType="search"
-                        placeholder="Name, phone or email"
-                        placeholderTextColor="#9CA3AF"
-                        autoCapitalize="none"
-                        className="flex-1 text-sm text-gray-900 dark:text-white"
-                        style={{ paddingVertical: 0 }}
-                      />
-                    </View>
-                    <Pressable
-                      onPress={() => void runSearch()}
-                      disabled={query.trim().length < 2 || searching}
-                      className={`h-12 items-center justify-center rounded-xl bg-[#0644C7] px-5 active:opacity-90 ${
-                        query.trim().length < 2 || searching ? "opacity-60" : ""
-                      }`}
-                      accessibilityRole="button"
-                    >
-                      {searching ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Text className="text-sm font-semibold text-white">
-                          Search
-                        </Text>
-                      )}
-                    </Pressable>
-                  </View>
-
-                  {searched && matches.length === 0 && (
-                    <Text className="py-4 text-sm text-gray-500 dark:text-gray-400">
-                      No completed waivers matched that search.
-                    </Text>
-                  )}
-
-                  {matches.map((waiver) => {
-                    const checked = selected.some((w) => w.id === waiver.id);
-                    return (
-                      <Pressable
-                        key={waiver.id}
-                        onPress={() =>
-                          waiver.contactable && toggleWaiver(waiver)
-                        }
-                        disabled={!waiver.contactable}
-                        className={`mb-2 flex-row items-start gap-3 rounded-xl border p-3 ${
-                          waiver.contactable
-                            ? checked
-                              ? "border-[#0644C7] bg-blue-50/60 dark:bg-blue-900/20"
-                              : "border-gray-200 dark:border-neutral-700"
-                            : "border-gray-200 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/40"
-                        }`}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{
-                          checked,
-                          disabled: !waiver.contactable,
-                        }}
-                      >
-                        <View className="mt-0.5">
-                          <CheckBox checked={checked} />
-                        </View>
-                        <View className="flex-1">
-                          <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                            {waiver.name}
-                          </Text>
-                          <Text className="text-xs text-gray-500 dark:text-gray-400">
-                            {waiver.emailMasked || "no email"} ·{" "}
-                            {waiver.phoneMasked || "no phone"}
-                            {waiver.signedOn
-                              ? ` · signed ${waiver.signedOn}`
-                              : ""}
-                          </Text>
-                          <View className="mt-1 flex-row flex-wrap gap-1">
-                            {!!waiver.unavailableReason && (
-                              <Badge
-                                label={waiver.unavailableReason}
-                                tone="amber"
-                              />
-                            )}
-                            {waiver.hasEmail && (
-                              <Badge label="email" tone="gray" />
-                            )}
-                            {waiver.hasPhone && (
-                              <Badge label="SMS" tone="gray" />
-                            )}
-                            {waiver.photoVideoConsent === false && (
-                              <Badge
-                                label="declined the photo release"
-                                tone="red"
-                              />
-                            )}
-                            {waiver.photoVideoConsent === null && (
-                              <Badge
-                                label="photo release never asked"
-                                tone="muted"
-                              />
-                            )}
-                          </View>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-
-                  {selected.length > 0 && (
-                    <View className="mt-4 border-t border-gray-100 pt-4 dark:border-neutral-800">
-                      <Text className="mb-2 text-sm font-medium text-gray-900 dark:text-white">
-                        Selected ({selectableCount} will receive the link)
-                      </Text>
-                      <View className="flex-row flex-wrap gap-2">
-                        {selected.map((waiver) => (
-                          <Pressable
-                            key={waiver.id}
-                            onPress={() => toggleWaiver(waiver)}
-                            className="flex-row items-center gap-1 rounded-full bg-gray-100 px-3 py-1.5 dark:bg-neutral-800"
-                            accessibilityRole="button"
-                            accessibilityLabel={`Remove ${waiver.name}`}
-                          >
-                            <Text className="text-xs text-gray-800 dark:text-gray-200">
-                              {waiver.name}
-                            </Text>
-                            <Feather name="x" size={12} color="#6B7280" />
-                          </Pressable>
-                        ))}
-                      </View>
-                      <Text className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        Waivers that share an email or mobile number are
-                        recorded individually but only sent once.
-                      </Text>
-                    </View>
-                  )}
+                  <RecipientPicker
+                    heading="Find the waiver or registration"
+                    variant="capture"
+                    photoSessionId={session.id}
+                    locationId={effectiveLocationId}
+                    selected={selected}
+                    onSelectedChange={setSelected}
+                    textRegistrants={textRegistrants}
+                    onTextRegistrantsChange={setTextRegistrants}
+                    onError={showError}
+                  />
 
                   <View className="mt-5 border-t border-gray-100 pt-4 dark:border-neutral-800">
                     <Text className="mb-2 text-sm font-medium text-gray-900 dark:text-white">
@@ -1235,6 +1055,7 @@ export default function PhotoCaptureScreen() {
                       const chip =
                         DELIVERY_STATUS_STYLES[delivery.status] ??
                         DEFAULT_STATUS_STYLE;
+                      const who = recipientLabel(delivery);
                       return (
                         <View
                           key={delivery.id}
@@ -1243,6 +1064,11 @@ export default function PhotoCaptureScreen() {
                           <Text className="flex-1 text-sm text-gray-700 dark:text-gray-300">
                             {delivery.channel === "email" ? "Email" : "SMS"} ·{" "}
                             {delivery.destinationMasked}
+                            {!!who && (
+                              <Text className="text-gray-500 dark:text-gray-400">
+                                {` · ${who}`}
+                              </Text>
+                            )}
                             {delivery.isDuplicate && (
                               <Text className="text-xs text-gray-500 dark:text-gray-400">
                                 {"  "}(same destination — not sent twice)

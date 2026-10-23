@@ -29,6 +29,7 @@ const original: RegistrationFormDetail = {
   nextEdition: null,
   totalEntries: 0,
   uniqueRegistrations: 0,
+  photoFrames: null,
   counts: {
     totalEntries: 0,
     uniqueRegistrations: 0,

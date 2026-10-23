@@ -9,12 +9,12 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { DeliveryOutcomePanel } from "../../components/photos/DeliveryOutcomePanel";
+import { RecipientPicker } from "../../components/photos/RecipientPicker";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { CenterModal } from "../../components/ui/CenterModal";
 import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
@@ -29,6 +29,7 @@ import {
 import { venueTodayKey } from "../../lib/dashboard/dashboardTimeframe";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { libraryDaysNotice, libraryDayWindow } from "../../lib/photos/libraryDays";
+import { receivingCount, recipientIds } from "../../lib/photos/photoRecipients";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -36,15 +37,14 @@ import {
   deleteLibraryPhotos,
   fetchPhotoLibrary,
   photoDownloadUrl,
-  searchPhotoWaivers,
   sendLibraryPhoto,
   setPhotoOnSlideshow,
   type LibraryPhoto,
   type PhotoDeliverySchedule,
   type PhotoLibrary,
+  type PhotoRecipientMatch,
   type PhotoSendResult,
   type PhotoSessionSource,
-  type PhotoWaiverMatch,
 } from "../../services/photosService";
 
 const PRIMARY = "#0644C7";
@@ -227,10 +227,8 @@ export default function PhotoLibraryScreen() {
   const [sendFor, setSendFor] = useState<LibraryPhoto | null>(null);
   // After a send, the sheet shows how each message went instead of the form.
   const [sendResult, setSendResult] = useState<PhotoSendResult | null>(null);
-  const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<PhotoWaiverMatch[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [chosen, setChosen] = useState<number[]>([]);
+  const [chosen, setChosen] = useState<PhotoRecipientMatch[]>([]);
+  const [textRegistrants, setTextRegistrants] = useState(false);
   const [schedule, setSchedule] = useState<PhotoDeliverySchedule>("immediate");
   const [sending, setSending] = useState(false);
 
@@ -437,31 +435,20 @@ export default function PhotoLibraryScreen() {
     [load, showToast, slideshowBusyId],
   );
 
-  const runSearch = useCallback(async () => {
-    const token = getToken();
-    if (query.trim().length < 2 || !token) return;
-    setSearching(true);
-    try {
-      setMatches(
-        await searchPhotoWaivers(token, query.trim(), effectiveLocationId),
-      );
-    } catch (e) {
-      showToast({
-        message: errorMessage(e, "The waiver search failed."),
-        type: "error",
-      });
-    } finally {
-      setSearching(false);
-    }
-  }, [effectiveLocationId, query, showToast]);
+  const showError = useCallback(
+    (message: string) => showToast({ message, type: "error" }),
+    [showToast],
+  );
+
+  const sendCount = receivingCount(chosen, textRegistrants);
 
   const send = useCallback(async () => {
     const token = getToken();
-    if (!sendFor || chosen.length === 0 || !token || sending) return;
+    if (!sendFor || receivingCount(chosen, textRegistrants) === 0 || !token || sending) return;
     setSending(true);
     try {
       const result = await sendLibraryPhoto(token, sendFor.id, {
-        waiverIds: chosen,
+        ...recipientIds(chosen, textRegistrants),
         schedule,
       });
       if (result.outcome) {
@@ -471,8 +458,7 @@ export default function PhotoLibraryScreen() {
         setSendFor(null);
       }
       setChosen([]);
-      setMatches([]);
-      setQuery("");
+      setTextRegistrants(false);
       void load();
     } catch (e) {
       showToast({
@@ -482,19 +468,20 @@ export default function PhotoLibraryScreen() {
     } finally {
       setSending(false);
     }
-  }, [chosen, load, schedule, sendFor, sending, showToast]);
+  }, [chosen, load, schedule, sendFor, sending, showToast, textRegistrants]);
 
   const closeSend = useCallback(() => {
     setSendFor(null);
     setSendResult(null);
+    setChosen([]);
+    setTextRegistrants(false);
   }, []);
 
   const openSend = useCallback((photo: LibraryPhoto) => {
     setSendFor(photo);
     setSendResult(null);
     setChosen([]);
-    setMatches([]);
-    setQuery("");
+    setTextRegistrants(false);
   }, []);
 
   const dateLabel =
@@ -1029,88 +1016,22 @@ export default function PhotoLibraryScreen() {
             showsVerticalScrollIndicator={false}
           >
             <Text className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-              This uses the normal waiver message delivery flow, and the action is
-              recorded in the activity log.
+              Find the guest&apos;s waiver or event registration. Event registrations are
+              listed for the day this photo was taken. The photo goes out as the usual
+              email or text, and the send is recorded in the activity log.
             </Text>
 
-            <View className="mb-4 flex-row items-center gap-2">
-              <View className="h-12 flex-1 flex-row items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
-                <Feather name="search" size={16} color="#9CA3AF" />
-                <TextInput
-                  value={query}
-                  onChangeText={setQuery}
-                  onSubmitEditing={() => void runSearch()}
-                  returnKeyType="search"
-                  placeholder="Name, phone or email"
-                  placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
-                  className="flex-1 text-sm text-gray-900 dark:text-white"
-                  style={{ paddingVertical: 0 }}
-                />
-              </View>
-              <Pressable
-                onPress={() => void runSearch()}
-                disabled={query.trim().length < 2 || searching}
-                className={`h-12 items-center justify-center rounded-lg bg-[#0644C7] px-5 active:opacity-90 ${
-                  query.trim().length < 2 || searching ? "opacity-60" : ""
-                }`}
-                accessibilityRole="button"
-              >
-                {searching ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text className="text-sm font-semibold text-white">Search</Text>
-                )}
-              </Pressable>
-            </View>
-
-            {matches.map((waiver) => {
-              const checked = chosen.includes(waiver.id);
-              return (
-                <Pressable
-                  key={waiver.id}
-                  onPress={() =>
-                    waiver.contactable &&
-                    setChosen((prev) =>
-                      prev.includes(waiver.id)
-                        ? prev.filter((id) => id !== waiver.id)
-                        : [...prev, waiver.id],
-                    )
-                  }
-                  disabled={!waiver.contactable}
-                  className={`mb-2 flex-row items-start gap-3 rounded-xl border p-3 ${
-                    waiver.contactable
-                      ? checked
-                        ? "border-[#0644C7] bg-blue-50/60 dark:bg-blue-900/20"
-                        : "border-gray-200 dark:border-neutral-700"
-                      : "border-gray-200 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/40"
-                  }`}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{
-                    checked,
-                    disabled: !waiver.contactable,
-                  }}
-                >
-                  <View className="mt-0.5">
-                    <CheckBox checked={checked} />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-sm font-medium text-gray-900 dark:text-white">
-                      {waiver.name}
-                    </Text>
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {waiver.emailMasked || "no email"} ·{" "}
-                      {waiver.phoneMasked || "no phone"}
-                    </Text>
-                    {!waiver.contactable && (
-                      <Text className="text-[11px] text-amber-800 dark:text-amber-400">
-                        no contact method on this waiver
-                      </Text>
-                    )}
-                  </View>
-                </Pressable>
-              );
-            })}
+            <RecipientPicker
+              key={sendFor?.id}
+              variant="library"
+              photoSessionId={sendFor?.session.id ?? null}
+              locationId={effectiveLocationId}
+              selected={chosen}
+              onSelectedChange={setChosen}
+              textRegistrants={textRegistrants}
+              onTextRegistrantsChange={setTextRegistrants}
+              onError={showError}
+            />
 
             <View className="mb-5 mt-2">
               <Pressable
@@ -1139,10 +1060,10 @@ export default function PhotoLibraryScreen() {
 
             <View className="mb-8">
               <PrimaryButton
-                label={`Send to ${chosen.length} waiver${chosen.length === 1 ? "" : "s"}`}
+                label={`Send to ${sendCount} ${sendCount === 1 ? "person" : "people"}`}
                 onPress={() => void send()}
                 loading={sending}
-                disabled={chosen.length === 0}
+                disabled={sendCount === 0}
               />
             </View>
           </ScrollView>

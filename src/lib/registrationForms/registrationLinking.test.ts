@@ -71,6 +71,7 @@ const detail = (over: Partial<RegistrationFormDetail> = {}): RegistrationFormDet
   nextEdition: null,
   totalEntries: 0,
   uniqueRegistrations: 0,
+  photoFrames: null,
   counts,
   locationLocked: false,
   canManageEvent: true,

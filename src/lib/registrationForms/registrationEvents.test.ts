@@ -54,10 +54,11 @@ const formRow = (over: Partial<RegistrationFormRow> = {}): RegistrationFormRow =
   nextEdition: null,
   totalEntries: 0,
   uniqueRegistrations: 0,
+  photoFrames: null,
   ...over,
 });
 
-const group = (over: Partial<RegistrationEventGroupDetail> = {}): RegistrationEventGroupDetail => ({
+const group =(over: Partial<RegistrationEventGroupDetail> = {}): RegistrationEventGroupDetail => ({
   id: 9,
   name: "Trunk or Treat 2026",
   eventDate: "2026-10-31",

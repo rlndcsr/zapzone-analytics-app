@@ -46,6 +46,7 @@ import {
   mergeDeliveries,
   outcomeStyle,
   pendingDeliveryIds,
+  recipientLabel,
 } from "../../lib/photos/deliveryOutcome";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -166,9 +167,9 @@ function DeliveryCard({
               {row.destinationMasked}
             </Text>
           </View>
-          {!!row.recipientName && (
+          {!!recipientLabel(row) && (
             <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              {row.recipientName}
+              {recipientLabel(row)}
             </Text>
           )}
         </View>
@@ -686,7 +687,7 @@ export default function PhotoDeliveryLogScreen() {
               <Text className="mt-1 text-center text-sm text-gray-500 dark:text-gray-400">
                 {anyFilterOn
                   ? "Nothing matches these filters. Tap Clear to see the full log."
-                  : "Rows appear once a session is sent to a waiver by email or SMS."}
+                  : "Rows appear once a session is sent by email or SMS."}
               </Text>
             </View>
           )}

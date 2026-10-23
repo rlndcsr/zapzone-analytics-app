@@ -66,6 +66,7 @@ import {
   type RegistrationGroup,
   type RegistrationListFilter,
   type RegistrationPagination,
+  type RegistrationPhotoFrames,
 } from "../../services/registrationFormsService";
 
 const PRIMARY = "#0644C7";
@@ -74,6 +75,61 @@ const PRIMARY = "#0644C7";
 const MAX_SEARCH = 100;
 
 type IconName = ComponentProps<typeof Feather>["name"];
+
+/** Which photo frame this location's event day uses (web: RegistrationEventDetails). */
+const PhotoFrameLine = ({
+  frames,
+  past,
+  onOpenOverlays,
+  onAddFrame,
+}: {
+  frames: RegistrationPhotoFrames;
+  past: boolean;
+  onOpenOverlays: () => void;
+  onAddFrame: () => void;
+}) => {
+  const first = frames.frames[0];
+  const days =
+    frames.firstDay === frames.eventDate
+      ? formatDateLong(frames.eventDate)
+      : `${formatDateLong(frames.firstDay)} – ${formatDateLong(frames.eventDate)}`;
+  return (
+    <View className="flex-row items-start gap-2">
+      <Feather name="camera" size={15} color={PRIMARY} style={{ marginTop: 2 }} />
+      {first ? (
+        <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
+          {"Photo frame: "}
+          <Text className="font-medium text-gray-800 dark:text-gray-200">{first.name}</Text>
+          {!first.isEnabled ? " (turned off)" : first.neverRuns ? " (never used)" : ""}
+          {frames.frames.length > 1 ? ` +${frames.frames.length - 1} more` : ""}
+          {` · used for photos on ${days} · `}
+          <Text
+            onPress={onOpenOverlays}
+            accessibilityRole="link"
+            className="font-medium text-[#0644C7] dark:text-blue-400"
+          >
+            Photo overlays
+          </Text>
+        </Text>
+      ) : past ? (
+        <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
+          No photo frame. The event day has passed.
+        </Text>
+      ) : (
+        <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
+          {"No photo frame. "}
+          <Text
+            onPress={onAddFrame}
+            accessibilityRole="link"
+            className="font-medium text-[#0644C7] dark:text-blue-400"
+          >
+            Add one
+          </Text>
+        </Text>
+      )}
+    </View>
+  );
+};
 
 const Chip = ({
   label,
@@ -736,6 +792,20 @@ const RegistrationFormDetails = () => {
               <Text className="font-semibold">This event</Text> · {shortVenue} only
             </Text>
           </View>
+
+          {form.photoFrames && (
+            <PhotoFrameLine
+              frames={form.photoFrames}
+              past={past}
+              onOpenOverlays={() => router.push("/photos/overlays" as never)}
+              onAddFrame={() =>
+                router.push({
+                  pathname: "/photos/overlays",
+                  params: { event: String(form.id), location: String(form.locationId) },
+                } as never)
+              }
+            />
+          )}
 
           {/* Count tiles — this location form's tallies, never one page's or the event's. */}
           <View>

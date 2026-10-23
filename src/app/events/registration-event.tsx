@@ -462,6 +462,19 @@ const RegistrationEvent = () => {
                               {form.uniqueRegistrations} unique
                             </Text>
                           </View>
+                          {form.photoFrames && (
+                            <View className="min-w-0 flex-row items-center gap-1.5">
+                              <Feather name="camera" size={13} color="#9CA3AF" />
+                              <Text
+                                className="shrink text-sm text-gray-600 dark:text-gray-400"
+                                numberOfLines={1}
+                              >
+                                {form.photoFrames.frames.length > 0
+                                  ? `Frame: ${form.photoFrames.frames[0].name}`
+                                  : "No frame"}
+                              </Text>
+                            </View>
+                          )}
                         </View>
                       </View>
                       <Feather name="chevron-right" size={18} color="#9CA3AF" />

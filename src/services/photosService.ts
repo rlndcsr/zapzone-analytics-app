@@ -74,12 +74,18 @@ export type PhotoOutcomeTone = "success" | "info" | "warning" | "danger" | "mute
 
 export type PhotoTextingState = "not_configured" | "unverified" | "verified" | "failing";
 
+/** Who a delivery row was sent to: a waiver, or an event registration. */
+export type PhotoRecipientSource = "waiver" | "registration";
+
 /** One email/SMS row created for a session (email and SMS are tracked apart). */
 export type PhotoDeliveryRow = {
   id: number;
   channel: PhotoChannel;
   destinationMasked: string;
   recipientName: string | null;
+  /** Null from a server that predates event-registration recipients. */
+  recipientSource: PhotoRecipientSource | null;
+  registrationEntryId: number | null;
   status: PhotoDeliveryStatus;
   /** Same destination as an earlier row — recorded, but not sent twice. */
   isDuplicate: boolean;
@@ -275,10 +281,35 @@ export type SlideshowQueues = {
 export type PhotoOverlayStatus =
   "active" | "scheduled" | "expired" | "disabled";
 
+/** The registration location form an event-day frame is tied to. */
+export type PhotoOverlayEvent = {
+  id: number;
+  name: string | null;
+  firstDay: string | null;
+  eventDate: string | null;
+  dayCount: number | null;
+  /** 6 AM on the first day to 6 AM after the last, location time (ISO). */
+  windowStart: string | null;
+  windowEnd: string | null;
+  /** The event window narrowed by the frame's own hours. */
+  effectiveStart: string | null;
+  effectiveEnd: string | null;
+  /** The form was removed, so the frame is never used again. */
+  locationFormRemoved: boolean;
+  /** Its own hours fall outside the event's day(s). */
+  neverRuns: boolean;
+};
+
 /** A branded frame composited under the capture-date layer. */
 export type PhotoOverlay = {
   id: number;
   locationId: number;
+  /** Set when the frame is only for one escape room's group photos. */
+  packageId: number | null;
+  roomName: string | null;
+  /** Set when the frame is only for one event's day(s). */
+  registrationEventId: number | null;
+  event: PhotoOverlayEvent | null;
   name: string;
   /** Public disk URL — overlays are venue branding, not customer media. */
   imageUrl: string | null;
@@ -299,6 +330,46 @@ export type PhotoOverlayConflict = {
   conflictsWithId: number;
   conflictsWithName: string;
   winnerId: number;
+  winnerName: string | null;
+};
+
+/** The other locations' copies a new event frame was (or was not) given. */
+export type PhotoOverlayCopies = {
+  created: { overlayId: number; locationName: string | null }[];
+  skipped: { locationName: string | null; reason: string | null }[];
+};
+
+/** Another location's form in the same registration event. */
+export type PhotoEventDaySibling = {
+  formId: number;
+  locationId: number;
+  locationName: string | null;
+  firstDay: string;
+  eventDate: string;
+  /** False when the frame can't be copied there; `reason` says why. */
+  usable: boolean;
+  reason: string | null;
+};
+
+/** An upcoming registration location form a frame can be tied to. */
+export type PhotoEventDay = {
+  id: number;
+  name: string;
+  eventDate: string;
+  firstDay: string;
+  dayCount: number;
+  groupId: number | null;
+  windowStart: string | null;
+  windowEnd: string | null;
+  hasFrame: boolean;
+  /** Only sent to company admins and admins. */
+  siblings: PhotoEventDaySibling[];
+};
+
+export type PhotoEventDays = {
+  /** False on a server without event frames, or before registrations exist. */
+  available: boolean;
+  forms: PhotoEventDay[];
 };
 
 export type PhotoOverlays = {
@@ -322,6 +393,41 @@ export type PhotoWaiverMatch = {
   photoVideoConsent: boolean | null;
   locationName: string | null;
   signedOn: string | null;
+};
+
+export type PhotoWaiverRecipient = PhotoWaiverMatch & { kind: "waiver" };
+
+/** An event registrant near the photo's day — emailed, and texted only on request. */
+export type PhotoRegistrationMatch = {
+  kind: "registration";
+  id: number;
+  name: string;
+  emailMasked: string | null;
+  phoneMasked: string | null;
+  hasEmail: boolean;
+  hasPhone: boolean;
+  canEmail: boolean;
+  /** A text can go out, but only when staff tick "Also text". */
+  canText: boolean;
+  contactable: boolean;
+  unavailableReason: string | null;
+  photoVideoConsent: boolean | null;
+  eventName: string | null;
+  firstDay: string | null;
+  eventDate: string | null;
+  /** The event runs on the photo's operating day. */
+  coversPhotoDay: boolean;
+  registeredOn: string | null;
+};
+
+/** One row of the guest picker: a waiver or an event registration. */
+export type PhotoRecipientMatch = PhotoWaiverRecipient | PhotoRegistrationMatch;
+
+export type PhotoPeopleSearchResult = {
+  /** The operating day registrations are listed for (±1 day). */
+  referenceDay: string | null;
+  waivers: PhotoWaiverRecipient[];
+  registrations: PhotoRegistrationMatch[];
 };
 
 /* -------------------------------------------------------------- mapping -- */
@@ -350,6 +456,8 @@ type ApiDelivery = {
   channel: PhotoChannel;
   destination_masked: string;
   recipient_name: string | null;
+  recipient_source?: PhotoRecipientSource | null;
+  registration_entry_id?: number | null;
   status: PhotoDeliveryStatus;
   is_duplicate: boolean;
   duplicate_of_id: number | null;
@@ -513,12 +621,21 @@ function mapOutcomeFields(raw: Partial<ApiDelivery>) {
   };
 }
 
+/** Which kind of guest the row went to (`presentDelivery`). */
+function mapRecipientFields(raw: Partial<ApiDelivery>) {
+  return {
+    recipientSource: raw.recipient_source ?? null,
+    registrationEntryId: raw.registration_entry_id ?? null,
+  };
+}
+
 function mapDelivery(raw: ApiDelivery): PhotoDeliveryRow {
   return {
     id: raw.id,
     channel: raw.channel,
     destinationMasked: raw.destination_masked,
     recipientName: raw.recipient_name,
+    ...mapRecipientFields(raw),
     status: raw.status,
     isDuplicate: raw.is_duplicate,
     duplicateOfId: raw.duplicate_of_id,
@@ -720,35 +837,41 @@ export async function reorderSessionPhotos(
  * email (min 2 characters, 25 results). `location_id` orders local matches
  * first; it is a preference, not a filter.
  */
-export async function searchPhotoWaivers(
-  token: string,
-  query: string,
-  locationId?: number | null,
-  signal?: AbortSignal,
-): Promise<PhotoWaiverMatch[]> {
-  const params = new URLSearchParams({ q: query });
-  if (locationId != null) params.append("location_id", String(locationId));
+type ApiWaiverMatch = {
+  id: number;
+  name: string;
+  email_masked: string | null;
+  phone_masked: string | null;
+  has_email: boolean;
+  has_phone: boolean;
+  contactable: boolean;
+  unavailable_reason: string | null;
+  photo_video_consent: boolean | null;
+  location_name: string | null;
+  signed_on: string | null;
+};
 
-  const res = await apiRequest<{
-    data: {
-      id: number;
-      name: string;
-      email_masked: string | null;
-      phone_masked: string | null;
-      has_email: boolean;
-      has_phone: boolean;
-      contactable: boolean;
-      unavailable_reason: string | null;
-      photo_video_consent: boolean | null;
-      location_name: string | null;
-      signed_on: string | null;
-    }[];
-  }>(`/api/photo-sessions/waiver-search?${params.toString()}`, {
-    token,
-    signal,
-  });
+type ApiRegistrationMatch = {
+  id: number;
+  name: string;
+  email_masked: string | null;
+  phone_masked: string | null;
+  has_email: boolean;
+  has_phone: boolean;
+  can_email: boolean;
+  can_text: boolean;
+  contactable: boolean;
+  unavailable_reason: string | null;
+  photo_video_consent: boolean | null;
+  event_name: string | null;
+  first_day: string | null;
+  event_date: string | null;
+  covers_photo_day: boolean;
+  registered_on: string | null;
+};
 
-  return (res.data ?? []).map((raw) => ({
+function mapWaiverMatch(raw: ApiWaiverMatch): PhotoWaiverMatch {
+  return {
     id: raw.id,
     name: raw.name,
     emailMasked: raw.email_masked,
@@ -760,13 +883,130 @@ export async function searchPhotoWaivers(
     photoVideoConsent: raw.photo_video_consent,
     locationName: raw.location_name,
     signedOn: raw.signed_on,
-  }));
+  };
 }
+
+function mapRegistrationMatch(raw: ApiRegistrationMatch): PhotoRegistrationMatch {
+  return {
+    kind: "registration",
+    id: raw.id,
+    name: raw.name,
+    emailMasked: raw.email_masked,
+    phoneMasked: raw.phone_masked,
+    hasEmail: Boolean(raw.has_email),
+    hasPhone: Boolean(raw.has_phone),
+    canEmail: Boolean(raw.can_email),
+    canText: Boolean(raw.can_text),
+    contactable: Boolean(raw.contactable),
+    unavailableReason: raw.unavailable_reason ?? null,
+    photoVideoConsent: raw.photo_video_consent ?? null,
+    eventName: raw.event_name ?? null,
+    firstDay: raw.first_day ?? null,
+    eventDate: raw.event_date ?? null,
+    coversPhotoDay: Boolean(raw.covers_photo_day),
+    registeredOn: raw.registered_on ?? null,
+  };
+}
+
+const asWaiverRecipients = (rows: PhotoWaiverMatch[]): PhotoWaiverRecipient[] =>
+  rows.map((row) => ({ ...row, kind: "waiver" as const }));
+
+/** A 404 from Laravel's router (no such route), not a "record not found" 404. */
+const isMissingRoute = (e: unknown): boolean => {
+  if (!(e instanceof ApiError) || e.status !== 404) return false;
+  const message = (e.body as { message?: unknown } | null | undefined)?.message;
+  return typeof message !== "string" || /route .*could not be found/i.test(message);
+};
+
+export async function searchPhotoWaivers(
+  token: string,
+  query: string,
+  locationId?: number | null,
+  signal?: AbortSignal,
+): Promise<PhotoWaiverMatch[]> {
+  const params = new URLSearchParams({ q: query });
+  if (locationId != null) params.append("location_id", String(locationId));
+
+  const res = await apiRequest<{ data: ApiWaiverMatch[] }>(
+    `/api/photo-sessions/waiver-search?${params.toString()}`,
+    { token, signal },
+  );
+
+  return (res.data ?? []).map(mapWaiverMatch);
+}
+
+/**
+ * GET /api/photo-sessions/people-search — completed waivers plus the event
+ * registrants at the session's location whose event runs within a day of the
+ * photo's operating day. A server without the route answers with waivers only.
+ */
+export async function searchPhotoPeople(
+  token: string,
+  query: string,
+  photoSessionId: number,
+  locationId?: number | null,
+  signal?: AbortSignal,
+): Promise<PhotoPeopleSearchResult> {
+  const params = new URLSearchParams({
+    q: query,
+    photo_session_id: String(photoSessionId),
+  });
+  try {
+    const res = await apiRequest<{
+      data: {
+        reference_day?: string | null;
+        waivers?: ApiWaiverMatch[];
+        registrations?: ApiRegistrationMatch[];
+      } | null;
+    }>(`/api/photo-sessions/people-search?${params.toString()}`, {
+      token,
+      signal,
+    });
+    const d = res.data;
+    return {
+      referenceDay: d?.reference_day ?? null,
+      waivers: asWaiverRecipients(
+        (Array.isArray(d?.waivers) ? d.waivers : []).map(mapWaiverMatch),
+      ),
+      registrations: (Array.isArray(d?.registrations) ? d.registrations : []).map(
+        mapRegistrationMatch,
+      ),
+    };
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+    return {
+      referenceDay: null,
+      waivers: asWaiverRecipients(
+        await searchPhotoWaivers(token, query, locationId, signal),
+      ),
+      registrations: [],
+    };
+  }
+}
+
+/** Who a send goes to; registrations and the text opt-in only when chosen. */
+export type PhotoRecipientIds = {
+  waiverIds: number[];
+  registrationEntryIds?: number[];
+  /** Also text the chosen registrations that asked for a text. */
+  textRegistrants?: boolean;
+};
+
+const recipientBody = (ids: PhotoRecipientIds) => ({
+  waiver_ids: ids.waiverIds,
+  ...(ids.registrationEntryIds?.length
+    ? {
+        registration_entry_ids: ids.registrationEntryIds,
+        text_registrants: Boolean(ids.textRegistrants),
+      }
+    : {}),
+});
 
 export type DeliverPhotoSessionInput = {
   method: "waiver_message" | "staff_qr";
   schedule?: PhotoDeliverySchedule;
-  waiverIds?: number[];
+  /** Required for `waiver_message`; ignored for the staff QR. */
+  recipients?: PhotoRecipientIds;
   slideshowOptIn?: boolean;
 };
 
@@ -795,8 +1035,9 @@ export async function deliverPhotoSession(
         method: input.method,
         schedule:
           input.method === "waiver_message" ? input.schedule : undefined,
-        waiver_ids:
-          input.method === "waiver_message" ? input.waiverIds : undefined,
+        ...(input.method === "waiver_message" && input.recipients
+          ? recipientBody(input.recipients)
+          : {}),
         slideshow_opt_in: input.slideshowOptIn,
       },
     },
@@ -917,18 +1158,18 @@ export function photoDownloadUrl(photoId: number): string {
   return apiUrl(`/api/photo-library/${photoId}/download`);
 }
 
-/** POST /api/photo-library/{id}/send — resend through the waiver message flow. */
+/** POST /api/photo-library/{id}/send — resend by email or text to waivers and registrants. */
 export async function sendLibraryPhoto(
   token: string,
   photoId: number,
-  input: { waiverIds: number[]; schedule?: PhotoDeliverySchedule },
+  input: PhotoRecipientIds & { schedule?: PhotoDeliverySchedule },
 ): Promise<PhotoSendResult> {
   const res = await apiRequest<{ data: ApiSession; message?: string; outcome?: ApiSendOutcome }>(
     `/api/photo-library/${photoId}/send`,
     {
       method: "POST",
       token,
-      body: { waiver_ids: input.waiverIds, schedule: input.schedule },
+      body: { ...recipientBody(input), schedule: input.schedule },
     },
   );
   return {
@@ -1031,7 +1272,7 @@ export type PhotoDeliveryLogFilters = {
   /** Send-date bounds, YYYY-MM-DD. */
   from?: string;
   to?: string;
-  /** The web's "Show deduplicated waiver links" — include suppressed dupes. */
+  /** The web's "Show deduplicated links" — include suppressed dupes. */
   includeDuplicates?: boolean;
   outcome?: PhotoTextOutcomeFilter;
 };
@@ -1084,6 +1325,7 @@ function mapDeliveryLogRow(raw: ApiDeliveryLogRow): PhotoDeliveryLogRow {
       raw.destination ??
       "—",
     recipientName: raw.recipient_name ?? raw.recipient ?? raw.name ?? null,
+    ...mapRecipientFields(raw),
     status: raw.status ?? "queued",
     isDuplicate: Boolean(raw.is_duplicate),
     duplicateOfId: raw.duplicate_of_id ?? null,
@@ -1622,9 +1864,27 @@ export async function setSlideshowQueuePaused(
 
 /* ------------------------------------------------------------- overlays -- */
 
+type ApiOverlayEvent = {
+  id: number;
+  name: string | null;
+  first_day: string | null;
+  event_date: string | null;
+  day_count: number | null;
+  window_start: string | null;
+  window_end: string | null;
+  effective_start: string | null;
+  effective_end: string | null;
+  location_form_removed: boolean;
+  never_runs: boolean;
+};
+
 type ApiOverlay = {
   id: number;
   location_id: number;
+  package_id?: number | null;
+  room_name?: string | null;
+  registration_event_id?: number | null;
+  event?: ApiOverlayEvent | null;
   name: string;
   image_url: string | null;
   starts_at: string | null;
@@ -1637,10 +1897,31 @@ type ApiOverlay = {
   created_at: string | null;
 };
 
+function mapOverlayEvent(raw: ApiOverlayEvent | null | undefined): PhotoOverlayEvent | null {
+  if (!raw) return null;
+  return {
+    id: raw.id,
+    name: raw.name ?? null,
+    firstDay: raw.first_day ?? null,
+    eventDate: raw.event_date ?? null,
+    dayCount: raw.day_count ?? null,
+    windowStart: raw.window_start ?? null,
+    windowEnd: raw.window_end ?? null,
+    effectiveStart: raw.effective_start ?? null,
+    effectiveEnd: raw.effective_end ?? null,
+    locationFormRemoved: Boolean(raw.location_form_removed),
+    neverRuns: Boolean(raw.never_runs),
+  };
+}
+
 function mapOverlay(raw: ApiOverlay): PhotoOverlay {
   return {
     id: raw.id,
     locationId: raw.location_id,
+    packageId: raw.package_id ?? null,
+    roomName: raw.room_name ?? null,
+    registrationEventId: raw.registration_event_id ?? null,
+    event: mapOverlayEvent(raw.event),
     name: raw.name,
     imageUrl: raw.image_url,
     startsAt: raw.starts_at,
@@ -1670,6 +1951,7 @@ export async function fetchPhotoOverlays(
         conflicts_with_id: number;
         conflicts_with_name: string;
         winner_id: number;
+        winner_name?: string | null;
       }[];
       date_layer_note: string;
     };
@@ -1684,9 +1966,79 @@ export async function fetchPhotoOverlays(
       conflictsWithId: c.conflicts_with_id,
       conflictsWithName: c.conflicts_with_name,
       winnerId: c.winner_id,
+      winnerName: c.winner_name ?? null,
     })),
     dateLayerNote: res.data?.date_layer_note ?? "",
   };
+}
+
+/**
+ * GET /api/photo-overlays/event-days — this location's upcoming registration
+ * forms a frame can be tied to. A server without event frames 404s or says
+ * `available: false`; both read as "no event days".
+ */
+export async function fetchPhotoEventDays(
+  token: string,
+  locationId: number,
+  signal?: AbortSignal,
+): Promise<PhotoEventDays> {
+  try {
+    const res = await apiRequest<{
+      data: {
+        available?: boolean;
+        forms?: {
+          id: number;
+          name: string;
+          event_date: string;
+          first_day: string;
+          day_count: number;
+          group_id: number | null;
+          window_start: string | null;
+          window_end: string | null;
+          has_frame: boolean;
+          siblings?: {
+            form_id: number;
+            location_id: number;
+            location_name: string | null;
+            first_day: string;
+            event_date: string;
+            usable: boolean;
+            reason: string | null;
+          }[];
+        }[];
+      } | null;
+    }>(`/api/photo-overlays/event-days?location_id=${locationId}`, {
+      token,
+      signal,
+    });
+    const d = res.data;
+    return {
+      available: Boolean(d?.available),
+      forms: (Array.isArray(d?.forms) ? d.forms : []).map((f) => ({
+        id: f.id,
+        name: f.name,
+        eventDate: f.event_date,
+        firstDay: f.first_day || f.event_date,
+        dayCount: f.day_count ?? 1,
+        groupId: f.group_id ?? null,
+        windowStart: f.window_start ?? null,
+        windowEnd: f.window_end ?? null,
+        hasFrame: Boolean(f.has_frame),
+        siblings: (f.siblings ?? []).map((s) => ({
+          formId: s.form_id,
+          locationId: s.location_id,
+          locationName: s.location_name ?? null,
+          firstDay: s.first_day,
+          eventDate: s.event_date,
+          usable: Boolean(s.usable),
+          reason: s.reason ?? null,
+        })),
+      })),
+    };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return { available: false, forms: [] };
+    throw e;
+  }
 }
 
 export type CreatePhotoOverlayInput = {
@@ -1697,6 +2049,12 @@ export type CreatePhotoOverlayInput = {
   startsAt?: string;
   endsAt?: string;
   priority: number;
+  /** Only that escape room's group photos. */
+  packageId?: number;
+  /** Only on that registration form's event day(s). */
+  registrationEventId?: number;
+  /** Admins: also copy an event frame to the event's other locations. */
+  alsoOtherLocations?: boolean;
 };
 
 /**
@@ -1706,7 +2064,7 @@ export type CreatePhotoOverlayInput = {
 export async function createPhotoOverlay(
   token: string,
   input: CreatePhotoOverlayInput,
-): Promise<PhotoOverlay> {
+): Promise<{ overlay: PhotoOverlay; copies: PhotoOverlayCopies }> {
   const form = new FormData();
   form.append("location_id", String(input.locationId));
   form.append("name", input.name);
@@ -1718,6 +2076,11 @@ export async function createPhotoOverlay(
   if (input.startsAt) form.append("starts_at", input.startsAt);
   if (input.endsAt) form.append("ends_at", input.endsAt);
   form.append("priority", String(input.priority));
+  if (input.packageId != null) form.append("package_id", String(input.packageId));
+  if (input.registrationEventId != null) {
+    form.append("registration_event_id", String(input.registrationEventId));
+  }
+  if (input.alsoOtherLocations) form.append("also_other_locations", "1");
 
   const res = await fetch(apiUrl("/api/photo-overlays"), {
     method: "POST",
@@ -1730,7 +2093,36 @@ export async function createPhotoOverlay(
       (data?.message as string) ?? "That overlay could not be saved.",
     );
   }
-  return mapOverlay(data.data as ApiOverlay);
+  const copies = data?.copies as {
+    created?: { overlay_id: number; location_name: string | null }[];
+    skipped?: { location_name: string | null; reason: string | null }[];
+  } | null | undefined;
+  return {
+    overlay: mapOverlay(data.data as ApiOverlay),
+    copies: {
+      created: (Array.isArray(copies?.created) ? copies.created : []).map((c) => ({
+        overlayId: c.overlay_id,
+        locationName: c.location_name ?? null,
+      })),
+      skipped: (Array.isArray(copies?.skipped) ? copies.skipped : []).map((s) => ({
+        locationName: s.location_name ?? null,
+        reason: s.reason ?? null,
+      })),
+    },
+  };
+}
+
+/** POST /api/photo-overlays/{id} — tie the overlay to one escape room, or null for all photos. */
+export async function setPhotoOverlayRoom(
+  token: string,
+  overlayId: number,
+  roomId: number | null,
+): Promise<void> {
+  await apiRequest(`/api/photo-overlays/${overlayId}`, {
+    method: "POST",
+    token,
+    body: { package_id: roomId },
+  });
 }
 
 /** POST /api/photo-overlays/{id} — the update route; used for enable/disable. */

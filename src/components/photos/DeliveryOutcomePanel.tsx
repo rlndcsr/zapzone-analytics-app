@@ -9,6 +9,7 @@ import {
   isCarrierPending,
   mergeDeliveries,
   outcomeStyle,
+  recipientLabel,
   resultStyleKey,
   type ResultStyleKey,
 } from "../../lib/photos/deliveryOutcome";
@@ -392,10 +393,10 @@ export function DeliveryOutcomePanel({
                 <View className="min-w-0 flex-1">
                   <Text className="text-sm text-gray-900 dark:text-white">
                     {channelName(row)} · {row.destinationMasked}
-                    {!!row.recipientName && (
+                    {!!recipientLabel(row) && (
                       <Text className="text-gray-500 dark:text-gray-400">
                         {" "}
-                        · {row.recipientName}
+                        · {recipientLabel(row)}
                       </Text>
                     )}
                   </Text>

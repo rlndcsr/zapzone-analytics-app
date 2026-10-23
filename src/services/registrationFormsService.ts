@@ -60,6 +60,23 @@ export type RegistrationCounts = {
   hiddenEntries: number;
 };
 
+/** A photo overlay tied to a location form's event day(s). */
+export type RegistrationPhotoFrame = {
+  id: number;
+  name: string;
+  status: "active" | "scheduled" | "expired" | "disabled";
+  isEnabled: boolean;
+  /** Its own hours fall outside the event's day(s). */
+  neverRuns: boolean;
+};
+
+export type RegistrationPhotoFrames = {
+  firstDay: string;
+  eventDate: string;
+  /** Highest priority first; empty when the form has no frame. */
+  frames: RegistrationPhotoFrame[];
+};
+
 export type RegistrationFormRow = {
   id: number;
   name: string;
@@ -79,6 +96,8 @@ export type RegistrationFormRow = {
   nextEdition: RegistrationEdition | null;
   totalEntries: number;
   uniqueRegistrations: number;
+  /** Null from a server without event photo frames. */
+  photoFrames: RegistrationPhotoFrames | null;
 };
 
 export type RegistrationFormDetail = RegistrationFormRow & {
@@ -362,6 +381,33 @@ function mapCounts(raw: unknown): RegistrationCounts {
   };
 }
 
+const FRAME_STATUSES: RegistrationPhotoFrame["status"][] = [
+  "active",
+  "scheduled",
+  "expired",
+  "disabled",
+];
+
+function mapPhotoFrames(raw: unknown): RegistrationPhotoFrames | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Raw;
+  const eventDate = str(r.event_date);
+  return {
+    firstDay: str(r.first_day) || eventDate,
+    eventDate,
+    frames: list(r.frames).map((f) => {
+      const status = str(f.status) as RegistrationPhotoFrame["status"];
+      return {
+        id: num(f.id),
+        name: str(f.name),
+        status: FRAME_STATUSES.includes(status) ? status : "disabled",
+        isEnabled: f.is_enabled === true,
+        neverRuns: f.never_runs === true,
+      };
+    }),
+  };
+}
+
 function mapForm(r: Raw): RegistrationFormRow {
   return {
     id: num(r.id),
@@ -382,6 +428,7 @@ function mapForm(r: Raw): RegistrationFormRow {
     nextEdition: mapEdition(r.next_edition),
     totalEntries: num(r.total_entries),
     uniqueRegistrations: num(r.unique_registrations),
+    photoFrames: mapPhotoFrames(r.photo_frames),
   };
 }
 

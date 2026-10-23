@@ -85,7 +85,7 @@ const BACKGROUND_LABELS: Record<string, string> = {
 };
 
 const KIND_LABELS: Record<string, string> = {
-  immediate: "Immediate waiver delivery",
+  immediate: "Immediate delivery",
   next_day: "9:00 AM next-day delivery",
   kiosk: "Kiosk delivery",
 };
@@ -907,7 +907,7 @@ export default function PhotoSettingsScreen() {
             <>
               <SectionCard
                 title="Delivery channels"
-                description="Whether this site can actually send a photo link right now. Waivers that only carry an unavailable channel are shown as not contactable, so staff are pointed at the direct QR code instead."
+                description="Whether this site can actually send a photo link right now. Waivers and event registrations that only carry an unavailable channel are shown as not contactable, so staff are pointed at the direct QR code instead."
               >
                 <ChannelCard
                   icon="mail"

@@ -38,6 +38,14 @@ export const TEXTING_STATE_CARD: Record<PhotoTextingState, string> = {
 export const channelName = (row: Pick<PhotoDeliveryRow, "channel">): string =>
   row.channel === "email" ? "Email" : "Text message";
 
+/** "Sam Lee · Event registration" — the guest, and whether they came from a registration. */
+export const recipientLabel = (
+  row: Pick<PhotoDeliveryRow, "recipientName" | "recipientSource">,
+): string =>
+  [row.recipientName, row.recipientSource === "registration" ? "Event registration" : null]
+    .filter(Boolean)
+    .join(" · ");
+
 /** Fresh rows from the server laid over the ones on screen, by id; others untouched. */
 export function mergeDeliveries<T extends PhotoDeliveryRow>(current: T[], updates: PhotoDeliveryRow[]): T[] {
   const byId = new Map(updates.map((row) => [row.id, row]));

@@ -532,6 +532,29 @@ export async function fetchEscapeRoomDay(
   return mapDay(res.data);
 }
 
+/** One escape room at a location, for pickers (e.g. an overlay's "Applies to"). */
+export type EscapeRoomOption = {
+  id: number;
+  name: string;
+  isActive: boolean;
+};
+
+/** GET /api/escape-rooms/rooms — the location's escape rooms, inactive ones included. */
+export async function fetchEscapeRoomOptions(
+  token: string,
+  locationId: number,
+  signal?: AbortSignal,
+): Promise<EscapeRoomOption[]> {
+  const res = await apiRequest<{
+    data: { id: number; name: string; is_active: boolean }[];
+  }>(`/api/escape-rooms/rooms?location_id=${locationId}`, { token, signal });
+  return (Array.isArray(res.data) ? res.data : []).map((room) => ({
+    id: room.id,
+    name: room.name,
+    isActive: Boolean(room.is_active),
+  }));
+}
+
 /** POST /api/escape-rooms/sessions — opens (or reuses) the game at a room and time. */
 export async function openEscapeRoomGame(
   token: string,

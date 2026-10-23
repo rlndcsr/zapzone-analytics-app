@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { memo, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
-import { canRetryFromLog, outcomeStyle } from "../../lib/photos/deliveryOutcome";
+import { canRetryFromLog, outcomeStyle, recipientLabel } from "../../lib/photos/deliveryOutcome";
 import type {
   PhotoDeliveryKind,
   PhotoDeliveryLogRow,
@@ -114,12 +114,12 @@ const COLUMNS: Column[] = [
         >
           {row.destinationMasked}
         </Text>
-        {!!row.recipientName && (
+        {!!recipientLabel(row) && (
           <Text
             numberOfLines={1}
             className="mt-0.5 text-xs text-gray-400 dark:text-gray-500"
           >
-            {row.recipientName}
+            {recipientLabel(row)}
           </Text>
         )}
       </View>
