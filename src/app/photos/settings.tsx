@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { MessageLinksPanel } from "../../components/photos/MessageLinksPanel";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { SheetSelect } from "../../components/ui/SheetSelect";
@@ -49,6 +50,7 @@ import {
   sendPhotoTestMessage,
   updatePhotoSettings,
   updatePhotoTemplate,
+  type PhotoMessageLink,
   type PhotoMessageTemplate,
   type PhotoSettings,
   type PhotoTemplates,
@@ -88,6 +90,7 @@ const KIND_LABELS: Record<string, string> = {
   immediate: "Immediate delivery",
   next_day: "9:00 AM next-day delivery",
   kiosk: "Kiosk delivery",
+  registration: "Event registration photos",
 };
 
 /** Same bounds as the web's number inputs. */
@@ -389,6 +392,35 @@ function PhotoLinkAddress({
   );
 }
 
+/** A ticked option for the registration email's switches (the web's checkboxes). */
+function CheckRow({
+  checked,
+  onToggle,
+  label,
+}: {
+  checked: boolean;
+  onToggle: () => void;
+  label: string;
+}) {
+  return (
+    <Pressable
+      onPress={onToggle}
+      className="flex-row items-start gap-2.5"
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+    >
+      <View
+        className={`mt-0.5 h-5 w-5 items-center justify-center rounded border-2 ${
+          checked ? "border-[#0644C7] bg-[#0644C7]" : "border-gray-300 dark:border-neutral-600"
+        }`}
+      >
+        {checked && <Feather name="check" size={13} color="#FFFFFF" />}
+      </View>
+      <Text className="flex-1 text-sm text-gray-800 dark:text-gray-200">{label}</Text>
+    </Pressable>
+  );
+}
+
 function LockedRow({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row justify-between gap-4 border-b border-gray-200/60 py-1.5 dark:border-neutral-800">
@@ -420,6 +452,8 @@ function SettingsSkeleton() {
 
 export default function PhotoSettingsScreen() {
   const insets = useSafeAreaInsets();
+  // "Edit its wording" on a registration form opens the event registration email.
+  const { open: openParam } = useLocalSearchParams<{ open?: string }>();
   // The update reminder floats above every screen until the app is
   // updated; without this it would sit on top of the buttons below.
   const updateNoticeInset = useAppUpdateNoticeInset();
@@ -480,6 +514,15 @@ export default function PhotoSettingsScreen() {
   const [templateDraft, setTemplateDraft] = useState<
     Record<number, PhotoMessageTemplate>
   >({});
+  const [variablesByKind, setVariablesByKind] = useState<Record<string, string[]> | null>(null);
+  const [linkVariables, setLinkVariables] = useState<string[]>([]);
+  const [templateTestTo, setTemplateTestTo] = useState<Record<number, string>>({});
+  const [templateTesting, setTemplateTesting] = useState<number | null>(null);
+
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollY = useRef(0);
+  const registrationCardRef = useRef<View>(null);
+  const openedFromLink = useRef(false);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -506,6 +549,8 @@ export default function PhotoSettingsScreen() {
       });
       setTemplates(templateData.templates);
       setVariables(templateData.variables);
+      setVariablesByKind(templateData.variablesByKind);
+      setLinkVariables(templateData.linkVariables.map((link) => link.variable));
       setEscapeRoomEmail(templateData.escapeRoomEmail);
       setTemplateDraft(
         Object.fromEntries(templateData.templates.map((t) => [t.id, t])),
@@ -757,6 +802,9 @@ export default function PhotoSettingsScreen() {
           emailSubject: draft.emailSubject,
           emailBody: draft.emailBody,
           smsBody: draft.smsBody,
+          ...(draft.kind === "registration"
+            ? { isActive: draft.isActive, attachPhotos: draft.attachPhotos }
+            : {}),
         });
         showToast({ message: "Template saved.", type: "success" });
         await load();
@@ -771,6 +819,69 @@ export default function PhotoSettingsScreen() {
     },
     [load, showToast, templateDraft],
   );
+
+  const sendTemplateTest = useCallback(
+    async (template: PhotoMessageTemplate) => {
+      const token = getToken();
+      if (!token || !effectiveLocationId || templateTesting !== null) return;
+      const destination = (templateTestTo[template.id] ?? "").trim();
+      if (!destination) {
+        showToast({ message: "Enter an email address for the test.", type: "error" });
+        return;
+      }
+      setTemplateTesting(template.id);
+      try {
+        const result = await sendPhotoTestMessage(token, {
+          locationId: effectiveLocationId,
+          channel: "email",
+          destination,
+          kind: template.kind,
+        });
+        showToast({
+          message:
+            result.message ||
+            (result.success ? "Test email sent." : "The test email could not be sent."),
+          type: result.success ? "success" : "error",
+        });
+      } finally {
+        setTemplateTesting(null);
+      }
+    },
+    [effectiveLocationId, showToast, templateTestTo, templateTesting],
+  );
+
+  const notify = useCallback(
+    (message: string, type: ToastType) => showToast({ message, type }),
+    [showToast],
+  );
+  const handleLinksChanged = useCallback(
+    (links: PhotoMessageLink[]) => setLinkVariables(links.map((link) => link.variable)),
+    [],
+  );
+
+  // Opened from a registration form: open the event registration email and bring it into view.
+  useEffect(() => {
+    if (openedFromLink.current || openParam !== "registration-email") return;
+    const registration = templates.find((template) => template.kind === "registration");
+    if (!registration) return;
+    openedFromLink.current = true;
+    setOpenTemplate(registration.id);
+    const timer = setTimeout(() => {
+      const card = registrationCardRef.current;
+      const scroll = scrollRef.current;
+      if (!card || !scroll) return;
+      try {
+        card.measureLayout(
+          scroll as unknown as View,
+          (_x, y) => scroll.scrollTo({ y: Math.max(0, scrollY.current + y - 16), animated: true }),
+          () => {},
+        );
+      } catch {
+        // The card is open either way; scrolling to it is a convenience.
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [openParam, templates]);
 
   const restoreTemplate = useCallback(
     async (templateId: number) => {
@@ -882,9 +993,14 @@ export default function PhotoSettingsScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
+          ref={scrollRef}
           className="flex-1"
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScroll={(e) => {
+            scrollY.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
           contentContainerStyle={{ padding: 20, paddingBottom: 24 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -1365,10 +1481,16 @@ export default function PhotoSettingsScreen() {
                   {templates.map((template) => {
                     const draft = templateDraft[template.id] ?? template;
                     const open = openTemplate === template.id;
+                    const isRegistration = template.kind === "registration";
+                    const templateVariables = [
+                      ...(variablesByKind?.[template.kind] ?? variables),
+                      ...linkVariables,
+                    ];
 
                     return (
                       <View
                         key={template.id}
+                        ref={isRegistration ? registrationCardRef : undefined}
                         className="rounded-xl border border-gray-100 dark:border-neutral-800"
                       >
                         <Pressable
@@ -1388,6 +1510,40 @@ export default function PhotoSettingsScreen() {
 
                         {open && (
                           <View className="gap-3 px-4 pb-4">
+                            {isRegistration && (
+                              <View className="gap-2 rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/60">
+                                <Text className="text-sm text-gray-700 dark:text-gray-300">
+                                  {"Used for every photo sent to someone who registered for an event, from the photo screen or the photo library. Change the wording between events; {{event_name}} and {{event_date}} fill in by themselves."}
+                                </Text>
+                                <CheckRow
+                                  checked={draft.isActive}
+                                  onToggle={() =>
+                                    setTemplateDraft((prev) => ({
+                                      ...prev,
+                                      [template.id]: { ...draft, isActive: !draft.isActive },
+                                    }))
+                                  }
+                                  label="Use this email for event registrations (when off, registrants get the usual photo email)"
+                                />
+                                <CheckRow
+                                  checked={draft.attachPhotos}
+                                  onToggle={() =>
+                                    setTemplateDraft((prev) => ({
+                                      ...prev,
+                                      [template.id]: { ...draft, attachPhotos: !draft.attachPhotos },
+                                    }))
+                                  }
+                                  label="Attach the photos to the email as well as the link"
+                                />
+                              </View>
+                            )}
+
+                            <Text className="text-xs text-gray-500 dark:text-gray-400">
+                              {`Variables for this message: ${templateVariables
+                                .map((v) => `{{${v}}}`)
+                                .join(", ")}`}
+                            </Text>
+
                             <View>
                               <FieldLabel>Email subject</FieldLabel>
                               <TextField
@@ -1434,6 +1590,20 @@ export default function PhotoSettingsScreen() {
                                 numberOfLines={3}
                               />
                               <Hint>{`${draft.smsBody.length} characters`}</Hint>
+                              {isRegistration && (
+                                <TestSendRow
+                                  label="Send a test of the saved email to"
+                                  placeholder="you@example.com"
+                                  keyboardType="email-address"
+                                  value={templateTestTo[template.id] ?? ""}
+                                  onChangeText={(v) =>
+                                    setTemplateTestTo((prev) => ({ ...prev, [template.id]: v }))
+                                  }
+                                  onSend={() => void sendTemplateTest(template)}
+                                  sending={templateTesting === template.id}
+                                  result={null}
+                                />
+                              )}
                             </View>
 
                             <View className="flex-row gap-2">
@@ -1481,6 +1651,11 @@ export default function PhotoSettingsScreen() {
                   })}
                 </View>
               </SectionCard>
+
+              <MessageLinksPanel
+                onNotify={notify}
+                onLinksChanged={handleLinksChanged}
+              />
 
               <SectionCard title="Fixed rules" tinted>
                 <LockedRow

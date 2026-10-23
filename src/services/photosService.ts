@@ -2403,6 +2403,8 @@ export async function sendPhotoTestMessage(
     locationId: number;
     channel: PhotoTestChannel;
     destination: string;
+    /** Which template's saved wording to test; the server defaults to immediate. */
+    kind?: PhotoTemplateKind;
   },
 ): Promise<PhotoTestResult> {
   try {
@@ -2422,6 +2424,7 @@ export async function sendPhotoTestMessage(
         location_id: input.locationId,
         channel: input.channel,
         destination: input.destination,
+        ...(input.kind ? { kind: input.kind } : {}),
       },
     });
     return {
@@ -2495,7 +2498,8 @@ export async function rotatePhotoPasscode(
 
 /* ----------------------------------------------------- message templates -- */
 
-export type PhotoTemplateKind = "immediate" | "next_day" | "kiosk";
+/** `registration` is the "Event registration photos" email sent to event registrants. */
+export type PhotoTemplateKind = "immediate" | "next_day" | "kiosk" | "registration";
 
 export type PhotoMessageTemplate = {
   id: number;
@@ -2504,13 +2508,20 @@ export type PhotoMessageTemplate = {
   emailSubject: string;
   emailBody: string;
   smsBody: string;
+  /** For `registration`: off means registrants get the usual photo email. */
   isActive: boolean;
+  /** For `registration`: attach the photos as well as the link. */
+  attachPhotos: boolean;
 };
 
 export type PhotoTemplates = {
   templates: PhotoMessageTemplate[];
   /** Placeholder names, without the braces the UI adds. */
   variables: string[];
+  /** Each kind's own variables (e.g. `event_name` for registration); null from an older server. */
+  variablesByKind: Record<string, string[]> | null;
+  /** `link_<key>` placeholders from "Links for photo messages". */
+  linkVariables: { variable: string; label: string }[];
   kinds: string[];
   /** The Thanks for Playing email escape-room photos go out with. */
   escapeRoomEmail: {
@@ -2531,6 +2542,7 @@ type ApiPhotoTemplate = {
   email_body: string | null;
   sms_body: string | null;
   is_active: boolean;
+  attach_photos?: boolean | null;
 };
 
 function mapPhotoTemplate(raw: ApiPhotoTemplate): PhotoMessageTemplate {
@@ -2542,6 +2554,7 @@ function mapPhotoTemplate(raw: ApiPhotoTemplate): PhotoMessageTemplate {
     emailBody: raw.email_body ?? "",
     smsBody: raw.sms_body ?? "",
     isActive: Boolean(raw.is_active),
+    attachPhotos: Boolean(raw.attach_photos),
   };
 }
 
@@ -2554,6 +2567,8 @@ export async function fetchPhotoTemplates(
     data: {
       templates: ApiPhotoTemplate[];
       variables: string[];
+      variables_by_kind?: Record<string, string[]> | null;
+      link_variables?: { variable: string; label: string }[] | null;
       kinds: string[];
       escape_room_email?: {
         id: number;
@@ -2569,6 +2584,8 @@ export async function fetchPhotoTemplates(
   return {
     templates: (res.data.templates ?? []).map(mapPhotoTemplate),
     variables: res.data.variables ?? [],
+    variablesByKind: res.data.variables_by_kind ?? null,
+    linkVariables: Array.isArray(res.data.link_variables) ? res.data.link_variables : [],
     kinds: res.data.kinds ?? [],
     escapeRoomEmail: email
       ? {
@@ -2586,11 +2603,17 @@ export async function fetchPhotoTemplates(
   };
 }
 
-/** PUT /api/photo-templates/{id} — saves one template's wording. */
+/** PUT /api/photo-templates/{id} — saves one template's wording (and, for registration, its switches). */
 export async function updatePhotoTemplate(
   token: string,
   templateId: number,
-  input: { emailSubject: string; emailBody: string; smsBody: string },
+  input: {
+    emailSubject: string;
+    emailBody: string;
+    smsBody: string;
+    isActive?: boolean;
+    attachPhotos?: boolean;
+  },
 ): Promise<PhotoMessageTemplate> {
   const res = await apiRequest<{ data: ApiPhotoTemplate }>(
     `/api/photo-templates/${templateId}`,
@@ -2601,10 +2624,133 @@ export async function updatePhotoTemplate(
         email_subject: input.emailSubject,
         email_body: input.emailBody,
         sms_body: input.smsBody,
+        ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
+        ...(input.attachPhotos !== undefined ? { attach_photos: input.attachPhotos } : {}),
       },
     },
   );
   return mapPhotoTemplate(res.data);
+}
+
+/* --------------------------------------------- links for photo messages -- */
+
+/** A named link with a default address and optional per-location addresses. */
+export type PhotoMessageLink = {
+  id: number;
+  key: string;
+  /** "link_instagram" — the placeholder without braces. */
+  variable: string;
+  label: string;
+  defaultUrl: string | null;
+  /** Only the locations this user works at. */
+  urls: { locationId: number; url: string }[];
+};
+
+export type PhotoMessageLinks = {
+  links: PhotoMessageLink[];
+  locations: { id: number; name: string }[];
+  /** Company admins and admins add, rename and remove links. */
+  canManageLinks: boolean;
+  maxLinks: number;
+};
+
+type ApiMessageLink = {
+  id: number;
+  key: string;
+  variable: string;
+  label: string;
+  default_url: string | null;
+  urls?: { location_id: number; url: string }[];
+};
+
+function mapMessageLink(raw: ApiMessageLink): PhotoMessageLink {
+  return {
+    id: raw.id,
+    key: raw.key,
+    variable: raw.variable || `link_${raw.key}`,
+    label: raw.label,
+    defaultUrl: raw.default_url ?? null,
+    urls: (raw.urls ?? []).map((u) => ({ locationId: u.location_id, url: u.url })),
+  };
+}
+
+const MESSAGE_LINKS_PATH = "/api/photo-message-links";
+
+/**
+ * GET /api/photo-message-links — null when the server doesn't have message
+ * links (404) or they aren't set up yet (503), so the section stays hidden.
+ */
+export async function fetchMessageLinks(
+  token: string,
+  signal?: AbortSignal,
+): Promise<PhotoMessageLinks | null> {
+  try {
+    const res = await apiRequest<{
+      data: {
+        links?: ApiMessageLink[];
+        locations?: { id: number; name: string }[];
+        can_manage_links?: boolean;
+        max_links?: number;
+      };
+    }>(MESSAGE_LINKS_PATH, { token, signal });
+    const d = res.data;
+    return {
+      links: (d?.links ?? []).map(mapMessageLink),
+      locations: d?.locations ?? [],
+      canManageLinks: Boolean(d?.can_manage_links),
+      maxLinks: d?.max_links ?? 0,
+    };
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 404 || e.status === 503)) return null;
+    throw e;
+  }
+}
+
+/** POST /api/photo-message-links — admins only. */
+export async function createMessageLink(
+  token: string,
+  input: { label: string; defaultUrl: string | null },
+): Promise<PhotoMessageLink> {
+  const res = await apiRequest<{ data: ApiMessageLink }>(MESSAGE_LINKS_PATH, {
+    method: "POST",
+    token,
+    body: { label: input.label, default_url: input.defaultUrl },
+  });
+  return mapMessageLink(res.data);
+}
+
+/** PUT /api/photo-message-links/{id} — rename or change the default address (admins only). */
+export async function updateMessageLink(
+  token: string,
+  linkId: number,
+  input: { label: string; defaultUrl: string | null },
+): Promise<PhotoMessageLink> {
+  const res = await apiRequest<{ data: ApiMessageLink }>(`${MESSAGE_LINKS_PATH}/${linkId}`, {
+    method: "PUT",
+    token,
+    body: { label: input.label, default_url: input.defaultUrl },
+  });
+  return mapMessageLink(res.data);
+}
+
+/** PUT /api/photo-message-links/{id}/url — one location's own address; null clears it. */
+export async function setMessageLinkUrl(
+  token: string,
+  linkId: number,
+  locationId: number,
+  url: string | null,
+): Promise<PhotoMessageLink> {
+  const res = await apiRequest<{ data: ApiMessageLink }>(`${MESSAGE_LINKS_PATH}/${linkId}/url`, {
+    method: "PUT",
+    token,
+    body: { location_id: locationId, url },
+  });
+  return mapMessageLink(res.data);
+}
+
+/** DELETE /api/photo-message-links/{id} — admins only. */
+export async function deleteMessageLink(token: string, linkId: number): Promise<void> {
+  await apiRequest(`${MESSAGE_LINKS_PATH}/${linkId}`, { method: "DELETE", token });
 }
 
 /** POST /api/photo-templates/{id}/reset — restores the default wording. */

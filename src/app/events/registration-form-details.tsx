@@ -794,17 +794,42 @@ const RegistrationFormDetails = () => {
           </View>
 
           {form.photoFrames && (
-            <PhotoFrameLine
-              frames={form.photoFrames}
-              past={past}
-              onOpenOverlays={() => router.push("/photos/overlays" as never)}
-              onAddFrame={() =>
-                router.push({
-                  pathname: "/photos/overlays",
-                  params: { event: String(form.id), location: String(form.locationId) },
-                } as never)
-              }
-            />
+            <View className="gap-2">
+              <PhotoFrameLine
+                frames={form.photoFrames}
+                past={past}
+                onOpenOverlays={() => router.push("/photos/overlays" as never)}
+                onAddFrame={() =>
+                  router.push({
+                    pathname: "/photos/overlays",
+                    params: { event: String(form.id), location: String(form.locationId) },
+                  } as never)
+                }
+              />
+              {/* Which email registrants' photos go out with (web: RegistrationEventDetails). */}
+              <View className="flex-row items-start gap-2">
+                <Feather name="mail" size={15} color={PRIMARY} style={{ marginTop: 2 }} />
+                <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
+                  {"Photos sent to people who registered use the "}
+                  <Text className="font-medium text-gray-800 dark:text-gray-200">
+                    Event registration photos
+                  </Text>
+                  {" email. "}
+                  <Text
+                    onPress={() =>
+                      router.push({
+                        pathname: "/photos/settings",
+                        params: { open: "registration-email" },
+                      } as never)
+                    }
+                    accessibilityRole="link"
+                    className="font-medium text-[#0644C7] dark:text-blue-400"
+                  >
+                    Edit its wording
+                  </Text>
+                </Text>
+              </View>
+            </View>
           )}
 
           {/* Count tiles — this location form's tallies, never one page's or the event's. */}
