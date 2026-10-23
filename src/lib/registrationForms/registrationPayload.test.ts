@@ -42,6 +42,7 @@ const original: RegistrationFormDetail = {
   locationLocked: false,
   canManageEvent: true,
   groupFormCount: 1,
+  photoEmailActive: true,
 };
 
 /** The editor as loaded from `original`, before any change. */

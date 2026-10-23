@@ -29,7 +29,12 @@ import {
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { escapeRoomEmailNote } from "../../lib/escapeRooms/gameFollowUp";
-import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
+import {
+  setActiveLocation,
+  useActiveLocation,
+} from "../../lib/location/activeLocationStore";
+import { shortVenueName } from "../../lib/registrationForms/registrationForms";
 import {
   fallbackTextingStatus,
   TEXTING_STATE_BADGE,
@@ -452,8 +457,11 @@ function SettingsSkeleton() {
 
 export default function PhotoSettingsScreen() {
   const insets = useSafeAreaInsets();
-  // "Edit its wording" on a registration form opens the event registration email.
-  const { open: openParam } = useLocalSearchParams<{ open?: string }>();
+  // "Edit its wording" on a registration form opens the event registration email, at the form's location.
+  const { open: openParam, location: locationParam } = useLocalSearchParams<{
+    open?: string;
+    location?: string;
+  }>();
   // The update reminder floats above every screen until the app is
   // updated; without this it would sit on top of the buttons below.
   const updateNoticeInset = useAppUpdateNoticeInset();
@@ -469,6 +477,8 @@ export default function PhotoSettingsScreen() {
 
   // The web guards /photos/settings to company_admin and location_manager.
   const canManage = isCompanyAdmin || user?.role === "location_manager";
+  const { locations, loading: locationsLoading } = useLocationOptions();
+  const linkLocationRead = useRef(false);
 
   const [data, setData] = useState<PhotoSettings | null>(null);
   const [form, setForm] = useState<Form | null>(null);
@@ -859,6 +869,24 @@ export default function PhotoSettingsScreen() {
     [],
   );
 
+  // Opened from a form while on All locations: a company admin is switched to the form's location, and told.
+  useEffect(() => {
+    if (linkLocationRead.current || !locationParam) return;
+    const target = Number(locationParam);
+    if (!isCompanyAdmin || activeLocation.id !== "all" || !Number.isInteger(target) || target <= 0) {
+      linkLocationRead.current = true;
+      return;
+    }
+    if (locationsLoading) return;
+    linkLocationRead.current = true;
+    const listed = locations.find((location) => location.id === target)?.name;
+    setActiveLocation({ id: target, name: listed ?? `Location #${target}` });
+    showToast({
+      message: `Switched to ${listed ? (shortVenueName(listed) ?? listed) : "that location"} to edit the photo emails`,
+      type: "info",
+    });
+  }, [locationParam, isCompanyAdmin, activeLocation.id, locationsLoading, locations, showToast]);
+
   // Opened from a registration form: open the event registration email and bring it into view.
   useEffect(() => {
     if (openedFromLink.current || openParam !== "registration-email") return;
@@ -975,7 +1003,7 @@ export default function PhotoSettingsScreen() {
             </Text>
             <Text className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
               {isCompanyAdmin
-                ? "Kiosk and slideshow passcodes, overlays and retention are all per location."
+                ? "Kiosk and slideshow passcodes, overlays and retention are all per location. Pick any location above to also edit the message templates and links, which every location shares."
                 : "Your account is not assigned to a location yet."}
             </Text>
           </View>
@@ -1515,6 +1543,9 @@ export default function PhotoSettingsScreen() {
                                 <Text className="text-sm text-gray-700 dark:text-gray-300">
                                   {"Used for every photo sent to someone who registered for an event, from the photo screen or the photo library. Change the wording between events; {{event_name}} and {{event_date}} fill in by themselves."}
                                 </Text>
+                                <Text className="text-xs text-gray-600 dark:text-gray-400">
+                                  {"This one email is shared by every location, and changes apply everywhere straight away. Use {{event_name}} and {{location_name}} rather than typing an event or venue. Photos still waiting to go out (9:00 AM sends and retries) use the wording saved when they are sent."}
+                                </Text>
                                 <CheckRow
                                   checked={draft.isActive}
                                   onToggle={() =>
@@ -1603,6 +1634,11 @@ export default function PhotoSettingsScreen() {
                                   sending={templateTesting === template.id}
                                   result={null}
                                 />
+                              )}
+                              {isRegistration && (
+                                <Hint>
+                                  {"The test fills in a sample event and doesn't attach photos. Real emails attach them when that box is ticked."}
+                                </Hint>
                               )}
                             </View>
 

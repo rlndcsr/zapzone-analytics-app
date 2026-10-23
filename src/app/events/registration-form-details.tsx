@@ -810,22 +810,27 @@ const RegistrationFormDetails = () => {
               <View className="flex-row items-start gap-2">
                 <Feather name="mail" size={15} color={PRIMARY} style={{ marginTop: 2 }} />
                 <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
-                  {"Photos sent to people who registered use the "}
+                  {form.photoEmailActive ? "Photos sent to people who registered use the " : "The "}
                   <Text className="font-medium text-gray-800 dark:text-gray-200">
                     Event registration photos
                   </Text>
-                  {" email. "}
+                  {form.photoEmailActive
+                    ? " email. "
+                    : " email is switched off, so people who registered get the usual photo email. "}
                   <Text
                     onPress={() =>
                       router.push({
                         pathname: "/photos/settings",
-                        params: { open: "registration-email" },
+                        params: {
+                          open: "registration-email",
+                          location: String(form.locationId),
+                        },
                       } as never)
                     }
                     accessibilityRole="link"
                     className="font-medium text-[#0644C7] dark:text-blue-400"
                   >
-                    Edit its wording
+                    {form.photoEmailActive ? "Edit its wording" : "Turn it on or edit it"}
                   </Text>
                 </Text>
               </View>

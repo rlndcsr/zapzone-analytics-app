@@ -335,6 +335,7 @@ describe("removing a location form or a whole event", () => {
     locationLocked: false,
     canManageEvent: true,
     groupFormCount: 2,
+    photoEmailActive: true,
     ...over,
   });
 

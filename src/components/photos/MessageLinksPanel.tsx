@@ -1,7 +1,15 @@
 import { Feather } from "@expo/vector-icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
 
+import {
+  linkDraftFor as draftFor,
+  linkFieldKey,
+  mergeLinkDrafts,
+  normaliseLinkUrl,
+  savedLinkUrl,
+  type LinkDraft,
+} from "../../lib/photos/messageLinks";
 import { getToken } from "../../lib/session";
 import {
   createMessageLink,
@@ -15,8 +23,6 @@ import {
 
 type Notify = (message: string, type: "success" | "error" | "info") => void;
 
-type LinkDraft = { label: string; defaultUrl: string; urls: Record<number, string> };
-
 const CARD_SHADOW = {
   shadowColor: "#000",
   shadowOffset: { width: 0, height: 2 },
@@ -27,12 +33,6 @@ const CARD_SHADOW = {
 
 const errorMessage = (e: unknown, fallback: string): string =>
   e instanceof Error && e.message ? e.message : fallback;
-
-const draftFor = (link: PhotoMessageLink): LinkDraft => ({
-  label: link.label,
-  defaultUrl: link.defaultUrl ?? "",
-  urls: Object.fromEntries(link.urls.map((row) => [row.locationId, row.url])),
-});
 
 /** Inline code chip for a {{placeholder}}. */
 function Code({ children }: { children: string }) {
@@ -51,6 +51,7 @@ function Field({
   disabled = false,
   url = false,
   maxLength,
+  a11yLabel,
 }: {
   label?: string;
   value: string;
@@ -59,6 +60,7 @@ function Field({
   disabled?: boolean;
   url?: boolean;
   maxLength?: number;
+  a11yLabel?: string;
 }) {
   return (
     <View>
@@ -75,7 +77,7 @@ function Field({
         keyboardType={url ? "url" : "default"}
         autoCapitalize={url ? "none" : "sentences"}
         autoCorrect={!url}
-        accessibilityLabel={label}
+        accessibilityLabel={a11yLabel ?? label}
         className={`rounded-xl border border-gray-100 px-4 py-3.5 text-sm dark:border-neutral-800 ${
           disabled
             ? "bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400"
@@ -133,15 +135,24 @@ export function MessageLinksPanel({
 }) {
   const [data, setData] = useState<PhotoMessageLinks | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [loadFailed, setLoadFailed] = useState<string | null>(null);
+  // Fields this screen changed and hasn't saved yet; a reload keeps these and refreshes the rest.
+  const edited = useRef(new Set<string>());
   const [drafts, setDrafts] = useState<Record<number, LinkDraft>>({});
   const [busyId, setBusyId] = useState<number | "new" | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const [newUrl, setNewUrl] = useState("");
 
+  const forget = (linkId: number) => {
+    edited.current.forEach((key) => {
+      if (key.startsWith(`${linkId}:`)) edited.current.delete(key);
+    });
+  };
+
   const apply = useCallback(
     (next: PhotoMessageLinks) => {
       setData(next);
-      setDrafts(Object.fromEntries(next.links.map((link) => [link.id, draftFor(link)])));
+      setDrafts((prev) => mergeLinkDrafts(prev, next.links, edited.current));
       onLinksChanged(next.links);
     },
     [onLinksChanged],
@@ -156,42 +167,74 @@ export function MessageLinksPanel({
         setUnavailable(true);
         return;
       }
+      setLoadFailed(null);
       apply(result);
     } catch (e) {
-      onNotify(errorMessage(e, "The links could not be loaded."), "error");
+      setLoadFailed(errorMessage(e, "The links could not be loaded."));
     }
-  }, [apply, onNotify]);
+  }, [apply]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const editField = (
+    link: PhotoMessageLink,
+    field: string,
+    saved: string,
+    value: string,
+    update: (draft: LinkDraft) => LinkDraft,
+  ) => {
+    const key = linkFieldKey(link.id, field);
+    if (value === saved) edited.current.delete(key);
+    else edited.current.add(key);
+    setDrafts((prev) => ({ ...prev, [link.id]: update(prev[link.id] ?? draftFor(link)) }));
+  };
 
   const save = async (link: PhotoMessageLink) => {
     const token = getToken();
     const draft = drafts[link.id];
     if (!token || !data || !draft) return;
     setBusyId(link.id);
+    // Each change is saved on its own, so one refusal doesn't hide the others.
+    const failures: string[] = [];
+    let sent = 0;
     try {
-      if (
-        data.canManageLinks &&
-        (draft.label.trim() !== link.label || draft.defaultUrl.trim() !== (link.defaultUrl ?? ""))
-      ) {
-        await updateMessageLink(token, link.id, {
-          label: draft.label.trim(),
-          defaultUrl: draft.defaultUrl.trim() || null,
-        });
-      }
-      for (const location of data.locations) {
-        const before = link.urls.find((row) => row.locationId === location.id)?.url ?? "";
-        const after = (draft.urls[location.id] ?? "").trim();
-        if (after !== before) {
-          await setMessageLinkUrl(token, link.id, location.id, after || null);
+      const label = draft.label.trim();
+      const defaultUrl = normaliseLinkUrl(draft.defaultUrl);
+      if (data.canManageLinks && (label !== link.label || defaultUrl !== (link.defaultUrl ?? ""))) {
+        sent += 1;
+        try {
+          await updateMessageLink(token, link.id, { label, defaultUrl: defaultUrl || null });
+          edited.current.delete(linkFieldKey(link.id, "label"));
+          edited.current.delete(linkFieldKey(link.id, "default"));
+        } catch (e) {
+          failures.push(`Name or default address: ${errorMessage(e, "not saved")}`);
         }
       }
-      onNotify(`Saved the ${draft.label.trim() || link.label} link.`, "success");
+      for (const location of data.locations) {
+        const after = normaliseLinkUrl(draft.urls[location.id] ?? "");
+        if (after !== savedLinkUrl(link, location.id)) {
+          sent += 1;
+          try {
+            await setMessageLinkUrl(token, link.id, location.id, after || null);
+            edited.current.delete(linkFieldKey(link.id, `url:${location.id}`));
+          } catch (e) {
+            failures.push(`${location.name}: ${errorMessage(e, "not saved")}`);
+          }
+        }
+      }
+      if (sent === 0) {
+        forget(link.id);
+        onNotify("Nothing has changed on this link.", "info");
+        return;
+      }
+      if (failures.length > 0) {
+        onNotify(`Some changes were not saved. ${failures.join(" ")}`, "error");
+      } else {
+        onNotify(`Saved the ${label || link.label} link.`, "success");
+      }
       await load();
-    } catch (e) {
-      onNotify(errorMessage(e, "That link could not be saved."), "error");
     } finally {
       setBusyId(null);
     }
@@ -202,10 +245,16 @@ export function MessageLinksPanel({
     if (!token || !newLabel.trim()) return;
     setBusyId("new");
     try {
-      await createMessageLink(token, { label: newLabel.trim(), defaultUrl: newUrl.trim() || null });
+      await createMessageLink(token, {
+        label: newLabel.trim(),
+        defaultUrl: normaliseLinkUrl(newUrl) || null,
+      });
       setNewLabel("");
       setNewUrl("");
-      onNotify("Link added. Set each location's own address below if it differs.", "success");
+      onNotify(
+        "Link added. Give each location its own address in the link above if it differs from the default.",
+        "success",
+      );
       await load();
     } catch (e) {
       onNotify(errorMessage(e, "That link could not be added."), "error");
@@ -229,6 +278,7 @@ export function MessageLinksPanel({
             setBusyId(link.id);
             try {
               await deleteMessageLink(token, link.id);
+              forget(link.id);
               onNotify("Link removed.", "info");
               await load();
             } catch (e) {
@@ -256,24 +306,57 @@ export function MessageLinksPanel({
         </Text>
       </View>
       <Text className="mb-4 mt-1 text-sm text-gray-600 dark:text-gray-400">
-        Add social media and other links once, then give each location its own address. In any
-        photo message, <Code>{"{{links}}"}</Code> lists every link the location has, and a
-        link&apos;s own name (for example <Code>{"{{link_instagram}}"}</Code>) gives just its
-        address. A location without its own address uses the default.
+        Add social media and other links once, then give each location its own address. A
+        location without its own address uses the default. In the photo messages above,{" "}
+        <Code>{"{{links}}"}</Code> lists the location&apos;s links and a link&apos;s own name (for
+        example <Code>{"{{link_instagram}}"}</Code>) gives just its address. Emails list every
+        link; text messages list as many as fit in about 480 characters, so in texts use one or two
+        link names instead. Escape-room photos use the Thanks for Playing email, so these links
+        don&apos;t appear there.
       </Text>
 
       {data === null ? (
-        <Text className="text-sm text-gray-500 dark:text-gray-400">Loading links…</Text>
+        loadFailed ? (
+          <View className="gap-3" accessibilityRole="alert">
+            <Text className="text-sm text-red-700 dark:text-red-400">{loadFailed}</Text>
+            <ActionButton
+              label="Try again"
+              icon="refresh-cw"
+              onPress={() => void load()}
+              loading={false}
+              disabled={false}
+            />
+          </View>
+        ) : (
+          <Text className="text-sm text-gray-500 dark:text-gray-400">Loading links…</Text>
+        )
       ) : (
         <View className="gap-3">
+          {loadFailed && (
+            <View
+              className="gap-3 rounded-xl border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-900/20"
+              accessibilityRole="alert"
+            >
+              <Text className="text-sm text-red-700 dark:text-red-400">
+                {loadFailed} The list below may be out of date.
+              </Text>
+              <ActionButton
+                label="Try again"
+                icon="refresh-cw"
+                onPress={() => void load()}
+                loading={false}
+                disabled={busyId !== null}
+              />
+            </View>
+          )}
+
           {data.links.length === 0 && (
             <Text className="text-sm text-gray-500 dark:text-gray-400">No links yet.</Text>
           )}
 
           {data.links.map((link) => {
             const draft = drafts[link.id] ?? draftFor(link);
-            const setDraft = (next: Partial<LinkDraft>) =>
-              setDrafts((prev) => ({ ...prev, [link.id]: { ...draft, ...next } }));
+            const saving = busyId === link.id;
 
             return (
               <View
@@ -301,17 +384,26 @@ export function MessageLinksPanel({
                 <Field
                   label="Name shown in messages"
                   value={draft.label}
-                  onChangeText={(v) => setDraft({ label: v })}
-                  disabled={!data.canManageLinks}
+                  onChangeText={(v) =>
+                    editField(link, "label", link.label, v, (current) => ({ ...current, label: v }))
+                  }
+                  disabled={!data.canManageLinks || saving}
                   maxLength={80}
+                  a11yLabel={`Name shown in messages for the ${link.label} link`}
                 />
                 <Field
                   label="Default address"
                   value={draft.defaultUrl}
-                  onChangeText={(v) => setDraft({ defaultUrl: v })}
-                  disabled={!data.canManageLinks}
+                  onChangeText={(v) =>
+                    editField(link, "default", link.defaultUrl ?? "", v, (current) => ({
+                      ...current,
+                      defaultUrl: v,
+                    }))
+                  }
+                  disabled={!data.canManageLinks || saving}
                   placeholder="https://"
                   url
+                  a11yLabel={`Default address for ${link.label}`}
                 />
 
                 {data.locations.length > 0 && (
@@ -330,12 +422,20 @@ export function MessageLinksPanel({
                         <Field
                           value={draft.urls[location.id] ?? ""}
                           onChangeText={(v) =>
-                            setDraft({ urls: { ...draft.urls, [location.id]: v } })
+                            editField(
+                              link,
+                              `url:${location.id}`,
+                              savedLinkUrl(link, location.id),
+                              v,
+                              (current) => ({ ...current, urls: { ...current.urls, [location.id]: v } }),
+                            )
                           }
+                          disabled={saving}
                           placeholder={
                             draft.defaultUrl ? `Uses the default: ${draft.defaultUrl}` : "https://"
                           }
                           url
+                          a11yLabel={`${link.label} address for ${location.name}`}
                         />
                       </View>
                     ))}
@@ -346,7 +446,7 @@ export function MessageLinksPanel({
                   label="Save link"
                   icon="save"
                   onPress={() => void save(link)}
-                  loading={busyId === link.id}
+                  loading={saving}
                   disabled={busyId !== null}
                 />
               </View>

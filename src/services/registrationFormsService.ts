@@ -107,6 +107,8 @@ export type RegistrationFormDetail = RegistrationFormRow & {
   canManageEvent: boolean;
   /** Forms in this form's event, including ones at locations the user can't see. */
   groupFormCount: number;
+  /** False when the company's Event registration photos email is switched off; true if the server doesn't say. */
+  photoEmailActive: boolean;
 };
 
 /** One row of GET /registration-event-groups — an event across its location forms. */
@@ -441,6 +443,7 @@ function mapDetail(r: Raw): RegistrationFormDetail {
     // An older backend sends neither; an ungrouped form is its own event.
     canManageEvent: r.can_manage_event === undefined ? form.group === null : r.can_manage_event === true,
     groupFormCount: num(r.group_form_count) || 1,
+    photoEmailActive: r.photo_email_active !== false,
   };
 }
 
