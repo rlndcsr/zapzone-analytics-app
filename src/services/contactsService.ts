@@ -174,8 +174,11 @@ export async function fetchContacts({
   return { rows, page, lastPage, total };
 }
 
-// Safety cap: 200 * 50 = 10k contacts, far beyond any real single-company CRM.
-const ALL_MAX_PAGES = 50;
+// Runaway guard only: 200 * 500 = 100k contacts. The web walks every page with
+// no cap and shows contacts.length as "Total Customers", so a cap a company can
+// reach makes the app's total stop short (50 pages froze it at 10,000 when the
+// CRM had 18,280).
+const ALL_MAX_PAGES = 500;
 const ALL_PER_PAGE = 200;
 
 /**
