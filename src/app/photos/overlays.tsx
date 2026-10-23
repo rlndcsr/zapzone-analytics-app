@@ -215,56 +215,32 @@ function CheckRow({
   );
 }
 
-/** Date + time pair standing in for one datetime-local input. */
+/** "2026-10-23" + "14:30" → "10/23/2026 02:30 PM", a datetime-local's display. */
+function scheduleDisplay(date: string, time: string): string {
+  const [y, m, d] = date.split("-");
+  const [hh, mm] = (time || "00:00").split(":").map(Number);
+  const hour12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${m}/${d}/${y} ${String(hour12).padStart(2, "0")}:${String(mm).padStart(2, "0")} ${hh < 12 ? "AM" : "PM"}`;
+}
+
+/** One field standing in for the web's datetime-local input: date, then time. */
 function ScheduleField({
   label,
   date,
   time,
-  onPickDate,
-  onPickTime,
+  onPick,
   onClear,
 }: {
   label: string;
   date: string;
   time: string;
-  onPickDate: () => void;
-  onPickTime: () => void;
+  onPick: () => void;
   onClear: () => void;
 }) {
   return (
-    <View>
-      <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
-        {label}
-      </Text>
-      <View className="flex-row items-center gap-2">
-        <Pressable
-          onPress={onPickDate}
-          className="flex-1 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900"
-          accessibilityRole="button"
-          accessibilityLabel={`${label} date`}
-        >
-          <Feather name="calendar" size={14} color={PRIMARY} />
-          <Text
-            className={`flex-1 text-sm ${date ? "text-gray-900 dark:text-white" : "text-gray-400"}`}
-            numberOfLines={1}
-          >
-            {date || "Date"}
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={onPickTime}
-          disabled={!date}
-          className={`w-28 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900 ${
-            date ? "" : "opacity-40"
-          }`}
-          accessibilityRole="button"
-          accessibilityLabel={`${label} time`}
-        >
-          <Feather name="clock" size={14} color={PRIMARY} />
-          <Text className="text-sm text-gray-900 dark:text-white">
-            {time || "00:00"}
-          </Text>
-        </Pressable>
+    <View className="flex-1">
+      <View className="mb-1 flex-row items-center justify-between">
+        <Text className="text-sm text-gray-700 dark:text-gray-200">{label}</Text>
         {date ? (
           <Pressable
             onPress={onClear}
@@ -272,10 +248,26 @@ function ScheduleField({
             accessibilityRole="button"
             accessibilityLabel={`Clear ${label}`}
           >
-            <Feather name="x" size={16} color="#9CA3AF" />
+            <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-400">Clear</Text>
           </Pressable>
         ) : null}
       </View>
+      <Pressable
+        onPress={onPick}
+        className="flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900"
+        accessibilityRole="button"
+        accessibilityLabel={label}
+      >
+        <Text
+          className={`flex-1 text-sm ${date ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"}`}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+        >
+          {date ? scheduleDisplay(date, time) : "mm/dd/yyyy --:-- --"}
+        </Text>
+        <Feather name="calendar" size={14} color="#6B7280" />
+      </Pressable>
     </View>
   );
 }
@@ -1081,42 +1073,30 @@ export default function PhotoOverlaysScreen() {
             value={name}
             onChangeText={setName}
             maxLength={120}
-            placeholder="Summer frame"
-            placeholderTextColor="#9CA3AF"
+            accessibilityLabel="Name"
             className="mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
           />
 
           <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
             Overlay image
           </Text>
-          <Pressable
-            onPress={() => void pickImage()}
-            className="mb-4 flex-row items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white px-3 py-3 dark:border-neutral-700 dark:bg-neutral-900"
-            accessibilityRole="button"
-            accessibilityLabel="Choose the overlay image"
-          >
-            <Feather name="upload" size={16} color={PRIMARY} />
+          {/* The web's file input: "Choose File" then the picked name. */}
+          <View className="mb-4 flex-row items-center gap-2">
+            <Pressable
+              onPress={() => void pickImage()}
+              className="rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 active:opacity-70 dark:border-neutral-600 dark:bg-neutral-800"
+              accessibilityRole="button"
+              accessibilityLabel="Choose the overlay image"
+            >
+              <Text className="text-sm text-gray-900 dark:text-white">Choose File</Text>
+            </Pressable>
             <Text
-              className={`flex-1 text-sm ${file ? "text-gray-900 dark:text-white" : "text-gray-400"}`}
+              className="flex-1 text-sm text-gray-900 dark:text-white"
               numberOfLines={1}
             >
-              {file?.name ?? "Choose a PNG, JPEG or WebP"}
+              {file?.name ?? "No file chosen"}
             </Text>
-            {file ? (
-              <Feather name="check-circle" size={16} color="#16A34A" />
-            ) : null}
-          </Pressable>
-
-          {file ? (
-            <View className="mb-4 aspect-video w-full items-center justify-center overflow-hidden rounded-xl border border-gray-100 dark:border-neutral-800">
-              <Checkerboard id="overlay-form-preview" />
-              <Image
-                source={{ uri: file.uri }}
-                style={{ width: "100%", height: "100%" }}
-                contentFit="contain"
-              />
-            </View>
-          ) : null}
+          </View>
 
           <View className="mb-4">
             <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
@@ -1199,13 +1179,12 @@ export default function PhotoOverlaysScreen() {
           )}
 
           {showHours && (
-            <View className="mb-4 gap-3">
+            <View className="mb-4 flex-row gap-3">
               <ScheduleField
                 label="Starts (optional)"
                 date={startsDate}
                 time={startsTime}
-                onPickDate={() => setPicker("starts-date")}
-                onPickTime={() => setPicker("starts-time")}
+                onPick={() => setPicker("starts-date")}
                 onClear={() => {
                   setStartsDate("");
                   setStartsTime("");
@@ -1215,8 +1194,7 @@ export default function PhotoOverlaysScreen() {
                 label="Ends (optional)"
                 date={endsDate}
                 time={endsTime}
-                onPickDate={() => setPicker("ends-date")}
-                onPickTime={() => setPicker("ends-time")}
+                onPick={() => setPicker("ends-date")}
                 onClear={() => {
                   setEndsDate("");
                   setEndsTime("");
@@ -1230,10 +1208,14 @@ export default function PhotoOverlaysScreen() {
           </Text>
           <TextInput
             value={priority}
-            onChangeText={(t) => setPriority(t.replace(/[^0-9]/g, ""))}
+            onChangeText={(t) => {
+              // The web's number input runs 0–100, the same bounds the server checks.
+              const digits = t.replace(/[^0-9]/g, "");
+              setPriority(digits === "" ? "" : String(Math.min(100, Number(digits))));
+            }}
             keyboardType="number-pad"
-            placeholder="0"
-            placeholderTextColor="#9CA3AF"
+            maxLength={3}
+            accessibilityLabel="Priority when schedules overlap"
             className="mb-5 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
           />
 
@@ -1257,7 +1239,7 @@ export default function PhotoOverlaysScreen() {
         onClose={() => setPicker(null)}
         onSelect={(date) => {
           setStartsDate(date);
-          setPicker(null);
+          setPicker("starts-time");
         }}
       />
       <DatePickerSheet
@@ -1268,7 +1250,7 @@ export default function PhotoOverlaysScreen() {
         onClose={() => setPicker(null)}
         onSelect={(date) => {
           setEndsDate(date);
-          setPicker(null);
+          setPicker("ends-time");
         }}
       />
       <TimePickerSheet
