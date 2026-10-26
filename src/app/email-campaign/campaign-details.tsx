@@ -20,7 +20,9 @@ import {
   InfoRow,
 } from "../../components/ui/DetailKit";
 import { mediaUrl } from "../../lib/api";
+import { LOG_RECIPIENT_TYPE_LABELS, RECIPIENT_TYPE_LABELS } from "../../lib/email/emailTemplateOptions";
 import { markEmailCampaignsStale } from "../../lib/emailStale";
+import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
 import { getToken } from "../../lib/session";
 import {
@@ -68,6 +70,9 @@ function statusPill(status: string): { pill: string; text: string } {
 const prettyType = (t: string) =>
   t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+const recipientTypeLabel = (t: string) => RECIPIENT_TYPE_LABELS[t] ?? prettyType(t);
+const logTypeLabel = (t: string) => LOG_RECIPIENT_TYPE_LABELS[t] ?? prettyType(t);
+
 const logStatusColor = (s: string) =>
   s === "sent" ? "#16A34A" : s === "failed" ? "#DC2626" : "#9CA3AF";
 
@@ -112,17 +117,19 @@ const CampaignDetails = () => {
     loadDetail();
   }, [loadDetail]);
 
-  // Run a mutation, then refresh (or leave, for delete).
+  // Run a mutation, then refresh (or leave, for delete). A message the server
+  // sends back ("Sending to 40 people now…") is shown, as the web's toast does.
   const runAction = useCallback(
-    async (key: string, fn: () => Promise<void>, leave = false) => {
+    async (key: string, fn: () => Promise<string | null | void>, leave = false) => {
       const token = getToken();
       if (!token || campaignId == null) return;
       setBusy(key);
       try {
-        await fn();
+        const message = await fn();
         markEmailCampaignsStale();
         if (leave) router.back();
         else await loadDetail();
+        if (message) Alert.alert("Resend", message);
       } catch (err) {
         Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
@@ -212,8 +219,8 @@ const CampaignDetails = () => {
       ? Math.round((detail.sentCount / detail.totalRecipients) * 100)
       : 0;
   const rateColor = successRate >= 90 ? "#16A34A" : successRate >= 70 ? "#D97706" : "#DC2626";
-  const bodyText = htmlToPlainText(detail.body);
-  const images = extractImageSrcs(detail.body)
+  const bodyText = htmlToPlainText(cleanEmailHtml(detail.body));
+  const images = extractImageSrcs(cleanEmailHtml(detail.body))
     .map((s) => mediaUrl(s))
     .filter((u): u is string => !!u);
 
@@ -240,6 +247,14 @@ const CampaignDetails = () => {
             </View>
           </View>
         </View>
+
+        {/* A send that stopped part-way says so (web: the red banner above the details). */}
+        {detail.status === "failed" && !!detail.errorMessage && (
+          <View className="mb-4 flex-row items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-900/20">
+            <Feather name="alert-triangle" size={15} color="#DC2626" style={{ marginTop: 1 }} />
+            <Text className="flex-1 text-sm text-red-700 dark:text-red-300">{detail.errorMessage}</Text>
+          </View>
+        )}
 
         {/* Statistics */}
         <DetailSection icon="bar-chart-2" title="Statistics">
@@ -273,11 +288,18 @@ const CampaignDetails = () => {
             ) : (
               detail.recipientTypes.map((t) => (
                 <View key={t} className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
-                  <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">{prettyType(t)}</Text>
+                  <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">{recipientTypeLabel(t)}</Text>
                 </View>
               ))
             )}
           </View>
+          {detail.recipientTypes.includes("event_registrants") && (
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              {`${detail.eventFormCount} registration form${detail.eventFormCount === 1 ? "" : "s"}${
+                detail.onlyWithPhotos ? " · only people whose photos were ready" : ""
+              }`}
+            </Text>
+          )}
           {detail.customEmails.length > 0 && (
             <View className="mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
               <Text className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
@@ -356,8 +378,13 @@ const CampaignDetails = () => {
                       {l.recipientEmail || "—"}
                     </Text>
                     <Text className="text-xs text-gray-400 dark:text-gray-500">
-                      {prettyType(l.recipientType)} · {fmtDateTime(l.sentAt)}
+                      {logTypeLabel(l.recipientType)} · {fmtDateTime(l.sentAt)}
                     </Text>
+                    {l.status === "failed" && !!l.errorMessage && (
+                      <Text className="text-xs text-red-600 dark:text-red-400 mt-0.5" numberOfLines={2}>
+                        {l.errorMessage}
+                      </Text>
+                    )}
                   </View>
                   <View className="flex-row items-center gap-1">
                     <Feather
@@ -388,7 +415,8 @@ const CampaignDetails = () => {
               onPress={confirmCancel}
             />
           )}
-          {isFinished && detail.failedCount > 0 && (
+          {/* web: completed or failed (a send that stopped part-way) with someone left to reach */}
+          {(detail.status === "completed" || detail.status === "failed") && detail.failedCount > 0 && (
             <DetailActionButton
               icon="rotate-ccw"
               label="Resend Failed"

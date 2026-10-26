@@ -307,8 +307,8 @@ export function MessageLinksPanel({
       </View>
       <Text className="mb-4 mt-1 text-sm text-gray-600 dark:text-gray-400">
         Add social media and other links once, then give each location its own address. A
-        location without its own address uses the default. In the photo messages above,{" "}
-        <Code>{"{{links}}"}</Code> lists the location&apos;s links and a link&apos;s own name (for
+        location without its own address uses the default. In the photo messages above and in
+        Event photos emails (Email Templates), <Code>{"{{links}}"}</Code> lists the location&apos;s links and a link&apos;s own name (for
         example <Code>{"{{link_instagram}}"}</Code>) gives just its address. Emails list every
         link; text messages list as many as fit in about 480 characters, so in texts use one or two
         link names instead. Escape-room photos use the Thanks for Playing email, so these links

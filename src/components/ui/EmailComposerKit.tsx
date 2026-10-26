@@ -152,6 +152,8 @@ export function LabeledInput({
   keyboardType,
   autoCapitalize,
   editable = true,
+  maxLength,
+  minHeight = 160,
 }: {
   label: string;
   required?: boolean;
@@ -165,6 +167,9 @@ export function LabeledInput({
   autoCapitalize?: React.ComponentProps<typeof TextInput>["autoCapitalize"];
   /** False greys the field and blocks typing (the web's locked default name). */
   editable?: boolean;
+  maxLength?: number;
+  /** Height of a multiline field (a short text message needs less than an email body). */
+  minHeight?: number;
 }) {
   return (
     <View className="mb-1">
@@ -182,13 +187,14 @@ export function LabeledInput({
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
         editable={editable}
+        maxLength={maxLength}
         textAlignVertical={multiline ? "top" : "center"}
         className={`rounded-xl px-3.5 py-3 text-sm border border-gray-200 dark:border-neutral-700 ${
           editable
             ? "bg-gray-50 dark:bg-neutral-800 text-gray-900 dark:text-white"
             : "bg-gray-100 dark:bg-neutral-800/60 text-gray-500 dark:text-gray-400"
         }`}
-        style={multiline ? { minHeight: 160 } : undefined}
+        style={multiline ? { minHeight } : undefined}
       />
       {!!hint && (
         <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5">
@@ -202,14 +208,17 @@ export function LabeledInput({
 /** Collapsible group of insertable merge variables. */
 function VariableGroup({
   title,
+  note,
   vars,
   initiallyOpen,
   onInsert,
 }: {
   title: string;
+  note?: string;
   vars: EmailVariable[];
   initiallyOpen?: boolean;
-  onInsert: (token: string) => void;
+  /** Left out when the template is read-only: the variables are listed but not tappable. */
+  onInsert?: (token: string) => void;
 }) {
   const [open, setOpen] = useState(!!initiallyOpen);
   return (
@@ -225,10 +234,14 @@ function VariableGroup({
       </Pressable>
       {open && (
         <View className="px-2.5 py-2">
+          {!!note && (
+            <Text className="text-[11px] text-gray-500 dark:text-gray-400 px-2.5 pb-1">{note}</Text>
+          )}
           {vars.map((v) => (
             <Pressable
               key={v.name}
-              onPress={() => onInsert(`{{ ${v.name} }}`)}
+              onPress={onInsert ? () => onInsert(`{{ ${v.name} }}`) : undefined}
+              disabled={!onInsert}
               className="rounded-lg px-2.5 py-2 active:bg-gray-50 dark:active:bg-neutral-800"
             >
               <Text className="text-[13px] font-mono text-[#0644C7] dark:text-blue-300">
@@ -252,8 +265,9 @@ export function VariablePanel({
   onInsert,
 }: {
   intro: string;
-  groups: { title: string; vars: EmailVariable[] }[];
-  onInsert: (token: string) => void;
+  groups: { title: string; note?: string; vars: EmailVariable[] }[];
+  /** Left out for a read-only template. */
+  onInsert?: (token: string) => void;
 }) {
   return (
     <View
@@ -271,6 +285,7 @@ export function VariablePanel({
         <VariableGroup
           key={g.title}
           title={g.title}
+          note={g.note}
           vars={g.vars}
           initiallyOpen={i === 0}
           onInsert={onInsert}

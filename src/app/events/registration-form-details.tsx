@@ -809,30 +809,51 @@ const RegistrationFormDetails = () => {
               {/* Which email registrants' photos go out with (web: RegistrationEventDetails). */}
               <View className="flex-row items-start gap-2">
                 <Feather name="mail" size={15} color={PRIMARY} style={{ marginTop: 2 }} />
-                <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
-                  {form.photoEmailActive ? "Photos sent to people who registered use the " : "The "}
-                  <Text className="font-medium text-gray-800 dark:text-gray-200">
-                    Event registration photos
+                {form.photoEmail ? (
+                  <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
+                    {"Photos sent to people who registered use the "}
+                    <Text className="font-medium text-gray-800 dark:text-gray-200">
+                      {form.photoEmail.name}
+                    </Text>
+                    {" email. "}
+                    {form.photoEmail.canManage
+                      ? ""
+                      : form.photoEmail.allLocations
+                        ? "It is shared with every location, so only a company admin can change it. "
+                        : "It is shared with other locations, so only a company admin can change it. Ask one if you need your own. "}
+                    <Text
+                      onPress={() =>
+                        router.push({
+                          pathname: "/email-campaign/create-template",
+                          params: { id: String(form.photoEmail!.id) },
+                        })
+                      }
+                      accessibilityRole="link"
+                      className="font-medium text-[#0644C7] dark:text-blue-400"
+                    >
+                      {form.photoEmail.canManage ? "Edit its wording" : "View it"}
+                    </Text>
+                    {!form.photoEmail.canManage && form.photoEmail.allLocations
+                      ? " to duplicate it for your location."
+                      : ""}
                   </Text>
-                  {form.photoEmailActive
-                    ? " email. "
-                    : " email is switched off, so people who registered get the usual photo email. "}
-                  <Text
-                    onPress={() =>
-                      router.push({
-                        pathname: "/photos/settings",
-                        params: {
-                          open: "registration-email",
-                          location: String(form.locationId),
-                        },
-                      } as never)
-                    }
-                    accessibilityRole="link"
-                    className="font-medium text-[#0644C7] dark:text-blue-400"
-                  >
-                    {form.photoEmailActive ? "Edit its wording" : "Turn it on or edit it"}
+                ) : (
+                  <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
+                    {"No event photo email covers this location, so people who registered get the usual photo email. "}
+                    <Text
+                      onPress={() =>
+                        router.push({
+                          pathname: "/email-campaign/create-template",
+                          params: { category: "event_photos", location: String(form.locationId) },
+                        })
+                      }
+                      accessibilityRole="link"
+                      className="font-medium text-[#0644C7] dark:text-blue-400"
+                    >
+                      Create one
+                    </Text>
                   </Text>
-                </Text>
+                )}
               </View>
             </View>
           )}

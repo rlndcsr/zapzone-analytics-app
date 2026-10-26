@@ -2498,7 +2498,11 @@ export async function rotatePhotoPasscode(
 
 /* ----------------------------------------------------- message templates -- */
 
-/** `registration` is the "Event registration photos" email sent to event registrants. */
+/**
+ * `registration` is only a test kind now: it sends a sample of the Event photos
+ * email template covering the location. That email moved to Email Templates, so
+ * the server no longer lists or saves a `registration` message template.
+ */
 export type PhotoTemplateKind = "immediate" | "next_day" | "kiosk" | "registration";
 
 export type PhotoMessageTemplate = {
@@ -2508,10 +2512,17 @@ export type PhotoMessageTemplate = {
   emailSubject: string;
   emailBody: string;
   smsBody: string;
-  /** For `registration`: off means registrants get the usual photo email. */
-  isActive: boolean;
-  /** For `registration`: attach the photos as well as the link. */
+};
+
+/** The Event photos email template that covers a location (people who registered get it with their photos). */
+export type PhotoEventEmailRef = {
+  id: number;
+  name: string;
+  allLocations: boolean;
+  locationNames: string[];
   attachPhotos: boolean;
+  /** False when only a company admin may change it. */
+  canManage: boolean;
 };
 
 export type PhotoTemplates = {
@@ -2523,6 +2534,8 @@ export type PhotoTemplates = {
   /** `link_<key>` placeholders from "Links for photo messages". */
   linkVariables: { variable: string; label: string }[];
   kinds: string[];
+  /** The event photo email covering the requested location; null when none does (or no location was asked for). */
+  eventPhotoEmail: PhotoEventEmailRef | null;
   /** The Thanks for Playing email escape-room photos go out with. */
   escapeRoomEmail: {
     id: number;
@@ -2541,8 +2554,6 @@ type ApiPhotoTemplate = {
   email_subject: string | null;
   email_body: string | null;
   sms_body: string | null;
-  is_active: boolean;
-  attach_photos?: boolean | null;
 };
 
 function mapPhotoTemplate(raw: ApiPhotoTemplate): PhotoMessageTemplate {
@@ -2553,14 +2564,16 @@ function mapPhotoTemplate(raw: ApiPhotoTemplate): PhotoMessageTemplate {
     emailSubject: raw.email_subject ?? "",
     emailBody: raw.email_body ?? "",
     smsBody: raw.sms_body ?? "",
-    isActive: Boolean(raw.is_active),
-    attachPhotos: Boolean(raw.attach_photos),
   };
 }
 
-/** GET /api/photo-templates — company templates plus the variable names. */
+/**
+ * GET /api/photo-templates — company templates plus the variable names. With a
+ * location it also names the event photo email covering that location.
+ */
 export async function fetchPhotoTemplates(
   token: string,
+  locationId?: number | null,
   signal?: AbortSignal,
 ): Promise<PhotoTemplates> {
   const res = await apiRequest<{
@@ -2570,6 +2583,14 @@ export async function fetchPhotoTemplates(
       variables_by_kind?: Record<string, string[]> | null;
       link_variables?: { variable: string; label: string }[] | null;
       kinds: string[];
+      event_photo_email?: {
+        id: number;
+        name: string;
+        all_locations?: boolean | null;
+        location_names?: string[] | null;
+        attach_photos?: boolean | null;
+        can_manage?: boolean | null;
+      } | null;
       escape_room_email?: {
         id: number;
         name: string;
@@ -2578,15 +2599,33 @@ export async function fetchPhotoTemplates(
         emails?: { id: number; name: string; rooms: string[] }[];
       } | null;
     };
-  }>("/api/photo-templates", { token, signal });
+  }>(locationId ? `/api/photo-templates?location_id=${locationId}` : "/api/photo-templates", {
+    token,
+    signal,
+  });
   const email = res.data.escape_room_email;
+  const eventEmail = res.data.event_photo_email;
 
   return {
-    templates: (res.data.templates ?? []).map(mapPhotoTemplate),
+    // the server stopped listing `registration` when that email moved to Email Templates;
+    // an older server still sends it, and saving it is refused now
+    templates: (res.data.templates ?? [])
+      .filter((template) => template.kind !== "registration")
+      .map(mapPhotoTemplate),
     variables: res.data.variables ?? [],
     variablesByKind: res.data.variables_by_kind ?? null,
     linkVariables: Array.isArray(res.data.link_variables) ? res.data.link_variables : [],
     kinds: res.data.kinds ?? [],
+    eventPhotoEmail: eventEmail
+      ? {
+          id: eventEmail.id,
+          name: eventEmail.name,
+          allLocations: eventEmail.all_locations === true,
+          locationNames: eventEmail.location_names ?? [],
+          attachPhotos: eventEmail.attach_photos === true,
+          canManage: eventEmail.can_manage !== false,
+        }
+      : null,
     escapeRoomEmail: email
       ? {
           id: email.id,
@@ -2603,7 +2642,7 @@ export async function fetchPhotoTemplates(
   };
 }
 
-/** PUT /api/photo-templates/{id} — saves one template's wording (and, for registration, its switches). */
+/** PUT /api/photo-templates/{id} — saves one template's wording. */
 export async function updatePhotoTemplate(
   token: string,
   templateId: number,
@@ -2611,8 +2650,6 @@ export async function updatePhotoTemplate(
     emailSubject: string;
     emailBody: string;
     smsBody: string;
-    isActive?: boolean;
-    attachPhotos?: boolean;
   },
 ): Promise<PhotoMessageTemplate> {
   const res = await apiRequest<{ data: ApiPhotoTemplate }>(
@@ -2624,8 +2661,6 @@ export async function updatePhotoTemplate(
         email_subject: input.emailSubject,
         email_body: input.emailBody,
         sms_body: input.smsBody,
-        ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
-        ...(input.attachPhotos !== undefined ? { attach_photos: input.attachPhotos } : {}),
       },
     },
   );

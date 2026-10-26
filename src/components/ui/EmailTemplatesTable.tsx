@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
+import { templateLocationSummary } from "../../lib/email/emailTemplateOptions";
 import type {
   EmailTemplateRow,
   EmailTemplateStatus,
@@ -57,10 +58,13 @@ type RowHandlers = {
   onPreview: (t: EmailTemplateRow) => void;
   onEdit: (t: EmailTemplateRow) => void;
   onDelete: (t: EmailTemplateRow) => void;
+  onDuplicate: (t: EmailTemplateRow) => void;
+  /** Whether this user may copy the row (web `canDuplicate`). */
+  canDuplicate: (t: EmailTemplateRow) => boolean;
 };
 
 // Columns mirror the web `/admin/email/templates` default-visible set + order:
-// Template (name + subject) · Category · Status · Created · Actions.
+// Template (name + subject) · Category · Locations · Status · Created · Actions.
 function buildColumns(h: RowHandlers): TableColumn<EmailTemplateRow>[] {
   return [
   {
@@ -95,6 +99,16 @@ function buildColumns(h: RowHandlers): TableColumn<EmailTemplateRow>[] {
     ),
   },
   {
+    key: "locations",
+    label: "Locations",
+    width: 170,
+    render: (t) => (
+      <Text numberOfLines={1} className="text-sm text-gray-900 dark:text-gray-100">
+        {templateLocationSummary(t)}
+      </Text>
+    ),
+  },
+  {
     key: "status",
     label: "Status",
     width: 120,
@@ -120,15 +134,26 @@ function buildColumns(h: RowHandlers): TableColumn<EmailTemplateRow>[] {
     ),
   },
   {
-    // Web parity: Preview (blue) · Edit (green) · Delete (red).
+    // Web parity: Preview (blue) · Edit/View (green) · Duplicate (gray) · Delete (red, only
+    // on a template this user may change).
     key: "actions",
     label: "Actions",
-    width: 130,
+    width: 170,
     render: (t) => (
       <View className="flex-row items-center gap-0.5">
         <IconAction icon="eye" tint="#2563EB" label={`Preview ${t.name}`} onPress={() => h.onPreview(t)} />
-        <IconAction icon="edit" tint="#16A34A" label={`Edit ${t.name}`} onPress={() => h.onEdit(t)} />
-        <IconAction icon="trash-2" tint="#DC2626" label={`Delete ${t.name}`} onPress={() => h.onDelete(t)} />
+        <IconAction
+          icon="edit"
+          tint="#16A34A"
+          label={`${t.canManage ? "Edit" : "View"} ${t.name}`}
+          onPress={() => h.onEdit(t)}
+        />
+        {h.canDuplicate(t) && (
+          <IconAction icon="copy" tint="#4B5563" label={`Duplicate ${t.name}`} onPress={() => h.onDuplicate(t)} />
+        )}
+        {t.canManage && (
+          <IconAction icon="trash-2" tint="#DC2626" label={`Delete ${t.name}`} onPress={() => h.onDelete(t)} />
+        )}
       </View>
     ),
   },
@@ -145,19 +170,18 @@ export function EmailTemplatesTable({
   onPreview,
   onEdit,
   onDelete,
+  onDuplicate,
+  canDuplicate,
 }: {
   templates: EmailTemplateRow[];
   selectedIds: Set<number>;
   onToggleRow: (id: number) => void;
   onToggleAll: () => void;
   onRowPress: (t: EmailTemplateRow) => void;
-  onPreview: (t: EmailTemplateRow) => void;
-  onEdit: (t: EmailTemplateRow) => void;
-  onDelete: (t: EmailTemplateRow) => void;
-}) {
+} & RowHandlers) {
   const columns = useMemo(
-    () => buildColumns({ onPreview, onEdit, onDelete }),
-    [onPreview, onEdit, onDelete],
+    () => buildColumns({ onPreview, onEdit, onDelete, onDuplicate, canDuplicate }),
+    [onPreview, onEdit, onDelete, onDuplicate, canDuplicate],
   );
   return (
     <SelectableTable

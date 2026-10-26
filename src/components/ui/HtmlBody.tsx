@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import { Linking, Pressable, Text, View, type TextStyle } from "react-native";
 
 import { mediaUrl } from "../../lib/api";
+import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import {
   parseHtmlBlocks,
   type HtmlAlign,
@@ -150,7 +151,8 @@ function ImageBlock({
  * inline formatting. See `lib/htmlBlocks` for what is understood.
  */
 export function HtmlBody({ html, emptyText = "No body content" }: { html: string; emptyText?: string }) {
-  const blocks = useMemo(() => parseHtmlBlocks(html), [html]);
+  // cleaned first, as the web's preview is (safeHtml), so both show the same content
+  const blocks = useMemo(() => parseHtmlBlocks(cleanEmailHtml(html)), [html]);
   const [bodyWidth, setBodyWidth] = useState(0);
 
   if (blocks.length === 0) {

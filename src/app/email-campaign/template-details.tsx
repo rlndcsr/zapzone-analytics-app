@@ -14,6 +14,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { mediaUrl } from "../../lib/api";
+import { templateLocationSummary } from "../../lib/email/emailTemplateOptions";
+import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
 import { getToken } from "../../lib/session";
 import {
@@ -131,8 +133,8 @@ const TemplateDetails = () => {
     );
   }
 
-  const bodyText = htmlToPlainText(detail.body);
-  const images = extractImageSrcs(detail.body)
+  const bodyText = htmlToPlainText(cleanEmailHtml(detail.body));
+  const images = extractImageSrcs(cleanEmailHtml(detail.body))
     .map((src) => mediaUrl(src))
     .filter((u): u is string => !!u);
 
@@ -164,6 +166,12 @@ const TemplateDetails = () => {
               </View>
             </View>
           )}
+          <View className="flex-row items-center gap-1.5 mt-3">
+            <Feather name="map-pin" size={13} color="#9CA3AF" />
+            <Text className="flex-1 text-sm text-gray-600 dark:text-gray-300" numberOfLines={2}>
+              {templateLocationSummary(detail)}
+            </Text>
+          </View>
         </View>
 
         {/* Template Preview */}
@@ -249,8 +257,10 @@ const TemplateDetails = () => {
             className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
           >
-            <Feather name="edit-2" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">Edit Template</Text>
+            <Feather name={detail.canManage ? "edit-2" : "eye"} size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">
+              {detail.canManage ? "Edit Template" : "View Template"}
+            </Text>
           </Pressable>
         </View>
       </ScrollView>

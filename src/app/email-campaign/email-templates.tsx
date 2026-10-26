@@ -22,10 +22,12 @@ import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import { canDuplicateTemplate, templateLocationSummary } from "../../lib/email/emailTemplateOptions";
 import { consumeEmailTemplatesStale } from "../../lib/emailStale";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
 import {
   deleteEmailTemplate,
+  duplicateEmailTemplate,
   fetchEmailTemplateDetail,
   fetchEmailTemplates,
   updateEmailTemplateStatus,
@@ -101,17 +103,19 @@ const TEMPLATE_BULK_CHIPS: EmailBulkChip[] = [
   { key: "archived", label: "Archive", icon: "archive", tint: "#6B7280" },
 ];
 
-type TColKey = "subject" | "category" | "date" | "status";
+type TColKey = "subject" | "category" | "locations" | "date" | "status";
 type TCols = Record<TColKey, boolean>;
 const DEFAULT_TCOLS: TCols = {
   subject: true,
   category: true,
+  locations: true,
   date: true,
   status: true,
 };
 const TCOLUMN_META: { key: TColKey; label: string }[] = [
   { key: "subject", label: "Subject" },
   { key: "category", label: "Category" },
+  { key: "locations", label: "Locations" },
   { key: "date", label: "Created Date" },
   { key: "status", label: "Status" },
 ];
@@ -241,10 +245,12 @@ const EmailTemplates = () => {
     return templates.filter((t) => {
       if (statusFilter !== "all" && t.status !== statusFilter) return false;
       if (categoryFilter !== "all" && t.category !== categoryFilter) return false;
+      // the web also searches the category and the locations a template covers
       if (
         q &&
-        !t.name.toLowerCase().includes(q) &&
-        !t.subject.toLowerCase().includes(q)
+        ![t.name, t.subject, t.category, templateLocationSummary(t), ...t.locationNames].some((v) =>
+          v.toLowerCase().includes(q),
+        )
       )
         return false;
       return true;
@@ -351,6 +357,31 @@ const EmailTemplates = () => {
     [router],
   );
 
+  // Duplicate makes a draft copy (for a manager, for their own location) and opens it.
+  const role = getCurrentUser()?.role;
+  const canDuplicate = useCallback((t: EmailTemplateRow) => canDuplicateTemplate(t, role), [role]);
+  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
+  const duplicateTemplate = useCallback(
+    async (t: EmailTemplateRow) => {
+      const token = getToken();
+      if (!token || duplicatingId !== null) return;
+      setDuplicatingId(t.id);
+      try {
+        const copyId = await duplicateEmailTemplate(token, t.id);
+        await load();
+        editTemplate(copyId);
+      } catch (err) {
+        Alert.alert(
+          "The template could not be copied",
+          err instanceof Error ? err.message : "Please try again.",
+        );
+      } finally {
+        setDuplicatingId(null);
+      }
+    },
+    [duplicatingId, editTemplate, load],
+  );
+
   const confirmDelete = useCallback(
     (t: EmailTemplateRow) =>
       Alert.alert(
@@ -387,31 +418,37 @@ const EmailTemplates = () => {
     [load],
   );
 
-  // Bulk status change — mirrors the web "Change Status" action, applied per id.
+  // Bulk status change — mirrors the web "Change Status" action: one template at a
+  // time (two event photo emails can't both be switched on for a location), then
+  // says how many changed and why the first refusal happened.
   const runBulkStatus = useCallback(
     async (key: string) => {
       const token = getToken();
-      if (!token || selectedIds.size === 0) return;
+      if (!token || selectedIds.size === 0 || bulkBusy !== null) return;
       const ids = [...selectedIds];
       setBulkBusy(key);
-      try {
-        await Promise.all(
-          ids.map((id) =>
-            updateEmailTemplateStatus(token, id, key as EmailTemplateStatus),
-          ),
-        );
-        setSelectedIds(new Set());
-        await load();
-      } catch (err) {
+      const failures: unknown[] = [];
+      for (const id of ids) {
+        try {
+          await updateEmailTemplateStatus(token, id, key as EmailTemplateStatus);
+        } catch (err) {
+          failures.push(err);
+        }
+      }
+      setBulkBusy(null);
+      setSelectedIds(new Set());
+      await load();
+      if (failures.length > 0) {
+        const first = failures[0];
         Alert.alert(
-          "Action failed",
-          err instanceof Error ? err.message : "Please try again.",
+          "Some templates were not changed",
+          `${ids.length - failures.length} updated, ${failures.length} not changed. ${
+            first instanceof Error ? first.message : "Some templates could not be updated."
+          }`,
         );
-      } finally {
-        setBulkBusy(null);
       }
     },
-    [selectedIds, load],
+    [selectedIds, bulkBusy, load],
   );
 
   const filtersActive = statusFilter !== "all" || categoryFilter !== "all";
@@ -639,6 +676,8 @@ const EmailTemplates = () => {
                 onPreview={loadPreview}
                 onEdit={(t) => editTemplate(t.id)}
                 onDelete={confirmDelete}
+                onDuplicate={duplicateTemplate}
+                canDuplicate={canDuplicate}
               />
             ) : (
               paged.map((t) => {
@@ -672,6 +711,14 @@ const EmailTemplates = () => {
                     </View>
                   )}
                 </View>
+                {cols.locations && (
+                  <View className="flex-row items-center gap-1.5 mt-2">
+                    <Feather name="map-pin" size={12} color="#9CA3AF" />
+                    <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+                      {templateLocationSummary(t)}
+                    </Text>
+                  </View>
+                )}
                 {(cols.category || cols.date) && (
                   <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
                     {cols.category ? (
@@ -732,8 +779,8 @@ const EmailTemplates = () => {
             <DetailActionButton icon="x" label="Close" onPress={closePreview} />
             {!!preview && (
               <DetailActionButton
-                icon="edit"
-                label="Edit Template"
+                icon={preview.row.canManage ? "edit" : "eye"}
+                label={preview.row.canManage ? "Edit Template" : "View Template"}
                 variant="primary"
                 onPress={() => {
                   const id = preview.row.id;

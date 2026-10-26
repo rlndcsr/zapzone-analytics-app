@@ -25,6 +25,7 @@ import {
   visitFollowupTiming,
 } from "../../lib/email/visitEmail";
 import { markEmailNotificationsStale } from "../../lib/emailStale";
+import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -413,8 +414,8 @@ const NotificationDetails = () => {
     );
   }
 
-  const bodyText = htmlToPlainText(detail.body);
-  const images = extractImageSrcs(detail.body)
+  const bodyText = htmlToPlainText(cleanEmailHtml(detail.body));
+  const images = extractImageSrcs(cleanEmailHtml(detail.body))
     .map((s) => mediaUrl(s))
     .filter((u): u is string => !!u);
   const appliesTo =

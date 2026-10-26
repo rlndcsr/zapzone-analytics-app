@@ -55,6 +55,7 @@ import {
   sendPhotoTestMessage,
   updatePhotoSettings,
   updatePhotoTemplate,
+  type PhotoEventEmailRef,
   type PhotoMessageLink,
   type PhotoMessageTemplate,
   type PhotoSettings,
@@ -95,7 +96,6 @@ const KIND_LABELS: Record<string, string> = {
   immediate: "Immediate delivery",
   next_day: "9:00 AM next-day delivery",
   kiosk: "Kiosk delivery",
-  registration: "Event registration photos",
 };
 
 /** Same bounds as the web's number inputs. */
@@ -397,35 +397,6 @@ function PhotoLinkAddress({
   );
 }
 
-/** A ticked option for the registration email's switches (the web's checkboxes). */
-function CheckRow({
-  checked,
-  onToggle,
-  label,
-}: {
-  checked: boolean;
-  onToggle: () => void;
-  label: string;
-}) {
-  return (
-    <Pressable
-      onPress={onToggle}
-      className="flex-row items-start gap-2.5"
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
-    >
-      <View
-        className={`mt-0.5 h-5 w-5 items-center justify-center rounded border-2 ${
-          checked ? "border-[#0644C7] bg-[#0644C7]" : "border-gray-300 dark:border-neutral-600"
-        }`}
-      >
-        {checked && <Feather name="check" size={13} color="#FFFFFF" />}
-      </View>
-      <Text className="flex-1 text-sm text-gray-800 dark:text-gray-200">{label}</Text>
-    </Pressable>
-  );
-}
-
 function LockedRow({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row justify-between gap-4 border-b border-gray-200/60 py-1.5 dark:border-neutral-800">
@@ -526,8 +497,10 @@ export default function PhotoSettingsScreen() {
   >({});
   const [variablesByKind, setVariablesByKind] = useState<Record<string, string[]> | null>(null);
   const [linkVariables, setLinkVariables] = useState<string[]>([]);
-  const [templateTestTo, setTemplateTestTo] = useState<Record<number, string>>({});
-  const [templateTesting, setTemplateTesting] = useState<number | null>(null);
+  // The Event photos email template covering this location (it lives in Email Templates now).
+  const [eventPhotoEmail, setEventPhotoEmail] = useState<PhotoEventEmailRef | null>(null);
+  const [eventTestTo, setEventTestTo] = useState("");
+  const [eventTesting, setEventTesting] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(0);
@@ -541,7 +514,7 @@ export default function PhotoSettingsScreen() {
     try {
       const [settings, templateData] = await Promise.all([
         fetchPhotoSettings(token, effectiveLocationId),
-        fetchPhotoTemplates(token),
+        fetchPhotoTemplates(token, effectiveLocationId),
       ]);
       setData(settings);
       setForm({
@@ -562,6 +535,7 @@ export default function PhotoSettingsScreen() {
       setVariablesByKind(templateData.variablesByKind);
       setLinkVariables(templateData.linkVariables.map((link) => link.variable));
       setEscapeRoomEmail(templateData.escapeRoomEmail);
+      setEventPhotoEmail(templateData.eventPhotoEmail);
       setTemplateDraft(
         Object.fromEntries(templateData.templates.map((t) => [t.id, t])),
       );
@@ -812,9 +786,6 @@ export default function PhotoSettingsScreen() {
           emailSubject: draft.emailSubject,
           emailBody: draft.emailBody,
           smsBody: draft.smsBody,
-          ...(draft.kind === "registration"
-            ? { isActive: draft.isActive, attachPhotos: draft.attachPhotos }
-            : {}),
         });
         showToast({ message: "Template saved.", type: "success" });
         await load();
@@ -830,35 +801,33 @@ export default function PhotoSettingsScreen() {
     [load, showToast, templateDraft],
   );
 
-  const sendTemplateTest = useCallback(
-    async (template: PhotoMessageTemplate) => {
-      const token = getToken();
-      if (!token || !effectiveLocationId || templateTesting !== null) return;
-      const destination = (templateTestTo[template.id] ?? "").trim();
-      if (!destination) {
-        showToast({ message: "Enter an email address for the test.", type: "error" });
-        return;
-      }
-      setTemplateTesting(template.id);
-      try {
-        const result = await sendPhotoTestMessage(token, {
-          locationId: effectiveLocationId,
-          channel: "email",
-          destination,
-          kind: template.kind,
-        });
-        showToast({
-          message:
-            result.message ||
-            (result.success ? "Test email sent." : "The test email could not be sent."),
-          type: result.success ? "success" : "error",
-        });
-      } finally {
-        setTemplateTesting(null);
-      }
-    },
-    [effectiveLocationId, showToast, templateTestTo, templateTesting],
-  );
+  // A sample of the saved event photo email for this location (kind "registration").
+  const sendEventPhotoTest = useCallback(async () => {
+    const token = getToken();
+    if (!token || !effectiveLocationId || eventTesting) return;
+    const destination = eventTestTo.trim();
+    if (!destination) {
+      showToast({ message: "Enter an email address for the test.", type: "error" });
+      return;
+    }
+    setEventTesting(true);
+    try {
+      const result = await sendPhotoTestMessage(token, {
+        locationId: effectiveLocationId,
+        channel: "email",
+        destination,
+        kind: "registration",
+      });
+      showToast({
+        message:
+          result.message ||
+          (result.success ? "Test email sent." : "The test email could not be sent."),
+        type: result.success ? "success" : "error",
+      });
+    } finally {
+      setEventTesting(false);
+    }
+  }, [effectiveLocationId, eventTestTo, eventTesting, showToast]);
 
   const notify = useCallback(
     (message: string, type: ToastType) => showToast({ message, type }),
@@ -887,13 +856,10 @@ export default function PhotoSettingsScreen() {
     });
   }, [locationParam, isCompanyAdmin, activeLocation.id, locationsLoading, locations, showToast]);
 
-  // Opened from a registration form: open the event registration email and bring it into view.
+  // Opened with open=registration-email: bring the event photo email note into view (web: #registration-email).
   useEffect(() => {
-    if (openedFromLink.current || openParam !== "registration-email") return;
-    const registration = templates.find((template) => template.kind === "registration");
-    if (!registration) return;
+    if (openedFromLink.current || openParam !== "registration-email" || !data) return;
     openedFromLink.current = true;
-    setOpenTemplate(registration.id);
     const timer = setTimeout(() => {
       const card = registrationCardRef.current;
       const scroll = scrollRef.current;
@@ -909,7 +875,7 @@ export default function PhotoSettingsScreen() {
       }
     }, 150);
     return () => clearTimeout(timer);
-  }, [openParam, templates]);
+  }, [openParam, data]);
 
   const restoreTemplate = useCallback(
     async (templateId: number) => {
@@ -1505,11 +1471,88 @@ export default function PhotoSettingsScreen() {
                     {escapeRoomNote.after}
                   </Text>
                 </View>
+
+                {/* Event registrants' photos go out with the Event photos email template covering
+                    this location (web: #registration-email). */}
+                <View
+                  ref={registrationCardRef}
+                  className="mb-3 gap-2 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 dark:border-indigo-900/40 dark:bg-indigo-900/20"
+                >
+                  {eventPhotoEmail ? (
+                    <Text className="text-sm text-gray-600 dark:text-gray-300">
+                      {"People who registered for an event here get the "}
+                      <Text
+                        className="font-semibold underline"
+                        onPress={() =>
+                          router.push({
+                            pathname: "/email-campaign/create-template",
+                            params: { id: String(eventPhotoEmail.id) },
+                          })
+                        }
+                      >
+                        {eventPhotoEmail.name}
+                      </Text>
+                      {` email from Email Templates${
+                        eventPhotoEmail.attachPhotos ? ", with their photos attached" : ""
+                      }. It covers ${
+                        eventPhotoEmail.allLocations
+                          ? "every location"
+                          : eventPhotoEmail.locationNames
+                              .map((name) => shortVenueName(name) ?? name)
+                              .join(", ")
+                      }${
+                        !eventPhotoEmail.canManage
+                          ? eventPhotoEmail.allLocations
+                            ? ". Only a company admin can change it. Open it to duplicate it for this location."
+                            : ". Only a company admin can change it. Ask one to change it, or to take this location off it if you need your own."
+                          : eventPhotoEmail.allLocations || eventPhotoEmail.locationNames.length > 1
+                            ? ", so a change there updates all of them."
+                            : "."
+                      }`}
+                    </Text>
+                  ) : (
+                    <Text className="text-sm text-gray-600 dark:text-gray-300">
+                      {"No active event photo email covers this location, so people who registered for an event here get the usual photo email below. "}
+                      <Text
+                        className="font-semibold underline"
+                        onPress={() =>
+                          router.push({
+                            pathname: "/email-campaign/create-template",
+                            params: {
+                              category: "event_photos",
+                              location: String(effectiveLocationId),
+                            },
+                          })
+                        }
+                      >
+                        Create one in Email Templates
+                      </Text>
+                      .
+                    </Text>
+                  )}
+                  {eventPhotoEmail && (
+                    <>
+                      <TestSendRow
+                        label="Send a test of the saved event photo email to"
+                        placeholder="you@example.com"
+                        keyboardType="email-address"
+                        value={eventTestTo}
+                        onChangeText={setEventTestTo}
+                        onSend={() => void sendEventPhotoTest()}
+                        sending={eventTesting}
+                        result={null}
+                      />
+                      <Hint>
+                        {"The test fills in a sample event and doesn't attach photos. Real emails attach them when the template says so."}
+                      </Hint>
+                    </>
+                  )}
+                </View>
+
                 <View className="gap-3">
                   {templates.map((template) => {
                     const draft = templateDraft[template.id] ?? template;
                     const open = openTemplate === template.id;
-                    const isRegistration = template.kind === "registration";
                     const templateVariables = [
                       ...(variablesByKind?.[template.kind] ?? variables),
                       ...linkVariables,
@@ -1518,7 +1561,6 @@ export default function PhotoSettingsScreen() {
                     return (
                       <View
                         key={template.id}
-                        ref={isRegistration ? registrationCardRef : undefined}
                         className="rounded-xl border border-gray-100 dark:border-neutral-800"
                       >
                         <Pressable
@@ -1538,37 +1580,6 @@ export default function PhotoSettingsScreen() {
 
                         {open && (
                           <View className="gap-3 px-4 pb-4">
-                            {isRegistration && (
-                              <View className="gap-2 rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/60">
-                                <Text className="text-sm text-gray-700 dark:text-gray-300">
-                                  {"Used for every photo sent to someone who registered for an event, from the photo screen or the photo library. Change the wording between events; {{event_name}} and {{event_date}} fill in by themselves."}
-                                </Text>
-                                <Text className="text-xs text-gray-600 dark:text-gray-400">
-                                  {"This one email is shared by every location, and changes apply everywhere straight away. Use {{event_name}} and {{location_name}} rather than typing an event or venue. Photos still waiting to go out (9:00 AM sends and retries) use the wording saved when they are sent."}
-                                </Text>
-                                <CheckRow
-                                  checked={draft.isActive}
-                                  onToggle={() =>
-                                    setTemplateDraft((prev) => ({
-                                      ...prev,
-                                      [template.id]: { ...draft, isActive: !draft.isActive },
-                                    }))
-                                  }
-                                  label="Use this email for event registrations (when off, registrants get the usual photo email)"
-                                />
-                                <CheckRow
-                                  checked={draft.attachPhotos}
-                                  onToggle={() =>
-                                    setTemplateDraft((prev) => ({
-                                      ...prev,
-                                      [template.id]: { ...draft, attachPhotos: !draft.attachPhotos },
-                                    }))
-                                  }
-                                  label="Attach the photos to the email as well as the link"
-                                />
-                              </View>
-                            )}
-
                             <Text className="text-xs text-gray-500 dark:text-gray-400">
                               {`Variables for this message: ${templateVariables
                                 .map((v) => `{{${v}}}`)
@@ -1621,25 +1632,6 @@ export default function PhotoSettingsScreen() {
                                 numberOfLines={3}
                               />
                               <Hint>{`${draft.smsBody.length} characters`}</Hint>
-                              {isRegistration && (
-                                <TestSendRow
-                                  label="Send a test of the saved email to"
-                                  placeholder="you@example.com"
-                                  keyboardType="email-address"
-                                  value={templateTestTo[template.id] ?? ""}
-                                  onChangeText={(v) =>
-                                    setTemplateTestTo((prev) => ({ ...prev, [template.id]: v }))
-                                  }
-                                  onSend={() => void sendTemplateTest(template)}
-                                  sending={templateTesting === template.id}
-                                  result={null}
-                                />
-                              )}
-                              {isRegistration && (
-                                <Hint>
-                                  {"The test fills in a sample event and doesn't attach photos. Real emails attach them when that box is ticked."}
-                                </Hint>
-                              )}
                             </View>
 
                             <View className="flex-row gap-2">

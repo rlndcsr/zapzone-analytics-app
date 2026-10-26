@@ -56,6 +56,8 @@ import {
   pickedLocation,
   triggerTiming,
 } from "../../lib/email/notificationSettings";
+import { isEventPhotoTemplate } from "../../lib/email/emailTemplateOptions";
+import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import { markEmailNotificationsStale } from "../../lib/emailStale";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -147,7 +149,8 @@ const CreateNotification = () => {
     const token = getToken();
     if (!token) return;
     fetchEmailTemplates(token)
-      .then((r) => setTemplates(r.rows))
+      // event photo emails go out with photos, never from a notification (the server refuses them)
+      .then((r) => setTemplates(r.rows.filter((t) => !isEventPhotoTemplate(t))))
       .catch(() => {});
   }, []);
 
@@ -177,7 +180,8 @@ const CreateNotification = () => {
         setCustomEmails(d.customEmails);
         setExcludedEmails(d.excludedEmails);
         setSubject(d.subject);
-        setBody(d.body);
+        // cleaned as the web editor loads it, so saving an older email isn't refused for code in it
+        setBody(cleanEmailHtml(d.body));
         setPromoId(d.promoId);
         setFromName(d.fromName);
         setReviewUrl(d.reviewUrl);

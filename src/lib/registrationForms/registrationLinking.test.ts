@@ -76,7 +76,7 @@ const detail = (over: Partial<RegistrationFormDetail> = {}): RegistrationFormDet
   locationLocked: false,
   canManageEvent: true,
   groupFormCount: 1,
-  photoEmailActive: true,
+  photoEmail: null,
   ...over,
 });
 

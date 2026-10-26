@@ -1,5 +1,10 @@
 import { apiRequest } from "../lib/api";
 import {
+  EVENT_PHOTOS_CATEGORY,
+  emailTemplateCategoryLabel,
+  type TemplateTargeting,
+} from "../lib/email/emailTemplateOptions";
+import {
   ALL_TRIGGER_GROUPS,
   TRIGGER_LABEL_OVERRIDES,
   type NotificationEntity,
@@ -50,13 +55,16 @@ const PER_PAGE = 100;
 
 export type EmailTemplateStatus = "active" | "draft" | "archived";
 
-export type EmailTemplateRow = {
+export type EmailTemplateRow = TemplateTargeting & {
   id: number;
   name: string;
   subject: string;
+  /** Display label ("Event photos"); "General" when the template has none. */
   category: string;
   status: EmailTemplateStatus;
   createdAt: string | null;
+  /** False when the server says this user may only view it (another location's, or every location's). */
+  canManage: boolean;
 };
 
 type RawTemplate = {
@@ -66,7 +74,59 @@ type RawTemplate = {
   category?: string | null;
   status?: string | null;
   created_at?: string | null;
+  location_id?: number | null;
+  location_ids?: number[] | null;
+  all_locations?: boolean | null;
+  location_names?: string[] | null;
+  target_locations?: { id: number; name: string | null; active?: boolean | null }[] | null;
+  location?: { name?: string | null } | null;
+  can_manage?: boolean | null;
 };
+
+/**
+ * Where a template applies. An older server sends only `location_id`, so that
+ * (or its absence, for every location) is read the same way the web does.
+ */
+function mapTargeting(t: RawTemplate): TemplateTargeting {
+  const categoryValue = t.category?.trim() || null;
+  if (typeof t.all_locations !== "boolean") {
+    const id = t.location_id ?? null;
+    return {
+      categoryValue,
+      allLocations: id == null,
+      locationIds: id == null ? [] : [id],
+      locationNames: id != null && t.location?.name ? [t.location.name] : [],
+      // no names to tell a deleted location from a missing one, so none is treated as deleted
+      targetLocations: [],
+    };
+  }
+  return {
+    categoryValue,
+    allLocations: t.all_locations,
+    locationIds: Array.isArray(t.location_ids) ? t.location_ids.map(Number) : [],
+    locationNames: Array.isArray(t.location_names) ? t.location_names : [],
+    targetLocations: Array.isArray(t.target_locations)
+      ? t.target_locations.map((target) => ({
+          id: Number(target.id),
+          name: target.name ?? null,
+          active: target.active !== false,
+        }))
+      : [],
+  };
+}
+
+function mapTemplateRow(t: RawTemplate): EmailTemplateRow {
+  return {
+    ...mapTargeting(t),
+    id: t.id,
+    name: t.name?.trim() || "Untitled template",
+    subject: t.subject?.trim() || "",
+    category: emailTemplateCategoryLabel(t.category),
+    status: (t.status ?? "draft") as EmailTemplateStatus,
+    createdAt: t.created_at ?? null,
+    canManage: t.can_manage !== false,
+  };
+}
 
 /** One insertable merge variable, e.g. {@literal {{ recipient_email }}}. */
 export type EmailVariable = { name: string; description: string };
@@ -76,12 +136,14 @@ export type EmailVariableGroups = {
   default: EmailVariable[];
   customer: EmailVariable[];
   user: EmailVariable[];
+  /** Event photo fields plus each `link_…` name; empty from an older server. */
+  event: EmailVariable[];
 };
 
 const toVarList = (rec: Record<string, string> | undefined): EmailVariable[] =>
-  Object.entries(rec ?? {}).map(([name, description]) => ({ name, description }));
+  Object.entries(rec ?? {}).map(([name, description]) => ({ name, description: String(description) }));
 
-/** GET /api/email-templates/variables — merge fields grouped default/customer/user. */
+/** GET /api/email-templates/variables — merge fields grouped default/customer/user/event. */
 export async function fetchEmailTemplateVariables(
   token: string,
 ): Promise<EmailVariableGroups> {
@@ -90,6 +152,7 @@ export async function fetchEmailTemplateVariables(
       default?: Record<string, string>;
       customer?: Record<string, string>;
       user?: Record<string, string>;
+      event?: Record<string, string>;
     };
   }>("/api/email-templates/variables", { token });
   const d = res?.data ?? {};
@@ -97,6 +160,7 @@ export async function fetchEmailTemplateVariables(
     default: toVarList(d.default),
     customer: toVarList(d.customer),
     user: toVarList(d.user),
+    event: toVarList(d.event),
   };
 }
 
@@ -106,14 +170,19 @@ export type CreateEmailTemplateInput = {
   body: string;
   status: EmailTemplateStatus;
   category?: string;
-  locationId?: number | null;
+  /**
+   * Company-level staff only: the locations it covers, empty for every
+   * location. Left out for everyone else — the server keeps their templates to
+   * their own location.
+   */
+  locationIds?: number[];
+  /** Event photos only. */
+  attachPhotos?: boolean;
+  /** Event photos only; null clears it so the usual photo text is used. */
+  smsBody?: string | null;
 };
 
-/** POST /api/email-templates — create a reusable template. */
-export async function createEmailTemplate(
-  token: string,
-  input: CreateEmailTemplateInput,
-): Promise<void> {
+function templateBody(input: CreateEmailTemplateInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
     name: input.name,
     subject: input.subject,
@@ -121,8 +190,18 @@ export async function createEmailTemplate(
     status: input.status,
   };
   if (input.category) body.category = input.category;
-  if (input.locationId != null) body.location_id = input.locationId;
-  await apiRequest("/api/email-templates", { method: "POST", token, body });
+  if (input.locationIds !== undefined) body.location_ids = input.locationIds;
+  if (input.attachPhotos !== undefined) body.attach_photos = input.attachPhotos;
+  if (input.smsBody !== undefined) body.sms_body = input.smsBody;
+  return body;
+}
+
+/** POST /api/email-templates — create a reusable template. */
+export async function createEmailTemplate(
+  token: string,
+  input: CreateEmailTemplateInput,
+): Promise<void> {
+  await apiRequest("/api/email-templates", { method: "POST", token, body: templateBody(input) });
 }
 
 /** GET /api/email-templates — reusable templates for the company. */
@@ -133,17 +212,21 @@ export async function fetchEmailTemplates(
     token,
   });
   const { rows, total } = extractPaginated<RawTemplate>(res);
-  return {
-    total,
-    rows: rows.map((t) => ({
-      id: t.id,
-      name: t.name?.trim() || "Untitled template",
-      subject: t.subject?.trim() || "",
-      category: t.category?.trim() || "General",
-      status: (t.status ?? "draft") as EmailTemplateStatus,
-      createdAt: t.created_at ?? null,
-    })),
-  };
+  return { total, rows: rows.map(mapTemplateRow) };
+}
+
+/**
+ * POST /api/email-templates/{id}/duplicate — a draft copy; for a manager the
+ * copy is for their own location. Returns the copy's id.
+ */
+export async function duplicateEmailTemplate(token: string, id: number): Promise<number> {
+  const res = await apiRequest<{ data?: { id?: number } }>(
+    `/api/email-templates/${id}/duplicate`,
+    { method: "POST", token },
+  );
+  const copyId = Number(res?.data?.id);
+  if (!Number.isInteger(copyId) || copyId <= 0) throw new Error("The template could not be copied");
+  return copyId;
 }
 
 /** PATCH /api/email-templates/{id}/status — set a template's status (bulk-action write). */
@@ -160,7 +243,7 @@ export async function updateEmailTemplateStatus(
 }
 
 /** Full template incl. the HTML body — powers the Template Details screen. */
-export type EmailTemplateDetail = {
+export type EmailTemplateDetail = TemplateTargeting & {
   id: number;
   name: string;
   subject: string;
@@ -168,14 +251,18 @@ export type EmailTemplateDetail = {
   status: EmailTemplateStatus;
   /** Display label — "General" when the template has none. */
   category: string;
-  /** The stored category exactly as saved (null when none), for the edit form. */
-  categoryValue: string | null;
-  locationId: number | null;
+  /** False when this user may only view it; the editor opens read-only. */
+  canManage: boolean;
+  /** Event photos: attach the photos as well as the link. */
+  attachPhotos: boolean;
+  /** Event photos: the text message; empty uses the usual photo text. */
+  smsBody: string;
 };
 
 type RawTemplateDetail = RawTemplate & {
   body?: string | null;
-  location_id?: number | null;
+  attach_photos?: boolean | null;
+  sms_body?: string | null;
 };
 
 /** GET /api/email-templates/{id} — full template (with body) for the details screen. */
@@ -189,15 +276,12 @@ export async function fetchEmailTemplateDetail(
   );
   // Tolerate either a `{ data }` envelope or a bare object.
   const raw = (res?.data ?? (res as unknown as RawTemplateDetail)) ?? ({} as RawTemplateDetail);
+  const row = mapTemplateRow(raw);
   return {
-    id: raw.id,
-    name: raw.name?.trim() || "Untitled template",
-    subject: raw.subject?.trim() || "",
+    ...row,
     body: raw.body ?? "",
-    status: (raw.status ?? "draft") as EmailTemplateStatus,
-    category: raw.category?.trim() || "General",
-    categoryValue: raw.category?.trim() || null,
-    locationId: raw.location_id ?? null,
+    attachPhotos: row.categoryValue === EVENT_PHOTOS_CATEGORY ? Boolean(raw.attach_photos) : true,
+    smsBody: raw.sms_body ?? "",
   };
 }
 
@@ -213,11 +297,20 @@ export async function deleteEmailTemplate(token: string, id: number): Promise<vo
  */
 export async function previewEmailContent(
   token: string,
-  input: { subject: string; body: string },
+  input: { subject: string; body: string; locationId?: number },
 ): Promise<{ subject: string; body: string }> {
+  // location_id picks whose links and phone fill the sample (web: the first ticked location)
   const res = await apiRequest<{ data?: { subject?: string | null; body?: string | null } }>(
     "/api/email-templates/preview",
-    { method: "POST", token, body: input },
+    {
+      method: "POST",
+      token,
+      body: {
+        subject: input.subject,
+        body: input.body,
+        ...(input.locationId ? { location_id: input.locationId } : {}),
+      },
+    },
   );
   return { subject: res?.data?.subject ?? "", body: res?.data?.body ?? "" };
 }
@@ -228,15 +321,7 @@ export async function updateEmailTemplate(
   id: number,
   input: CreateEmailTemplateInput,
 ): Promise<void> {
-  const body: Record<string, unknown> = {
-    name: input.name,
-    subject: input.subject,
-    body: input.body,
-    status: input.status,
-  };
-  if (input.category) body.category = input.category;
-  if (input.locationId != null) body.location_id = input.locationId;
-  await apiRequest(`/api/email-templates/${id}`, { method: "PUT", token, body });
+  await apiRequest(`/api/email-templates/${id}`, { method: "PUT", token, body: templateBody(input) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -295,7 +380,16 @@ export type CampaignRecipientType =
   | "attendants"
   | "company_admin"
   | "location_managers"
-  | "custom";
+  | "custom"
+  | "event_registrants";
+
+/** Who an Event Registrants campaign goes to. */
+export type CampaignEventFilter = {
+  /** Location registration forms (the web's event picker sends form ids). */
+  registrationEventIds: number[];
+  /** Skip anyone whose photos are not ready yet. */
+  onlyWithPhotos: boolean;
+};
 
 export type CreateEmailCampaignInput = {
   name: string;
@@ -306,24 +400,92 @@ export type CreateEmailCampaignInput = {
   emailTemplateId?: number | null;
   sendNow: boolean;
   locationId?: number | null;
+  /** Only when sending to event registrants. */
+  events?: CampaignEventFilter;
 };
 
-/** POST /api/email-campaigns — create a bulk send (draft when sendNow is false). */
+function campaignRecipientBody(input: {
+  recipientTypes: CampaignRecipientType[];
+  customEmails?: string[];
+  locationId?: number | null;
+  events?: CampaignEventFilter;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = { recipient_types: input.recipientTypes };
+  if (input.customEmails?.length) body.custom_emails = input.customEmails;
+  if (input.locationId != null) body.location_id = input.locationId;
+  if (input.events && input.recipientTypes.includes("event_registrants")) {
+    body.recipient_filters = {
+      registration_event_ids: input.events.registrationEventIds,
+      only_with_photos: input.events.onlyWithPhotos,
+    };
+  }
+  return body;
+}
+
+/**
+ * POST /api/email-campaigns — create a bulk send (draft when sendNow is false).
+ * A large send carries on after the reply: `status` is then "sending" and
+ * `message` says so.
+ */
 export async function createEmailCampaign(
   token: string,
   input: CreateEmailCampaignInput,
-): Promise<void> {
+): Promise<{ status: string; message: string | null; totalRecipients: number }> {
   const body: Record<string, unknown> = {
     name: input.name,
     subject: input.subject,
     body: input.body,
-    recipient_types: input.recipientTypes,
     send_now: input.sendNow,
+    ...campaignRecipientBody(input),
   };
-  if (input.customEmails?.length) body.custom_emails = input.customEmails;
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
-  if (input.locationId != null) body.location_id = input.locationId;
-  await apiRequest("/api/email-campaigns", { method: "POST", token, body });
+  const res = await apiRequest<{
+    message?: string | null;
+    data?: { status?: string | null; total_recipients?: number | null };
+  }>("/api/email-campaigns", { method: "POST", token, body });
+  return {
+    status: res?.data?.status ?? "",
+    message: res?.message ?? null,
+    totalRecipients: Number(res?.data?.total_recipients ?? 0),
+  };
+}
+
+export type CampaignRecipientPreview = {
+  total: number;
+  /** Per recipient type ("event_registrant", "customer", …). */
+  byType: Record<string, number>;
+  /** Event registrants who have their own photo link. */
+  withPhotos: number;
+};
+
+/** POST /api/email-campaigns/preview-recipients — who a campaign would reach, before it is sent. */
+export async function previewCampaignRecipients(
+  token: string,
+  input: {
+    recipientTypes: CampaignRecipientType[];
+    customEmails?: string[];
+    locationId?: number | null;
+    events?: CampaignEventFilter;
+  },
+  signal?: AbortSignal,
+): Promise<CampaignRecipientPreview> {
+  const res = await apiRequest<{
+    data?: {
+      total_recipients?: number | null;
+      by_type?: Record<string, number> | null;
+      with_photos?: number | null;
+    };
+  }>("/api/email-campaigns/preview-recipients", {
+    method: "POST",
+    token,
+    signal,
+    body: campaignRecipientBody(input),
+  });
+  return {
+    total: Number(res?.data?.total_recipients ?? 0),
+    byType: res?.data?.by_type ?? {},
+    withPhotos: Number(res?.data?.with_photos ?? 0),
+  };
 }
 
 export type EmailCampaignStats = {
@@ -388,6 +550,12 @@ export type EmailCampaignDetail = {
   createdAt: string | null;
   createdByName: string | null;
   locationName: string | null;
+  /** Why a send stopped part-way (status "failed"). */
+  errorMessage: string | null;
+  /** Event Registrants: how many location forms it went to. */
+  eventFormCount: number;
+  /** Event Registrants: only people whose photos were ready. */
+  onlyWithPhotos: boolean;
   logs: EmailCampaignLog[];
 };
 
@@ -407,6 +575,11 @@ type RawCampaignDetail = RawCampaign & {
   scheduled_at?: string | null;
   completed_at?: string | null;
   created_at?: string | null;
+  error_message?: string | null;
+  recipient_filters?: {
+    registration_event_ids?: unknown;
+    only_with_photos?: unknown;
+  } | null;
   location?: { name?: string | null } | null;
   creator?: { first_name?: string | null; last_name?: string | null } | null;
   logs?: RawCampaignLog[] | null;
@@ -424,6 +597,7 @@ export async function fetchEmailCampaignDetail(
   const d = (res?.data ?? (res as unknown as RawCampaignDetail)) ?? ({} as RawCampaignDetail);
   const c = d.creator;
   const createdBy = c ? `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() : "";
+  const filters = d.recipient_filters;
   return {
     id: d.id,
     name: d.name?.trim() || "Untitled campaign",
@@ -442,6 +616,12 @@ export async function fetchEmailCampaignDetail(
     createdAt: d.created_at ?? null,
     createdByName: createdBy || null,
     locationName: d.location?.name ?? null,
+    errorMessage: d.error_message?.trim() || null,
+    eventFormCount: Array.isArray(filters?.registration_event_ids)
+      ? filters.registration_event_ids.length
+      : 0,
+    // stored from a JSON body (true) or form data ("1"), as the web reads it
+    onlyWithPhotos: [true, 1, "1", "true"].includes(filters?.only_with_photos as never),
     logs: Array.isArray(d.logs)
       ? d.logs.map((l) => ({
           id: l.id,
@@ -460,17 +640,22 @@ export async function cancelEmailCampaign(token: string, id: number): Promise<vo
   await apiRequest(`/api/email-campaigns/${id}/cancel`, { method: "POST", token });
 }
 
-/** POST /api/email-campaigns/{id}/resend — retry failed (or all) recipients. */
+/**
+ * POST /api/email-campaigns/{id}/resend — retry failed (or all) recipients.
+ * Returns the server's message ("Sending to 40 people now…", "There was no one
+ * left to send it to again.").
+ */
 export async function resendEmailCampaign(
   token: string,
   id: number,
   type: "failed" | "all" = "failed",
-): Promise<void> {
-  await apiRequest(`/api/email-campaigns/${id}/resend`, {
+): Promise<string | null> {
+  const res = await apiRequest<{ message?: string | null }>(`/api/email-campaigns/${id}/resend`, {
     method: "POST",
     token,
     body: { type },
   });
+  return res?.message ?? null;
 }
 
 /** DELETE /api/email-campaigns/{id} — remove a finished/cancelled campaign. */

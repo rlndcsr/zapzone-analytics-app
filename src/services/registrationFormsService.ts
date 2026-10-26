@@ -107,8 +107,21 @@ export type RegistrationFormDetail = RegistrationFormRow & {
   canManageEvent: boolean;
   /** Forms in this form's event, including ones at locations the user can't see. */
   groupFormCount: number;
-  /** False when the company's Event registration photos email is switched off; true if the server doesn't say. */
-  photoEmailActive: boolean;
+  /**
+   * The active Event photos email template covering this form's location, which
+   * registrants' photos go out with; null when none does (they get the usual
+   * photo email). Sent only alongside `photoFrames`.
+   */
+  photoEmail: RegistrationPhotoEmail | null;
+};
+
+export type RegistrationPhotoEmail = {
+  id: number;
+  name: string;
+  /** False when only a company admin may change it (shared with other locations). */
+  canManage: boolean;
+  allLocations: boolean;
+  locationCount: number;
 };
 
 /** One row of GET /registration-event-groups — an event across its location forms. */
@@ -443,7 +456,21 @@ function mapDetail(r: Raw): RegistrationFormDetail {
     // An older backend sends neither; an ungrouped form is its own event.
     canManageEvent: r.can_manage_event === undefined ? form.group === null : r.can_manage_event === true,
     groupFormCount: num(r.group_form_count) || 1,
-    photoEmailActive: r.photo_email_active !== false,
+    photoEmail: mapPhotoEmail(r.photo_email),
+  };
+}
+
+function mapPhotoEmail(raw: unknown): RegistrationPhotoEmail | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Raw;
+  const id = num(r.id);
+  if (id <= 0) return null;
+  return {
+    id,
+    name: str(r.name) || "Event photos",
+    canManage: r.can_manage === true,
+    allLocations: r.all_locations === true,
+    locationCount: num(r.location_count),
   };
 }
 
@@ -551,6 +578,19 @@ export async function fetchRegistrationForm(
 ): Promise<RegistrationFormDetail> {
   const res = await apiRequest<Envelope>(`${BASE}/${id}`, { token, signal });
   return mapDetail((res?.data ?? {}) as Raw);
+}
+
+/**
+ * GET /registration-events — every location form at the signed-in staff
+ * member's locations, newest event first (the web's `listEvents`; the server
+ * returns up to 500).
+ */
+export async function fetchRegistrationForms(
+  token: string,
+  signal?: AbortSignal,
+): Promise<RegistrationFormRow[]> {
+  const res = await apiRequest<Envelope>(BASE, { token, signal });
+  return list((res?.data as Raw | undefined)?.events).map(mapForm);
 }
 
 /** JSON through apiRequest, or multipart when a new header image travels with it. */
