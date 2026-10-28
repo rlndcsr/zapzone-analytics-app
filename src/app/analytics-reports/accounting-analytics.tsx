@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
 } from "react";
@@ -228,7 +229,13 @@ const AccountingAnalytics = () => {
       .catch(() => setLocations([]));
   }, []);
 
+  // Bumped per load, so changing the location/dates/view quickly shows the last
+  // choice's report, not whichever reply happened to arrive last.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
     if (!token || locationId == null) {
       setLoading(false);
@@ -245,6 +252,7 @@ const AccountingAnalytics = () => {
         viewMode,
         categoryFilter: categoryFilter || undefined,
       });
+      if (!isCurrent()) return;
       setReport(next);
 
       if (!categoryFilter) {
@@ -259,9 +267,11 @@ const AccountingAnalytics = () => {
         );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load report");
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [locationId, start, end, viewMode, categoryFilter]);
 

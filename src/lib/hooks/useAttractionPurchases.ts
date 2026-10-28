@@ -11,7 +11,10 @@ import { getCurrentUser, getToken } from "../session";
 type CacheEntry = { fetchedAt: number; data: PurchaseRow[] };
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const cacheKey = (locationId?: number) => String(locationId ?? "all");
+// The signed-in user is part of the key, so switching accounts never serves the
+// previous account's rows as fresh.
+const cacheKey = (locationId?: number) =>
+  `${getCurrentUser()?.id ?? "anon"}|${locationId ?? "all"}`;
 const isFresh = (entry?: CacheEntry) =>
   !!entry && Date.now() - entry.fetchedAt < CACHE_TTL_MS;
 

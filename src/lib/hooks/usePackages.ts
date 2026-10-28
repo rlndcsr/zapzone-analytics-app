@@ -13,9 +13,10 @@ type Cache = { key: string; fetchedAt: number; data: PackageRow[] };
 let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 // The kind is part of the key: the two screens hold different slices of the
-// same endpoint, and sharing one cache entry would serve each other's rows.
+// same endpoint, and sharing one cache entry would serve each other's rows. The
+// signed-in user is too, so switching accounts never serves the previous one's.
 const cacheKey = (locationId: number | undefined, kind: PackageKind) =>
-  `${kind}:${locationId ?? "all"}`;
+  `${getCurrentUser()?.id ?? "anon"}|${kind}:${locationId ?? "all"}`;
 
 // Set after a mutation (e.g. toggling status) so the list screen knows to
 // force a refetch the next time it regains focus.

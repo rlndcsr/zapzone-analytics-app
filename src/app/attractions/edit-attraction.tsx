@@ -138,6 +138,9 @@ const EditAttractionScreen = () => {
     const controller = new AbortController();
     (async () => {
       try {
+        // Categories don't depend on the attraction's location, so they load
+        // alongside the detail rather than after it.
+        const categoriesPromise = fetchCategories(token).catch(() => []);
         const detail = await fetchAttractionDetail(
           token,
           attractionId,
@@ -146,7 +149,7 @@ const EditAttractionScreen = () => {
         if (!active) return;
         const locId = detail.locationId ?? undefined;
         const [cats, ads] = await Promise.all([
-          fetchCategories(token).catch(() => []),
+          categoriesPromise,
           user?.id
             ? fetchAddOns({ token, userId: user.id, locationId: locId }).catch(
                 () => [],

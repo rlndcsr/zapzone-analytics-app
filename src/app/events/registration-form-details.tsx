@@ -424,8 +424,6 @@ const RegistrationFormDetails = () => {
     void loadForm();
   }, [loadForm]);
 
-  const formLoaded = form !== null;
-
   const loadList = useCallback(async () => {
     const current = ++listSequence.current;
     const token = getToken();
@@ -457,10 +455,14 @@ const RegistrationFormDetails = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formId, search, filter, page, reloadTick]);
 
+  // The list needs only the form id, so it loads alongside the form rather than
+  // after it (one round trip instead of two); it stops once the form has failed.
+  const listEnabled = Number.isFinite(formId) && failure === null;
+
   useEffect(() => {
-    if (!formLoaded) return;
+    if (!listEnabled) return;
     void loadList();
-  }, [formLoaded, loadList]);
+  }, [listEnabled, loadList]);
 
   useEffect(() => {
     const timer = setTimeout(() => {

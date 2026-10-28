@@ -3,13 +3,17 @@ import {
   fetchMembershipPlans,
   type MembershipPlanRow,
 } from "../../services/membershipPlansService";
-import { getToken } from "../session";
+import { getCurrentUser, getToken } from "../session";
 
 // Session cache of the plan list; views filter it client-side. Mirrors the
 // caching approach used by usePackages.
-type Cache = { fetchedAt: number; data: MembershipPlanRow[] };
+type Cache = { owner: number | null; fetchedAt: number; data: MembershipPlanRow[] };
 let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+const currentOwner = () => getCurrentUser()?.id ?? null;
+/** The cache, unless it was filled under a different account (then: none). */
+const ownCache = () => (cache && cache.owner === currentOwner() ? cache : null);
 
 export function clearMembershipPlansCache(): void {
   cache = null;
@@ -17,18 +21,20 @@ export function clearMembershipPlansCache(): void {
 
 /** Loads + caches the membership plan list, with `refetch` + optimistic patches. */
 export function useMembershipPlans() {
-  const cacheFresh = !!cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+  const initial = ownCache();
+  const cacheFresh = !!initial && Date.now() - initial.fetchedAt < CACHE_TTL_MS;
 
-  const [plans, setPlans] = useState<MembershipPlanRow[]>(cache?.data ?? []);
+  const [plans, setPlans] = useState<MembershipPlanRow[]>(initial?.data ?? []);
   const [loading, setLoading] = useState(!cacheFresh);
   const [error, setError] = useState<string | null>(null);
 
   const requestIdRef = useRef(0);
 
   const sync = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    const fresh = !!cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
-    if (fresh && !force) {
-      setPlans(cache!.data);
+    const own = ownCache();
+    const fresh = !!own && Date.now() - own.fetchedAt < CACHE_TTL_MS;
+    if (own && fresh && !force) {
+      setPlans(own.data);
       setError(null);
       setLoading(false);
       return;
@@ -46,16 +52,17 @@ export function useMembershipPlans() {
       return;
     }
 
-    if (cache && !force) {
-      setPlans(cache.data);
+    if (own && !force) {
+      setPlans(own.data);
       setLoading(false);
     } else {
       setLoading(true);
     }
 
     try {
+      const owner = currentOwner();
       const data = await fetchMembershipPlans({ token });
-      cache = { fetchedAt: Date.now(), data };
+      cache = { owner, fetchedAt: Date.now(), data };
       if (isCurrent()) {
         setPlans(data);
         setError(null);
@@ -64,7 +71,7 @@ export function useMembershipPlans() {
       console.error("Membership plans error:", err);
       if (isCurrent()) {
         setError(err instanceof Error ? err.message : "Failed to load plans");
-        if (!cache) setPlans([]);
+        if (!ownCache()) setPlans([]);
       }
     } finally {
       if (isCurrent()) setLoading(false);

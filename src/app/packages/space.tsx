@@ -514,6 +514,11 @@ const Space = () => {
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page, perPage],
   );
+  // Deleting the last page's only row would otherwise leave an empty page.
+  useEffect(() => {
+    const last = Math.max(1, Math.ceil(filtered.length / perPage));
+    if (page > last) setPage(last);
+  }, [page, filtered.length, perPage]);
 
   // Reset to the first page whenever the result set changes size / filters move.
   useEffect(() => {
@@ -656,17 +661,29 @@ const Space = () => {
     }
 
     setCreating(true);
+    let created = 0;
     try {
       for (const name of names) {
         await createRoom(token, { ...base, name });
+        created += 1;
       }
       setShowCreate(false);
       await refetch();
     } catch (err) {
-      Alert.alert(
-        "Create failed",
-        err instanceof Error ? err.message : "Could not create the space(s).",
-      );
+      const reason =
+        err instanceof Error ? err.message : "Could not create the space(s).";
+      if (created === 0) {
+        Alert.alert("Create failed", reason);
+      } else {
+        // Some already exist: close the sheet and show them, so pressing Create
+        // again can't re-post (duplicate) the rooms that went through.
+        setShowCreate(false);
+        await refetch().catch(() => {});
+        Alert.alert(
+          "Create partly failed",
+          `${created} of ${names.length} spaces were created. ${reason}`,
+        );
+      }
     } finally {
       setCreating(false);
     }

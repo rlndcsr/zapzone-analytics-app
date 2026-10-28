@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import React, {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ComponentProps,
 } from "react";
@@ -125,7 +126,13 @@ const PageAnalytics = () => {
     fetchLocations(token).then(setLocations).catch(() => setLocations([]));
   }, []);
 
+  // Bumped per load, so switching period/location quickly shows the last
+  // choice's figures, not whichever batch of replies arrived last.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
     if (!token) {
       setError("Not authenticated");
@@ -156,6 +163,7 @@ const PageAnalytics = () => {
         fetchLandingPages(p).catch(() => []),
         fetchRecentConversions(p).catch(() => []),
       ]);
+      if (!isCurrent()) return;
       setOverview(ov);
       setLive(lv);
       setSeries(ts.series);
@@ -167,9 +175,11 @@ const PageAnalytics = () => {
       setLanding(lp);
       setConversions(cv);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analytics");
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "Failed to load analytics");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [days, locationId]);
 

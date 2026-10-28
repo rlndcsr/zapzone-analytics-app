@@ -432,23 +432,30 @@ const EditEventPurchaseScreen = () => {
         if (eventId == null) return;
 
         // The full event carries the add-on catalog + daily hours; the purchase's
-        // own embedded event is the fallback, as on the web.
-        try {
-          const detail = await fetchEventDetail(token, eventId, controller.signal);
-          if (!controller.signal.aborted && detail) setEventFull(detail);
-        } catch {
-          // Falls back to `record.event`.
-        }
-        try {
-          const dates = await fetchEventAvailableDates({
-            token,
-            eventId,
-            signal: controller.signal,
-          });
-          if (!controller.signal.aborted) setAvailableDates(dates);
-        } catch {
-          // Calendar simply offers no extra dates.
-        }
+        // own embedded event is the fallback, as on the web. Independent of the
+        // available dates, so both load together.
+        await Promise.all([
+          (async () => {
+            try {
+              const detail = await fetchEventDetail(token, eventId, controller.signal);
+              if (!controller.signal.aborted && detail) setEventFull(detail);
+            } catch {
+              // Falls back to `record.event`.
+            }
+          })(),
+          (async () => {
+            try {
+              const dates = await fetchEventAvailableDates({
+                token,
+                eventId,
+                signal: controller.signal,
+              });
+              if (!controller.signal.aborted) setAvailableDates(dates);
+            } catch {
+              // Calendar simply offers no extra dates.
+            }
+          })(),
+        ]);
       } catch {
         if (controller.signal.aborted) return;
         setNotFound(true);

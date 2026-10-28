@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import {
   EVENT_PHOTOS_CATEGORY,
   emailTemplateCategoryLabel,
@@ -48,6 +49,38 @@ function extractPaginated<T>(res: unknown): { rows: T[]; total: number } {
 // Fetch a generous page so client-derived stat counts are accurate at this
 // app's scale (the backend caps nothing important here).
 const PER_PAGE = 100;
+/** Runaway guard for {@link fetchEveryPage} — 5,000 rows. */
+const MAX_PAGES = 50;
+
+/**
+ * Every row of a paginated index, plus the server's total. The backend pages
+ * these lists, so reading only the first page silently dropped everything past
+ * {@link PER_PAGE} — rows missing from the list, its search and its stats.
+ */
+async function fetchEveryPage<T extends { id: number }>(
+  token: string,
+  path: string,
+): Promise<{ rows: T[]; total: number }> {
+  let total = 0;
+  const rows = await fetchAllPages<T>(
+    async (page) => {
+      const res = await apiRequest<unknown>(`${path}?per_page=${PER_PAGE}&page=${page}`, {
+        token,
+      });
+      const parsed = extractPaginated<T>(res);
+      if (page === 1) total = parsed.total;
+      const paginator = ((res ?? {}) as Record<string, unknown>).data;
+      const lastPage =
+        paginator && typeof paginator === "object" && !Array.isArray(paginator)
+          ? Number((paginator as Record<string, unknown>).last_page) || 1
+          : 1;
+      return { items: parsed.rows, lastPage };
+    },
+    { maxPages: MAX_PAGES },
+  );
+  // A row created mid-walk can shift another onto the next page; keep it once.
+  return { rows: uniqueById(rows), total };
+}
 
 /* ------------------------------------------------------------------ */
 /* Email templates                                                     */
@@ -208,10 +241,7 @@ export async function createEmailTemplate(
 export async function fetchEmailTemplates(
   token: string,
 ): Promise<{ rows: EmailTemplateRow[]; total: number }> {
-  const res = await apiRequest<unknown>(`/api/email-templates?per_page=${PER_PAGE}`, {
-    token,
-  });
-  const { rows, total } = extractPaginated<RawTemplate>(res);
+  const { rows, total } = await fetchEveryPage<RawTemplate>(token, "/api/email-templates");
   return { total, rows: rows.map(mapTemplateRow) };
 }
 
@@ -355,10 +385,7 @@ type RawCampaign = {
 export async function fetchEmailCampaigns(
   token: string,
 ): Promise<{ rows: EmailCampaignRow[]; total: number }> {
-  const res = await apiRequest<unknown>(`/api/email-campaigns?per_page=${PER_PAGE}`, {
-    token,
-  });
-  const { rows, total } = extractPaginated<RawCampaign>(res);
+  const { rows, total } = await fetchEveryPage<RawCampaign>(token, "/api/email-campaigns");
   return {
     total,
     rows: rows.map((c) => ({
@@ -734,11 +761,10 @@ export type EmailNotificationStats = {
 export async function fetchEmailNotifications(
   token: string,
 ): Promise<{ rows: EmailNotificationRow[]; total: number; stats: EmailNotificationStats }> {
-  const res = await apiRequest<unknown>(
-    `/api/email-notifications?per_page=${PER_PAGE}`,
-    { token },
+  const { rows, total } = await fetchEveryPage<RawNotification>(
+    token,
+    "/api/email-notifications",
   );
-  const { rows, total } = extractPaginated<RawNotification>(res);
   const mapped: EmailNotificationRow[] = rows.map((n) => ({
     id: n.id,
     name: n.name?.trim() || "Notification",

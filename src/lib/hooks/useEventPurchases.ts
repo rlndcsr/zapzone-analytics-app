@@ -10,7 +10,10 @@ import { getCurrentUser, getToken } from "../session";
 type Cache = { key: string; fetchedAt: number; data: EventPurchaseRow[] };
 let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const cacheKey = (locationId?: number) => String(locationId ?? "all");
+// The signed-in user is part of the key, so switching accounts never serves the
+// previous account's rows as fresh.
+const cacheKey = (locationId?: number) =>
+  `${getCurrentUser()?.id ?? "anon"}|${locationId ?? "all"}`;
 
 // Set after creating a purchase so the list screen force-refetches on focus.
 let stale = false;

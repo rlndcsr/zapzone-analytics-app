@@ -52,7 +52,7 @@ import {
 } from "../../lib/packages/packagePricing";
 import { sortRoomsNumerically } from "../../lib/rooms";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import {
   CARD_MONTHS,
@@ -364,13 +364,16 @@ const ManualBookingScreen = () => {
 
   // Location filter (company admin). Managers are auth-scoped server-side.
   const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
-  const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
-  const locationOptions = useMemo(() => {
-    if (!metrics?.locationStats) return [];
-    return Object.entries(metrics.locationStats)
-      .map(([id, s]) => ({ id: Number(id), name: s.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics]);
+  // The light locations endpoint (as edit-booking uses), not the all-time
+  // dashboard metrics — the heaviest call in the app — just for names.
+  const { locations } = useLocationOptions();
+  const locationOptions = useMemo(
+    () =>
+      locations
+        .map((l) => ({ id: l.id, name: l.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [locations],
+  );
 
   // Package catalog (lightweight list) + the hydrated selection.
   const [packageItems, setPackageItems] = useState<PackageListItem[]>([]);

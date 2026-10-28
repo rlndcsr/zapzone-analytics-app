@@ -23,12 +23,24 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
   // Holds the "commit this delete to the server" callback for the item currently
   // in its undo window, so a second delete (or unmount) can flush it early.
   const commitDeleteRef = useRef<(() => void) | null>(null);
+  // The committed list, for handlers that must decide from it before updating it:
+  // a setState updater isn't guaranteed to run synchronously, so a value captured
+  // inside one can still be unset when the handler reads it back.
+  const notificationsRef = useRef(notifications);
+  useEffect(() => {
+    notificationsRef.current = notifications;
+  }, [notifications]);
+  // Bumped per load, so a slower response for a filter/page the user already
+  // left can't overwrite the list they switched to.
+  const requestIdRef = useRef(0);
 
   // `silent` re-reads the list without flipping `loading`, so the cards stay on
   // screen instead of being swapped for skeletons. That is what pull-to-refresh
   // and the refresh-on-return want; the first load still shows skeletons.
   const loadNotifications = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     try {
       const token = getToken();
       const user = getCurrentUser();
@@ -41,15 +53,20 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
 
       if (!silent) setLoading(true);
       const data = await fetchNotifications(token, filter, page, perPage);
+      if (!isCurrent()) return;
       setNotifications(data.data.notifications);
       setTotalCount(data.data.pagination.total);
       setLastPage(data.data.pagination.last_page);
       setError(null);
     } catch (err) {
       console.error('Notifications error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load notifications');
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : 'Failed to load notifications');
+      }
     } finally {
-      if (!silent) setLoading(false);
+      // Only the latest load settles `loading` — including a silent one that
+      // superseded a non-silent load, which would otherwise leave skeletons up.
+      if (isCurrent()) setLoading(false);
     }
   }, [filter, page, perPage]);
 
@@ -107,15 +124,11 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
     const token = getToken();
     if (!token) return;
 
-    let wasUnread = false;
+    const target = notificationsRef.current.find((n) => n.id === id);
+    if (target?.status !== 'unread') return;
     setNotifications((prev) =>
-      prev.map((n) => {
-        if (n.id !== id) return n;
-        wasUnread = n.status === 'unread';
-        return wasUnread ? { ...n, status: 'read' } : n;
-      })
+      prev.map((n) => (n.id === id ? { ...n, status: 'read' } : n))
     );
-    if (!wasUnread) return;
 
     try {
       await markNotificationAsRead(token, id);
@@ -167,19 +180,15 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
       commitDeleteRef.current?.();
     }
 
-    let snapshot: PendingDelete | null = null;
-    setNotifications((prev) => {
-      const index = prev.findIndex((n) => n.id === id);
-      if (index === -1) return prev;
-      snapshot = { notification: prev[index], index };
-      return prev.filter((n) => n.id !== id);
-    });
-    if (!snapshot) return;
+    const list = notificationsRef.current;
+    const index = list.findIndex((n) => n.id === id);
+    if (index === -1) return;
+    const captured: PendingDelete = { notification: list[index], index };
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
 
     setTotalCount((c) => Math.max(0, c - 1));
-    setPendingDelete(snapshot);
+    setPendingDelete(captured);
 
-    const captured = snapshot;
     const commit = async () => {
       undoTimerRef.current = null;
       commitDeleteRef.current = null;
@@ -197,17 +206,16 @@ export function useNotifications(initialFilter: NotificationFilterType = 'all') 
   }, [restoreNotification]);
 
   // Cancels the pending delete and puts the notification back where it was.
+  // Restores only while the delete is still uncommitted (its timer is live), and
+  // outside any updater, so the row can't be put back twice.
   const undoDelete = useCallback(() => {
-    if (undoTimerRef.current) {
-      clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = null;
-    }
+    if (!undoTimerRef.current) return;
+    clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = null;
     commitDeleteRef.current = null;
-    setPendingDelete((p) => {
-      if (p) restoreNotification(p);
-      return null;
-    });
-  }, [restoreNotification]);
+    if (pendingDelete) restoreNotification(pendingDelete);
+    setPendingDelete(null);
+  }, [pendingDelete, restoreNotification]);
 
   // On unmount, flush any pending delete so it isn't silently dropped.
   useEffect(() => {

@@ -217,6 +217,8 @@ export function useBookingCheckIn(): UseBookingCheckIn {
         const { signal } = abortRef.current;
 
         let booking: ScanBooking | null = null;
+        // An id-only scan already fetched the full detail — reused below.
+        let scannedDetail: BookingDetail | null = null;
         try {
           // Prefer the reference number (like the web); fall back to the id.
           if (referenceNumber) {
@@ -227,8 +229,8 @@ export function useBookingCheckIn(): UseBookingCheckIn {
               signal,
             });
           } else if (bookingId != null) {
-            const detail = await fetchBookingDetail(token, bookingId, signal);
-            booking = detail ? scanBookingFromDetail(detail) : null;
+            scannedDetail = await fetchBookingDetail(token, bookingId, signal);
+            booking = scannedDetail ? scanBookingFromDetail(scannedDetail) : null;
           }
         } catch (err) {
           if (signal.aborted) return;
@@ -274,28 +276,19 @@ export function useBookingCheckIn(): UseBookingCheckIn {
         // surface (both best-effort), then hand off to the review screen.
         setResult(null);
 
-        let detail: BookingDetail | null = null;
-        try {
-          detail = await fetchBookingDetail(token, booking.id, signal);
-        } catch {
-          if (signal.aborted) return;
-          detail = null; // fall back to the summary-only review
-        }
-
         // Outdates any re-read still on its way for the booking reviewed before.
         waiversRequestRef.current++;
-        let entityWaivers: EntityWaivers | null = null;
-        try {
-          entityWaivers = await fetchEntityWaivers(
-            token,
-            "booking",
-            booking.id,
-            signal,
-          );
-        } catch {
-          if (signal.aborted) return;
-          entityWaivers = null;
-        }
+        // Independent of each other, so they load together.
+        const [detail, entityWaivers] = await Promise.all([
+          scannedDetail ??
+            fetchBookingDetail(token, booking.id, signal).catch(
+              (): BookingDetail | null => null, // fall back to the summary-only review
+            ),
+          fetchEntityWaivers(token, "booking", booking.id, signal).catch(
+            (): EntityWaivers | null => null,
+          ),
+        ]);
+        if (signal.aborted) return;
 
         if (!mountedRef.current) return;
         setReviewDetail(detail);
@@ -375,18 +368,27 @@ export function useBookingCheckIn(): UseBookingCheckIn {
           customerId: reviewDetail.customerId,
         });
 
-        // Reflect the new balance from the server.
-        const detail = await fetchBookingDetail(token, reviewDetail.id);
-        if (mountedRef.current) {
-          setReviewDetail(detail);
-          setReview((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  amountPaid: detail.amountPaid,
-                  paymentStatus: detail.paymentStatus,
-                }
-              : prev,
+        // Reflect the new balance from the server. The payment is already saved,
+        // so a failed re-read must not report "Payment failed" — that invites a
+        // second, duplicate payment from the still-filled sheet.
+        try {
+          const detail = await fetchBookingDetail(token, reviewDetail.id);
+          if (mountedRef.current) {
+            setReviewDetail(detail);
+            setReview((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    amountPaid: detail.amountPaid,
+                    paymentStatus: detail.paymentStatus,
+                  }
+                : prev,
+            );
+          }
+        } catch {
+          Alert.alert(
+            "Payment recorded",
+            "The payment was saved, but the updated balance couldn't be loaded. Reopen the booking to see it.",
           );
         }
         return true;

@@ -1,4 +1,5 @@
 import { apiRequest } from "../lib/api";
+import { getCurrentUser } from "../lib/session";
 
 /**
  * Visitor Tracking — every customer visit as its own session (one visitor, one
@@ -159,7 +160,10 @@ export type AllVisitorSessions = {
 };
 
 const CACHE_TTL_MS = 3 * 60 * 1000;
-const cacheKey = (locationId?: number) => String(locationId ?? "all");
+// The signed-in user is part of the key, so switching accounts never serves the
+// previous account's sessions as fresh.
+const cacheKey = (locationId?: number) =>
+  `${getCurrentUser()?.id ?? "anon"}|${locationId ?? "all"}`;
 
 let cache: {
   key: string;

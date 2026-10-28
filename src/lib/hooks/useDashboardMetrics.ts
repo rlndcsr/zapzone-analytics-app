@@ -122,6 +122,20 @@ export function useDashboardMetrics({
           }
         }
 
+        // Every booking, not the newest page — a busy week outgrew one page of 100.
+        // Independent of the metrics, so it loads alongside them rather than after;
+        // a failure only skips the derived new-bookings figures.
+        const bookingsPromise = dashboardNeedsBookings(config)
+          ? fullBookingList({
+              token,
+              locationId: user.location_id ?? undefined,
+              force,
+            }).catch((bookingsErr: unknown) => {
+              console.warn("New bookings derivation failed:", bookingsErr);
+              return null;
+            })
+          : null;
+
         let result: DashboardData;
         if (config.metricsSource === "attendant") {
           result = await fetchAttendantMetrics({
@@ -152,25 +166,16 @@ export function useDashboardMetrics({
           derived.avgBooking = computeAvgBooking(result.metrics);
         }
 
-        if (dashboardNeedsBookings(config)) {
-          try {
-            // Every booking, not the newest page — a busy week outgrew one page of 100.
-            const bookings = await fullBookingList({
-              token,
-              locationId: user.location_id ?? undefined,
-              force,
-            });
-            const created = filterNewBookings(
-              bookings,
-              timeframe,
-              dateFrom,
-              dateTo,
-            );
-            derived.newBookings = created.length;
-            derived.newBookingBreakdowns = newBookingBreakdowns(created);
-          } catch (bookingsErr) {
-            console.warn("New bookings derivation failed:", bookingsErr);
-          }
+        const bookings = bookingsPromise ? await bookingsPromise : null;
+        if (bookings) {
+          const created = filterNewBookings(
+            bookings,
+            timeframe,
+            dateFrom,
+            dateTo,
+          );
+          derived.newBookings = created.length;
+          derived.newBookingBreakdowns = newBookingBreakdowns(created);
         }
 
         result = withDerivedMetrics(result, derived);

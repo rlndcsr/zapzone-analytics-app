@@ -75,7 +75,7 @@ import {
 import { venueNow } from "../../lib/date/venueTime";
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { markBookingsStale } from "../../lib/hooks/useBookings";
-import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
+import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import {
   packagePriceForParticipants,
@@ -613,13 +613,16 @@ const CreateBookingScreen = () => {
   const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
     isCompanyAdmin ? (slotPrefill.locationId ?? null) : null,
   );
-  const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
-  const locationOptions = useMemo(() => {
-    if (!metrics?.locationStats) return [];
-    return Object.entries(metrics.locationStats)
-      .map(([id, s]) => ({ id: Number(id), name: s.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics]);
+  // The light locations endpoint (as edit-booking uses), not the all-time
+  // dashboard metrics — the heaviest call in the app — just for names.
+  const { locations } = useLocationOptions();
+  const locationOptions = useMemo(
+    () =>
+      locations
+        .map((l) => ({ id: l.id, name: l.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [locations],
+  );
 
   const [packageItems, setPackageItems] = useState<PackageListItem[]>([]);
   const [pkgPage, setPkgPage] = useState(1);
@@ -907,7 +910,9 @@ const CreateBookingScreen = () => {
    *  reapplied and the room/time resolution re-armed to run again once this
    *  package's own slots have loaded. */
   const pickPackage = async (item: PackageListItem) => {
-    await pickPackageById(item.id);
+    // A failed load has already alerted; staying on Step 1 keeps a previously
+    // picked package from showing up under the one that just failed.
+    if (!(await pickPackageById(item.id))) return;
     if (slotPrefill.hasAny) {
       setScheduledDate((prev) => slotPrefill.date ?? prev);
       prefillLandedRef.current = true;

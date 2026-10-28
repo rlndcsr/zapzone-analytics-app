@@ -218,6 +218,11 @@ const AddOns = () => {
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page, perPage],
   );
+  // Deleting the last page's only row would otherwise leave an empty page.
+  useEffect(() => {
+    const last = Math.max(1, Math.ceil(filtered.length / perPage));
+    if (page > last) setPage(last);
+  }, [page, filtered.length, perPage]);
 
   useEffect(() => {
     setPage(1);

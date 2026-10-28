@@ -98,6 +98,9 @@ export function ProcessPaymentSheet({
     }
 
     setSaving(true);
+    // Once the payment POST succeeds it is recorded — a later failure must not
+    // read as "Payment failed", or a retry from this sheet records it twice.
+    let paid = false;
     try {
       await recordBookingPayment(token, {
         bookingId,
@@ -108,6 +111,7 @@ export function ProcessPaymentSheet({
         notes,
         referenceNumber,
       });
+      paid = true;
 
       // Send what was collected and let the server decide what that makes the
       // booking. The old `newAmountPaid >= totalAmount ? "paid" : "partial"`
@@ -131,6 +135,15 @@ export function ProcessPaymentSheet({
       onClose();
       Alert.alert("Payment processed successfully!");
     } catch (err) {
+      if (paid) {
+        onProcessed();
+        onClose();
+        Alert.alert(
+          "Payment recorded",
+          "The payment was saved, but the booking's payment status couldn't be updated. Refresh the booking to check it.",
+        );
+        return;
+      }
       Alert.alert(
         "Payment failed",
         err instanceof Error

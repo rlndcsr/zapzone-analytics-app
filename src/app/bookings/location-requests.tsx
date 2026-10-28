@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -97,7 +97,13 @@ export default function LocationRequestsScreen() {
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
+  // Bumped per load, so a slower response for a tab the user already left
+  // can't overwrite the rows of the tab they switched to.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
     if (!token) {
       setError("Not signed in.");
@@ -110,15 +116,17 @@ export default function LocationRequestsScreen() {
         token,
         status: tab === "all" ? undefined : tab,
       });
+      if (!isCurrent()) return;
       setRequests(rows);
       setError(null);
     } catch (err) {
+      if (!isCurrent()) return;
       setRequests([]);
       setError(
         err instanceof Error ? err.message : "Failed to load requests.",
       );
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [tab]);
 

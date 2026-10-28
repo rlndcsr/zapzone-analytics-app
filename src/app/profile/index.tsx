@@ -4,7 +4,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { setStatusBarStyle } from "expo-status-bar";
 import * as WebBrowser from "expo-web-browser";
 import { useColorScheme } from "nativewind";
-import { useCallback, useState, type ComponentProps } from "react";
+import { useCallback, useRef, useState, type ComponentProps } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -443,9 +443,12 @@ const Profile = () => {
 
   // Re-fetch when returning from the edit screen so saved changes show. The
   // status bar goes light for the blue hero and back to `auto` on the way out.
+  // The first focus is skipped: useProfile already loads on mount.
+  const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      refresh();
+      if (focusedOnce.current) refresh();
+      focusedOnce.current = true;
       setStatusBarStyle("light", true);
       return () => setStatusBarStyle("auto", true);
     }, [refresh]),

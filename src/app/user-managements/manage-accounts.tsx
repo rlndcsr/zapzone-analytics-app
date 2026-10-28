@@ -1269,8 +1269,17 @@ const ManageAccounts = () => {
           Alert.alert("Accounts deleted", message ?? "Accounts deleted");
           return;
         }
-        for (const u of chosen)
-          if (u.status !== target) await toggleStaffStatus(token, u.id);
+        // Together rather than one round trip per account; settled first, so the
+        // reload below never runs while some toggles are still in flight.
+        const results = await Promise.allSettled(
+          chosen
+            .filter((u) => u.status !== target)
+            .map((u) => toggleStaffStatus(token, u.id)),
+        );
+        const failed = results.find(
+          (r): r is PromiseRejectedResult => r.status === "rejected",
+        );
+        if (failed) throw failed.reason;
         clearSelection();
         afterMutation();
       } catch (err) {

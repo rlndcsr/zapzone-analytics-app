@@ -303,7 +303,13 @@ const Settings = () => {
         onSaved={() => {
           setShowPinModal(false);
           const token = getToken();
-          if (token) getOverridePinStatus(token).then(setOverridePinStatus);
+          if (token) {
+            getOverridePinStatus(token)
+              .then(setOverridePinStatus)
+              .catch(() => {
+                // The PIN is saved; the status just refreshes on the next visit.
+              });
+          }
         }}
       />
     </View>

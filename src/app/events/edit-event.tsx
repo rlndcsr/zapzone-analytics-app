@@ -177,24 +177,28 @@ const EditEventScreen = () => {
 
   // --- image ---
   const pickImage = useCallback(async () => {
-    // Loaded lazily so the native module never runs at app startup.
-    const ImagePicker = await import("expo-image-picker");
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Allow photo library access to add an image.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: false,
-      base64: true,
-      quality: 0.7,
-    });
-    if (result.canceled) return;
-    const asset = result.assets[0];
-    if (asset?.base64) {
-      const dataUrl = `data:${asset.mimeType ?? "image/jpeg"};base64,${asset.base64}`;
-      update({ image: { kind: "new", dataUrl } });
-      setImagePreview(dataUrl);
+    try {
+      // Loaded lazily so the native module never runs at app startup.
+      const ImagePicker = await import("expo-image-picker");
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission needed", "Allow photo library access to add an image.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsMultipleSelection: false,
+        base64: true,
+        quality: 0.7,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (asset?.base64) {
+        const dataUrl = `data:${asset.mimeType ?? "image/jpeg"};base64,${asset.base64}`;
+        update({ image: { kind: "new", dataUrl } });
+        setImagePreview(dataUrl);
+      }
+    } catch {
+      Alert.alert("Image error", "Could not open the image picker.");
     }
   }, [update]);
 

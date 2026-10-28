@@ -7,7 +7,10 @@ import { getCurrentUser, getToken } from "../session";
 type Cache = { key: string; fetchedAt: number; data: EventRow[] };
 let cache: Cache | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const cacheKey = (locationId?: number) => String(locationId ?? "all");
+// The signed-in user is part of the key, so switching accounts never serves the
+// previous account's rows as fresh.
+const cacheKey = (locationId?: number) =>
+  `${getCurrentUser()?.id ?? "anon"}|${locationId ?? "all"}`;
 
 // Set after a mutation (e.g. creating an event) so the list screen knows to
 // force a refetch the next time it regains focus.

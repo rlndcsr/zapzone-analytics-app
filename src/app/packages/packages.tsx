@@ -664,17 +664,31 @@ const Packages = () => {
             if (!token) return;
             setBusyAction("delete");
             try {
-              for (const id of selectedIds) await deletePackage(token, id);
+              // Together rather than one round trip each; settled, so the list
+              // is refreshed even when some fail — otherwise the ones already
+              // deleted stay listed and selected, and a retry 404s on them.
+              const results = await Promise.allSettled(
+                selectedIds.map((id) => deletePackage(token, id)),
+              );
+              const failures = results.filter(
+                (r): r is PromiseRejectedResult => r.status === "rejected",
+              );
+              const deleted = results.length - failures.length;
               setSelected({});
               markPackagesStale();
-              await refetch();
+              await refetch().catch(() => {});
               setShowMoreSheet(false);
-              Alert.alert("Deleted", `${selectedIds.length} package(s) deleted.`);
-            } catch (err) {
-              Alert.alert(
-                "Delete failed",
-                requestErrorMessage(err, "Could not delete the selected packages."),
-              );
+              if (failures.length === 0) {
+                Alert.alert("Deleted", `${deleted} package(s) deleted.`);
+              } else {
+                Alert.alert(
+                  "Delete failed",
+                  `${deleted} of ${results.length} package(s) deleted. ${requestErrorMessage(
+                    failures[0].reason,
+                    "Could not delete the selected packages.",
+                  )}`,
+                );
+              }
             } finally {
               setBusyAction(null);
             }

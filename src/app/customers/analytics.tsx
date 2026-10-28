@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import React, {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ComponentProps,
 } from "react";
@@ -187,7 +188,13 @@ const CustomersAnalytics = () => {
   );
   const [exporting, setExporting] = useState(false);
 
+  // Bumped per load, so changing the range quickly shows the last choice's
+  // figures, not whichever reply arrived last.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
     if (!token) {
       setError("Not authenticated");
@@ -210,11 +217,13 @@ const CustomersAnalytics = () => {
         endDate: customEnd,
         locationId: activeLocationId,
       });
-      setData(res);
+      if (isCurrent()) setData(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analytics");
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "Failed to load analytics");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [dateRange, customStart, customEnd, activeLocationId, user?.id]);
 

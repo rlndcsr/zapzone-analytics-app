@@ -52,30 +52,24 @@ export function useProfile() {
       setUser(profile);
       setError(null);
 
+      // Both need only the profile, not each other, so they load together.
       const companyId = profile.company_id ?? profile.company?.id ?? null;
-      if (companyId) {
-        try {
-          setStats(await fetchCompanyStatistics(companyId, token));
-        } catch {
-          // Stats are best-effort; leave them null and keep the profile.
-          setStats(null);
-        }
-      } else {
-        setStats(null);
-      }
-
-      if (profile.role === "company_admin") {
-        try {
-          setCompanyAdminCount(
-            await fetchStaffCount(token, { role: "company_admin" }),
-          );
-        } catch {
-          // Also best-effort — the counters fall back to the raw user total.
-          setCompanyAdminCount(null);
-        }
-      } else {
-        setCompanyAdminCount(null);
-      }
+      const [nextStats, nextAdminCount] = await Promise.all([
+        companyId
+          ? fetchCompanyStatistics(companyId, token).catch(
+              // Stats are best-effort; leave them null and keep the profile.
+              () => null,
+            )
+          : null,
+        profile.role === "company_admin"
+          ? fetchStaffCount(token, { role: "company_admin" }).catch(
+              // Also best-effort — the counters fall back to the raw user total.
+              () => null,
+            )
+          : null,
+      ]);
+      setStats(nextStats);
+      setCompanyAdminCount(nextAdminCount);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load profile");
     } finally {

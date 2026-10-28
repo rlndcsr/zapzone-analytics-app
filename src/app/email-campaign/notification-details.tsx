@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -267,19 +267,26 @@ const NotificationDetails = () => {
     }
   }, [notificationId]);
 
+  // Bumped per load, so paging quickly shows the page the user landed on, not
+  // whichever page's reply arrived last.
+  const logsRequestRef = useRef(0);
+
   const loadLogs = useCallback(async () => {
     const token = getToken();
     if (!token || notificationId == null || Number.isNaN(notificationId)) return;
+    const requestId = ++logsRequestRef.current;
+    const isCurrent = () => requestId === logsRequestRef.current;
     setLogsLoading(true);
     try {
       const r = await fetchEmailNotificationLogs(token, notificationId, logsPage, LOGS_PER_PAGE);
+      if (!isCurrent()) return;
       setLogs(r.logs);
       setLogsTotal(r.total);
       setLogsLastPage(r.lastPage);
     } catch {
       // Leave the last good page on screen; Refresh retries.
     } finally {
-      setLogsLoading(false);
+      if (isCurrent()) setLogsLoading(false);
     }
   }, [notificationId, logsPage]);
 

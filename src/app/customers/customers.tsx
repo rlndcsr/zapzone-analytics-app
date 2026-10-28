@@ -1,6 +1,13 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -242,7 +249,10 @@ const Customers = () => {
     // publishing partial pages over it would collapse the list to 200 rows and
     // grow it back under the user.
     const progressive = !loadedOnceRef.current;
-    setLoading(true);
+    // Skeletons only for the first load. A refetch (a status toggle, a delete,
+    // a return from editing) keeps the rows on screen while the walk runs,
+    // rather than hiding the whole CRM behind skeletons until its last page.
+    if (progressive) setLoading(true);
     setComplete(false);
     setError(null);
     try {
@@ -318,9 +328,13 @@ const Customers = () => {
     return Array.from(new Set(allRows.flatMap((c) => c.tags))).sort();
   }, [tagOptions, allRows]);
 
+  // Filtering a large CRM on every keystroke made typing lag; the deferred copy
+  // lets the input update first and the list catch up right after.
+  const deferredSearch = useDeferredValue(search);
+
   // The full client-side filter + sort pipeline (mirrors the web's useAdminTable).
   const filtered = useMemo(() => {
-    const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = deferredSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const result = allRows.filter((c) => {
       if (filters.status !== "all" && c.status !== filters.status) return false;
       if (filters.tag !== "all" && !c.tags.includes(filters.tag)) return false;
@@ -369,7 +383,7 @@ const Customers = () => {
       return sortOrder === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [allRows, search, filters, sort]);
+  }, [allRows, deferredSearch, filters, sort]);
 
   // Reset to the first page whenever the result set changes.
   useEffect(() => {

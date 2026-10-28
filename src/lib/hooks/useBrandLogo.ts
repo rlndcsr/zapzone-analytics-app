@@ -9,10 +9,16 @@ import { getCurrentUser, getToken, useCurrentUserId } from "../session";
 let cachedCompanyLogo: string | null = null;
 let companyLogoUserId: number | null = null;
 let companyLogoInFlight: Promise<void> | null = null;
+let companyLogoInFlightUserId: number | null = null;
 
 function loadCompanyLogo(userId: number, token: string): Promise<void> {
-  if (companyLogoInFlight) return companyLogoInFlight;
-  companyLogoInFlight = fetchUserProfile(userId, token)
+  // Shared only with a fetch for the same user, so a switch made mid-fetch
+  // can't file the previous account's logo under the new one.
+  if (companyLogoInFlight && companyLogoInFlightUserId === userId) {
+    return companyLogoInFlight;
+  }
+  companyLogoInFlightUserId = userId;
+  const request: Promise<void> = fetchUserProfile(userId, token)
     .then((profile) => {
       cachedCompanyLogo = profile.company?.logo_path ?? null;
       companyLogoUserId = userId;
@@ -21,9 +27,10 @@ function loadCompanyLogo(userId: number, token: string): Promise<void> {
       // Best-effort — the header just keeps the bundled default.
     })
     .finally(() => {
-      companyLogoInFlight = null;
+      if (companyLogoInFlight === request) companyLogoInFlight = null;
     });
-  return companyLogoInFlight;
+  companyLogoInFlight = request;
+  return request;
 }
 
 /** Call after a successful logo save so the header updates without a refetch. */
@@ -67,21 +74,36 @@ function useCompanyLogo(): string | null {
   return logoPath;
 }
 
+// Tagged with the account that loaded it — another company's locations are a
+// different list, so a cache from before an account switch is treated as empty.
 let cachedLocations: LocationOption[] | null = null;
+let cachedLocationsOwner: number | null = null;
 let locationsInFlight: Promise<LocationOption[]> | null = null;
+let locationsInFlightOwner: number | null = null;
+
+const currentOwner = () => getCurrentUser()?.id ?? null;
+const ownLocations = () =>
+  cachedLocationsOwner === currentOwner() ? cachedLocations : null;
 
 function loadLocations(token: string): Promise<LocationOption[]> {
-  if (cachedLocations) return Promise.resolve(cachedLocations);
-  if (locationsInFlight) return locationsInFlight;
-  locationsInFlight = fetchLocations(token)
+  const owner = currentOwner();
+  const own = ownLocations();
+  if (own) return Promise.resolve(own);
+  if (locationsInFlight && locationsInFlightOwner === owner) {
+    return locationsInFlight;
+  }
+  locationsInFlightOwner = owner;
+  const request: Promise<LocationOption[]> = fetchLocations(token)
     .then((list) => {
       cachedLocations = list;
+      cachedLocationsOwner = owner;
       return list;
     })
     .finally(() => {
-      locationsInFlight = null;
+      if (locationsInFlight === request) locationsInFlight = null;
     });
-  return locationsInFlight;
+  locationsInFlight = request;
+  return request;
 }
 
 /**
@@ -103,7 +125,7 @@ export function setCachedLocationLogo(
 /** The given location's logo, from the same lightweight list the location picker uses. */
 function useLocationLogo(locationId: number | null): string | null {
   const [logoPath, setLogoPath] = useState<string | null>(
-    cachedLocations?.find((l) => l.id === locationId)?.logoPath ?? null,
+    () => ownLocations()?.find((l) => l.id === locationId)?.logoPath ?? null,
   );
 
   useEffect(() => {
@@ -111,7 +133,7 @@ function useLocationLogo(locationId: number | null): string | null {
       setLogoPath(null);
       return;
     }
-    const cached = cachedLocations?.find((l) => l.id === locationId);
+    const cached = ownLocations()?.find((l) => l.id === locationId);
     if (cached) {
       setLogoPath(cached.logoPath);
       return;
@@ -119,10 +141,14 @@ function useLocationLogo(locationId: number | null): string | null {
     const token = getToken();
     if (!token) return;
     let cancelled = false;
-    loadLocations(token).then((list) => {
-      if (cancelled) return;
-      setLogoPath(list.find((l) => l.id === locationId)?.logoPath ?? null);
-    });
+    loadLocations(token)
+      .then((list) => {
+        if (cancelled) return;
+        setLogoPath(list.find((l) => l.id === locationId)?.logoPath ?? null);
+      })
+      .catch(() => {
+        // Best-effort, like the company logo — the header keeps its fallback.
+      });
     return () => {
       cancelled = true;
     };

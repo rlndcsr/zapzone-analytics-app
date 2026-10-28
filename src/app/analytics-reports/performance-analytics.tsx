@@ -16,7 +16,7 @@ import {
   UserCheck,
   Users,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Pressable,
   RefreshControl,
@@ -99,7 +99,13 @@ const CompanyPerformanceAnalytics = () => {
   const [showLocations, setShowLocations] = useState(false);
   const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
 
+  // Bumped per load, so ticking several locations (or changing the range) in
+  // quick succession shows the last selection's figures, not the slowest reply's.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
     const companyId = getCurrentUser()?.company_id;
     if (!token || companyId == null) {
@@ -108,25 +114,29 @@ const CompanyPerformanceAnalytics = () => {
       return;
     }
     // A custom range only makes a request once both ends are picked, as on web.
-    if (range === "custom" && (!customStart || !customEnd)) return;
+    if (range === "custom" && (!customStart || !customEnd)) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     setSelectedLoc(null);
     try {
-      setReport(
-        await fetchCompanyAnalytics({
-          token,
-          companyId,
-          dateRange: range,
-          locationIds: selectedLocationIds,
-          startDate: customStart || undefined,
-          endDate: customEnd || undefined,
-        }),
-      );
+      const next = await fetchCompanyAnalytics({
+        token,
+        companyId,
+        dateRange: range,
+        locationIds: selectedLocationIds,
+        startDate: customStart || undefined,
+        endDate: customEnd || undefined,
+      });
+      if (isCurrent()) setReport(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analytics");
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "Failed to load analytics");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [range, customStart, customEnd, selectedLocationIds]);
 

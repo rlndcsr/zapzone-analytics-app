@@ -231,28 +231,32 @@ const TemplateAds = () => {
     target?.kind === "edit" ? mediaUrl(target.ad.imagePath) : null;
 
   const pickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(
-        "Permission needed",
-        "Allow photo library access to choose an ad image.",
-      );
-      return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "Permission needed",
+          "Allow photo library access to choose an ad image.",
+        );
+        return;
+      }
+      // Re-encoded at the app's usual upload quality, which also keeps an iPhone
+      // HEIC out of the backend's png/jpg/webp allow-list.
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: false,
+        quality: 0.7,
+      });
+      const asset = picked.canceled ? null : picked.assets[0];
+      if (!asset?.uri) return;
+      setImage({
+        uri: asset.uri,
+        name: asset.fileName ?? "ad.jpg",
+        type: asset.mimeType ?? "image/jpeg",
+      });
+    } catch {
+      Alert.alert("Image error", "Could not open the image picker.");
     }
-    // Re-encoded at the app's usual upload quality, which also keeps an iPhone
-    // HEIC out of the backend's png/jpg/webp allow-list.
-    const picked = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsMultipleSelection: false,
-      quality: 0.7,
-    });
-    const asset = picked.canceled ? null : picked.assets[0];
-    if (!asset?.uri) return;
-    setImage({
-      uri: asset.uri,
-      name: asset.fileName ?? "ad.jpg",
-      type: asset.mimeType ?? "image/jpeg",
-    });
   };
 
   const submitForm = async () => {
