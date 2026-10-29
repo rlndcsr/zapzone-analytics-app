@@ -88,11 +88,24 @@ export async function fetchAllPages<T>(
   emit();
 
   let next = 2;
+  // Once one page fails the walk is lost — Promise.all rejects straight away —
+  // so the other workers must stop claiming pages. Left running, they kept
+  // downloading the rest of a failed walk nobody would read, and the caller's
+  // retry (the dashboard asks every 30s) started a second walk beside it: on a
+  // slow connection those piled up until the app ran out of memory.
+  let failed = false;
   const worker = async () => {
     for (;;) {
+      if (failed) return;
       const page = next++;
       if (page > lastPage) return;
-      pages[page - 1] = (await fetchPage(page)).items;
+      try {
+        pages[page - 1] = (await fetchPage(page)).items;
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
+      if (failed) return;
       emit();
     }
   };

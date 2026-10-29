@@ -25,6 +25,7 @@ import {
 } from "../../components/ui/skeleton/LocationSkeleton";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useTabTransitionDone } from "../../lib/hooks/useTabTransitionDone";
 import {
   setActiveLocation,
   useActiveLocation,
@@ -265,11 +266,15 @@ const Location = () => {
 
   const [refreshing, setRefreshing] = useState(false);
 
+  // The skeleton paints with the tap; the load starts once the switch is done.
+  const transitionDone = useTabTransitionDone();
+
   // locationStats is computed for every location regardless of location_id, so
   // the location filter is applied client-side; only the timeframe hits the API.
   const { data, loading, error, refetch } = useDashboardMetrics({
     timeframe: dateFilter,
     locationId: "all",
+    enabled: transitionDone,
   });
   const {
     totalCount: unreadNotificationsCount,

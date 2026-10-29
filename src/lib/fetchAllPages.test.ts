@@ -151,6 +151,29 @@ describe("walking a paginated index", () => {
     assert.equal(call, 3);
   });
 
+  it("stops claiming pages once one fails", async () => {
+    // Page 2 fails at once; the rest are slow. A failed walk must not keep
+    // downloading the other 48 pages in the background.
+    const started: number[] = [];
+    const fetchPage = async (page: number): Promise<PageResult<number>> => {
+      started.push(page);
+      if (page === 2) throw new Error("timeout");
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+      return { items: [page], lastPage: 50 };
+    };
+    await assert.rejects(
+      fetchAllPages(fetchPage, { maxPages: 50, concurrency: 3 }),
+      /timeout/,
+    );
+    // Let the requests already in flight settle, then count.
+    for (let i = 0; i < 50; i += 1) await Promise.resolve();
+    assert.deepEqual(
+      started.sort((a, b) => a - b),
+      [1, 2, 3, 4],
+      "only page 1 and the pool's first claims may run",
+    );
+  });
+
   it("a lastPage of 0 is treated as a single page", async () => {
     const fetchPage = async (): Promise<PageResult<number>> => ({
       items: [1],

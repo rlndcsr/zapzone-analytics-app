@@ -23,6 +23,7 @@ import { timeframeLabel as labelForTimeframe } from "../../lib/dashboard/dashboa
 import { useTimeframeSelection } from "../../lib/dashboard/timeframeStore";
 import { useManagerActivity } from "../../lib/hooks/useManagerActivity";
 import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useTabTransitionDone } from "../../lib/hooks/useTabTransitionDone";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type {
   RecentEventPurchase,
@@ -303,6 +304,9 @@ const Activity = () => {
   const insets = useSafeAreaInsets();
   const pulse = usePulse();
 
+  // The skeleton paints with the tap; the load starts once the switch is done.
+  const transitionDone = useTabTransitionDone();
+
   // Timeframe is shared with the Home dashboard filter.
   const { timeframe, dateFrom, dateTo } = useTimeframeSelection();
   const {
@@ -314,7 +318,12 @@ const Activity = () => {
     loading,
     error,
     refetch,
-  } = useManagerActivity({ timeframe, dateFrom, dateTo });
+  } = useManagerActivity({
+    timeframe,
+    dateFrom,
+    dateTo,
+    enabled: transitionDone,
+  });
 
   const {
     totalCount: unreadNotificationsCount,

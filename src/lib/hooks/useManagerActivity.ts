@@ -20,6 +20,8 @@ type ManagerActivityParams = {
   timeframe: TimeframeType;
   dateFrom?: string;
   dateTo?: string;
+  /** False holds the first load (the skeleton stays up) until it turns true. */
+  enabled?: boolean;
 };
 
 type ManagerActivity = {
@@ -44,6 +46,7 @@ export function useManagerActivity({
   timeframe,
   dateFrom = "",
   dateTo = "",
+  enabled = true,
 }: ManagerActivityParams): ManagerActivity {
   const [newBookings, setNewBookings] = useState<CalendarBooking[]>([]);
   const [newBookingsCount, setNewBookingsCount] = useState(0);
@@ -106,11 +109,12 @@ export function useManagerActivity({
   }, [timeframe, dateFrom, dateTo]);
 
   useEffect(() => {
+    if (!enabled) return;
     load();
     return () => {
       requestIdRef.current++;
     };
-  }, [load]);
+  }, [load, enabled]);
 
   const refetch = useCallback(() => load(), [load]);
 

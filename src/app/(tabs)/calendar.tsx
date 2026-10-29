@@ -97,6 +97,7 @@ import { useAttractionPurchases } from "../../lib/hooks/useAttractionPurchases";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
+import { useTabTransitionDone } from "../../lib/hooks/useTabTransitionDone";
 import { useSpaces } from "../../lib/hooks/useSpaceSchedule";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
@@ -1004,10 +1005,15 @@ const Calendar = () => {
 
   const {
     bookings,
-    loading,
+    loading: bookingsLoading,
     error,
     refetch: refetchBookings,
   } = useCalendarBookings({ startDate, endDate });
+
+  // The tap paints the skeleton; the grid — the heaviest render in the app —
+  // draws once the tab switch is done, even when the bookings are already held.
+  const transitionDone = useTabTransitionDone();
+  const loading = bookingsLoading || !transitionDone;
 
   const { purchases, refetch: refetchPurchases } = useAttractionPurchases();
 

@@ -53,6 +53,11 @@ export const tabScreenOptions = (
 ): BottomTabNavigationOptions => ({
   headerShown: false,
   sceneStyle: { backgroundColor: surfaceFor(theme) },
+  // A visited tab stays mounted. Unfrozen, every hidden tab re-rendered on each
+  // shared-store change (location, timeframe, theme) and on its own data, all
+  // on the JS thread the visible tab needs for the next tap. Frozen, it only
+  // catches up when it is shown again.
+  freezeOnBlur: true,
   transitionSpec: {
     animation: "timing",
     config: {

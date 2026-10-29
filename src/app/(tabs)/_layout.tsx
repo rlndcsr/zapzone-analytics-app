@@ -163,7 +163,6 @@ const FloatingTabBar = ({
   descriptors,
   navigation,
 }: BottomTabBarProps) => {
-  if (__DEV__) console.count("[render] FloatingTabBar");
   const insets = useSafeAreaInsets();
   // Reactive, not a getCurrentUser() snapshot: switching accounts remounts this
   // tree anyway, but signing into a different role in place (add-account) does
@@ -247,7 +246,6 @@ const FloatingTabBar = ({
 };
 
 const TabLayout = () => {
-  if (__DEV__) console.count("[render] TabLayout");
   // Opaque scene backing per theme — see tabScreenOptions. Uses NativeWind's
   // scheme so it tracks the in-app Settings switch, not the OS setting.
   const { colorScheme } = useColorScheme();

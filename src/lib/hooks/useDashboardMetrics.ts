@@ -27,6 +27,14 @@ type UseDashboardMetricsParams = {
   locationId?: number | "all";
   dateFrom?: string;
   dateTo?: string;
+  /**
+   * Derive the New Bookings card from the venue's full booking list. Only the
+   * Home dashboard shows that card; every other caller reads `locationStats`
+   * and must not page the whole booking history to get it.
+   */
+  includeNewBookings?: boolean;
+  /** False holds the first load (the skeleton stays up) until it turns true. */
+  enabled?: boolean;
 };
 
 /** The web has one dashboard component — and one cache namespace — per role. */
@@ -41,6 +49,8 @@ export function useDashboardMetrics({
   locationId = "all",
   dateFrom = "",
   dateTo = "",
+  includeNewBookings = false,
+  enabled = true,
 }: UseDashboardMetricsParams) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,28 +123,36 @@ export function useDashboardMetrics({
           locationId,
           timeframe,
         };
+        let paintedFromCache = false;
         if (!force && !silent) {
           const cached = await metricsCacheService.getCachedMetrics(cacheScope);
           if (cached && isCurrent()) {
             applyData(cached.data);
             setError(null);
             setLoading(false);
+            paintedFromCache = true;
           }
         }
 
         // Every booking, not the newest page — a busy week outgrew one page of 100.
         // Independent of the metrics, so it loads alongside them rather than after;
         // a failure only skips the derived new-bookings figures.
-        const bookingsPromise = dashboardNeedsBookings(config)
-          ? fullBookingList({
-              token,
-              locationId: user.location_id ?? undefined,
-              force,
-            }).catch((bookingsErr: unknown) => {
-              console.warn("New bookings derivation failed:", bookingsErr);
-              return null;
-            })
-          : null;
+        const needsBookings = dashboardNeedsBookings(config);
+        const bookingsPromise =
+          needsBookings && includeNewBookings
+            ? fullBookingList({
+                token,
+                locationId: user.location_id ?? undefined,
+                force,
+              }).catch((bookingsErr: unknown) => {
+                console.warn("New bookings derivation failed:", bookingsErr);
+                return null;
+              })
+            : null;
+        let bookingsSettled = false;
+        void bookingsPromise?.then(() => {
+          bookingsSettled = true;
+        });
 
         let result: DashboardData;
         if (config.metricsSource === "attendant") {
@@ -166,6 +184,23 @@ export function useDashboardMetrics({
           derived.avgBooking = computeAvgBooking(result.metrics);
         }
 
+        // A cold booking list pages the venue's whole history, which can take
+        // far longer than the metrics call. Paint every other card now rather
+        // than hold them all on the skeleton; New Bookings reads "—" until its
+        // list lands. Not when a cached snapshot is already on screen (that one
+        // has a New Bookings figure to lose), and not on a silent refresh.
+        if (
+          bookingsPromise &&
+          !bookingsSettled &&
+          !silent &&
+          !paintedFromCache &&
+          isCurrent()
+        ) {
+          applyData(withDerivedMetrics(result, derived));
+          setError(null);
+          setLoading(false);
+        }
+
         const bookings = bookingsPromise ? await bookingsPromise : null;
         if (bookings) {
           const created = filterNewBookings(
@@ -186,8 +221,12 @@ export function useDashboardMetrics({
         }
 
         // Write-through after a successful fetch, like the web's cacheMetrics
-        // call at the end of its effect.
-        await metricsCacheService.cacheMetrics(cacheScope, result);
+        // call at the end of its effect. A result that skipped New Bookings
+        // the role's dashboard shows is not cached: Home reads the same entry
+        // and would paint the card blank from it.
+        if (!needsBookings || includeNewBookings) {
+          await metricsCacheService.cacheMetrics(cacheScope, result);
+        }
       } catch (err) {
         console.error("Metrics error:", err);
         if (isCurrent()) {
@@ -207,15 +246,16 @@ export function useDashboardMetrics({
         if (isCurrent() && !silent) setLoading(false);
       }
     },
-    [timeframe, locationId, dateFrom, dateTo, applyData],
+    [timeframe, locationId, dateFrom, dateTo, includeNewBookings, applyData],
   );
 
   useEffect(() => {
+    if (!enabled) return;
     loadMetrics();
     return () => {
       requestIdRef.current++;
     };
-  }, [loadMetrics]);
+  }, [loadMetrics, enabled]);
 
   // Pull-to-refresh forces a fresh bookings fetch alongside the metrics reload.
   const refetch = useCallback(

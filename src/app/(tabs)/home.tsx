@@ -58,6 +58,7 @@ import Reanimated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
+import { TAB_SCENE_DURATION } from "../../components/navigation/navMotion";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import {
@@ -594,11 +595,9 @@ const RecentEventPurchases = ({ rows }: { rows: RecentEventPurchase[] }) => {
 };
 
 const Home = () => {
-  if (__DEV__) console.count("[render] Home");
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === "dark";
-  if (__DEV__) console.log("[Home] colorScheme=" + String(colorScheme));
 
   const dashboardConfig = useMemo(
     () => getDashboardConfig(getCurrentUser()?.role),
@@ -688,6 +687,7 @@ const Home = () => {
       locationId: selectedLocation,
       dateFrom: customStartDate,
       dateTo: customEndDate,
+      includeNewBookings: true,
     });
   const {
     totalCount: unreadNotificationsCount,
@@ -719,46 +719,54 @@ const Home = () => {
       : "Your location only";
 
   // Live Recent Purchases: while this screen is on show and the app is in the
-  // foreground, re-ask the backend every LIVE_REFRESH_MS, and at once on coming
-  // back to the screen or the app. A purchase clears the backend's dashboard
-  // cache, so each ask returns the newest rows; an idle one is a cache hit.
-  const [screenFocused, setScreenFocused] = useState(false);
-  const [appActive, setAppActive] = useState(
-    AppState.currentState === "active",
-  );
-  const focusedOnceRef = useRef(false);
+  // foreground, re-ask the backend every LIVE_REFRESH_MS, and on coming back to
+  // the screen or the app. A purchase clears the backend's dashboard cache, so
+  // each ask returns the newest rows; an idle one is a cache hit.
+  //
+  // Focus lives in refs, not state: as state, every tab switch re-rendered this
+  // whole dashboard at the moment of the tap, which is what held the switch up.
+  const focusedRef = useRef(false);
+  // The mount's own load counts as the first refresh.
+  const lastLiveRefreshRef = useRef(Date.now());
   // Read through a ref so a new timeframe (a new refreshSilently) does not
   // count as coming back to the screen.
   const refreshSilentlyRef = useRef(refreshSilently);
   refreshSilentlyRef.current = refreshSilently;
+  const liveRefresh = useCallback(() => {
+    lastLiveRefreshRef.current = Date.now();
+    refreshSilentlyRef.current();
+    setPanelsRefresh((n) => n + 1);
+  }, []);
   useFocusEffect(
     useCallback(() => {
-      setScreenFocused(true);
-      // The first focus is the mount, whose own load is already running.
-      if (focusedOnceRef.current) {
-        refreshSilentlyRef.current();
-        setPanelsRefresh((n) => n + 1);
-      }
-      focusedOnceRef.current = true;
-      return () => setScreenFocused(false);
-    }, []),
+      focusedRef.current = true;
+      // Coming back to the tab: catch up only when the screen is older than one
+      // live tick (a quick hop to another tab and back reloads nothing), and
+      // only once the tab transition has finished, so the switch stays instant.
+      const catchUp = setTimeout(() => {
+        if (Date.now() - lastLiveRefreshRef.current >= LIVE_REFRESH_MS) {
+          liveRefresh();
+        }
+      }, TAB_SCENE_DURATION);
+      const tick = setInterval(() => {
+        if (AppState.currentState === "active") {
+          lastLiveRefreshRef.current = Date.now();
+          refreshSilentlyRef.current();
+        }
+      }, LIVE_REFRESH_MS);
+      return () => {
+        focusedRef.current = false;
+        clearTimeout(catchUp);
+        clearInterval(tick);
+      };
+    }, [liveRefresh]),
   );
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      const active = state === "active";
-      setAppActive(active);
-      if (active && screenFocused) {
-        refreshSilently();
-        setPanelsRefresh((n) => n + 1);
-      }
+      if (state === "active" && focusedRef.current) liveRefresh();
     });
     return () => sub.remove();
-  }, [refreshSilently, screenFocused]);
-  useEffect(() => {
-    if (!screenFocused || !appActive) return;
-    const id = setInterval(refreshSilently, LIVE_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [screenFocused, appActive, refreshSilently]);
+  }, [liveRefresh]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
