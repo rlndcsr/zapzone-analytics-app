@@ -20,7 +20,11 @@ import {
   InfoRow,
 } from "../../components/ui/DetailKit";
 import { mediaUrl } from "../../lib/api";
-import { LOG_RECIPIENT_TYPE_LABELS, RECIPIENT_TYPE_LABELS } from "../../lib/email/emailTemplateOptions";
+import {
+  LOG_RECIPIENT_TYPE_LABELS,
+  logStatusStyle,
+  RECIPIENT_TYPE_LABELS,
+} from "../../lib/email/emailTemplateOptions";
 import { markEmailCampaignsStale } from "../../lib/emailStale";
 import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
@@ -72,9 +76,6 @@ const prettyType = (t: string) =>
 
 const recipientTypeLabel = (t: string) => RECIPIENT_TYPE_LABELS[t] ?? prettyType(t);
 const logTypeLabel = (t: string) => LOG_RECIPIENT_TYPE_LABELS[t] ?? prettyType(t);
-
-const logStatusColor = (s: string) =>
-  s === "sent" ? "#16A34A" : s === "failed" ? "#DC2626" : "#9CA3AF";
 
 const CampaignDetails = () => {
   const insets = useSafeAreaInsets();
@@ -385,14 +386,19 @@ const CampaignDetails = () => {
                         {l.errorMessage}
                       </Text>
                     )}
+                    {l.status === "cancelled" && !!l.errorMessage && (
+                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5" numberOfLines={2}>
+                        {l.errorMessage}
+                      </Text>
+                    )}
                   </View>
                   <View className="flex-row items-center gap-1">
                     <Feather
-                      name={l.status === "sent" ? "check-circle" : l.status === "failed" ? "x-circle" : "clock"}
+                      name={logStatusStyle(l.status).icon}
                       size={13}
-                      color={logStatusColor(l.status)}
+                      color={logStatusStyle(l.status).color}
                     />
-                    <Text className="text-xs font-medium" style={{ color: logStatusColor(l.status) }}>
+                    <Text className="text-xs font-medium" style={{ color: logStatusStyle(l.status).color }}>
                       {prettyType(l.status)}
                     </Text>
                   </View>

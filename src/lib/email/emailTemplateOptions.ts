@@ -185,6 +185,31 @@ export const registrantGapMessage = (onlyWithPhotos: boolean): string =>
     ? "Nobody from these events has photos ready yet. If people did register, untick “Only people whose photos are ready” to email them anyway."
     : "Nobody who registered for these events can get this email: no one gave an email address, or they unsubscribed. Pick other events.";
 
+/** The preview's registrant line. The server counts emails, one per person or one per photo session. */
+export const registrantSummary = (emails: number, withPhotos: number): string =>
+  `${emails} ${emails === 1 ? "email goes" : "emails go"} to people from these events. ${withPhotos} of them ${withPhotos === 1 ? "carries" : "carry"} a photo link.`;
+
+export type LogStatusStyle = {
+  icon: "check-circle" | "x-circle" | "slash" | "send" | "clock";
+  color: string;
+};
+
+/** A delivery-log row's status icon and color; anything unrecognised reads as waiting. */
+export const logStatusStyle = (status: string): LogStatusStyle => {
+  switch (status) {
+    case "sent":
+      return { icon: "check-circle", color: "#16A34A" };
+    case "failed":
+      return { icon: "x-circle", color: "#DC2626" };
+    case "cancelled":
+      return { icon: "slash", color: "#6B7280" };
+    case "sending":
+      return { icon: "send", color: "#2563EB" };
+    default:
+      return { icon: "clock", color: "#9CA3AF" };
+  }
+};
+
 /** Campaign recipient groups, as the web names them. */
 export const RECIPIENT_TYPE_LABELS: Record<string, string> = {
   customers: "Customers",

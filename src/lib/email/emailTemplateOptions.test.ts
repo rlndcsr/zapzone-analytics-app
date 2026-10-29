@@ -7,7 +7,9 @@ import {
   emailTemplateCategoryLabel,
   isCompanyLevelRole,
   isSharedEventPhotoTemplate,
+  logStatusStyle,
   registrantGapMessage,
+  registrantSummary,
   templateLocationIds,
   templateLocationsFrom,
   templateLocationSummary,
@@ -162,5 +164,36 @@ describe("event registrant campaigns", () => {
   it("says why nobody would get it", () => {
     assert.match(registrantGapMessage(true), /has photos ready yet/);
     assert.match(registrantGapMessage(false), /no one gave an email address/);
+  });
+});
+
+describe("registrantSummary", () => {
+  it("counts emails, since someone photographed in several sessions gets one per session", () => {
+    assert.equal(
+      registrantSummary(3, 2),
+      "3 emails go to people from these events. 2 of them carry a photo link.",
+    );
+    assert.equal(
+      registrantSummary(1, 1),
+      "1 email goes to people from these events. 1 of them carries a photo link.",
+    );
+  });
+});
+
+describe("logStatusStyle", () => {
+  it("keeps sent, failed and pending as they were", () => {
+    assert.deepEqual(logStatusStyle("sent"), { icon: "check-circle", color: "#16A34A" });
+    assert.deepEqual(logStatusStyle("failed"), { icon: "x-circle", color: "#DC2626" });
+    assert.deepEqual(logStatusStyle("pending"), { icon: "clock", color: "#9CA3AF" });
+  });
+
+  it("shows sending as in progress and cancelled apart from failed", () => {
+    assert.deepEqual(logStatusStyle("sending"), { icon: "send", color: "#2563EB" });
+    assert.deepEqual(logStatusStyle("cancelled"), { icon: "slash", color: "#6B7280" });
+  });
+
+  it("falls back to waiting for statuses it does not know", () => {
+    assert.deepEqual(logStatusStyle("deferred"), logStatusStyle("pending"));
+    assert.deepEqual(logStatusStyle(""), logStatusStyle("pending"));
   });
 });
