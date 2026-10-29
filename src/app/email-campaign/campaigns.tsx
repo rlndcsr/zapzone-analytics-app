@@ -347,8 +347,9 @@ const EmailCampaigns = () => {
             </Text>
           </View>
 
-          {/* Nav: Templates · Notifications — side-by-side square cards, the
-              same design the other modules' sub-page shortcuts use. */}
+          {/* Nav: Templates · Email Notifications · SMS Notifications — square
+              cards two to a row, the same design the other modules' sub-page
+              shortcuts use. */}
           <View className="flex-row items-stretch gap-3">
             <View className="flex-1">
               <NavTileCard
@@ -362,12 +363,25 @@ const EmailCampaigns = () => {
             <View className="flex-1">
               <NavTileCard
                 icon="bell"
-                title="Notifications"
+                title="Email Notifications"
                 desc="Automated booking & payment emails"
                 cta="View Notifications"
                 onPress={() => router.push("/email-campaign/email-notification")}
               />
             </View>
+          </View>
+          <View className="flex-row items-stretch gap-3">
+            <View className="flex-1">
+              <NavTileCard
+                icon="message-square"
+                title="SMS Notifications"
+                desc="Automated text messages for parties, attractions & events"
+                cta="View SMS"
+                onPress={() => router.push("/email-campaign/sms-notifications")}
+              />
+            </View>
+            {/* Keeps the lone tile the same square size as the row above. */}
+            <View className="flex-1" />
           </View>
 
           <Pressable

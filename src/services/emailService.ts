@@ -790,11 +790,14 @@ export async function fetchEmailNotifications(
     promoSummary: n.promo_summary ?? null,
   }));
 
+  // Counted exactly as the web Email Notifications page counts its cards: over
+  // the rows it loaded, active only when the server says so, and a trigger by
+  // its `booking_` / `purchase_` prefix — so the two never show different figures.
   const stats: EmailNotificationStats = {
-    total,
-    active: mapped.filter((n) => n.isActive).length,
-    bookingTriggers: mapped.filter((n) => n.triggerType.includes("booking")).length,
-    purchaseTriggers: mapped.filter((n) => n.triggerType.includes("purchase")).length,
+    total: rows.length,
+    active: rows.filter((n) => !!n.is_active).length,
+    bookingTriggers: mapped.filter((n) => n.triggerType.startsWith("booking_")).length,
+    purchaseTriggers: mapped.filter((n) => n.triggerType.startsWith("purchase_")).length,
   };
 
   return { rows: mapped, total, stats };

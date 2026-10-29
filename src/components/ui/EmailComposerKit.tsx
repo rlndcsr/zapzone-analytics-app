@@ -71,11 +71,14 @@ export function ComposerHeader({
   );
 }
 
-/** Small header action button (outline or filled). */
+/** Action button (outline or filled) — small by default, for the header;
+ *  `block` makes it a large button that shares its row's full width with its
+ *  siblings, for a screen's bottom action bar. */
 export function HeaderAction({
   label,
   icon,
   variant = "outline",
+  block = false,
   disabled,
   loading,
   onPress,
@@ -83,6 +86,7 @@ export function HeaderAction({
   label: string;
   icon?: React.ComponentProps<typeof Feather>["name"];
   variant?: "outline" | "primary";
+  block?: boolean;
   disabled?: boolean;
   loading?: boolean;
   onPress: () => void;
@@ -92,18 +96,28 @@ export function HeaderAction({
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
-      className={`flex-row items-center gap-1.5 px-3 py-2 rounded-xl ${
+      className={`flex-row items-center ${
+        block
+          ? "flex-1 justify-center gap-2 px-4 py-3.5 rounded-xl"
+          : "gap-1.5 px-3 py-2 rounded-xl"
+      } ${
         filled
           ? "bg-[#0644C7]"
-          : "border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+          : block
+            ? "border border-gray-300 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800"
+            : "border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
       }`}
       style={disabled || loading ? { opacity: 0.5 } : undefined}
     >
       {!!icon && (
-        <Feather name={icon} size={14} color={filled ? "#FFFFFF" : "#374151"} />
+        <Feather
+          name={icon}
+          size={block ? 18 : 14}
+          color={filled ? "#FFFFFF" : "#374151"}
+        />
       )}
       <Text
-        className={`text-xs font-semibold ${
+        className={`${block ? "text-sm" : "text-xs"} font-semibold ${
           filled ? "text-white" : "text-gray-700 dark:text-gray-200"
         }`}
       >

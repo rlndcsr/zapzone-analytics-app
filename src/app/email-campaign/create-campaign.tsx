@@ -309,28 +309,6 @@ const CreateCampaign = () => {
         title="Create Email Campaign"
         subtitle="Send bulk emails to selected recipients"
         onBack={() => router.back()}
-        actions={
-          <>
-            {/* A draft has no send time, so it is offered only for sending now. */}
-            {!scheduling && (
-              <HeaderAction
-                label="Save Draft"
-                icon="save"
-                loading={saving === "draft"}
-                disabled={saving !== null}
-                onPress={() => save(false)}
-              />
-            )}
-            <HeaderAction
-              label={scheduling ? "Schedule Campaign" : "Send Campaign"}
-              icon={scheduling ? "clock" : "send"}
-              variant="primary"
-              loading={saving === "send"}
-              disabled={saving !== null}
-              onPress={confirmSend}
-            />
-          </>
-        }
       />
 
       <KeyboardAvoidingView
@@ -341,8 +319,19 @@ const CreateCampaign = () => {
           className="flex-1"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
         >
+          <EmailSection title="Tips">
+            {TIPS.map((t) => (
+              <View key={t} className="flex-row gap-2 mb-2">
+                <Text className="text-[#0644C7]">•</Text>
+                <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                  {t}
+                </Text>
+              </View>
+            ))}
+          </EmailSection>
+
           <EmailSection title="Campaign Information">
             <LabeledInput
               label="Campaign Name"
@@ -587,18 +576,35 @@ const CreateCampaign = () => {
             groups={variableGroups}
             onInsert={insert}
           />
-
-          <EmailSection title="Tips">
-            {TIPS.map((t) => (
-              <View key={t} className="flex-row gap-2 mb-2">
-                <Text className="text-[#0644C7]">•</Text>
-                <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-                  {t}
-                </Text>
-              </View>
-            ))}
-          </EmailSection>
         </ScrollView>
+
+        {/* The actions sit in a bar under the form, always in reach, rather
+            than crowding the header. */}
+        <View
+          className="flex-row gap-3 px-4 pt-3 bg-white dark:bg-neutral-900 border-t border-gray-100 dark:border-neutral-800"
+          style={{ paddingBottom: insets.bottom + 12 }}
+        >
+          {/* A draft has no send time, so it is offered only for sending now. */}
+          {!scheduling && (
+            <HeaderAction
+              label="Save Draft"
+              icon="save"
+              block
+              loading={saving === "draft"}
+              disabled={saving !== null}
+              onPress={() => save(false)}
+            />
+          )}
+          <HeaderAction
+            label={scheduling ? "Schedule Campaign" : "Send Campaign"}
+            icon={scheduling ? "clock" : "send"}
+            variant="primary"
+            block
+            loading={saving === "send"}
+            disabled={saving !== null}
+            onPress={confirmSend}
+          />
+        </View>
       </KeyboardAvoidingView>
 
       <DatePickerSheet

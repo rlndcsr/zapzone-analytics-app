@@ -502,7 +502,7 @@ const EmailTemplates = () => {
             </Text>
           </View>
 
-          {/* Nav: Campaigns · Notifications pill */}
+          {/* Nav: Campaigns · Email Notifications pill */}
           <FilterPill>
             <PillSegment
               label="Campaigns"
@@ -510,7 +510,7 @@ const EmailTemplates = () => {
               renderIcon={(c) => <Feather name="send" size={15} color={c} />}
             />
             <PillSegment
-              label="Notifications"
+              label="Email Notifications"
               onPress={() => router.push("/email-campaign/email-notification")}
               renderIcon={(c) => <Feather name="bell" size={15} color={c} />}
             />
