@@ -32,13 +32,16 @@ const ACTION_MIN_HEIGHT = 104;
 const ERROR_COPY: Record<InstallErrorKind, string> = {
   invalid_url:
     "The update link isn't valid. Please contact your administrator.",
-  offline: "No internet connection. Check your network and try again.",
+  offline:
+    "The download was interrupted. Check your connection and try again.",
   http_error: "The update file couldn't be downloaded. Please try again.",
   no_space:
     "Not enough storage to download the update. Free up some space and try again.",
   not_an_apk: "The downloaded file wasn't a valid update. Please try again.",
+  incomplete: "The download didn't finish properly. Please try again.",
   cancelled: "Download cancelled.",
-  install_failed: "Android needs permission to install apps from ZapZone.",
+  install_failed:
+    "The update wasn't installed. If Android blocked it, allow installs from ZapZone in Settings, then retry.",
   unknown: "Something went wrong while updating. Please try again.",
 };
 
@@ -140,6 +143,11 @@ export function AppUpdateDialog({
               </PressableScale>
             </View>
           </View>
+
+          <Text className="mt-2 text-xs leading-4 text-gray-400 dark:text-gray-500">
+            ZapZone closes while Android installs the update. Reopen it when
+            it&apos;s done.
+          </Text>
         </View>
       );
     }
@@ -161,7 +169,8 @@ export function AppUpdateDialog({
           <UpdateProgressBar fraction={null} color={accent} />
           {phase === "installing" && (
             <Text className="mt-2 text-xs leading-4 text-gray-400 dark:text-gray-500">
-              Follow the Android prompt to finish installing.
+              Follow the Android prompt to finish installing. ZapZone closes
+              while it installs.
             </Text>
           )}
         </View>

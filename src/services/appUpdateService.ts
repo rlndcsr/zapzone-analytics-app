@@ -215,12 +215,22 @@ async function runUpdateCheck(): Promise<AppUpdateStatus | null> {
   }
 
   try {
+    console.info("[app-update] check_started", { platform, currentVersion });
     const payload = await requestVersionPayload(platform);
     if (!payload) {
       console.warn("[app-update] version endpoint returned an unusable body");
       return null;
     }
-    return evaluateUpdateStatus(currentVersion, payload);
+    const status = evaluateUpdateStatus(currentVersion, payload);
+    if (status.hasUpdate) {
+      console.info("[app-update] update_available", {
+        currentVersion,
+        latestVersion: status.latestVersion,
+        required: status.requiresUpdate,
+        hasDownload: !!status.apkUrl,
+      });
+    }
+    return status;
   } catch (error) {
     // Offline, timeout, 5xx, bad JSON — all non-fatal: launch continues.
     console.warn(

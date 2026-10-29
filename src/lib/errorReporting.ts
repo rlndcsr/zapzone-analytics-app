@@ -15,7 +15,7 @@ import { createReportGate } from "./errorReportGate";
  * break the app, and it never reports itself.
  */
 
-export type ClientErrorKind = "api" | "render" | "window" | "promise";
+export type ClientErrorKind = "api" | "render" | "window" | "promise" | "update";
 
 export type ClientErrorReport = {
   message: string;

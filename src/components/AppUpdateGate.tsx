@@ -13,6 +13,7 @@ import { useAppUpdateCheck } from "../lib/hooks/useAppUpdateCheck";
 import { useAppUpdateNoticeVisible } from "../lib/hooks/useAppUpdateNotice";
 import { isTabRoute } from "../lib/navigation/navConfig";
 import { isPublicRoute } from "../lib/navigation/publicRoutes";
+import { reviewPreviousUpdateAttempt } from "../services/appUpdateAttemptStore";
 import { sweepStaleApks } from "../services/appUpdateInstaller";
 
 /**
@@ -49,6 +50,11 @@ export function AppUpdateGate() {
   const deferred = useUpdatePromptDeferred();
   const noticeVisible = useAppUpdateNoticeVisible();
   const install = useApkInstall();
+
+  // How the last update attempt ended (installed, or the app stopped mid-way).
+  useEffect(() => {
+    reviewPreviousUpdateAttempt();
+  }, []);
 
   // Clear APKs left behind by earlier launches. Once per launch, and never for
   // the build we are about to install.

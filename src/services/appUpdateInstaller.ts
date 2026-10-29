@@ -1,48 +1,25 @@
 import * as Application from "expo-application";
 import { Platform } from "react-native";
 
-export type InstallErrorKind =
-  | "invalid_url"
-  | "offline"
-  | "http_error"
-  | "no_space"
-  | "not_an_apk"
-  | "cancelled"
-  | "install_failed"
-  | "unknown";
+import {
+  apkFileProblem,
+  InstallError,
+  type ApkDownload,
+  type DownloadedApk,
+  type DownloadTick,
+} from "../lib/appUpdateInstall";
 
-export class InstallError extends Error {
-  readonly kind: InstallErrorKind;
-
-  constructor(kind: InstallErrorKind, message?: string) {
-    super(message ?? kind);
-    this.name = "InstallError";
-    this.kind = kind;
-  }
-}
-
-export type DownloadTick = {
-  bytesWritten: number;
-  totalBytes: number | null;
-};
-
-export type DownloadedApk = {
-  uri: string;
-  httpStatus: number;
-};
-
-export type ApkDownload = {
-  start: () => Promise<DownloadedApk | null>;
-  resume: () => Promise<DownloadedApk | null>;
-  pause: () => Promise<void>;
-  cancel: () => Promise<void>;
-};
+export {
+  InstallError,
+  type ApkDownload,
+  type DownloadedApk,
+  type DownloadTick,
+  type InstallErrorKind,
+} from "../lib/appUpdateInstall";
 
 const APK_MIME = "application/vnd.android.package-archive";
 const APK_PREFIX = "zapzone-update-";
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
-const MIN_APK_BYTES = 1_000_000;
-const ZIP_MAGIC_BASE64 = "UEsD";
 const SPACE_HEADROOM = 1.3;
 const MIN_FREE_BYTES = 50 * 1024 * 1024;
 
@@ -76,34 +53,36 @@ function apkFileName(version: string): string {
 }
 
 export async function verifyApkFile(
-  fileUri: string,
-  httpStatus: number,
+  file: DownloadedApk,
+  expectedBytes: number | null,
 ): Promise<void> {
   const FileSystem = await loadFileSystem();
 
-  const discard = async (kind: InstallErrorKind): Promise<never> => {
-    await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
-    throw new InstallError(kind);
-  };
+  const info = await FileSystem.getInfoAsync(file.uri);
+  const header = info.exists
+    ? await FileSystem.readAsStringAsync(file.uri, {
+        encoding: "base64",
+        position: 0,
+        length: 8,
+      }).catch(() => "")
+    : "";
 
-  if (httpStatus !== 200) {
-    await discard("http_error");
-  }
+  const size = info.exists ? info.size : 0;
+  const problem = apkFileProblem({
+    httpStatus: file.httpStatus,
+    resumed: file.resumed,
+    exists: info.exists,
+    size,
+    expectedBytes,
+    header,
+  });
+  if (!problem) return;
 
-  const info = await FileSystem.getInfoAsync(fileUri);
-  if (!info.exists || info.size < MIN_APK_BYTES) {
-    await discard("not_an_apk");
-  }
-
-  const header = await FileSystem.readAsStringAsync(fileUri, {
-    encoding: "base64",
-    position: 0,
-    length: 8,
-  }).catch(() => "");
-
-  if (!header.startsWith(ZIP_MAGIC_BASE64)) {
-    await discard("not_an_apk");
-  }
+  await FileSystem.deleteAsync(file.uri, { idempotent: true }).catch(() => {});
+  throw new InstallError(
+    problem,
+    `HTTP ${file.httpStatus}${file.resumed ? " (resumed)" : ""}, ${size} of ${expectedBytes ?? "unknown"} bytes`,
+  );
 }
 
 export function createApkDownload(options: {
@@ -122,8 +101,9 @@ export function createApkDownload(options: {
 
   const guardSpace = async (totalBytes: number): Promise<void> => {
     const FileSystem = await loadFileSystem();
-    const free = await FileSystem.getFreeDiskStorageAsync();
-    if (free >= totalBytes * SPACE_HEADROOM) return;
+    // An unreadable free-space figure is not a reason to stop the download.
+    const free = await FileSystem.getFreeDiskStorageAsync().catch(() => null);
+    if (free === null || free >= totalBytes * SPACE_HEADROOM) return;
     outOfSpace = true;
     await task?.cancelAsync().catch(() => {});
   };
@@ -146,18 +126,20 @@ export function createApkDownload(options: {
   const settle = (
     result:
       import("expo-file-system/legacy").FileSystemDownloadResult | undefined,
+    resumed: boolean,
   ): DownloadedApk | null => {
     if (outOfSpace) throw new InstallError("no_space");
     if (cancelledByUser) return null;
+    // A result means the transfer finished, even if Pause was tapped as it did.
+    if (result) return { uri: result.uri, httpStatus: result.status, resumed };
     if (pausedByUser) return null;
-    if (!result) throw new InstallError("unknown");
-    return { uri: result.uri, httpStatus: result.status };
+    throw new InstallError("unknown", "download ended without a result");
   };
 
   const wrapFailure = (error: unknown): never => {
     if (error instanceof InstallError) throw error;
-    if (outOfSpace) throw new InstallError("no_space");
-    throw new InstallError("offline");
+    if (outOfSpace) throw new InstallError("no_space", error);
+    throw new InstallError("offline", error);
   };
 
   return {
@@ -190,17 +172,19 @@ export function createApkDownload(options: {
       );
 
       try {
-        return settle(await task.downloadAsync());
+        return settle(await task.downloadAsync(), false);
       } catch (error) {
         return wrapFailure(error);
       }
     },
 
     async resume() {
-      if (!task) throw new InstallError("unknown");
+      if (!task) throw new InstallError("unknown", "nothing to resume");
       pausedByUser = false;
+      // Without resumeData (the pause never landed) the native side restarts from byte 0.
+      const resumed = !!task.savable().resumeData;
       try {
-        return settle(await task.resumeAsync());
+        return settle(await task.resumeAsync(), resumed);
       } catch (error) {
         return wrapFailure(error);
       }
@@ -227,7 +211,7 @@ export function createApkDownload(options: {
 
 export async function launchApkInstaller(fileUri: string): Promise<void> {
   if (Platform.OS !== "android") {
-    throw new InstallError("install_failed");
+    throw new InstallError("install_failed", `unsupported platform ${Platform.OS}`);
   }
 
   try {
@@ -245,12 +229,11 @@ export async function launchApkInstaller(fileUri: string): Promise<void> {
     );
 
     if (result.resultCode === IntentLauncher.ResultCode.Canceled) {
-      throw new InstallError("install_failed");
+      throw new InstallError("install_failed", "installer returned RESULT_CANCELED");
     }
   } catch (error) {
     if (error instanceof InstallError) throw error;
-    console.warn("[app-update] could not launch the installer:", error);
-    throw new InstallError("install_failed");
+    throw new InstallError("install_failed", error);
   }
 }
 

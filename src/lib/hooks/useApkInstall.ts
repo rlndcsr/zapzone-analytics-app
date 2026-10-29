@@ -1,23 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { AppState } from "react-native";
 
+import { recordUpdateEvent } from "../../services/appUpdateAttemptStore";
 import {
   createApkDownload,
-  InstallError,
   launchApkInstaller,
   openUnknownSourcesSettings,
   verifyApkFile,
-  type ApkDownload,
   type InstallErrorKind,
 } from "../../services/appUpdateInstaller";
+import {
+  BUSY_PHASES,
+  createInstallController,
+  type InstallPhase,
+} from "../appUpdateInstall";
 
-export type InstallPhase =
-  | "idle"
-  | "downloading"
-  | "paused"
-  | "verifying"
-  | "launching"
-  | "installing"
-  | "error";
+export type { InstallPhase } from "../appUpdateInstall";
 
 export type ApkInstall = {
   phase: InstallPhase;
@@ -35,185 +33,34 @@ export type ApkInstall = {
   openSettings: () => void;
 };
 
-const PROGRESS_COMMIT_MS = 100;
-
-const SPEED_SMOOTHING = 0.75;
-
-const BUSY_PHASES: InstallPhase[] = [
-  "downloading",
-  "paused",
-  "verifying",
-  "launching",
-  "installing",
-];
-
-type Meters = {
-  bytesWritten: number;
-  totalBytes: number | null;
-  bytesPerSecond: number | null;
-};
-
-const EMPTY_METERS: Meters = {
-  bytesWritten: 0,
-  totalBytes: null,
-  bytesPerSecond: null,
-};
-
+/** React binding for the install state machine in lib/appUpdateInstall.ts. */
 export function useApkInstall(): ApkInstall {
-  const [phase, setPhase] = useState<InstallPhase>("idle");
-  const [error, setError] = useState<InstallErrorKind | null>(null);
-  const [meters, setMeters] = useState<Meters>(EMPTY_METERS);
+  const [controller] = useState(() =>
+    createInstallController({
+      createDownload: createApkDownload,
+      verify: verifyApkFile,
+      launch: launchApkInstaller,
+      onEvent: recordUpdateEvent,
+    }),
+  );
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot,
+  );
+  const busy = BUSY_PHASES.includes(snapshot.phase);
 
-  const downloadRef = useRef<ApkDownload | null>(null);
-  const targetRef = useRef<{ url: string; version: string } | null>(null);
+  useEffect(() => () => controller.cancel(), [controller]);
 
-  const runRef = useRef(0);
-  const mountedRef = useRef(true);
-
-  const commitRef = useRef({ at: 0, percent: -1 });
-  const speedRef = useRef({ at: 0, bytes: 0, value: null as number | null });
-
-  const resetMeters = useCallback(() => {
-    commitRef.current = { at: 0, percent: -1 };
-    speedRef.current = { at: 0, bytes: 0, value: null };
-    setMeters(EMPTY_METERS);
-  }, []);
-
+  // Whether the app left the foreground mid-update is the first question when one dies.
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      runRef.current += 1;
-      void downloadRef.current?.cancel();
-      downloadRef.current = null;
-    };
-  }, []);
-
-  const handleTick = useCallback(
-    (tick: { bytesWritten: number; totalBytes: number | null }) => {
-      const now = Date.now();
-      const speed = speedRef.current;
-
-      if (speed.at !== 0 && now > speed.at) {
-        const instant =
-          ((tick.bytesWritten - speed.bytes) * 1000) / (now - speed.at);
-        speed.value =
-          speed.value === null
-            ? instant
-            : speed.value * SPEED_SMOOTHING + instant * (1 - SPEED_SMOOTHING);
-      }
-      speed.at = now;
-      speed.bytes = tick.bytesWritten;
-
-      const percent =
-        tick.totalBytes && tick.totalBytes > 0
-          ? Math.floor((tick.bytesWritten / tick.totalBytes) * 100)
-          : -1;
-      const commit = commitRef.current;
-      if (percent === commit.percent && now - commit.at < PROGRESS_COMMIT_MS) {
-        return;
-      }
-      commitRef.current = { at: now, percent };
-
-      if (!mountedRef.current) return;
-      setMeters({
-        bytesWritten: tick.bytesWritten,
-        totalBytes: tick.totalBytes,
-        bytesPerSecond: speed.value,
-      });
-    },
-    [],
-  );
-
-  const run = useCallback(
-    async (mode: "start" | "resume") => {
-      const target = targetRef.current;
-      if (!target) return;
-
-      const generation = (runRef.current += 1);
-      const alive = () => mountedRef.current && runRef.current === generation;
-
-      setError(null);
-      setPhase("downloading");
-
-      try {
-        const effectiveMode =
-          mode === "resume" && downloadRef.current ? "resume" : "start";
-
-        let download = downloadRef.current;
-        if (effectiveMode === "start") {
-          resetMeters();
-          download = createApkDownload({
-            url: target.url,
-            version: target.version,
-            onTick: (tick) => {
-              if (alive()) handleTick(tick);
-            },
-          });
-          downloadRef.current = download;
-        }
-        if (!download) throw new InstallError("unknown");
-
-        const file =
-          effectiveMode === "resume"
-            ? await download.resume()
-            : await download.start();
-
-        if (!alive() || file === null) return;
-
-        setPhase("verifying");
-        await verifyApkFile(file.uri, file.httpStatus);
-        if (!alive()) return;
-
-        setPhase("launching");
-        await launchApkInstaller(file.uri);
-        if (!alive()) return;
-
-        setPhase("installing");
-      } catch (caught) {
-        if (!alive()) return;
-        const kind =
-          caught instanceof InstallError ? caught.kind : ("unknown" as const);
-        if (kind !== "cancelled") {
-          console.warn("[app-update] install failed:", kind, caught);
-        }
-        setError(kind);
-        setPhase("error");
-      }
-    },
-    [handleTick, resetMeters],
-  );
-
-  const start = useCallback(
-    (url: string, version: string) => {
-      targetRef.current = { url, version };
-      void run("start");
-    },
-    [run],
-  );
-
-  const retry = useCallback(() => {
-    void run(downloadRef.current ? "resume" : "start");
-  }, [run]);
-
-  const pause = useCallback(() => {
-    setPhase("paused");
-    void downloadRef.current?.pause();
-  }, []);
-
-  const resume = useCallback(() => {
-    void run("resume");
-  }, [run]);
-
-  const cancel = useCallback(() => {
-    runRef.current += 1;
-    const download = downloadRef.current;
-    downloadRef.current = null;
-    void download?.cancel();
-    setError(null);
-    setPhase("idle");
-    resetMeters();
-  }, [resetMeters]);
+    if (!busy) return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background") recordUpdateEvent({ stage: "backgrounded" });
+      else if (state === "active") recordUpdateEvent({ stage: "foregrounded" });
+    });
+    return () => subscription.remove();
+  }, [busy]);
 
   const openSettings = useCallback(() => {
     void openUnknownSourcesSettings().catch((caught) => {
@@ -222,23 +69,23 @@ export function useApkInstall(): ApkInstall {
   }, []);
 
   const fraction =
-    meters.totalBytes && meters.totalBytes > 0
-      ? Math.min(1, meters.bytesWritten / meters.totalBytes)
+    snapshot.totalBytes && snapshot.totalBytes > 0
+      ? Math.min(1, snapshot.bytesWritten / snapshot.totalBytes)
       : null;
 
   return {
-    phase,
+    phase: snapshot.phase,
     fraction,
-    bytesWritten: meters.bytesWritten,
-    totalBytes: meters.totalBytes,
-    bytesPerSecond: meters.bytesPerSecond,
-    error,
-    busy: BUSY_PHASES.includes(phase),
-    start,
-    pause,
-    resume,
-    cancel,
-    retry,
+    bytesWritten: snapshot.bytesWritten,
+    totalBytes: snapshot.totalBytes,
+    bytesPerSecond: snapshot.bytesPerSecond,
+    error: snapshot.error,
+    busy,
+    start: controller.start,
+    pause: controller.pause,
+    resume: controller.resume,
+    cancel: controller.cancel,
+    retry: controller.retry,
     openSettings,
   };
 }
