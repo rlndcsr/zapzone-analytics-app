@@ -1,5 +1,4 @@
 import type { BottomTabNavigationOptions } from "@react-navigation/bottom-tabs";
-import { Easing } from "react-native";
 import { Easing as WorkletEasing } from "react-native-reanimated";
 
 export const SURFACE = {
@@ -13,7 +12,6 @@ export const surfaceFor = (theme: ThemeName | null | undefined) =>
   SURFACE[theme === "dark" ? "dark" : "light"];
 
 export const AUTH_FADE_DURATION = 300;
-export const TAB_SCENE_DURATION = 260;
 export const SCREEN_ENTER_DURATION = 280;
 export const UI_REACTION_DURATION = 180;
 
@@ -29,44 +27,30 @@ export const AUTH_SCREEN_OPTIONS = {
   animationDuration: AUTH_FADE_DURATION,
 } as const;
 
-type SceneStyleInterpolator = NonNullable<
-  BottomTabNavigationOptions["sceneStyleInterpolator"]
->;
+/**
+ * How long a tab must stay on screen before it starts its first heavy work
+ * (data load, big grid render). Long enough for the tapped tab to paint its
+ * skeleton; a tab only passed through while tapping quickly never starts.
+ */
+export const TAB_SETTLE_MS = 150;
 
-const TAB_SCENE_SCALE = 1.03;
-
-export const forTabScene: SceneStyleInterpolator = ({ current }) => ({
-  sceneStyle: {
-    transform: [
-      {
-        scale: current.progress.interpolate({
-          inputRange: [-1, 0, 1],
-          outputRange: [TAB_SCENE_SCALE, 1, TAB_SCENE_SCALE],
-        }),
-      },
-    ],
-  },
-});
-
+/**
+ * Tabs swap in the frame they are tapped: no scene animation and no freezing.
+ *
+ * A scene animation kept the old and new screens attached for its duration, and
+ * a tap during it re-targeted every scene. `freezeOnBlur` (react-freeze) is a
+ * Suspense boundary: hiding a tab tore down its effects and showing it rebuilt
+ * them, on Home's and Calendar's whole trees, on every switch. Tapped back and
+ * forth, both landed on the JS thread exactly as the next tap arrived — the
+ * lag and freezes. Hidden tabs are kept idle by their own focus handling
+ * instead (Home's live refresh, Calendar's clock).
+ */
 export const tabScreenOptions = (
   theme: ThemeName | null | undefined,
 ): BottomTabNavigationOptions => ({
   headerShown: false,
   sceneStyle: { backgroundColor: surfaceFor(theme) },
-  // A visited tab stays mounted. Unfrozen, every hidden tab re-rendered on each
-  // shared-store change (location, timeframe, theme) and on its own data, all
-  // on the JS thread the visible tab needs for the next tap. Frozen, it only
-  // catches up when it is shown again.
-  freezeOnBlur: true,
-  transitionSpec: {
-    animation: "timing",
-    config: {
-      duration: TAB_SCENE_DURATION,
-      // Decelerate: leaves immediately on tap, settles softly.
-      easing: Easing.out(Easing.cubic),
-    },
-  },
-  sceneStyleInterpolator: forTabScene,
+  animation: "none",
 });
 
 export const TAB_STATE_TIMING = {

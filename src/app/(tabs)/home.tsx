@@ -58,7 +58,7 @@ import Reanimated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
-import { TAB_SCENE_DURATION } from "../../components/navigation/navMotion";
+import { TAB_SETTLE_MS } from "../../components/navigation/navMotion";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DashboardHeader } from "../../components/ui/DashboardHeader";
 import {
@@ -742,12 +742,12 @@ const Home = () => {
       focusedRef.current = true;
       // Coming back to the tab: catch up only when the screen is older than one
       // live tick (a quick hop to another tab and back reloads nothing), and
-      // only once the tab transition has finished, so the switch stays instant.
+      // only once the tab has settled, so tapping through it stays instant.
       const catchUp = setTimeout(() => {
         if (Date.now() - lastLiveRefreshRef.current >= LIVE_REFRESH_MS) {
           liveRefresh();
         }
-      }, TAB_SCENE_DURATION);
+      }, TAB_SETTLE_MS);
       const tick = setInterval(() => {
         if (AppState.currentState === "active") {
           lastLiveRefreshRef.current = Date.now();

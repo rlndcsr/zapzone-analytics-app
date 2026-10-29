@@ -23,7 +23,7 @@ import { timeframeLabel as labelForTimeframe } from "../../lib/dashboard/dashboa
 import { useTimeframeSelection } from "../../lib/dashboard/timeframeStore";
 import { useManagerActivity } from "../../lib/hooks/useManagerActivity";
 import { useNotifications } from "../../lib/hooks/useNotifications";
-import { useTabTransitionDone } from "../../lib/hooks/useTabTransitionDone";
+import { useTabSettled } from "../../lib/hooks/useTabSettled";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type {
   RecentEventPurchase,
@@ -304,8 +304,8 @@ const Activity = () => {
   const insets = useSafeAreaInsets();
   const pulse = usePulse();
 
-  // The skeleton paints with the tap; the load starts once the switch is done.
-  const transitionDone = useTabTransitionDone();
+  // The skeleton paints with the tap; the load starts once the tab settles.
+  const settled = useTabSettled();
 
   // Timeframe is shared with the Home dashboard filter.
   const { timeframe, dateFrom, dateTo } = useTimeframeSelection();
@@ -322,7 +322,7 @@ const Activity = () => {
     timeframe,
     dateFrom,
     dateTo,
-    enabled: transitionDone,
+    enabled: settled,
   });
 
   const {

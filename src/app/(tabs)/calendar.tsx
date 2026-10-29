@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BookingDetailSheet } from "../../components/ui/BookingDetailSheet";
 import { BottomSheet } from "../../components/ui/BottomSheet";
@@ -97,7 +97,7 @@ import { useAttractionPurchases } from "../../lib/hooks/useAttractionPurchases";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
-import { useTabTransitionDone } from "../../lib/hooks/useTabTransitionDone";
+import { useTabSettled } from "../../lib/hooks/useTabSettled";
 import { useSpaces } from "../../lib/hooks/useSpaceSchedule";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
@@ -1011,9 +1011,9 @@ const Calendar = () => {
   } = useCalendarBookings({ startDate, endDate });
 
   // The tap paints the skeleton; the grid — the heaviest render in the app —
-  // draws once the tab switch is done, even when the bookings are already held.
-  const transitionDone = useTabTransitionDone();
-  const loading = bookingsLoading || !transitionDone;
+  // draws once the tab settles, even when the bookings are already held.
+  const settled = useTabSettled();
+  const loading = bookingsLoading || !settled;
 
   const { purchases, refetch: refetchPurchases } = useAttractionPurchases();
 
@@ -1201,14 +1201,30 @@ const Calendar = () => {
   );
 
   // The venue's own clock, ticked while Day view is open, so "Free now" and the
-  // walk-in fit stay true without leaving and re-entering the tab.
+  // walk-in fit stay true without leaving and re-entering the tab. Only while
+  // this tab is on screen: each tick re-renders the whole day grid, which a
+  // hidden tab must not do under the next tab tap. A tick in the same minute
+  // keeps the old value, so coming back to the tab re-renders nothing.
   const [nowTick, setNowTick] = useState(() => venueNow());
-  useEffect(() => {
-    if (viewMode !== "day") return;
-    setNowTick(venueNow());
-    const timer = setInterval(() => setNowTick(venueNow()), 60_000);
-    return () => clearInterval(timer);
-  }, [viewMode]);
+  useFocusEffect(
+    useCallback(() => {
+      if (viewMode !== "day") return;
+      const tick = () =>
+        setNowTick((prev) => {
+          const next = venueNow();
+          return next.year === prev.year &&
+            next.month === prev.month &&
+            next.day === prev.day &&
+            next.hour === prev.hour &&
+            next.minute === prev.minute
+            ? prev
+            : next;
+        });
+      tick();
+      const timer = setInterval(tick, 60_000);
+      return () => clearInterval(timer);
+    }, [viewMode]),
+  );
   const nowMinutes = nowTick.hour * 60 + nowTick.minute;
   const venueTodayKey = dateKey(venueToday());
   const isVenueToday = startDate === venueTodayKey;
