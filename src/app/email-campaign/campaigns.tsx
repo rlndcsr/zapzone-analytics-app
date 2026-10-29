@@ -21,6 +21,7 @@ import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { formatDateTimeET } from "../../lib/date/venueTime";
+import { campaignDisplayStatus, isScheduledCampaign } from "../../lib/email/campaignSchedule";
 import { consumeEmailCampaignsStale } from "../../lib/emailStale";
 import { getToken } from "../../lib/session";
 import {
@@ -79,6 +80,9 @@ function statusPill(status: string): { pill: string; text: string } {
   }
 }
 
+// Scheduled campaigns (pending with a send time) show and filter apart from other pending ones.
+const shownStatus = (c: EmailCampaignRow) => campaignDisplayStatus(c.status, c.scheduledAt);
+
 const EmailCampaigns = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -135,11 +139,11 @@ const EmailCampaigns = () => {
   const statusOptions = useMemo(
     () => [
       { label: "All Statuses", value: "all" },
-      ...Array.from(new Set(campaigns.map((c) => c.status).filter(Boolean)))
+      ...Array.from(new Set(campaigns.map(shownStatus).filter(Boolean)))
         .sort()
         .map((s) => ({
           label:
-            campaigns.find((c) => c.status === s)?.statusLabel ??
+            campaigns.find((c) => shownStatus(c) === s)?.statusLabel ??
             s.charAt(0).toUpperCase() + s.slice(1),
           value: s,
         })),
@@ -150,7 +154,7 @@ const EmailCampaigns = () => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return campaigns.filter((c) => {
-      if (statusFilter !== "all" && c.status !== statusFilter) return false;
+      if (statusFilter !== "all" && shownStatus(c) !== statusFilter) return false;
       if (
         q &&
         !c.name.toLowerCase().includes(q) &&
@@ -213,24 +217,32 @@ const EmailCampaigns = () => {
 
   // Per-row Cancel/Delete (mirrors the web Actions), confirmed then reloads.
   const confirmRowCancel = useCallback(
-    (c: EmailCampaignRow) =>
-      Alert.alert("Cancel campaign?", `Stop sending "${c.name}"?`, [
-        { text: "Keep sending", style: "cancel" },
-        {
-          text: "Cancel campaign",
-          style: "destructive",
-          onPress: async () => {
-            const token = getToken();
-            if (!token) return;
-            try {
-              await cancelEmailCampaign(token, c.id);
-              await load();
-            } catch (err) {
-              Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
-            }
+    (c: EmailCampaignRow) => {
+      const scheduled = isScheduledCampaign(c.status, c.scheduledAt);
+      Alert.alert(
+        scheduled ? "Cancel scheduled campaign?" : "Cancel campaign?",
+        scheduled ? `Nothing has gone out yet. Nobody will get "${c.name}".` : `Stop sending "${c.name}"?`,
+        [
+          { text: scheduled ? "Keep it scheduled" : "Keep sending", style: "cancel" },
+          {
+            text: "Cancel campaign",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) return;
+              try {
+                await cancelEmailCampaign(token, c.id);
+                await load();
+              } catch (err) {
+                Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
+                // e.g. it finished meanwhile (409): show where it stands now
+                void load();
+              }
+            },
           },
-        },
-      ]),
+        ],
+      );
+    },
     [load],
   );
   const confirmRowDelete = useCallback(
@@ -493,7 +505,8 @@ const EmailCampaigns = () => {
               />
             ) : (
               paged.map((c) => {
-                const pill = statusPill(c.status);
+                const pill = statusPill(shownStatus(c));
+                const scheduled = isScheduledCampaign(c.status, c.scheduledAt);
                 const pct = c.recipients > 0 ? Math.round((c.sentCount / c.recipients) * 100) : 0;
             return (
               <Pressable
@@ -540,9 +553,11 @@ const EmailCampaigns = () => {
                 </View>
 
                 <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-                  <Text className="text-xs text-gray-400 dark:text-gray-500">Sent at</Text>
+                  <Text className="text-xs text-gray-400 dark:text-gray-500">
+                    {scheduled ? "Scheduled for" : "Sent at"}
+                  </Text>
                   <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {fmtDateTime(c.sentAt)}
+                    {fmtDateTime(scheduled ? c.scheduledAt : c.sentAt)}
                   </Text>
                 </View>
               </Pressable>

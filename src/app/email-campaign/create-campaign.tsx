@@ -22,9 +22,18 @@ import {
   PRIMARY,
   VariablePanel,
 } from "../../components/ui/EmailComposerKit";
+import { DatePickerSheet } from "../../components/ui/DatePickerSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
 import { EventRecipientPicker } from "../../components/ui/EventRecipientPicker";
-import { CheckboxRow } from "../../components/ui/FormControls";
+import { CheckboxRow, SegmentedToggle } from "../../components/ui/FormControls";
+import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
+import { formatShortDate } from "../../lib/date/calendar";
+import {
+  canScheduleCampaign,
+  formatClock,
+  formatScheduleTime,
+  resolveSchedule,
+} from "../../lib/email/campaignSchedule";
 import {
   canManageEventPhotoEmails,
   registrantGapMessage,
@@ -87,6 +96,12 @@ const CreateCampaign = () => {
   const [vars, setVars] = useState<EmailVariableGroups | null>(null);
   const [saving, setSaving] = useState<null | "draft" | "send">(null);
 
+  // "Schedule for later": a day + "HH:mm" on this device's clock; the server sends it then.
+  const [sendLater, setSendLater] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [schedulePicker, setSchedulePicker] = useState<null | "date" | "time">(null);
+
   // Event Registrants: the picked location forms, and "only people whose photos
   // are ready" (null until ticked by hand: it then follows whether the email uses
   // {{ photo_link }}, as on the web).
@@ -101,6 +116,7 @@ const CreateCampaign = () => {
   const lastFocused = useRef<"subject" | "body">("body");
 
   const sendsToEvents = recipients.includes("event_registrants");
+  const scheduling = sendLater && canScheduleCampaign(recipients);
   const onlyWithPhotos = photosChoice ?? usesPhotoLink(subject, body);
   const registrantGap = registrantGapMessage(onlyWithPhotos);
 
@@ -230,6 +246,11 @@ const CreateCampaign = () => {
       return Alert.alert("No events", "Pick at least one event to send to");
     if (!subject.trim() || !body.trim())
       return Alert.alert("Incomplete", "A subject and body are required.");
+    // re-checked here: the picked time may have passed while the confirm was open
+    const timing = sendNow
+      ? resolveSchedule({ sendLater, recipientTypes, date: scheduleDate, time: scheduleTime })
+      : ({ kind: "now" } as const);
+    if (timing.kind === "invalid") return Alert.alert("Pick another time", timing.message);
     const token = getToken();
     if (!token) return Alert.alert("Not signed in", "Please sign in again.");
 
@@ -242,11 +263,16 @@ const CreateCampaign = () => {
         body: body.trim(),
         ...recipientInput,
         sendNow,
+        scheduledAt: timing.kind === "later" ? timing.at : null,
       });
       markEmailCampaignsStale();
       router.back();
-      // a large send carries on after the reply; say so rather than leave it looking done
-      if (result.status === "sending" && result.message) Alert.alert("Campaign sending", result.message);
+      if (timing.kind === "later") {
+        Alert.alert("Campaign scheduled", `It goes out ${formatScheduleTime(timing.at)}.`);
+      } else if (result.status === "sending" && result.message) {
+        // a large send carries on after the reply; say so rather than leave it looking done
+        Alert.alert("Campaign sending", result.message);
+      }
     } catch (e) {
       Alert.alert(
         "Failed",
@@ -255,6 +281,25 @@ const CreateCampaign = () => {
     } finally {
       setSaving(null);
     }
+  };
+
+  const confirmSend = () => {
+    const timing = resolveSchedule({ sendLater, recipientTypes, date: scheduleDate, time: scheduleTime });
+    if (timing.kind === "invalid") return Alert.alert("Pick another time", timing.message);
+    if (timing.kind === "later") {
+      return Alert.alert(
+        "Schedule campaign?",
+        `This sends the email to all selected recipients on ${formatScheduleTime(timing.at)}.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Schedule", onPress: () => save(true) },
+        ],
+      );
+    }
+    Alert.alert("Send campaign?", "This sends the email to all selected recipients now.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Send", onPress: () => save(true) },
+    ]);
   };
 
   return (
@@ -266,29 +311,23 @@ const CreateCampaign = () => {
         onBack={() => router.back()}
         actions={
           <>
+            {/* A draft has no send time, so it is offered only for sending now. */}
+            {!scheduling && (
+              <HeaderAction
+                label="Save Draft"
+                icon="save"
+                loading={saving === "draft"}
+                disabled={saving !== null}
+                onPress={() => save(false)}
+              />
+            )}
             <HeaderAction
-              label="Save Draft"
-              icon="save"
-              loading={saving === "draft"}
-              disabled={saving !== null}
-              onPress={() => save(false)}
-            />
-            <HeaderAction
-              label="Send Campaign"
-              icon="send"
+              label={scheduling ? "Schedule Campaign" : "Send Campaign"}
+              icon={scheduling ? "clock" : "send"}
               variant="primary"
               loading={saving === "send"}
               disabled={saving !== null}
-              onPress={() =>
-                Alert.alert(
-                  "Send campaign?",
-                  "This sends the email to all selected recipients now.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "Send", onPress: () => save(true) },
-                  ],
-                )
-              }
+              onPress={confirmSend}
             />
           </>
         }
@@ -468,6 +507,57 @@ const CreateCampaign = () => {
             )}
           </EmailSection>
 
+          <EmailSection title="When to Send">
+            {sendsToEvents ? (
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                Emails to event registrants go out right away, so everyone who registered is included.
+              </Text>
+            ) : (
+              <>
+                <SegmentedToggle
+                  options={[
+                    { value: "now", label: "Send now" },
+                    { value: "later", label: "Schedule for later" },
+                  ]}
+                  value={sendLater ? "later" : "now"}
+                  onChange={(v) => setSendLater(v === "later")}
+                />
+                {sendLater && (
+                  <View className="gap-2">
+                    {(
+                      [
+                        { key: "date", icon: "calendar", label: "Date", value: formatShortDate(scheduleDate), empty: "Pick a date" },
+                        { key: "time", icon: "clock", label: "Time", value: formatClock(scheduleTime), empty: "Pick a time" },
+                      ] as const
+                    ).map((row) => (
+                      <Pressable
+                        key={row.key}
+                        onPress={() => setSchedulePicker(row.key)}
+                        disabled={saving !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${row.label}: ${row.value || row.empty}`}
+                        className="flex-row items-center gap-3 rounded-xl border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800 px-3.5 py-3"
+                      >
+                        <Feather name={row.icon} size={15} color={PRIMARY} />
+                        <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 w-10">{row.label}</Text>
+                        <Text
+                          key={row.value ? "set" : "empty"}
+                          className={`flex-1 text-sm ${row.value ? "text-gray-900 dark:text-white" : "text-gray-400 dark:text-gray-500"}`}
+                        >
+                          {row.value || row.empty}
+                        </Text>
+                        <Feather name="chevron-right" size={15} color="#9CA3AF" />
+                      </Pressable>
+                    ))}
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">
+                      Who gets it is settled now. Unsubscribes are checked again when it goes out.
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
+          </EmailSection>
+
           <EmailSection title="Email Content">
             <LabeledInput
               label="Subject Line"
@@ -510,6 +600,27 @@ const CreateCampaign = () => {
           </EmailSection>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <DatePickerSheet
+        visible={schedulePicker === "date"}
+        value={scheduleDate}
+        title="Send On"
+        onClose={() => setSchedulePicker(null)}
+        onSelect={(date) => {
+          setScheduleDate(date);
+          setSchedulePicker(null);
+        }}
+      />
+      <TimePickerSheet
+        visible={schedulePicker === "time"}
+        value={scheduleTime || "09:00"}
+        title="Send At"
+        onClose={() => setSchedulePicker(null)}
+        onSelect={(time) => {
+          setScheduleTime(time);
+          setSchedulePicker(null);
+        }}
+      />
     </View>
   );
 };

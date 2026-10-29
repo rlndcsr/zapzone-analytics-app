@@ -25,6 +25,7 @@ import {
   logStatusStyle,
   RECIPIENT_TYPE_LABELS,
 } from "../../lib/email/emailTemplateOptions";
+import { campaignDisplayStatus, isScheduledCampaign } from "../../lib/email/campaignSchedule";
 import { markEmailCampaignsStale } from "../../lib/emailStale";
 import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
@@ -133,6 +134,11 @@ const CampaignDetails = () => {
         if (message) Alert.alert("Resend", message);
       } catch (err) {
         Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
+        // a cancel that lost the race (409: already finished) — show where it stands now
+        if (key === "cancel") {
+          markEmailCampaignsStale();
+          void loadDetail();
+        }
       } finally {
         setBusy(null);
       }
@@ -140,15 +146,21 @@ const CampaignDetails = () => {
     [campaignId, loadDetail],
   );
 
-  const confirmCancel = () =>
-    Alert.alert("Cancel campaign?", "This stops any further sending.", [
-      { text: "Keep sending", style: "cancel" },
-      {
-        text: "Cancel campaign",
-        style: "destructive",
-        onPress: () => runAction("cancel", () => cancelEmailCampaign(getToken()!, campaignId!)),
-      },
-    ]);
+  const confirmCancel = () => {
+    const scheduled = !!detail && isScheduledCampaign(detail.status, detail.scheduledAt);
+    Alert.alert(
+      scheduled ? "Cancel scheduled campaign?" : "Cancel campaign?",
+      scheduled ? "Nothing has gone out yet. Nobody will get it." : "This stops any further sending.",
+      [
+        { text: scheduled ? "Keep it scheduled" : "Keep sending", style: "cancel" },
+        {
+          text: "Cancel campaign",
+          style: "destructive",
+          onPress: () => runAction("cancel", () => cancelEmailCampaign(getToken()!, campaignId!)),
+        },
+      ],
+    );
+  };
 
   const confirmDelete = () =>
     Alert.alert("Delete campaign?", "This permanently removes the campaign.", [
@@ -214,7 +226,8 @@ const CampaignDetails = () => {
     );
   }
 
-  const pill = statusPill(detail.status);
+  const pill = statusPill(campaignDisplayStatus(detail.status, detail.scheduledAt));
+  const scheduled = isScheduledCampaign(detail.status, detail.scheduledAt);
   const successRate =
     detail.totalRecipients > 0
       ? Math.round((detail.sentCount / detail.totalRecipients) * 100)
@@ -247,6 +260,11 @@ const CampaignDetails = () => {
               <Text className={`text-xs font-semibold ${pill.text}`}>{detail.statusLabel}</Text>
             </View>
           </View>
+          {scheduled && (
+            <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              {`Goes out ${fmtDateTime(detail.scheduledAt)}`}
+            </Text>
+          )}
         </View>
 
         {/* A send that stopped part-way says so (web: the red banner above the details). */}
@@ -355,6 +373,7 @@ const CampaignDetails = () => {
         {/* Metadata */}
         <DetailSection icon="info" title="Campaign Details">
           <InfoRow label="Created" value={fmtDateTime(detail.createdAt)} />
+          {!!detail.scheduledAt && <InfoRow label="Scheduled For" value={fmtDateTime(detail.scheduledAt)} />}
           {!!detail.sentAt && <InfoRow label="Sent At" value={fmtDateTime(detail.sentAt)} />}
           {!!detail.completedAt && <InfoRow label="Completed At" value={fmtDateTime(detail.completedAt)} />}
           {!!detail.createdByName && <InfoRow label="Created By" value={detail.createdByName} />}

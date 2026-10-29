@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
+import { campaignDisplayStatus, isScheduledCampaign } from "../../lib/email/campaignSchedule";
 import type { EmailCampaignRow } from "../../services/emailService";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
 
@@ -106,7 +107,7 @@ function buildColumns(h: Handlers): TableColumn<EmailCampaignRow>[] {
     label: "Status",
     width: 130,
     render: (c) => {
-      const p = statusPill(c.status);
+      const p = statusPill(campaignDisplayStatus(c.status, c.scheduledAt));
       return (
         <View className="flex-row">
           <View className={`px-2.5 py-1 rounded-full ${p.pill}`}>
@@ -144,11 +145,16 @@ function buildColumns(h: Handlers): TableColumn<EmailCampaignRow>[] {
     key: "sentAt",
     label: "Sent At",
     width: 170,
-    render: (c) => (
-      <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
-        {fmtDateTime(c.sentAt)}
-      </Text>
-    ),
+    render: (c) =>
+      isScheduledCampaign(c.status, c.scheduledAt) ? (
+        <Text numberOfLines={2} className="text-sm text-amber-700 dark:text-amber-300">
+          {`Scheduled for ${fmtDateTime(c.scheduledAt)}`}
+        </Text>
+      ) : (
+        <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
+          {fmtDateTime(c.sentAt)}
+        </Text>
+      ),
   },
   {
     key: "actions",

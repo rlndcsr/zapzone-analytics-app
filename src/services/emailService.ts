@@ -1,5 +1,6 @@
 import { apiRequest } from "../lib/api";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
+import { campaignDisplayStatus, campaignTiming } from "../lib/email/campaignSchedule";
 import {
   EVENT_PHOTOS_CATEGORY,
   emailTemplateCategoryLabel,
@@ -368,6 +369,7 @@ export type EmailCampaignRow = {
   status: string;
   statusLabel: string;
   sentAt: string | null;
+  scheduledAt: string | null;
 };
 
 type RawCampaign = {
@@ -379,7 +381,12 @@ type RawCampaign = {
   failed_count?: number | null;
   status?: string | null;
   sent_at?: string | null;
+  scheduled_at?: string | null;
 };
+
+/** "Scheduled" for a pending campaign waiting on its send time, else the status itself. */
+const campaignStatusLabel = (status: string | null | undefined, scheduledAt: string | null | undefined) =>
+  humanize(status ? campaignDisplayStatus(status, scheduledAt) : null) || "Draft";
 
 /** GET /api/email-campaigns — bulk email sends. */
 export async function fetchEmailCampaigns(
@@ -396,8 +403,9 @@ export async function fetchEmailCampaigns(
       sentCount: Number(c.sent_count ?? 0),
       failedCount: Number(c.failed_count ?? 0),
       status: c.status ?? "draft",
-      statusLabel: humanize(c.status) || "Draft",
+      statusLabel: campaignStatusLabel(c.status, c.scheduled_at),
       sentAt: c.sent_at ?? null,
+      scheduledAt: c.scheduled_at ?? null,
     })),
   };
 }
@@ -426,6 +434,8 @@ export type CreateEmailCampaignInput = {
   customEmails?: string[];
   emailTemplateId?: number | null;
   sendNow: boolean;
+  /** Send later from the server's scheduler; never set for event registrants. */
+  scheduledAt?: Date | null;
   locationId?: number | null;
   /** Only when sending to event registrants. */
   events?: CampaignEventFilter;
@@ -462,7 +472,7 @@ export async function createEmailCampaign(
     name: input.name,
     subject: input.subject,
     body: input.body,
-    send_now: input.sendNow,
+    ...campaignTiming(input.sendNow, input.scheduledAt),
     ...campaignRecipientBody(input),
   };
   if (input.emailTemplateId != null) body.email_template_id = input.emailTemplateId;
@@ -631,7 +641,7 @@ export async function fetchEmailCampaignDetail(
     subject: d.subject?.trim() || "",
     body: d.body ?? "",
     status: d.status ?? "draft",
-    statusLabel: humanize(d.status) || "Draft",
+    statusLabel: campaignStatusLabel(d.status, d.scheduled_at),
     recipientTypes: Array.isArray(d.recipient_types) ? d.recipient_types : [],
     customEmails: Array.isArray(d.custom_emails) ? d.custom_emails : [],
     totalRecipients: Number(d.total_recipients ?? 0),
