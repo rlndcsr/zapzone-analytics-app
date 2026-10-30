@@ -403,102 +403,6 @@ const BookingCard = ({
   );
 };
 
-/** Module shortcuts, rendered as a 2-column grid of square cards (the same
- *  design the Attractions / Events modules use). */
-const NAV_CARDS: {
-  icon: ComponentIconName;
-  title: string;
-  desc: string;
-  cta: string;
-  route: string;
-}[] = [
-  {
-    icon: "camera",
-    title: "Check-In / Waivers",
-    desc: "Scan any code, or find a guest",
-    cta: "Open Check-In",
-    route: "/check-in",
-  },
-  {
-    icon: "grid",
-    title: "Space Schedule",
-    desc: "View all customer bookings",
-    cta: "View Schedule",
-    route: "/bookings/space-schedule",
-  },
-  {
-    icon: "map-pin",
-    title: "Location Requests",
-    desc: "Review location change requests",
-    cta: "Review Requests",
-    route: "/bookings/location-requests",
-  },
-  {
-    icon: "calendar",
-    title: "Calendar View",
-    desc: "Browse bookings on a calendar",
-    cta: "Open Calendar",
-    route: "/bookings/calendar",
-  },
-];
-
-const NAV_CARD_SHADOW = {
-  shadowColor: "#424242",
-  shadowOffset: { width: 0, height: 1 },
-  shadowOpacity: 0.04,
-  shadowRadius: 6,
-  elevation: 1,
-} as const;
-
-/** One square shortcut tile in the grid above the KPIs. */
-const NavSquareCard = ({
-  icon,
-  title,
-  desc,
-  cta,
-  onPress,
-}: {
-  icon: ComponentIconName;
-  title: string;
-  desc: string;
-  cta: string;
-  onPress: () => void;
-}) => (
-  <Pressable
-    onPress={onPress}
-    className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-    style={NAV_CARD_SHADOW}
-    accessibilityRole="button"
-    accessibilityLabel={title}
-  >
-    <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-      <Feather name={icon} size={20} color={PRIMARY} />
-    </View>
-    <Text
-      numberOfLines={1}
-      className="text-sm font-bold text-gray-900 dark:text-white mb-1"
-    >
-      {title}
-    </Text>
-    <Text
-      numberOfLines={2}
-      style={{ minHeight: 28 }}
-      className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-    >
-      {desc}
-    </Text>
-    <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-      <Text
-        numberOfLines={1}
-        className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
-      >
-        {cta}
-      </Text>
-      <Feather name="chevron-right" size={16} color={PRIMARY} />
-    </View>
-  </Pressable>
-);
-
 type KpiTone = { bg: string; tint: string };
 
 /** All metric cards share one blue accent, as every web card does. */
@@ -1117,7 +1021,7 @@ const Bookings = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Bookings
+            Manage Bookings
           </Text>
           {/* Page-level "More" menu (mirrors the web header ActionMenu). */}
           <Pressable
@@ -1149,21 +1053,6 @@ const Bookings = () => {
           {/* Global workspace location selector (company-admin only). */}
           <View className="mb-5">
             <LocationWorkspaceSelector />
-          </View>
-
-          {/* Module shortcuts — a 2-column grid of square cards. */}
-          <View className="flex-row flex-wrap -mx-1.5">
-            {NAV_CARDS.map((item) => (
-              <View key={item.route} className="w-1/2 px-1.5 mb-3">
-                <NavSquareCard
-                  icon={item.icon}
-                  title={item.title}
-                  desc={item.desc}
-                  cta={item.cta}
-                  onPress={() => router.push(item.route as never)}
-                />
-              </View>
-            ))}
           </View>
 
           {/* The two entry points, side by side: Manual Booking (a single-page

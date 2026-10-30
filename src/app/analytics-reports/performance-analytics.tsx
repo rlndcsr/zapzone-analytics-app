@@ -42,7 +42,6 @@ import { AreaChart } from "../../components/ui/AreaChart";
 import { BarChart } from "../../components/ui/BarChart";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
-import { NavTileCard } from "../../components/ui/NavTileCard";
 import { PieChart } from "../../components/ui/PieChart";
 import { SheetSelect } from "../../components/ui/SheetSelect";
 import { PerformanceAnalyticsSkeleton } from "../../components/ui/skeleton/PerformanceAnalyticsSkeleton";
@@ -231,31 +230,6 @@ const CompanyPerformanceAnalytics = () => {
             <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {scopeLabel}
             </Text>
-          </View>
-
-          {/* Sibling report shortcuts — side-by-side square cards, the same
-              design the other modules use. */}
-          <View className="flex-row items-stretch gap-3">
-            <View className="flex-1">
-              <NavTileCard
-                icon="bar-chart"
-                title="Page Analytics"
-                desc="Visitors, engagement, conversions"
-                cta="View Analytics"
-                onPress={() => router.push("/analytics-reports/page-analytics")}
-              />
-            </View>
-            <View className="flex-1">
-              <NavTileCard
-                icon="bar-chart-2"
-                title="Accounting"
-                desc="Purchases made on selected dates"
-                cta="View Accounting"
-                onPress={() =>
-                  router.push("/analytics-reports/accounting-analytics")
-                }
-              />
-            </View>
           </View>
 
           {/* Period + this page's own location filter (the web's header row) */}

@@ -189,28 +189,10 @@ const SmsNotifications = () => {
         }
       >
         <View className="px-5 gap-4">
-          {/* Intro */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              SMS Notifications
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Automated text messages for parties, attractions, and events
-            </Text>
-            <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2 leading-relaxed">
-              Text-message templates that fire automatically alongside the
-              matching email. Edit the wording; merge fields like{" "}
-              {"{{customer_first_name}}"} are filled in when sent.
-            </Text>
-          </View>
-
           <Pressable
             onPress={handleSync}
             disabled={syncing}
-            className={`flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 ${
+            className={`mt-6 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 ${
               syncing ? "opacity-50" : "active:opacity-80"
             }`}
             accessibilityRole="button"

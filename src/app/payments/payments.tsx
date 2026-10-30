@@ -216,70 +216,6 @@ function PaymentCard({ p, deleted }: { p: PaymentRow; deleted?: boolean }) {
   );
 }
 
-/**
- * One of the module's square shortcut cards — the same card the Attractions,
- * Events and Packages modules use, except these open a sheet instead of
- * pushing a route, so the press handler comes in rather than a path.
- */
-const ShortcutCard = ({
-  icon,
-  title,
-  subtitle,
-  action,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  title: string;
-  subtitle: string;
-  /** The blue call to action in the card's footer. */
-  action: string;
-  onPress: () => void;
-}) => (
-  <Pressable
-    onPress={onPress}
-    accessibilityRole="button"
-    accessibilityLabel={title}
-    className="aspect-square bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-    style={{
-      // Structural, so it is a style and not a `w-[48%]` class: a utility that
-      // has not made it into the generated stylesheet yet would collapse the
-      // card to its content width and break the grid.
-      width: "48%",
-      shadowColor: "#424242",
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.04,
-      shadowRadius: 6,
-      elevation: 1,
-    }}
-  >
-    <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-      <Feather name={icon} size={20} color={PRIMARY} />
-    </View>
-    <Text
-      numberOfLines={1}
-      className="text-sm font-bold text-gray-900 dark:text-white mb-1"
-    >
-      {title}
-    </Text>
-    <Text
-      numberOfLines={2}
-      style={{ minHeight: 28 }}
-      className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight"
-    >
-      {subtitle}
-    </Text>
-    <View className="flex-row items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-neutral-800">
-      <Text
-        numberOfLines={1}
-        className="flex-1 mr-1 text-xs font-medium text-blue-600 dark:text-blue-400"
-      >
-        {action}
-      </Text>
-      <Feather name="chevron-right" size={16} color={PRIMARY} />
-    </View>
-  </Pressable>
-);
-
 const Payments = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -394,7 +330,10 @@ const Payments = () => {
   // Deep link: open a payment's detail sheet directly when navigated here from a
   // notification (e.g. /payments/payments?openId=123). Wait until the list has
   // loaded before resolving; if the record is gone, tell the user and stay put.
-  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  const { openId, sheet } = useLocalSearchParams<{
+    openId?: string;
+    sheet?: string;
+  }>();
   useEffect(() => {
     if (!openId || loading) return;
     const match = payments.find((p) => String(p.id) === openId);
@@ -405,6 +344,15 @@ const Payments = () => {
     }
     router.setParams({ openId: undefined });
   }, [openId, loading, payments, router]);
+
+  // From the Payments hub (?sheet=invoices / ?sheet=deleted): open that sheet
+  // once, as the matching button used to.
+  useEffect(() => {
+    if (sheet === "invoices") setShowInvoices(true);
+    else if (sheet === "deleted") setShowDeleted(true);
+    else return;
+    router.setParams({ sheet: undefined });
+  }, [sheet, router]);
 
   // Stat cards — counts + revenue over the full fetched set.
   const stats = useMemo(() => {
@@ -826,7 +774,7 @@ const Payments = () => {
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">Payments</Text>
+          <Text className="text-gray-900 dark:text-white text-lg font-bold">Manage Payments</Text>
           {/* Page-level "More" menu (mirrors the Attractions header menu):
               hosts Export CSV / Export Invoices, and spins in place while one
               of them runs. Refreshing stays on pull-to-refresh. */}
@@ -852,38 +800,7 @@ const Payments = () => {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View className="px-5 gap-4">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6" style={CARD_SHADOW}>
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">Payments</Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              View and manage all payment transactions
-            </Text>
-          </View>
-
-          {/* Package Invoices and View Deleted — the module's shortcuts as
-              equal square cards, two per row, as in the other modules. Both
-              exports live in the header's "More" menu. */}
-          <View
-            className="flex-row flex-wrap justify-between"
-            style={{ rowGap: 12 }}
-          >
-            <ShortcutCard
-              icon="package"
-              title="Package Invoices"
-              subtitle="Every invoice for one package"
-              action="Export Invoices"
-              onPress={() => setShowInvoices(true)}
-            />
-            <ShortcutCard
-              icon="trash-2"
-              title="View Deleted"
-              subtitle="Deleted payments and their totals"
-              action="Restore or Remove"
-              onPress={() => setShowDeleted(true)}
-            />
-          </View>
-
+        <View className="px-5 pt-6 gap-4">
           {/* Skeleton (first load) */}
           {showInitialLoader && <PaymentsListSkeleton />}
 

@@ -1,4 +1,4 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
@@ -44,7 +44,6 @@ import {
 } from "../../components/ui/CustomersTable";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
-import { NavTileCard } from "../../components/ui/NavTileCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { type SheetSelectOption } from "../../components/ui/SheetSelect";
 import { StatTile } from "../../components/ui/StatTile";
@@ -217,7 +216,10 @@ const Customers = () => {
   // the contact turns up in a page that has landed, but only declare it missing
   // once the whole walk is done — the list paints progressively, so a contact
   // on a later page is "not here yet", not gone.
-  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  const { openId, add } = useLocalSearchParams<{
+    openId?: string;
+    add?: string;
+  }>();
   useEffect(() => {
     if (!openId) return;
     const match = allRows.find((c) => String(c.id) === openId);
@@ -229,6 +231,14 @@ const Customers = () => {
     }
     router.setParams({ openId: undefined });
   }, [openId, complete, allRows, router]);
+
+  // From the Customers hub's "Add Customer" shortcut (?add=1): open the add
+  // form once, as the "Add Customer" button does.
+  useEffect(() => {
+    if (add !== "1") return;
+    setSheetContact(null);
+    router.setParams({ add: undefined });
+  }, [add, router]);
 
   const reqRef = useRef(0);
   // Whether a full walk has ever finished. A ref, not state: `load` is rebuilt
@@ -716,7 +726,7 @@ const Customers = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Customers
+            Manage Customers
           </Text>
           {/* Page-level "More" menu (mirrors the Attractions header menu):
               hosts Export CSV / Campaign Export. */}
@@ -739,44 +749,7 @@ const Customers = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        <View className="px-5 gap-4">
-          {/* Sub-page shortcuts — square tiles side by side, the same design the
-              Attractions and Events modules use. */}
-          <View className="mt-6 flex-row flex-wrap items-stretch">
-            <View className="w-1/2 pr-1.5 mb-3">
-              <NavTileCard
-                icon="pie-chart"
-                title="Customer Analytics"
-                desc="KPIs, trends, top customers, and segments"
-                cta="View Analytics"
-                onPress={() => router.push("/customers/analytics")}
-              />
-            </View>
-            <View className="w-1/2 pl-1.5 mb-3">
-              <NavTileCard
-                icon="phone-call"
-                title="Customer Concerns"
-                desc="Guests waiting on a call or who left checkout"
-                cta="View Concerns"
-                onPress={() => router.push("/customers/customer-concerns")}
-              />
-            </View>
-            <View className="w-1/2 pr-1.5">
-              <NavTileCard
-                // Footprints, like the web sidebar's icon. Feather has no
-                // footprint glyph, so this one comes from Ionicons.
-                icon="activity"
-                renderIcon={(color, size) => (
-                  <Ionicons name="footsteps-outline" size={size} color={color} />
-                )}
-                title="Visitor Tracking"
-                desc="Every visit as its own session, one visitor a day"
-                cta="View Sessions"
-                onPress={() => router.push("/customers/visitor-tracking")}
-              />
-            </View>
-          </View>
-
+        <View className="px-5 pt-6 gap-4">
           {/* KPI cards — skeleton while loading (tiles match StatTile exactly). */}
           {showSkeleton ? (
             <AnalyticsSkeleton tiles={4} panels={0} />

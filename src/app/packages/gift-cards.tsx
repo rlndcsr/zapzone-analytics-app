@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -310,6 +310,17 @@ const GiftCards = () => {
     setCTargeting(EMPTY_TARGETING);
     setShowCreate(true);
   };
+
+  // Opened from the Packages hub's "Create Gift Card" shortcut
+  // (?create=1): show the create form once, then drop the param.
+  const { create } = useLocalSearchParams<{ create?: string }>();
+  useEffect(() => {
+    if (create !== "1") return;
+    openCreate();
+    router.setParams({ create: undefined });
+    // openCreate is recreated each render; the param is the only trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [create]);
 
   const submitCreate = async () => {
     const token = getToken();

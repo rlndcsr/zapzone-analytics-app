@@ -53,19 +53,19 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
     key: "bookings",
     label: "Bookings",
     icon: Calendar,
-    route: "/bookings/bookings",
+    route: "/bookings/bookings-hub",
   },
   {
     key: "packages",
     label: "Packages",
     icon: Package,
-    route: "/packages/packages",
+    route: "/packages/packages-hub",
   },
   {
     key: "pricing",
     label: "Pricing",
     icon: Percent,
-    route: "/pricing/pricing",
+    route: "/pricing/pricing-hub",
   },
   {
     // Between Pricing and Waivers, as in the web admin sidebar.
@@ -78,7 +78,7 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
     key: "waivers",
     label: "Waivers",
     icon: FileSignature,
-    route: "/waivers/waivers",
+    route: "/waivers/waivers-hub",
   },
   {
     key: "photos",
@@ -90,31 +90,31 @@ const BASE_NAV_MENU_ITEMS: NavMenuItem[] = [
     key: "customers",
     label: "Customers",
     icon: Users,
-    route: "/customers/customers",
+    route: "/customers/customers-hub",
   },
   {
     key: "memberships",
     label: "Memberships",
     icon: IdCard,
-    route: "/memberships/memberships",
+    route: "/memberships/memberships-hub",
   },
   {
     key: "email",
     label: "Email Campaign",
     icon: Mail,
-    route: "/email-campaign/campaigns",
+    route: "/email-campaign/email-campaign-hub",
   },
   {
     key: "payments",
     label: "Payments",
     icon: CreditCard,
-    route: "/payments/payments",
+    route: "/payments/payments-hub",
   },
   {
     key: "analytics",
     label: "Analytics & Reports",
     icon: BarChart3,
-    route: "/analytics-reports/performance-analytics",
+    route: "/analytics-reports/analytics-hub",
   },
 ];
 
@@ -122,14 +122,14 @@ const USER_MANAGEMENT_ITEM: NavMenuItem = {
   key: "management",
   label: "User Management",
   icon: UserCog,
-  route: "/user-managements/manage-accounts",
+  route: "/user-managements/user-management-hub",
 };
 
 const ATTENDANTS_MANAGEMENT_ITEM: NavMenuItem = {
   key: "management",
   label: "Attendants Management",
   icon: UserCog,
-  route: "/user-managements/attendants",
+  route: "/user-managements/user-management-hub",
 };
 
 function managementItemForRole(

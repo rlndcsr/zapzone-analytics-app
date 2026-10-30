@@ -98,7 +98,11 @@ export default function EscapeRoomsScreen() {
       : activeLocation.id
     : (user?.location_id ?? null);
 
-  const params = useLocalSearchParams<{ date?: string; session?: string }>();
+  const params = useLocalSearchParams<{
+    date?: string;
+    session?: string;
+    checkin?: string;
+  }>();
   const linkedDate = params.date && DATE_KEY.test(params.date) ? params.date : null;
   const [date, setDate] = useState(() => linkedDate ?? toKey(venueToday()));
   // Until staff pick a day, follow the venue's "today" as the backend reports it.
@@ -290,6 +294,16 @@ export default function EscapeRoomsScreen() {
       )
       .catch(() => showToast("That game could not be found.", "error"));
   }, [day, openSlot, showToast]);
+
+  // From the Photos hub's "Guest Check-in" shortcut (?checkin=1): show the
+  // location's check-in QR, as the header button does, once the day is in.
+  const pendingCheckIn = useRef(params.checkin === "1");
+  useEffect(() => {
+    if (!pendingCheckIn.current || !day) return;
+    pendingCheckIn.current = false;
+    if (day.kioskUrl) setQr(checkInQr(day.kioskUrl, day.location.id));
+    else showToast("Guest check-in isn't available for this location yet.", "info");
+  }, [day, showToast]);
 
   const closeGame = useCallback(() => {
     openSequence.current++;

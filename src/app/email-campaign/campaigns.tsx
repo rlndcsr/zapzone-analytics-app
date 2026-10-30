@@ -16,7 +16,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
 import { EmailCampaignsTable } from "../../components/ui/EmailCampaignsTable";
 import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
-import { NavTileCard } from "../../components/ui/NavTileCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -317,7 +316,7 @@ const EmailCampaigns = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Email Campaigns
+            Manage Campaigns
           </Text>
           <Pressable
             onPress={onRefresh}
@@ -337,56 +336,9 @@ const EmailCampaigns = () => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View className="px-5 gap-4">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6" style={CARD_SHADOW}>
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Email Campaigns
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Send bulk emails to customers and staff
-            </Text>
-          </View>
-
-          {/* Nav: Templates · Email Notifications · SMS Notifications — square
-              cards two to a row, the same design the other modules' sub-page
-              shortcuts use. */}
-          <View className="flex-row items-stretch gap-3">
-            <View className="flex-1">
-              <NavTileCard
-                icon="mail"
-                title="Email Templates"
-                desc="Reusable email templates"
-                cta="View Templates"
-                onPress={() => router.push("/email-campaign/email-templates")}
-              />
-            </View>
-            <View className="flex-1">
-              <NavTileCard
-                icon="bell"
-                title="Email Notifications"
-                desc="Automated booking & payment emails"
-                cta="View Notifications"
-                onPress={() => router.push("/email-campaign/email-notification")}
-              />
-            </View>
-          </View>
-          <View className="flex-row items-stretch gap-3">
-            <View className="flex-1">
-              <NavTileCard
-                icon="message-square"
-                title="SMS Notifications"
-                desc="Automated text messages for parties, attractions & events"
-                cta="View SMS"
-                onPress={() => router.push("/email-campaign/sms-notifications")}
-              />
-            </View>
-            {/* Keeps the lone tile the same square size as the row above. */}
-            <View className="flex-1" />
-          </View>
-
           <Pressable
             onPress={() => router.push("/email-campaign/create-campaign")}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
+            className="mt-6 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
             <Text className="text-sm font-semibold text-white">

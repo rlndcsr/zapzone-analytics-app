@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -246,6 +246,17 @@ const AddOns = () => {
     setFormTarget("new");
     loadLocations();
   };
+
+  // Opened from the Packages hub's "Create Add-on" shortcut
+  // (?create=1): show the create form once, then drop the param.
+  const { create } = useLocalSearchParams<{ create?: string }>();
+  useEffect(() => {
+    if (create !== "1") return;
+    openCreate();
+    router.setParams({ create: undefined });
+    // openCreate is recreated each render; the param is the only trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [create]);
 
   const openEdit = (addOn: AddOnRow) => {
     setFLocationId(addOn.locationId);

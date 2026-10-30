@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -200,6 +200,15 @@ const MembershipPlans = () => {
   const [editing, setEditing] = useState<MembershipPlanRow | null | undefined>(
     undefined, // undefined = closed, null = new plan, row = edit
   );
+
+  // From the Memberships hub's "New Plan" shortcut (?create=1): open the
+  // New Plan form once, as the "New Plan" button does.
+  const { create } = useLocalSearchParams<{ create?: string }>();
+  useEffect(() => {
+    if (create !== "1") return;
+    setEditing(null);
+    router.setParams({ create: undefined });
+  }, [create, router]);
   const [benefitsPlan, setBenefitsPlan] = useState<MembershipPlanRow | null>(null);
 
   // Client-side pagination over the plans list.

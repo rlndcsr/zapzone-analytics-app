@@ -274,7 +274,11 @@ function ScheduleField({
 
 export default function PhotoOverlaysScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ event?: string; location?: string }>();
+  const params = useLocalSearchParams<{
+    event?: string;
+    location?: string;
+    upload?: string;
+  }>();
 
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
@@ -425,6 +429,14 @@ export default function PhotoOverlaysScreen() {
     router.setParams({ event: undefined, location: undefined });
     setLinkVersion((version) => version + 1);
   }, [params.event, params.location]);
+
+  // From the Photos hub's "Upload Overlay" shortcut (?upload=1): open the
+  // upload form once, as the "Upload overlay" button does.
+  useEffect(() => {
+    if (params.upload !== "1") return;
+    router.setParams({ upload: undefined });
+    if (canManage) setShowForm(true);
+  }, [params.upload, canManage]);
 
   // Open the upload with the linked event chosen, once its location's event days are in.
   useEffect(() => {

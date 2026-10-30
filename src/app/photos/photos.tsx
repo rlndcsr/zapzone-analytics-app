@@ -1,160 +1,125 @@
-import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
 import { DoorOpen } from "lucide-react-native";
-import { useColorScheme } from "nativewind";
-import { type ComponentProps, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { NavTileCard } from "../../components/ui/NavTileCard";
+import {
+  ModuleHubScreen,
+  type HubModule,
+  type HubQuickLink,
+} from "../../components/ui/ModuleHub";
 import { getCurrentUser } from "../../lib/session";
 
-type ComponentIconName = ComponentProps<typeof Feather>["name"];
+const doorIcon = (color: string, size: number) => (
+  <DoorOpen size={size} color={color} />
+);
 
-type PhotoNavRow = {
-  icon: ComponentIconName;
-  /** For a web icon Feather lacks (the Escape Rooms door). */
-  renderIcon?: (color: string, size: number) => ReactNode;
-  title: string;
-  desc: string;
-  cta: string;
-  route: string;
-  managerOnly?: boolean;
-  pending?: boolean;
-};
+/** One-tap actions. Guest Check-in opens Escape Rooms with its check-in QR
+ *  showing (?checkin=1); Upload Overlay opens the upload form (?upload=1). */
+const QUICK_LINKS: (HubQuickLink & { managerOnly?: boolean })[] = [
+  { icon: "camera", label: "Take Photos", route: "/photos/capture" },
+  {
+    icon: "maximize",
+    label: "Guest Check-in",
+    route: "/photos/escape-rooms?checkin=1",
+  },
+  {
+    icon: "upload",
+    label: "Upload Overlay",
+    route: "/photos/overlays?upload=1",
+    managerOnly: true,
+  },
+];
 
-/** Labels, descriptions and order all follow the web admin's Photos section.
- *  Descriptions are kept to the two lines the square tile shows. */
-const NAV_ROWS: PhotoNavRow[] = [
+/** Titles and order follow the web admin's Photos section. */
+const MODULES: (HubModule & { managerOnly?: boolean })[] = [
   {
     icon: "camera",
     title: "Take Photos",
-    desc: "Capture and send customer photos",
-    cta: "Open Camera",
+    description: "Capture customer photos and send them by email or SMS.",
+    tags: ["Camera", "Send"],
+    accent: "#0644C7",
     route: "/photos/capture",
   },
   {
     icon: "log-in",
-    renderIcon: (color, size) => <DoorOpen size={size} color={color} />,
+    renderIcon: doorIcon,
     title: "Escape Rooms",
-    desc: "Group photo, finish time and send",
-    cta: "Open Games",
+    description: "Group photo, finish time and send, for each game.",
+    tags: ["Games", "Finish time"],
+    accent: "#059669",
     route: "/photos/escape-rooms",
   },
   {
     icon: "image",
     title: "Photo Library",
-    desc: "Browse, download and resend",
-    cta: "View Library",
+    description: "Browse, download and resend every photo taken.",
+    tags: ["Browse", "Resend"],
+    accent: "#D97706",
     route: "/photos/library",
   },
   {
     icon: "monitor",
     title: "Slideshow Queue",
-    desc: "What the venue screen is showing",
-    cta: "Manage Queue",
+    description: "What the venue screen is showing, and what's next.",
+    tags: ["Venue screen", "Queue"],
+    accent: "#7C3AED",
     route: "/photos/slideshow-queue",
   },
   {
     icon: "layers",
     title: "Overlays",
-    desc: "Branded frame applied to photos",
-    cta: "Manage Overlays",
+    description: "The branded frame applied to every photo.",
+    tags: ["Branding", "Frames"],
+    accent: "#DB2777",
     route: "/photos/overlays",
     managerOnly: true,
   },
   {
     icon: "send",
     title: "Delivery Log",
-    desc: "Every email and SMS photo link",
-    cta: "View Log",
+    description: "Every photo link sent by email and SMS.",
+    tags: ["Email", "SMS"],
+    accent: "#0891B2",
     route: "/photos/delivery-log",
   },
   {
     icon: "bar-chart-2",
     title: "Photo Reports",
-    desc: "Capture, delivery, QR and kiosk stats",
-    cta: "View Reports",
+    description: "Capture, delivery, QR and kiosk stats.",
+    tags: ["Stats", "Kiosk"],
+    accent: "#DC2626",
     route: "/photos/reports",
     managerOnly: true,
   },
   {
     icon: "settings",
     title: "Photo Settings",
-    desc: "Passcodes, date layer and retention",
-    cta: "Open Settings",
+    description: "Passcodes, the date layer and photo retention.",
+    tags: ["Passcodes", "Retention"],
+    accent: "#475569",
     route: "/photos/settings",
     managerOnly: true,
   },
 ];
 
+// The Photos module hub, same design as the other modules.
 export default function PhotosScreen() {
-  const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-
   const role = getCurrentUser()?.role;
   const canManageSubModules =
     role === "company_admin" || role === "location_manager";
 
-  const rows = NAV_ROWS.filter(
-    (row) => !row.managerOnly || canManageSubModules,
+  const quickLinks = QUICK_LINKS.filter(
+    (link) => !link.managerOnly || canManageSubModules,
+  );
+  const modules = MODULES.filter(
+    (item) => !item.managerOnly || canManageSubModules,
   );
 
   return (
-    <View className="flex-1 bg-gray-50 dark:bg-black">
-      <View className="w-full border-b border-gray-100 bg-white px-5 pb-5 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            Photos
-          </Text>
-          <View style={{ width: 36 }} />
-        </View>
-      </View>
-
-      <ScrollView
-        className="flex-1"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-      >
-        <View className="mt-5 px-5">
-          <Text className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-            Capture, deliver and display customer photos.
-          </Text>
-
-          {/* Global workspace location selector (company-admin only). */}
-          <View className="mb-5">
-            <LocationWorkspaceSelector />
-          </View>
-
-          {/* Sub-page shortcuts — a 2-column grid of square cards. */}
-          <View className="-mx-1.5 mb-2 flex-row flex-wrap">
-            {rows.map((row) => (
-              <View key={row.route} className="mb-3 w-1/2 px-1.5">
-                <NavTileCard
-                  icon={row.icon}
-                  renderIcon={row.renderIcon}
-                  title={row.title}
-                  desc={row.desc}
-                  cta={row.cta}
-                  disabled={row.pending}
-                  badge={row.pending ? "Coming soon" : undefined}
-                  onPress={() => router.push(row.route as never)}
-                />
-              </View>
-            ))}
-          </View>
-        </View>
-      </ScrollView>
-    </View>
+    <ModuleHubScreen
+      title="Photos"
+      heading="What would you like to do?"
+      intro="Capture, deliver and display customer photos, from the camera to the venue screen."
+      quickLinks={quickLinks}
+      modules={modules}
+    />
   );
 }

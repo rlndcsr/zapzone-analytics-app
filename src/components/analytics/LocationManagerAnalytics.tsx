@@ -35,7 +35,6 @@ import {
 import { BarChart } from "../ui/BarChart";
 import { BottomSheet } from "../ui/BottomSheet";
 import { DateRangeSheet, formatShortDate } from "../ui/DateRangeSheet";
-import { NavTileCard } from "../ui/NavTileCard";
 import { SheetSelect } from "../ui/SheetSelect";
 import { PerformanceAnalyticsSkeleton } from "../ui/skeleton/PerformanceAnalyticsSkeleton";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -289,30 +288,6 @@ export default function LocationManagerAnalytics() {
               {report?.location.fullAddress ||
                 "Revenue, bookings and attraction performance"}
             </Text>
-          </View>
-
-          {/* Sibling report shortcuts (the manager sidebar's other two entries) */}
-          <View className="flex-row items-stretch gap-3">
-            <View className="flex-1">
-              <NavTileCard
-                icon="bar-chart"
-                title="Page Analytics"
-                desc="Visitors, engagement, conversions"
-                cta="View Analytics"
-                onPress={() => router.push("/analytics-reports/page-analytics")}
-              />
-            </View>
-            <View className="flex-1">
-              <NavTileCard
-                icon="bar-chart-2"
-                title="Accounting"
-                desc="Purchases made on selected dates"
-                cta="View Accounting"
-                onPress={() =>
-                  router.push("/analytics-reports/accounting-analytics")
-                }
-              />
-            </View>
           </View>
 
           {/* Period select + Export — the web header's controls */}

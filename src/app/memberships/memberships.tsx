@@ -233,7 +233,10 @@ const Memberships = () => {
   // Deep link: open a member's details screen when navigated here from a
   // notification (e.g. ?openId=123). Wait until the list has loaded to verify
   // the record exists; otherwise show a friendly message.
-  const { openId } = useLocalSearchParams<{ openId?: string }>();
+  const { openId, add } = useLocalSearchParams<{
+    openId?: string;
+    add?: string;
+  }>();
   useEffect(() => {
     if (!openId || loading) return;
     const match = memberships.find((m) => String(m.id) === openId);
@@ -245,6 +248,14 @@ const Memberships = () => {
       );
     router.setParams({ openId: undefined });
   }, [openId, loading, memberships, router, openDetails]);
+
+  // From the Memberships hub's "Add Member" shortcut (?add=1): open the Add
+  // Member sheet once, as the "Add Member" button does.
+  useEffect(() => {
+    if (add !== "1") return;
+    setShowAdd(true);
+    router.setParams({ add: undefined });
+  }, [add, router]);
 
   // Locations for the filter + Add Member picker come from the dashboard
   // metrics rollup (the /api/locations endpoint is too heavy for mobile).
@@ -402,7 +413,7 @@ const Memberships = () => {
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
           <Text className="text-gray-900 dark:text-white items-center text-lg font-bold">
-            Memberships
+            Manage Memberships
           </Text>
           <View className="flex-row  gap-2"></View>
         </View>
@@ -417,41 +428,9 @@ const Memberships = () => {
         }
       >
         <View className="px-5">
-          {/* Intro */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Memberships
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              View and manage all member subscriptions
-            </Text>
-          </View>
-
-          {/* Actions: Scan · Plans · Reports pill, then Add Member */}
-          <FilterPill>
-            <PillSegment
-              label="Check-In"
-              onPress={() => router.push("/check-in")}
-              renderIcon={(c) => <Feather name="maximize" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Plans"
-              onPress={() => router.push("/memberships/membership-plan")}
-              renderIcon={(c) => <Feather name="layers" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Reports"
-              onPress={() => router.push("/memberships/membership-reports")}
-              renderIcon={(c) => <Feather name="bar-chart-2" size={15} color={c} />}
-            />
-          </FilterPill>
-
           <Pressable
             onPress={() => setShowAdd(true)}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-5"
+            className="mt-6 flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-5"
             accessibilityRole="button"
             accessibilityLabel="Add member"
           >

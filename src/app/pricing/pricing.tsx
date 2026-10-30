@@ -683,40 +683,11 @@ const Pricing = () => {
         }
       >
         <View className="px-5">
-          <Pressable
-            onPress={() => router.push("/pricing/fee-support")}
-            className="mt-5 mb-5 flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800 active:opacity-70"
-            style={{
-              shadowColor: "#424242",
-              shadowOffset: { width: 0, height: 1 },
-              shadowOpacity: 0.04,
-              shadowRadius: 6,
-              elevation: 1,
-            }}
-          >
-            <View className="w-12 h-12 rounded-xl bg-[#0644C7]/10 items-center justify-center mb-3">
-              <Feather name="dollar-sign" size={20} color="#0644C7" />
-            </View>
-            <Text className="text-sm font-bold text-gray-900 dark:text-white mb-0.5">
-              Fee Supports
-            </Text>
-            <Text className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
-              Manage additional fees for packages, attractions, events, and
-              memberships
-            </Text>
-            <View className="flex-row items-center mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-              <Text className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                View All
-              </Text>
-              <Feather name="chevron-right" size={16} color="#0644C7" />
-            </View>
-          </Pressable>
-
           {/* Special Pricing — the primary filled CTA, full width. Export CSV
-              lives in the header. */}
+              lives in the header. Fee Supports moved to the Pricing hub. */}
           <Pressable
             onPress={() => router.push("/pricing/create-special-pricing")}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 mb-5"
+            className="mt-5 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 mb-5"
           >
             <Feather name="plus" size={16} color="#FFFFFF" />
             <Text className="text-sm font-semibold text-white">

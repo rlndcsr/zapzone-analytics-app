@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -33,7 +33,6 @@ import {
 } from "../../components/ui/FormControls";
 import { KpiCard } from "../../components/ui/KpiCard";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
-import { NavTileCard } from "../../components/ui/NavTileCard";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -1325,6 +1324,23 @@ const ManageAccounts = () => {
     setSheet("invite");
   }, []);
 
+  // From the User Management hub's shortcuts (?invite=1 / ?create=1): open that form
+  // once, as the matching button does.
+  const { invite, create } = useLocalSearchParams<{
+    invite?: string;
+    create?: string;
+  }>();
+  useEffect(() => {
+    if (!canManage) return;
+    if (invite === "1") {
+      openInvite();
+      router.setParams({ invite: undefined });
+    } else if (create === "1") {
+      openCreate();
+      router.setParams({ create: undefined });
+    }
+  }, [invite, create, canManage, openInvite, openCreate]);
+
   const sendInvite = useCallback(async () => {
     const token = getToken();
     if (!token) return;
@@ -1457,58 +1473,10 @@ const ManageAccounts = () => {
           />
         }
       >
-        <View className="px-5">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Manage Accounts
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Manage all staff accounts across your company
-            </Text>
-          </View>
-
+        <View className="px-5 pt-6">
           {/* Global workspace location selector (company-admin only). */}
           <View className="mb-5">
             <LocationWorkspaceSelector />
-          </View>
-
-          {/* Page actions — a 2-column grid of square cards, the same design
-              the Bookings / Packages / Waivers modules use. */}
-          <View className="-mx-1.5 flex-row flex-wrap">
-            <View className="mb-3 w-1/2 px-1.5">
-              <NavTileCard
-                icon="key"
-                title="Employee PINs"
-                desc="Issue staff PINs and set the automatic logout"
-                cta="Manage PINs"
-                onPress={() =>
-                  router.push("/user-managements/staff-pins" as never)
-                }
-              />
-            </View>
-            <View className="mb-3 w-1/2 px-1.5">
-              <NavTileCard
-                icon="activity"
-                title="Activity Log"
-                desc="Review staff account activity"
-                cta="View Log"
-                onPress={() =>
-                  router.push("/user-managements/activity-logs" as never)
-                }
-              />
-            </View>
-            <View className="mb-3 w-1/2 px-1.5">
-              <NavTileCard
-                icon="calendar"
-                title="Day Offs"
-                desc="Blocked dates and holidays"
-                cta="Manage Day Offs"
-                onPress={() =>
-                  router.push("/user-managements/day-offs" as never)
-                }
-              />
-            </View>
           </View>
 
           {/* The two write actions, side by side above the list. */}
