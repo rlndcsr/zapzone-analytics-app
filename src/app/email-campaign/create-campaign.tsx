@@ -34,6 +34,7 @@ import {
   formatScheduleTime,
   resolveSchedule,
 } from "../../lib/email/campaignSchedule";
+import { campaignSendOutcome } from "../../lib/email/campaignSendOutcome";
 import {
   canManageEventPhotoEmails,
   registrantGapMessage,
@@ -267,11 +268,15 @@ const CreateCampaign = () => {
       });
       markEmailCampaignsStale();
       router.back();
+      const outcome = campaignSendOutcome(result.status, result.message);
       if (timing.kind === "later") {
         Alert.alert("Campaign scheduled", `It goes out ${formatScheduleTime(timing.at)}.`);
-      } else if (result.status === "sending" && result.message) {
+      } else if (outcome.kind === "refused") {
+        // Resend turned it down: the reply is still a success, so don't leave it looking sent
+        Alert.alert("Campaign not sent", outcome.message);
+      } else if (outcome.kind === "sending") {
         // a large send carries on after the reply; say so rather than leave it looking done
-        Alert.alert("Campaign sending", result.message);
+        Alert.alert("Campaign sending", outcome.message);
       }
     } catch (e) {
       Alert.alert(

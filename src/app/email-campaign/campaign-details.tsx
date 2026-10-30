@@ -26,6 +26,7 @@ import {
   RECIPIENT_TYPE_LABELS,
 } from "../../lib/email/emailTemplateOptions";
 import { campaignDisplayStatus, isScheduledCampaign } from "../../lib/email/campaignSchedule";
+import { type CampaignSendOutcome, campaignSendOutcome } from "../../lib/email/campaignSendOutcome";
 import { markEmailCampaignsStale } from "../../lib/emailStale";
 import { cleanEmailHtml } from "../../lib/email/safeEmailHtml";
 import { extractImageSrcs, htmlToPlainText } from "../../lib/htmlText";
@@ -120,18 +121,20 @@ const CampaignDetails = () => {
   }, [loadDetail]);
 
   // Run a mutation, then refresh (or leave, for delete). A message the server
-  // sends back ("Sending to 40 people now…") is shown, as the web's toast does.
+  // sends back ("Sending to 40 people now…") is shown, as the web's toast does;
+  // a run Resend refused comes back as a success, so it gets an error title.
   const runAction = useCallback(
-    async (key: string, fn: () => Promise<string | null | void>, leave = false) => {
+    async (key: string, fn: () => Promise<CampaignSendOutcome | void>, leave = false) => {
       const token = getToken();
       if (!token || campaignId == null) return;
       setBusy(key);
       try {
-        const message = await fn();
+        const outcome = await fn();
         markEmailCampaignsStale();
         if (leave) router.back();
         else await loadDetail();
-        if (message) Alert.alert("Resend", message);
+        if (outcome?.message)
+          Alert.alert(outcome.kind === "refused" ? "Resend failed" : "Resend", outcome.message);
       } catch (err) {
         Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
         // a cancel that lost the race (409: already finished) — show where it stands now
@@ -448,7 +451,12 @@ const CampaignDetails = () => {
               variant="primary"
               busy={busy === "resend"}
               disabled={busy !== null}
-              onPress={() => runAction("resend", () => resendEmailCampaign(getToken()!, campaignId!, "failed"))}
+              onPress={() =>
+                runAction("resend", async () => {
+                  const res = await resendEmailCampaign(getToken()!, campaignId!, "failed");
+                  return campaignSendOutcome(res.status, res.message);
+                })
+              }
             />
           )}
           {isFinished && (

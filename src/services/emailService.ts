@@ -462,7 +462,8 @@ function campaignRecipientBody(input: {
 /**
  * POST /api/email-campaigns — create a bulk send (draft when sendNow is false).
  * A large send carries on after the reply: `status` is then "sending" and
- * `message` says so.
+ * `message` says so. When Resend refuses it, `status` is "failed" and
+ * `message` is Resend's reason (see campaignSendOutcome).
  */
 export async function createEmailCampaign(
   token: string,
@@ -679,20 +680,24 @@ export async function cancelEmailCampaign(token: string, id: number): Promise<vo
 
 /**
  * POST /api/email-campaigns/{id}/resend — retry failed (or all) recipients.
- * Returns the server's message ("Sending to 40 people now…", "There was no one
- * left to send it to again.").
+ * Returns the campaign's status after the run and the server's message
+ * ("Sending to 40 people now…", "There was no one left to send it to again.",
+ * or Resend's reason when the campaign comes back "failed").
  */
 export async function resendEmailCampaign(
   token: string,
   id: number,
   type: "failed" | "all" = "failed",
-): Promise<string | null> {
-  const res = await apiRequest<{ message?: string | null }>(`/api/email-campaigns/${id}/resend`, {
+): Promise<{ status: string; message: string | null }> {
+  const res = await apiRequest<{
+    message?: string | null;
+    data?: { status?: string | null };
+  }>(`/api/email-campaigns/${id}/resend`, {
     method: "POST",
     token,
     body: { type },
   });
-  return res?.message ?? null;
+  return { status: res?.data?.status ?? "", message: res?.message ?? null };
 }
 
 /** DELETE /api/email-campaigns/{id} — remove a finished/cancelled campaign. */
