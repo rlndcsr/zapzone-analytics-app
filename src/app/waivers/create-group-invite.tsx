@@ -144,7 +144,7 @@ const CreateGroupInvite = () => {
 
     setSubmitting(true);
     try {
-      await createGroupInvite(token, {
+      const feedback = await createGroupInvite(token, {
         waiverTemplateId: templateId!,
         selectedDate,
         chaperoneName,
@@ -153,7 +153,9 @@ const CreateGroupInvite = () => {
         allowShareableLink: allowShareable,
       });
       markGroupInvitesStale();
-      Alert.alert("Invite sent", "The chaperone has been notified.", [
+      // The invite exists either way; the server says whether the chaperone's
+      // email or text actually went out, and what to do if it didn't.
+      Alert.alert(feedback.title, feedback.message, [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (e) {

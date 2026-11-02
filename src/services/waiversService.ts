@@ -9,6 +9,12 @@ import {
   type KioskSettings,
   type ReturningLookupResult,
 } from "../lib/waivers/kioskContract";
+import {
+  createInviteFeedback,
+  mapInviteRecipient,
+  type GroupInviteRecipient,
+  type RawInviteRecipient,
+} from "../lib/waivers/groupInvites";
 import { kioskAccessTokenFrom } from "../lib/waivers/kioskToken";
 import type {
   VisitPeriodScope,
@@ -176,6 +182,8 @@ export type GroupInvite = {
   locationName: string | null;
   recipientsCount: number;
   completeCount: number;
+  /** Parents whose email/text invite was not accepted by any channel. */
+  failedCount: number;
 };
 
 /** Company-level waiver settings (permission flags + company-wide defaults). */
@@ -290,6 +298,7 @@ type RawInvite = {
   location?: { id?: number; name?: string } | null;
   recipients_count?: number;
   complete_count?: number;
+  failed_count?: number;
 };
 
 type Pagination = {
@@ -456,6 +465,7 @@ function mapInvite(raw: RawInvite): GroupInvite {
     locationName: raw.location?.name?.trim() || null,
     recipientsCount: num(raw.recipients_count, 0),
     completeCount: num(raw.complete_count, 0),
+    failedCount: num(raw.failed_count, 0),
   };
 }
 
@@ -1100,11 +1110,31 @@ export type CreateGroupInviteInput = {
   eventId?: number;
 };
 
-/** POST /api/waiver-bulk-invites — create + notify the chaperone. */
+/**
+ * GET /api/waiver-bulk-invites/{id} — one invite with every parent the
+ * chaperone has added (`recipients`), each carrying its own send/sign status.
+ */
+export async function fetchGroupInviteRecipients(
+  token: string,
+  id: number,
+  signal?: AbortSignal,
+): Promise<GroupInviteRecipient[]> {
+  const res = await apiRequest<{
+    success: boolean;
+    data?: { recipients?: RawInviteRecipient[] | null } | null;
+  }>(`/api/waiver-bulk-invites/${id}`, { token, signal });
+  return (res?.data?.recipients ?? []).map(mapInviteRecipient);
+}
+
+/**
+ * POST /api/waiver-bulk-invites — create + notify the chaperone. The invite is
+ * created on any 2xx; whether the chaperone was actually reached comes back in
+ * `chaperone_notified`, so the caller words its feedback from the result.
+ */
 export async function createGroupInvite(
   token: string,
   input: CreateGroupInviteInput,
-): Promise<void> {
+): Promise<ReturnType<typeof createInviteFeedback>> {
   const body: Record<string, unknown> = {
     waiver_template_id: input.waiverTemplateId,
     selected_date: input.selectedDate,
@@ -1118,10 +1148,19 @@ export async function createGroupInvite(
   if (input.locationId != null) body.location_id = input.locationId;
   if (input.bookingId != null) body.booking_id = input.bookingId;
   if (input.eventId != null) body.event_id = input.eventId;
-  await apiRequest(`/api/waiver-bulk-invites`, { method: "POST", token, body });
+  const res = await apiRequest<{
+    success: boolean;
+    message?: string;
+    data?: { chaperone_notified?: boolean } | null;
+  }>(`/api/waiver-bulk-invites`, { method: "POST", token, body });
+  return createInviteFeedback(res);
 }
 
-/** POST /api/waiver-bulk-invites/{id}/resend — re-notify the chaperone. */
+/**
+ * POST /api/waiver-bulk-invites/{id}/resend — re-notify the chaperone. The
+ * server answers 422 (with the reason in `message`) when no email or text went
+ * out, so a resolved call means the chaperone really was reached.
+ */
 export async function resendGroupInvite(
   token: string,
   id: number,

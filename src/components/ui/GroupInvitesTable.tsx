@@ -10,7 +10,8 @@ import {
 } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
-import { buildChaperoneLink } from "../../lib/waivers/chaperoneLink";
+import { buildChaperoneLink, buildGroupLink } from "../../lib/waivers/chaperoneLink";
+import { groupLinkState } from "../../lib/waivers/groupInvites";
 import type { GroupInvite } from "../../services/waiversService";
 
 const PRIMARY = "#0644C7";
@@ -43,6 +44,73 @@ type RowContext = {
   /** Resend is admin/manager only — the attendant role has no invite actions. */
   canManage: boolean;
   onResend: (invite: GroupInvite) => Promise<void> | void;
+  onViewRecipients: (invite: GroupInvite) => void;
+};
+
+/** Copies `link`, then flips to a green check for two seconds. */
+function useCopyFlash(link: string) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const copy = useCallback(async () => {
+    await Clipboard.setStringAsync(link);
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 2000);
+  }, [link]);
+
+  return { copied, copy };
+}
+
+/**
+ * Group link cell — the web's "Group link" column: a Copy button for the link
+ * parents use to sign once the invite has one, "Enabled" while it's allowed but
+ * not minted yet, else a dash.
+ */
+const GroupLinkCell = ({ invite }: { invite: GroupInvite }) => {
+  const state = groupLinkState(invite);
+  const { copied, copy } = useCopyFlash(
+    invite.shareableToken ? buildGroupLink(invite.shareableToken) : "",
+  );
+  if (state === "enabled")
+    return (
+      <Text className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+        Enabled
+      </Text>
+    );
+  if (state === "off")
+    return <Text className="text-xs text-gray-300 dark:text-gray-600">—</Text>;
+  return (
+    <Pressable
+      onPress={copy}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`Copy the group link for ${invite.chaperoneName}`}
+      className="flex-row items-center gap-1 self-start active:opacity-60"
+    >
+      <Feather
+        name={copied ? "check" : "share-2"}
+        size={13}
+        color={copied ? "#059669" : PRIMARY}
+      />
+      <Text
+        className={`text-xs font-semibold ${
+          copied
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-[#0644C7] dark:text-blue-400"
+        }`}
+      >
+        {copied ? "Copied" : "Copy"}
+      </Text>
+    </Pressable>
+  );
 };
 
 /** A single icon action button inside the Actions cell. Nested Pressable, so it
@@ -77,11 +145,11 @@ const ActionIconButton = ({
 );
 
 /**
- * Row Actions cell — Copy chaperone link and Resend to chaperone, the same two
- * per-row buttons (and order) as the web admin's Group Invites table. The web
- * shows a tooltip plus a toast on copy; native has no tooltip, so the copy
- * button flashes to a green check for two seconds instead — the same feedback
- * the Attractions table's copy-link cell uses.
+ * Row Actions cell — See who has signed, Copy chaperone link and Resend to
+ * chaperone, the same per-row buttons (and order) as the web admin's Group
+ * Invites table. The web shows a tooltip plus a toast on copy; native has no
+ * tooltip, so the copy button flashes to a green check for two seconds instead
+ * — the same feedback the Attractions table's copy-link cell uses.
  */
 const ActionsCell = ({
   invite,
@@ -90,23 +158,8 @@ const ActionsCell = ({
   invite: GroupInvite;
   ctx: RowContext;
 }) => {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFlash(buildChaperoneLink(invite.manageToken));
   const [resending, setResending] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  const onCopy = useCallback(async () => {
-    await Clipboard.setStringAsync(buildChaperoneLink(invite.manageToken));
-    setCopied(true);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), 2000);
-  }, [invite.manageToken]);
 
   const onResend = useCallback(async () => {
     setResending(true);
@@ -120,10 +173,16 @@ const ActionsCell = ({
   return (
     <View className="flex-row items-center gap-1">
       <ActionIconButton
+        icon="list"
+        color={PRIMARY}
+        label={`See who has signed in ${invite.chaperoneName}'s group`}
+        onPress={() => ctx.onViewRecipients(invite)}
+      />
+      <ActionIconButton
         icon={copied ? "check" : "link-2"}
         color={copied ? "#059669" : PRIMARY}
         label={`Copy chaperone link for ${invite.chaperoneName}`}
-        onPress={onCopy}
+        onPress={copy}
       />
       {ctx.canManage && (
         <ActionIconButton
@@ -193,32 +252,38 @@ const COLUMNS: Column[] = [
     ),
   },
   {
-    key: "contacts",
-    label: "Contacts",
-    width: 100,
+    key: "signed",
+    label: "Signed",
+    width: 130,
     render: (invite) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {invite.recipientsCount}
-      </Text>
+      <View>
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          <Text className="font-semibold text-gray-900 dark:text-white">
+            {invite.completeCount}
+          </Text>{" "}
+          of {invite.recipientsCount}
+        </Text>
+        {invite.failedCount > 0 && (
+          <Text
+            numberOfLines={1}
+            className="text-xs text-red-600 dark:text-red-400 mt-0.5"
+          >
+            {invite.failedCount} not delivered
+          </Text>
+        )}
+      </View>
     ),
   },
   {
-    key: "shareable",
-    label: "Shareable",
+    key: "groupLink",
+    label: "Group link",
     width: 110,
-    render: (invite) =>
-      invite.allowShareableLink ? (
-        <Text className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-          Enabled
-        </Text>
-      ) : (
-        <Text className="text-xs text-gray-300 dark:text-gray-600">—</Text>
-      ),
+    render: (invite) => <GroupLinkCell invite={invite} />,
   },
   {
     key: "actions",
     label: "",
-    width: 110,
+    width: 150,
     render: (invite, ctx) => <ActionsCell invite={invite} ctx={ctx} />,
   },
 ];
@@ -227,25 +292,28 @@ const TABLE_WIDTH = COLUMNS.reduce((sum, c) => sum + c.width, 0);
 
 /**
  * Table layout for Group Invites, mirroring the web admin's bulk-invite table:
- * Chaperone (+ contact), Template, Date, Contacts, Shareable, then the same
- * per-row Copy-link / Resend actions. Horizontally scrollable with fixed column
- * widths, matching WaiversTable/TemplatesTable. Tapping a row opens the actions
- * sheet the card view uses — the Actions cell handles its own presses so they
- * don't open the sheet.
+ * Chaperone (+ contact), Template, Date, Signed ("X of Y" + not delivered),
+ * Group link, then the same per-row See-who-signed / Copy-link / Resend
+ * actions. Horizontally scrollable with fixed column widths, matching
+ * WaiversTable/TemplatesTable. Tapping a row opens the actions sheet the card
+ * view uses — cells with buttons handle their own presses so they don't open
+ * the sheet.
  */
 export const GroupInvitesTable = memo(function GroupInvitesTable({
   invites,
   canManage,
   onRowPress,
   onResend,
+  onViewRecipients,
 }: {
   invites: GroupInvite[];
   canManage: boolean;
   onRowPress: (invite: GroupInvite) => void;
   onResend: (invite: GroupInvite) => Promise<void> | void;
+  onViewRecipients: (invite: GroupInvite) => void;
 }) {
   // Row-independent, so it's built once rather than per row.
-  const ctx: RowContext = { canManage, onResend };
+  const ctx: RowContext = { canManage, onResend, onViewRecipients };
 
   return (
     <View

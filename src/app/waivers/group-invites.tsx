@@ -1,7 +1,8 @@
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { GroupInviteRecipientsSheet } from "../../components/ui/GroupInviteRecipientsSheet";
 import { GroupInvitesTable } from "../../components/ui/GroupInvitesTable";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
@@ -25,6 +27,8 @@ import {
   useGroupInvites,
 } from "../../lib/hooks/useGroupInvites";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { buildGroupLink } from "../../lib/waivers/chaperoneLink";
+import { groupLinkState } from "../../lib/waivers/groupInvites";
 import {
   resendGroupInvite,
   type GroupInvite,
@@ -105,11 +109,16 @@ const InviteCard = ({
       </View>
 
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center gap-1.5">
+        <View className="flex-row items-center gap-1.5 flex-1 mr-2">
           <Feather name="users" size={12} color="#9CA3AF" />
           <Text className="text-xs text-gray-500 dark:text-gray-400">
-            {invite.completeCount}/{invite.recipientsCount} complete
+            {invite.completeCount} of {invite.recipientsCount} signed
           </Text>
+          {invite.failedCount > 0 && (
+            <Text className="text-xs font-medium text-red-600 dark:text-red-400">
+              · {invite.failedCount} not delivered
+            </Text>
+          )}
         </View>
         <View className="flex-row items-center gap-2">
           {invite.allowShareableLink && (
@@ -138,10 +147,14 @@ const GroupInvites = () => {
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [actionsInvite, setActionsInvite] = useState<GroupInvite | null>(null);
+  const [viewingInvite, setViewingInvite] = useState<GroupInvite | null>(null);
   const [busy, setBusy] = useState(false);
+  // Shared by the table's Resend button and the sheet's, so a quick double tap
+  // on either can't notify the chaperone twice.
+  const resendLock = useRef(false);
   // Presentation layout only — table by default, card view on toggle, mirroring
-  // the web admin's Group Invites table (Chaperone / Template / Date / Contacts
-  // / Shareable) and the same pattern used across the app's other list screens.
+  // the web admin's Group Invites table (Chaperone / Template / Date / Signed
+  // / Group link) and the same pattern used across the app's other list screens.
   const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   const { invites, loading, error, refetch } = useGroupInvites();
@@ -172,13 +185,17 @@ const GroupInvites = () => {
   );
 
   const onResend = async (invite: GroupInvite) => {
+    if (resendLock.current) return;
     const token = getToken();
     if (!token) {
       Alert.alert("Not authenticated");
       return;
     }
+    resendLock.current = true;
     setBusy(true);
     try {
+      // Resolves only when an email or text actually went out — the server
+      // answers 422 with the reason otherwise, which lands in the catch.
       await resendGroupInvite(token, invite.id);
       setActionsInvite(null);
       Alert.alert("Invite resent", "The chaperone has been notified again.");
@@ -188,7 +205,33 @@ const GroupInvites = () => {
         e instanceof Error ? e.message : "Please try again.",
       );
     } finally {
+      resendLock.current = false;
       setBusy(false);
+    }
+  };
+
+  // The actions sheet closes first; opening the list on top of it while it
+  // animates out would stack two modals.
+  const onViewRecipients = (invite: GroupInvite) => {
+    if (actionsInvite) {
+      setActionsInvite(null);
+      setTimeout(() => setViewingInvite(invite), 280);
+    } else {
+      setViewingInvite(invite);
+    }
+  };
+
+  const onCopyGroupLink = async (invite: GroupInvite) => {
+    if (!invite.shareableToken) return;
+    setActionsInvite(null);
+    try {
+      await Clipboard.setStringAsync(buildGroupLink(invite.shareableToken));
+      Alert.alert(
+        "Group link copied",
+        "Parents who open it sign their own waiver for this group.",
+      );
+    } catch {
+      Alert.alert("Copy failed", "Could not copy the group link.");
     }
   };
 
@@ -331,6 +374,7 @@ const GroupInvites = () => {
                 canManage={canManage}
                 onRowPress={(invite) => setActionsInvite(invite)}
                 onResend={onResend}
+                onViewRecipients={onViewRecipients}
               />
             ) : (
               filtered.map((invite) => (
@@ -359,6 +403,28 @@ const GroupInvites = () => {
           )}
           {actionsInvite && (
             <>
+              <Pressable
+                disabled={busy}
+                onPress={() => onViewRecipients(actionsInvite)}
+                className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+              >
+                <Feather name="list" size={18} color={PRIMARY} />
+                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
+                  See who has signed
+                </Text>
+              </Pressable>
+              {groupLinkState(actionsInvite) === "copy" && (
+                <Pressable
+                  disabled={busy}
+                  onPress={() => onCopyGroupLink(actionsInvite)}
+                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+                >
+                  <Feather name="copy" size={18} color={PRIMARY} />
+                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
+                    Copy group link
+                  </Text>
+                </Pressable>
+              )}
               {canManage && (
                 <Pressable
                   disabled={busy}
@@ -385,7 +451,10 @@ const GroupInvites = () => {
         </View>
       </BottomSheet>
 
-      
+      <GroupInviteRecipientsSheet
+        invite={viewingInvite}
+        onClose={() => setViewingInvite(null)}
+      />
     </View>
   );
 };
