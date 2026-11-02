@@ -8,6 +8,7 @@ import {
   groupLinkState,
   mapInviteRecipient,
   recipientContactLine,
+  recipientDisplayName,
   recipientStatusMeta,
   recipientSummary,
   type RawInviteRecipient,
@@ -160,6 +161,11 @@ describe("recipient list", () => {
     );
     assert.equal(recipientContactLine(recipients[2]), "(810) 555-0000");
     assert.equal(recipientContactLine(recipients[0]), "ana@example.com");
+  });
+
+  it("names a person without a name the way the web does", () => {
+    assert.equal(recipientDisplayName(recipients[0]), "Ana Diaz");
+    assert.equal(recipientDisplayName(recipients[2]), "No name given");
   });
 
   it("maps missing fields to safe defaults", () => {

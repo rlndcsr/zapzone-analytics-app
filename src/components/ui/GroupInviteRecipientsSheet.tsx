@@ -10,6 +10,7 @@ import {
 import { getToken } from "../../lib/session";
 import {
   recipientContactLine,
+  recipientDisplayName,
   recipientStatusMeta,
   recipientSummary,
   type GroupInviteRecipient,
@@ -53,7 +54,7 @@ const RecipientRow = ({
           numberOfLines={1}
           className="text-sm font-medium text-gray-900 dark:text-white"
         >
-          {recipient.name || "Unnamed contact"}
+          {recipientDisplayName(recipient)}
         </Text>
         {!!contact && (
           <Text
@@ -158,7 +159,7 @@ export function GroupInviteRecipientsSheet({
           </View>
         ) : recipients.length === 0 ? (
           <Text className="text-sm text-gray-400 dark:text-gray-500 text-center py-8">
-            {"The chaperone hasn't added any parents yet."}
+            {"The chaperone hasn't added anyone yet."}
           </Text>
         ) : (
           recipients.map((r, i) => (

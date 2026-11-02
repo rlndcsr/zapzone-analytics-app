@@ -94,6 +94,10 @@ export function recipientStatusMeta(status: string): RecipientStatusMeta {
   );
 }
 
+export function recipientDisplayName(r: GroupInviteRecipient): string {
+  return r.name || "No name given";
+}
+
 export function recipientContactLine(r: GroupInviteRecipient): string {
   const phone = r.phone ? formatPhoneForDisplay(r.phone) || r.phone : null;
   return [r.email, phone].filter(Boolean).join(" · ");

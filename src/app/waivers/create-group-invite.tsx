@@ -325,7 +325,8 @@ const CreateGroupInvite = () => {
                 )}
               </View>
               <Text className="flex-1 text-sm text-gray-700 dark:text-gray-200">
-                Allow a shareable link the chaperone can forward
+                Give the chaperone one group link to share, so people can sign
+                without being added first
               </Text>
             </Pressable>
           </View>

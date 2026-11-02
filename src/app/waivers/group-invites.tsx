@@ -228,7 +228,7 @@ const GroupInvites = () => {
       await Clipboard.setStringAsync(buildGroupLink(invite.shareableToken));
       Alert.alert(
         "Group link copied",
-        "Parents who open it sign their own waiver for this group.",
+        "Everyone in the group who opens it signs their own waiver.",
       );
     } catch {
       Alert.alert("Copy failed", "Could not copy the group link.");
