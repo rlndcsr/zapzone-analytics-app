@@ -83,21 +83,8 @@ export function formatDurationDisplay(
 
 export type FeatherIconName = ComponentProps<typeof Feather>["name"];
 
-/** A small icon + label metric used in the attraction card footer. */
-export const Stat = ({
-  icon,
-  label,
-}: {
-  icon: FeatherIconName;
-  label: string;
-}) => (
-  <View className="flex-row items-center gap-1.5">
-    <Feather name={icon} size={12} color="#9CA3AF" />
-    <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
-  </View>
-);
-
-/** Active / inactive status pill, matching the web attractions status colors. */
+/** Active / inactive status badge — a soft pill with a leading status dot,
+ *  matching the web attractions status colors. */
 export const AttractionStatusBadge = ({
   status,
 }: {
@@ -106,17 +93,22 @@ export const AttractionStatusBadge = ({
   const active = status === "active";
   return (
     <View
-      className={`px-2.5 py-1 rounded-full ${
+      className={`flex-row items-center gap-1.5 px-2 py-0.5 rounded-full ${
         active
           ? "bg-green-50 dark:bg-green-900/30"
           : "bg-gray-100 dark:bg-neutral-800"
       }`}
     >
+      <View
+        className={`w-1.5 h-1.5 rounded-full ${
+          active ? "bg-green-500" : "bg-gray-400"
+        }`}
+      />
       <Text
-        className={`text-xs font-semibold capitalize ${
+        className={`text-xs font-medium capitalize ${
           active
-            ? "text-green-600 dark:text-green-400"
-            : "text-gray-500 dark:text-gray-400"
+            ? "text-green-700 dark:text-green-400"
+            : "text-gray-600 dark:text-gray-400"
         }`}
       >
         {status}

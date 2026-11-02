@@ -42,20 +42,16 @@ import {
 } from "../../components/ui/CategoryChips";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
-import {
-  FilterPill,
-  PillDivider,
-  PillSegment,
-} from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
-  AttractionsKpiSkeleton,
   AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
 } from "../../components/ui/skeleton/AttractionsSkeleton";
 import {
-  CARD_SHADOW,
   formatMoney,
   type FeatherIconName,
 } from "../../lib/attractions/attractionDisplay";
@@ -88,41 +84,83 @@ const PRIMARY = "#0644C7";
 
 const PER_PAGE_OPTIONS = [5, 10, 15];
 
-type KpiTone = { bg: string; tint: string };
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
-const KpiCard = ({
+/**
+ * One cell of the summary panel. Cells sit in a single bordered card and are
+ * separated by hairlines (`divideLeft` / `divideTop`) rather than each being
+ * its own shadowed tile, which keeps the header calm and easy to scan.
+ */
+const SummaryCell = ({
   icon,
-  tone,
   title,
   value,
-  change,
+  hint,
+  divideLeft = false,
+  divideTop = false,
 }: {
   icon: FeatherIconName;
-  tone: KpiTone;
   title: string;
   value: string;
-  change: string;
+  hint: string;
+  divideLeft?: boolean;
+  divideTop?: boolean;
 }) => (
   <View
-    className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 m-1.5 shadow-sm"
-    style={CARD_SHADOW}
+    className={`flex-1 p-4 ${
+      divideLeft ? "border-l border-gray-100 dark:border-neutral-800" : ""
+    } ${divideTop ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
   >
-    <View
-      className="w-9 h-9 rounded-xl items-center justify-center"
-      style={{ backgroundColor: tone.bg }}
-    >
-      <Feather name={icon} size={18} color={tone.tint} />
+    <View className="flex-row items-center gap-1.5">
+      <Feather name={icon} size={13} color="#9CA3AF" />
+      <Text
+        numberOfLines={1}
+        className="shrink text-xs font-medium text-gray-500 dark:text-gray-400"
+      >
+        {title}
+      </Text>
     </View>
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
-      {title}
-    </Text>
-    <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+    <Text
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      className="text-2xl font-semibold text-gray-900 dark:text-white mt-1.5"
+    >
       {value}
     </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      {change}
+    <Text
+      numberOfLines={1}
+      className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+    >
+      {hint}
     </Text>
   </View>
+);
+
+/** Square icon button used in the toolbar rows (Columns). */
+const ToolbarIconButton = ({
+  icon,
+  label,
+  active = false,
+  onPress,
+}: {
+  icon: FeatherIconName;
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className={`w-9 h-9 rounded-xl items-center justify-center active:opacity-70 ${
+      active
+        ? "bg-blue-50 dark:bg-blue-900/30"
+        : "bg-gray-100 dark:bg-neutral-800"
+    }`}
+  >
+    <Feather name={icon} size={16} color={active ? PRIMARY : "#6B7280"} />
+  </Pressable>
 );
 
 const ManageAttractions = () => {
@@ -147,7 +185,6 @@ const ManageAttractions = () => {
     defaultAttractionColumnKeys,
   );
   const [showCreatedDateSheet, setShowCreatedDateSheet] = useState(false);
-  const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [showImportSheet, setShowImportSheet] = useState(false);
   const [showExportSheet, setShowExportSheet] = useState(false);
   const [actionsAttraction, setActionsAttraction] =
@@ -534,89 +571,56 @@ const ManageAttractions = () => {
     }
   }, [filtered]);
 
-  // Mirrors the web "More" action menu. Fee Supports / Special Pricing link to
-  // their management screens; Import / Export open their dedicated sheets, and
-  // Export CSV downloads the filtered rows directly.
-  const moreActions: {
-    label: string;
-    icon: FeatherIconName;
-    hint: string;
-    onPress: () => void;
-  }[] = [
+  // The web "More" action menu, laid out as module-hub shortcuts. Fee Supports
+  // / Special Pricing link to their management screens; Import / Export open
+  // their dedicated sheets, and Export CSV downloads the filtered rows directly.
+  const moreShortcuts: HubQuickLink[] = [
     {
       label: "Fee Supports",
       icon: "dollar-sign",
-      hint: "Manage additional fees",
-      onPress: () => {
-        setShowMoreSheet(false);
-        router.push("/pricing/fee-support");
-      },
+      route: "/pricing/fee-support",
     },
-    {
-      label: "Special Pricing",
-      icon: "percent",
-      hint: "Manage automatic discounts",
-      onPress: () => {
-        setShowMoreSheet(false);
-        router.push("/pricing/pricing");
-      },
-    },
+    { label: "Special Pricing", icon: "percent", route: "/pricing/pricing" },
     {
       label: "Import Attractions",
       icon: "upload",
-      hint: "Bulk-create from a JSON file",
-      onPress: () => {
-        setShowMoreSheet(false);
-        setShowImportSheet(true);
-      },
+      onPress: () => setShowImportSheet(true),
     },
     {
       label: "Export Attractions",
       icon: "download",
-      hint: `Select from ${filtered.length} to export as JSON`,
-      onPress: () => {
-        setShowMoreSheet(false);
-        setShowExportSheet(true);
-      },
+      onPress: () => setShowExportSheet(true),
     },
-    {
-      label: "Export CSV",
-      icon: "file-text",
-      hint:
-        filtered.length === 0
-          ? "Nothing to export"
-          : `All ${filtered.length} filtered ${filtered.length === 1 ? "row" : "rows"} as a spreadsheet`,
-      onPress: () => {
-        setShowMoreSheet(false);
-        exportCsv();
-      },
-    },
+    { label: "Export CSV", icon: "file-text", onPress: exportCsv },
   ];
 
   return (
-    <View className="flex-1 bg-white dark:bg-black">
-      {/* Gradient header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+    <View className="flex-1 bg-gray-50 dark:bg-black">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Manage Attractions
           </Text>
-          {/* Page-level "More" menu (mirrors the web header ActionMenu). */}
           <Pressable
-            onPress={() => setShowMoreSheet(true)}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            onPress={() => router.push("/attractions/create-attraction")}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
-            accessibilityLabel="More actions"
+            accessibilityLabel="New attraction"
           >
-            <Feather name="more-horizontal" size={20} color={headerIcon} />
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
           </Pressable>
         </View>
       </View>
@@ -624,6 +628,7 @@ const ManageAttractions = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -635,121 +640,164 @@ const ManageAttractions = () => {
           />
         }
       >
-        <View className="px-5 mt-5">
+        <View className="px-4 mt-4">
           {/* Global workspace location selector (company-admin only). */}
-          <View className="mb-5">
+          <View className="mb-4">
             <LocationWorkspaceSelector />
           </View>
 
-          {/* New Attraction — the primary filled CTA, full width. */}
-          <Pressable
-            onPress={() => router.push("/attractions/create-attraction")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              New Attraction
-            </Text>
-          </Pressable>
-
           {/* Error state */}
           {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
+            <View className="flex-row gap-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4 mb-4">
+              <Feather name="alert-circle" size={18} color="#DC2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  Could not load attractions
+                </Text>
+                <Text className="text-sm text-red-600/90 dark:text-red-400/80 mt-0.5">
+                  {error}
+                </Text>
+                <Pressable
+                  onPress={onRefresh}
+                  className="self-start mt-2.5 px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-900/50 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-xs font-semibold text-red-700 dark:text-red-400">
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
-          {/* KPI cards */}
+          {/* Summary — one panel, four figures, divided by hairlines. */}
           {loading ? (
-            <AttractionsKpiSkeleton />
+            <AttractionsSummarySkeleton />
           ) : (
-            <View className="flex-row flex-wrap -mx-1.5 mb-3">
-              <View className="w-1/2">
-                <KpiCard
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+              <View className="flex-row">
+                <SummaryCell
                   icon="star"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Attractions"
                   value={String(kpis.total)}
-                  change={`${kpis.active} active`}
+                  hint={`${kpis.active} active`}
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
+                <SummaryCell
+                  divideLeft
                   icon="zap"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Active"
                   value={String(kpis.active)}
-                  change={`${kpis.inactive} inactive`}
+                  hint={`${kpis.inactive} inactive`}
                 />
               </View>
-              <View className="w-1/2">
-                <KpiCard
+              <View className="flex-row">
+                <SummaryCell
+                  divideTop
                   icon="dollar-sign"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Avg. Price"
                   value={formatMoney(kpis.avgPrice)}
-                  change="Per attraction"
+                  hint="Per attraction"
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
+                <SummaryCell
+                  divideTop
+                  divideLeft
                   icon="users"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Capacity"
                   value={String(kpis.capacity)}
-                  change="Across all attractions"
+                  hint="Across all attractions"
                 />
               </View>
             </View>
           )}
 
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mt-2 mb-3">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search attractions..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+          {/* More — the page's secondary actions as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {/* Filters + Columns — mirrors the web table toolbar's button pair.
-              Columns only applies to the table layout, so it's hidden in Cards. */}
-          <FilterPill>
-            <PillSegment
-              label={
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <View className="flex-1 flex-row items-center gap-2 h-11 px-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="search" size={16} color="#9CA3AF" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search attractions"
+                placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+              />
+              {search.length > 0 && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Feather name="x-circle" size={16} color="#9CA3AF" />
+                </Pressable>
+              )}
+            </View>
+            <Pressable
+              onPress={() => setShowFilterSheet(true)}
+              accessibilityRole="button"
+              accessibilityLabel={
                 activeFilterCount > 0
-                  ? `Filters (${activeFilterCount})`
+                  ? `Filters, ${activeFilterCount} applied`
                   : "Filters"
               }
-              active={showFilterSheet || activeFilterCount > 0}
-              onPress={() => setShowFilterSheet(true)}
-              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
-            />
-            {viewMode === "table" && (
-              <>
-                <PillDivider />
-                <PillSegment
-                  label="Columns"
-                  active={showColumnsSheet}
-                  onPress={() => setShowColumnsSheet(true)}
-                  renderIcon={(c) => (
-                    <Feather name="columns" size={15} color={c} />
-                  )}
-                />
-              </>
-            )}
-          </FilterPill>
+              className={`flex-row items-center gap-1.5 h-11 px-3.5 rounded-xl border active:opacity-70 ${
+                activeFilterCount > 0
+                  ? "bg-blue-50 dark:bg-blue-900/30 border-[#0644C7]/40"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
+              }`}
+            >
+              <Feather
+                name="sliders"
+                size={15}
+                color={activeFilterCount > 0 ? PRIMARY : "#6B7280"}
+              />
+              <Text
+                className={`text-sm font-medium ${
+                  activeFilterCount > 0
+                    ? "text-[#0644C7] dark:text-blue-300"
+                    : "text-gray-700 dark:text-gray-200"
+                }`}
+              >
+                Filters
+              </Text>
+              {activeFilterCount > 0 && (
+                <View className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#0644C7] items-center justify-center">
+                  <Text className="text-[10px] font-bold text-white">
+                    {activeFilterCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Applied-filters hint with a one-tap reset. */}
+          {activeFilterCount > 0 && (
+            <View className="flex-row items-center justify-between mb-3 -mt-1">
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                {activeFilterCount}{" "}
+                {activeFilterCount === 1 ? "filter" : "filters"} applied
+              </Text>
+              <Pressable
+                onPress={() => setFilters(EMPTY_ATTRACTION_FILTERS)}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Clear all
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* Category chips — a visible surface over the sheet's Category
               filter, not a second one: both write the same `filters.category`. */}
@@ -763,23 +811,31 @@ const ManageAttractions = () => {
             allLabel="All Categories"
           />
 
-          {/* List header + layout toggle (Table default / Cards) */}
+          {/* List header — title + count, Columns (table only), layout toggle. */}
           {!loading && !error && (
-            <View className="flex-row items-center justify-between gap-2 mb-4">
-              <View className="flex-row items-center gap-2 shrink">
+            <View className="flex-row items-center justify-between gap-2 mb-3">
+              <View className="flex-row items-baseline gap-2 shrink">
                 <Text
                   numberOfLines={1}
-                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                  className="shrink text-base font-semibold text-gray-900 dark:text-white"
                 >
                   All Attractions
                 </Text>
-                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {filtered.length}
-                  </Text>
-                </View>
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
+                  {filtered.length}
+                </Text>
               </View>
-              <ViewToggle mode={viewMode} onChange={setViewMode} />
+              <View className="flex-row items-center gap-2">
+                {viewMode === "table" && (
+                  <ToolbarIconButton
+                    icon="columns"
+                    label="Toggle columns"
+                    active={showColumnsSheet}
+                    onPress={() => setShowColumnsSheet(true)}
+                  />
+                )}
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </View>
             </View>
           )}
 
@@ -798,20 +854,55 @@ const ManageAttractions = () => {
 
           {/* List / states */}
           {loading ? (
-            <AttractionsListSkeleton />
+            viewMode === "table" ? (
+              <AttractionsTableSkeleton />
+            ) : (
+              <AttractionsListSkeleton />
+            )
           ) : !error && !hasResults ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="zap" size={26} color="#9CA3AF" />
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 px-6 py-10 items-center">
+              <View className="w-12 h-12 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                <Feather
+                  name={attractions.length === 0 ? "zap" : "search"}
+                  size={20}
+                  color="#9CA3AF"
+                />
               </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No attractions found
+              <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                {attractions.length === 0
+                  ? "No attractions yet"
+                  : "No attractions found"}
               </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+              <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1 max-w-xs">
                 {attractions.length === 0
                   ? "There are no attractions for this account yet."
                   : "Try adjusting your search or filters."}
               </Text>
+              {attractions.length === 0 ? (
+                <Pressable
+                  onPress={() => router.push("/attractions/create-attraction")}
+                  className="flex-row items-center gap-1.5 mt-4 px-4 py-2.5 rounded-xl bg-[#0644C7] active:opacity-90"
+                  accessibilityRole="button"
+                >
+                  <Feather name="plus" size={15} color="#FFFFFF" />
+                  <Text className="text-sm font-semibold text-white">
+                    New Attraction
+                  </Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => {
+                    setSearch("");
+                    setFilters(EMPTY_ATTRACTION_FILTERS);
+                  }}
+                  className="mt-4 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    Clear search & filters
+                  </Text>
+                </Pressable>
+              )}
             </View>
           ) : (
             !error && (
@@ -842,7 +933,6 @@ const ManageAttractions = () => {
                   ))
                 )}
 
-                {/* Pagination (bottom) — same state as the top control */}
                 <PaginationControls
                   page={page}
                   lastPage={lastPage}
@@ -896,38 +986,6 @@ const ManageAttractions = () => {
         onApply={applyCreatedDate}
       />
 
-      {/* More actions — mirrors the web action menu (Fee Supports / Special
-          Pricing links + Import / Export). */}
-      <BottomSheet
-        visible={showMoreSheet}
-        onClose={() => setShowMoreSheet(false)}
-        title="More"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {moreActions.map((action) => (
-            <Pressable
-              key={action.label}
-              onPress={action.onPress}
-              style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
-              className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
-            >
-              <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
-                <Feather name={action.icon} size={18} color="#374151" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                  {action.label}
-                </Text>
-                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                  {action.hint}
-                </Text>
-              </View>
-              <Feather name="chevron-right" size={18} color="#9CA3AF" />
-            </Pressable>
-          ))}
-        </ScrollView>
-      </BottomSheet>
-
       {/* Bulk import (JSON) — same endpoint as the web ManageAttractions import. */}
       <AttractionsImportSheet
         visible={showImportSheet}
@@ -978,15 +1036,22 @@ const ManageAttractions = () => {
                     isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                   }`}
                 >
-                  <Text
-                    className={`text-base font-medium capitalize ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    {option}
-                  </Text>
+                  <View className="flex-row items-center gap-2.5">
+                    <View
+                      className={`w-2 h-2 rounded-full ${
+                        option === "active" ? "bg-green-500" : "bg-gray-400"
+                      }`}
+                    />
+                    <Text
+                      className={`text-base font-medium capitalize ${
+                        isSelected
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-gray-700 dark:text-gray-200"
+                      }`}
+                    >
+                      {option}
+                    </Text>
+                  </View>
                   {isSelected && (
                     <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                       <Feather name="check" size={14} color="#FFFFFF" />

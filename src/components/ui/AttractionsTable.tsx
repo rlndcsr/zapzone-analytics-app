@@ -11,7 +11,6 @@ import {
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
 import {
-  CARD_SHADOW,
   PRICING_SUFFIX,
   durationLabel,
   formatCreatedAt,
@@ -25,14 +24,19 @@ import type { AttractionRow } from "../../services/attractionsService";
 // Comfortable, SaaS-style row rhythm. These are floors (minHeight) — real
 // cell padding (py-*) does the breathing, so rows stay vertically centered and
 // never feel clamped.
-const HEADER_MIN_HEIGHT = 48;
-const ROW_MIN_HEIGHT = 68;
+const HEADER_MIN_HEIGHT = 44;
+const ROW_MIN_HEIGHT = 64;
 
 /** Leading selection-checkbox column width. */
 const CHECKBOX_WIDTH = 48;
 
+const PRIMARY = "#0644C7";
+
 /** Shared secondary-cell text style so every column reads consistently. */
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
+
+/** Muted second line under a cell's main value (units, hints). */
+const CELL_HINT = "text-xs text-gray-400 dark:text-gray-500 mt-0.5";
 
 /**
  * Purchase Link cell — mirrors the web admin's "Copy Link" button. Copies the
@@ -64,18 +68,22 @@ const PurchaseLinkCell = ({ attraction }: { attraction: AttractionRow }) => {
       onPress={onCopy}
       accessibilityRole="button"
       accessibilityLabel={`Copy purchase link for ${attraction.name}`}
-      className="flex-row items-center gap-1.5 self-start px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70"
+      className={`flex-row items-center gap-1.5 self-start px-2.5 py-1.5 rounded-lg active:opacity-70 ${
+        copied
+          ? "bg-green-50 dark:bg-green-900/30"
+          : "bg-gray-100 dark:bg-neutral-800"
+      }`}
     >
       <Feather
-        name={copied ? "check" : "link"}
-        size={12}
-        color={copied ? "#16A34A" : "#6B7280"}
+        name={copied ? "check" : "link-2"}
+        size={13}
+        color={copied ? "#16A34A" : "#4B5563"}
       />
       <Text
         className={`text-xs font-medium ${
           copied
-            ? "text-green-600 dark:text-green-400"
-            : "text-gray-600 dark:text-gray-300"
+            ? "text-green-700 dark:text-green-400"
+            : "text-gray-700 dark:text-gray-300"
         }`}
       >
         {copied ? "Copied!" : "Copy Link"}
@@ -139,17 +147,22 @@ const StatusPill = ({
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={`Change status for ${attraction.name}, currently ${attraction.status}`}
-        className={`flex-row items-center gap-1 px-2.5 py-1 rounded-full ${
+        className={`flex-row items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full ${
           active
             ? "bg-green-50 dark:bg-green-900/30"
             : "bg-gray-100 dark:bg-neutral-800"
         } active:opacity-70`}
       >
+        <View
+          className={`w-1.5 h-1.5 rounded-full ${
+            active ? "bg-green-500" : "bg-gray-400"
+          }`}
+        />
         <Text
-          className={`text-xs font-semibold capitalize ${
+          className={`text-xs font-medium capitalize ${
             active
-              ? "text-green-600 dark:text-green-400"
-              : "text-gray-500 dark:text-gray-400"
+              ? "text-green-700 dark:text-green-400"
+              : "text-gray-600 dark:text-gray-400"
           }`}
         >
           {attraction.status}
@@ -157,7 +170,7 @@ const StatusPill = ({
         <Feather
           name="chevron-down"
           size={12}
-          color={active ? "#16A34A" : "#6B7280"}
+          color={active ? "#16A34A" : "#9CA3AF"}
         />
       </Pressable>
     </View>
@@ -171,21 +184,25 @@ const ActionIconButton = ({
   color,
   label,
   busy = false,
+  divider = false,
   onPress,
 }: {
   icon: FeatherIconName;
   color: string;
   label: string;
   busy?: boolean;
+  /** Hairline on the leading edge — separates buttons inside the group. */
+  divider?: boolean;
   onPress: () => void;
 }) => (
   <Pressable
     onPress={onPress}
     disabled={busy}
-    hitSlop={6}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className="w-8 h-8 items-center justify-center rounded-lg active:opacity-60"
+    className={`w-8 h-8 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-700" : ""
+    }`}
   >
     {busy ? (
       <ActivityIndicator size="small" color={color} />
@@ -221,7 +238,9 @@ const ActionsCell = ({
   }, [attraction, ctx]);
 
   return (
-    <View className="flex-row items-center gap-1">
+    // One bordered segmented group: neutral icons, with only the destructive
+    // action tinted, so the column reads as a single quiet control.
+    <View className="flex-row items-center self-start rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
       <ActionIconButton
         icon="shopping-cart"
         color="#6B7280"
@@ -229,18 +248,21 @@ const ActionsCell = ({
         onPress={() => ctx.onViewPurchase(attraction)}
       />
       <ActionIconButton
+        divider
         icon="eye"
-        color="#2563EB"
+        color="#6B7280"
         label={`View details for ${attraction.name}`}
         onPress={() => ctx.onView(attraction)}
       />
       <ActionIconButton
+        divider
         icon="edit-2"
-        color="#0644C7"
+        color={PRIMARY}
         label={`Edit ${attraction.name}`}
         onPress={() => ctx.onEdit(attraction)}
       />
       <ActionIconButton
+        divider
         icon="copy"
         color="#6B7280"
         label={`Duplicate ${attraction.name}`}
@@ -248,8 +270,9 @@ const ActionsCell = ({
         onPress={onDuplicate}
       />
       <ActionIconButton
+        divider
         icon="trash-2"
-        color="#dc2626"
+        color="#DC2626"
         label={`Delete ${attraction.name}`}
         onPress={() => ctx.onDelete(attraction)}
       />
@@ -279,11 +302,16 @@ const COLUMNS: Column[] = [
     key: "order",
     label: "Order",
     group: "Ordering",
-    width: 80,
+    width: 72,
     render: (a) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {a.displayOrder + 1}
-      </Text>
+      <View className="self-start min-w-[28px] h-7 px-1.5 rounded-md bg-gray-100 dark:bg-neutral-800 items-center justify-center">
+        <Text
+          numberOfLines={1}
+          className="text-xs font-semibold text-gray-600 dark:text-gray-300"
+        >
+          {a.displayOrder + 1}
+        </Text>
+      </View>
     ),
   },
   {
@@ -311,45 +339,34 @@ const COLUMNS: Column[] = [
           <View className="flex-row items-center gap-1.5">
             <Text
               numberOfLines={1}
-              className="flex-1 text-sm font-semibold text-gray-900 dark:text-white"
+              className="shrink text-sm font-semibold text-gray-900 dark:text-white"
             >
               {a.name}
             </Text>
             {a.name.includes("(Copy)") && (
-              <View className="flex-row items-center gap-0.5 px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40">
-                <Feather name="copy" size={8} color="#B45309" />
+              <View className="px-1 py-0.5 rounded bg-amber-50 dark:bg-amber-900/30">
                 <Text className="text-[9px] font-semibold text-amber-700 dark:text-amber-400">
                   Copy
                 </Text>
               </View>
             )}
           </View>
-          {!!a.locationName && (
-            <View className="flex-row items-center gap-1 mt-0.5">
-              <Feather name="map-pin" size={11} color="#9CA3AF" />
-              <Text
-                numberOfLines={1}
-                className="flex-1 text-xs text-gray-500 dark:text-gray-400"
-              >
-                {a.locationName}
-              </Text>
-            </View>
-          )}
           {!!a.description && (
             <Text
-              numberOfLines={2}
-              className="text-xs text-gray-500 dark:text-gray-400 leading-4 mt-1"
+              numberOfLines={1}
+              className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
             >
               {a.description}
             </Text>
           )}
-          {!!created && (
-            <View className="flex-row items-center gap-1 mt-1">
-              <Feather name="calendar" size={11} color="#9CA3AF" />
-              <Text className="text-xs text-gray-400 dark:text-gray-500">
-                {created}
-              </Text>
-            </View>
+          {/* Location and created date share one quiet meta line. */}
+          {(!!a.locationName || !!created) && (
+            <Text
+              numberOfLines={1}
+              className="text-[11px] text-gray-400 dark:text-gray-500 mt-1"
+            >
+              {[a.locationName, created].filter(Boolean).join("  ·  ")}
+            </Text>
           )}
         </View>
       );
@@ -364,9 +381,14 @@ const COLUMNS: Column[] = [
     // normalises this in its row mapper, which mobile cannot do because the
     // same mapper feeds the edit and duplicate forms.
     render: (a) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {normalizeCategory(a.category)}
-      </Text>
+      <View className="self-start max-w-full px-2 py-1 rounded-md bg-gray-100 dark:bg-neutral-800">
+        <Text
+          numberOfLines={1}
+          className="text-xs font-medium text-gray-700 dark:text-gray-300"
+        >
+          {normalizeCategory(a.category)}
+        </Text>
+      </View>
     ),
   },
   {
@@ -401,15 +423,19 @@ const COLUMNS: Column[] = [
     render: (a) => {
       const suffix = PRICING_SUFFIX[a.pricingType] ?? "";
       return (
-        <Text
-          numberOfLines={1}
-          className="text-sm font-semibold text-gray-900 dark:text-white"
-        >
-          {formatMoney(a.price)}
+        <View>
+          <Text
+            numberOfLines={1}
+            className="text-sm font-semibold text-gray-900 dark:text-white"
+          >
+            {formatMoney(a.price)}
+          </Text>
           {!!suffix && (
-            <Text className="text-xs font-normal text-gray-400"> {suffix}</Text>
+            <Text numberOfLines={1} className={CELL_HINT}>
+              per {suffix.slice(1)}
+            </Text>
           )}
-        </Text>
+        </View>
       );
     },
   },
@@ -431,12 +457,19 @@ const COLUMNS: Column[] = [
     group: "Capacity",
     width: 140,
     render: (a) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {a.maxCapacity} people
+      <View>
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {a.maxCapacity} people
+        </Text>
         {!a.displayCapacityToCustomers && (
-          <Text className="text-gray-400 dark:text-gray-500"> (hidden)</Text>
+          <View className="flex-row items-center gap-1 mt-0.5">
+            <Feather name="eye-off" size={11} color="#9CA3AF" />
+            <Text className="text-xs text-gray-400 dark:text-gray-500">
+              Hidden
+            </Text>
+          </View>
         )}
-      </Text>
+      </View>
     ),
   },
   {
@@ -507,7 +540,7 @@ const COLUMNS: Column[] = [
     label: "Actions",
     group: "Actions",
     lockVisible: true,
-    width: 208,
+    width: 200,
     render: (a, ctx) => <ActionsCell attraction={a} ctx={ctx} />,
   },
 ];
@@ -566,19 +599,19 @@ const CheckboxCell = ({
       accessibilityRole="checkbox"
       accessibilityState={{ checked: state === "on" }}
       accessibilityLabel={label}
-      className="active:opacity-60"
+      className={`w-[18px] h-[18px] rounded-[5px] items-center justify-center border active:opacity-60 ${
+        state === "off"
+          ? "border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-900"
+          : "border-[#0644C7] bg-[#0644C7]"
+      }`}
     >
-      <Feather
-        name={
-          state === "on"
-            ? "check-square"
-            : state === "some"
-              ? "minus-square"
-              : "square"
-        }
-        size={19}
-        color={state === "off" ? "#9CA3AF" : "#0644C7"}
-      />
+      {state !== "off" && (
+        <Feather
+          name={state === "on" ? "check" : "minus"}
+          size={12}
+          color="#FFFFFF"
+        />
+      )}
     </Pressable>
   </View>
 );
@@ -654,10 +687,7 @@ export const AttractionsTable = memo(function AttractionsTable({
         : "off";
 
   return (
-    <View
-      className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-100 dark:border-neutral-800 mb-3"
-      style={CARD_SHADOW}
-    >
+    <View className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-200 dark:border-neutral-800 mb-3">
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -666,7 +696,7 @@ export const AttractionsTable = memo(function AttractionsTable({
         <View style={{ width: tableWidth }}>
           {/* Header */}
           <View
-            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
+            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/50 border-b border-gray-200 dark:border-neutral-800"
             style={{ minHeight: HEADER_MIN_HEIGHT }}
           >
             <CheckboxCell
@@ -686,7 +716,7 @@ export const AttractionsTable = memo(function AttractionsTable({
               >
                 <Text
                   numberOfLines={1}
-                  className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
+                  className="text-xs font-medium text-gray-500 dark:text-gray-400"
                 >
                   {col.label}
                 </Text>
@@ -708,16 +738,15 @@ export const AttractionsTable = memo(function AttractionsTable({
                 accessibilityRole="button"
                 accessibilityLabel={`View details for ${attraction.name}`}
                 className={`flex-row items-center ${
-                  selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  selected
+                    ? "bg-blue-50/70 dark:bg-blue-900/20"
+                    : "active:bg-gray-50 dark:active:bg-neutral-800/60"
                 } ${
                   i < attractions.length - 1
                     ? "border-b border-gray-100 dark:border-neutral-800"
                     : ""
                 }`}
-                style={({ pressed }) => ({
-                  minHeight: ROW_MIN_HEIGHT,
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                style={{ minHeight: ROW_MIN_HEIGHT }}
               >
                 <CheckboxCell
                   state={selected ? "on" : "off"}
@@ -727,7 +756,7 @@ export const AttractionsTable = memo(function AttractionsTable({
                 {columns.map((col) => (
                   <View
                     key={col.key}
-                    className="justify-center px-4 py-4"
+                    className="justify-center px-4 py-3"
                     style={{ width: col.width }}
                   >
                     {col.render(attraction, rowContext)}

@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import { router } from "expo-router";
+import { useColorScheme } from "nativewind";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -52,94 +53,89 @@ const money = (n: number): string =>
 
 /* --- Local presentational helpers (matches PackageActionsSheet convention) -- */
 
+/** One row in a bordered action list; `divider` draws the hairline above it. */
 const ActionRow = ({
   icon,
   label,
   hint,
-  danger = false,
-  busy = false,
+  iconColor,
+  divider = false,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
   hint?: string;
-  danger?: boolean;
-  busy?: boolean;
+  iconColor: string;
+  divider?: boolean;
   onPress: () => void;
-}) => {
-  const color = danger ? "#dc2626" : "#374151";
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={busy}
-      style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
-      className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
-    >
-      <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
-        {busy ? (
-          <ActivityIndicator size="small" color={color} />
-        ) : (
-          <Feather name={icon} size={18} color={color} />
-        )}
-      </View>
-      <View className="flex-1">
-        <Text
-          className="text-base font-medium text-gray-800 dark:text-gray-100"
-          style={danger ? { color } : undefined}
-        >
-          {label}
+}) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    className={`flex-row items-center gap-3 px-3.5 py-3 active:bg-gray-50 dark:active:bg-neutral-800 ${
+      divider ? "border-t border-gray-100 dark:border-neutral-800" : ""
+    }`}
+  >
+    <View className="w-8 h-8 rounded-lg items-center justify-center bg-gray-100 dark:bg-neutral-800">
+      <Feather name={icon} size={16} color={iconColor} />
+    </View>
+    <View className="flex-1">
+      <Text className="text-sm font-medium text-gray-900 dark:text-gray-100">
+        {label}
+      </Text>
+      {!!hint && (
+        <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+          {hint}
         </Text>
-        {!!hint && (
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-            {hint}
-          </Text>
-        )}
-      </View>
-    </Pressable>
-  );
-};
+      )}
+    </View>
+    <Feather name="chevron-right" size={16} color="#9CA3AF" />
+  </Pressable>
+);
 
 /** Section heading, matching the web details page's `<h2>` treatment. */
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
-  <Text className="text-lg font-semibold text-gray-900 dark:text-white mt-6 mb-3">
+  <Text className="text-sm font-semibold text-gray-900 dark:text-white mt-6 mb-2.5">
     {children}
   </Text>
 );
 
 /**
- * One icon-led detail in the "Attraction Details" grid — icon tile, muted
- * label, value. Two per row, as on the web.
+ * One detail in the "Attraction Details" grid — muted icon + label, then the
+ * value. Two per row inside one bordered card; `index` places the hairlines
+ * (left edge on the second column, top edge from the second row on).
  */
 const DetailTile = ({
   icon,
   label,
   value,
   extra,
+  index,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
   value: string;
   /** Muted qualifier after the value, e.g. "(per person)". */
   extra?: string;
+  index: number;
 }) => (
-  <View className="w-1/2 px-1.5 mb-4">
-    <View className="flex-row items-start gap-2.5">
-      <View className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-        <Feather name={icon} size={16} color={PRIMARY} />
-      </View>
-      <View className="flex-1">
-        <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
-        <Text className="text-sm font-medium text-gray-900 dark:text-white">
-          {value}
-          {!!extra && (
-            <Text className="text-xs font-normal text-gray-500 dark:text-gray-400">
-              {"  "}
-              {extra}
-            </Text>
-          )}
-        </Text>
-      </View>
+  <View
+    className={`w-1/2 p-3.5 ${
+      index % 2 === 1 ? "border-l border-gray-100 dark:border-neutral-800" : ""
+    } ${index >= 2 ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
+  >
+    <View className="flex-row items-center gap-1.5">
+      <Feather name={icon} size={12} color="#9CA3AF" />
+      <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
     </View>
+    <Text className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
+      {value}
+    </Text>
+    {!!extra && (
+      <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+        {extra}
+      </Text>
+    )}
   </View>
 );
 
@@ -171,6 +167,8 @@ export function AttractionActionsSheet({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const { colorScheme } = useColorScheme();
+  const iconColor = colorScheme === "dark" ? "#E5E7EB" : "#374151";
 
   const reqRef = useRef(0);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -374,15 +372,14 @@ export function AttractionActionsSheet({
                   button); the category + status badges sit directly beneath it,
                   then the image. */}
             <View className="flex-row items-center gap-2 mt-1">
-              <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
-                <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
+              <View className="bg-gray-100 dark:bg-neutral-800 px-2 py-1 rounded-md">
+                <Text className="text-xs font-medium text-gray-700 dark:text-gray-300">
                   {normalizeCategory(detail.category)}
                 </Text>
               </View>
               <StatusBadge status={detail.status} />
               {detail.name.includes("(Copy)") && (
-                <View className="flex-row items-center gap-1 px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40">
-                  <Feather name="copy" size={10} color="#B45309" />
+                <View className="px-2 py-1 rounded-md bg-amber-50 dark:bg-amber-900/30">
                   <Text className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
                     Copy
                   </Text>
@@ -397,7 +394,7 @@ export function AttractionActionsSheet({
                 {detail.images.map((img, i) => (
                   <View key={i} className="w-1/2 px-1.5 mb-3">
                     <View
-                      className="w-full rounded-lg overflow-hidden border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800"
+                      className="w-full rounded-xl overflow-hidden border border-gray-200 dark:border-neutral-800 bg-gray-100 dark:bg-neutral-800"
                       style={{ aspectRatio: 16 / 9 }}
                     >
                       <Image
@@ -411,138 +408,172 @@ export function AttractionActionsSheet({
               </View>
             ) : (
               <View
-                className="w-full rounded-lg overflow-hidden border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800 items-center justify-center"
+                className="w-full rounded-xl overflow-hidden border border-dashed border-gray-300 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-900 items-center justify-center"
                 style={{ aspectRatio: 16 / 9 }}
               >
-                <Feather name="image" size={36} color="#9CA3AF" />
+                <Feather name="image" size={28} color="#9CA3AF" />
+                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                  No images
+                </Text>
               </View>
             )}
 
             <SectionTitle>Description</SectionTitle>
-            <Text className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">
+            <Text
+              className={`text-sm leading-relaxed ${
+                detail.description
+                  ? "text-gray-700 dark:text-gray-200"
+                  : "text-gray-400 dark:text-gray-500"
+              }`}
+            >
               {detail.description || "No description provided."}
             </Text>
 
             <SectionTitle>Attraction Details</SectionTitle>
-            <View className="flex-row flex-wrap -mx-1.5">
+            <View className="flex-row flex-wrap rounded-xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
               <DetailTile
+                index={0}
                 icon="tag"
                 label="Category"
                 value={normalizeCategory(detail.category)}
               />
               <DetailTile
+                index={1}
                 icon="dollar-sign"
                 label="Price"
                 value={money(detail.price)}
                 extra={priceQualifier}
               />
               <DetailTile
+                index={2}
                 icon="users"
                 label="Max Capacity"
                 value={`${detail.maxCapacity} people`}
               />
               <DetailTile
+                index={3}
                 icon="clock"
                 label="Duration"
-                value={formatDurationDisplay(detail.duration, detail.durationUnit)}
+                value={formatDurationDisplay(
+                  detail.duration,
+                  detail.durationUnit,
+                )}
               />
               <DetailTile
+                index={4}
                 icon="map-pin"
                 label="Location"
                 value={detail.locationName || "N/A"}
               />
-              <DetailTile icon="calendar" label="Created" value={createdValue} />
+              <DetailTile
+                index={5}
+                icon="calendar"
+                label="Created"
+                value={createdValue}
+              />
             </View>
 
             {detail.addOns.length > 0 && (
               <>
                 <SectionTitle>Add-ons</SectionTitle>
-                {orderedAddOns.map((a) => {
-                  const thumb = mediaUrl(a.image);
-                  return (
-                    <View
-                      key={a.id}
-                      className="flex-row items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2 dark:border-neutral-700 dark:bg-neutral-800/40"
-                    >
+                <View className="rounded-xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+                  {orderedAddOns.map((a, i) => {
+                    const thumb = mediaUrl(a.image);
+                    return (
                       <View
-                        className="rounded-md overflow-hidden bg-gray-100 dark:bg-neutral-800 items-center justify-center"
-                        style={{ width: 48, height: 48 }}
+                        key={a.id}
+                        className={`flex-row items-center gap-3 p-3 ${
+                          i > 0
+                            ? "border-t border-gray-100 dark:border-neutral-800"
+                            : ""
+                        }`}
                       >
-                        {thumb ? (
-                          <Image
-                            source={{ uri: thumb }}
-                            style={{ width: "100%", height: "100%" }}
-                            contentFit="cover"
-                          />
-                        ) : (
-                          <Text className="text-[10px] text-gray-400">No Img</Text>
-                        )}
-                      </View>
-                      <View className="flex-1">
-                        <Text
-                          className="text-sm font-medium text-gray-900 dark:text-white"
-                          numberOfLines={1}
+                        <View
+                          className="rounded-lg overflow-hidden bg-gray-100 dark:bg-neutral-800 items-center justify-center"
+                          style={{ width: 44, height: 44 }}
                         >
-                          {a.name}
-                        </Text>
-                        {!!a.description && (
+                          {thumb ? (
+                            <Image
+                              source={{ uri: thumb }}
+                              style={{ width: "100%", height: "100%" }}
+                              contentFit="cover"
+                            />
+                          ) : (
+                            <Feather name="package" size={16} color="#9CA3AF" />
+                          )}
+                        </View>
+                        <View className="flex-1">
                           <Text
-                            className="text-xs text-gray-500 dark:text-gray-400"
+                            className="text-sm font-medium text-gray-900 dark:text-white"
                             numberOfLines={1}
                           >
-                            {a.description}
+                            {a.name}
                           </Text>
-                        )}
+                          {!!a.description && (
+                            <Text
+                              className="text-xs text-gray-500 dark:text-gray-400"
+                              numberOfLines={1}
+                            >
+                              {a.description}
+                            </Text>
+                          )}
+                        </View>
+                        <View className="items-end">
+                          <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+                            {money(a.price)}
+                          </Text>
+                          <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                            Min: {a.minQuantity} · Max: {a.maxQuantity}
+                          </Text>
+                        </View>
                       </View>
-                      <View className="items-end">
-                        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {money(a.price)}
-                        </Text>
-                        <Text className="text-[10px] text-gray-500 dark:text-gray-400">
-                          Min: {a.minQuantity} · Max: {a.maxQuantity}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
+                    );
+                  })}
+                </View>
               </>
             )}
 
-            {/* Availability — one card per schedule: blue day chips, then the
+            {/* Availability — one row per schedule: soft day chips, then the
                 open hours beside a clock (web parity). */}
             <SectionTitle>Availability Schedule</SectionTitle>
             {detail.availability.length > 0 ? (
-              detail.availability.map((s, i) => (
-                <View
-                  key={i}
-                  className="rounded-lg border border-gray-200 bg-gray-50 p-4 mb-2 dark:border-neutral-700 dark:bg-neutral-800/40"
-                >
-                  {s.days.length > 0 && (
-                    <View className="flex-row flex-wrap gap-2 mb-3">
-                      {s.days.map((day) => (
-                        <View
-                          key={day}
-                          className="rounded bg-[#0644C7] px-3 py-1.5"
-                        >
-                          <Text className="text-sm font-medium capitalize text-white">
-                            {day}
-                          </Text>
-                        </View>
-                      ))}
+              <View className="rounded-xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+                {detail.availability.map((s, i) => (
+                  <View
+                    key={i}
+                    className={`p-3.5 ${
+                      i > 0
+                        ? "border-t border-gray-100 dark:border-neutral-800"
+                        : ""
+                    }`}
+                  >
+                    {s.days.length > 0 && (
+                      <View className="flex-row flex-wrap gap-1.5 mb-2.5">
+                        {s.days.map((day) => (
+                          <View
+                            key={day}
+                            className="rounded-md bg-blue-50 dark:bg-blue-900/30 px-2 py-1"
+                          >
+                            <Text className="text-xs font-medium capitalize text-[#0644C7] dark:text-blue-300">
+                              {day}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    <View className="flex-row items-center gap-1.5">
+                      <Feather name="clock" size={13} color="#9CA3AF" />
+                      <Text className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        {formatTimeRange(s.start_time, s.end_time) ||
+                          `${s.start_time}–${s.end_time}`}
+                      </Text>
                     </View>
-                  )}
-                  <View className="flex-row items-center gap-2">
-                    <Feather name="clock" size={14} color={PRIMARY} />
-                    <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                      {formatTimeRange(s.start_time, s.end_time) ||
-                        `${s.start_time}–${s.end_time}`}
-                    </Text>
                   </View>
-                </View>
-              ))
+                ))}
+              </View>
             ) : (
-              <View className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/40">
-                <Text className="text-sm text-gray-600 dark:text-gray-300">
+              <View className="rounded-xl border border-dashed border-gray-300 dark:border-neutral-700 p-4">
+                <Text className="text-sm text-gray-500 dark:text-gray-400">
                   No availability schedule configured for this attraction.
                 </Text>
               </View>
@@ -551,15 +582,18 @@ export function AttractionActionsSheet({
             {/* Purchase-page actions (relocated here from the old overflow
                   menu now that a card tap opens straight into these details). */}
             <SectionTitle>Purchase Page</SectionTitle>
-            <View className="-mx-1">
+            <View className="rounded-xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
               <ActionRow
-                icon={copied ? "check" : "link"}
+                icon={copied ? "check" : "link-2"}
+                iconColor={copied ? "#16A34A" : iconColor}
                 label={copied ? "Link copied" : "Copy link"}
                 hint="Copy the public purchase URL"
                 onPress={handleCopyLink}
               />
               <ActionRow
+                divider
                 icon="shopping-cart"
+                iconColor={iconColor}
                 label="View purchase page"
                 hint="Open the in-app purchase page"
                 onPress={handleViewPurchasePage}
@@ -567,10 +601,10 @@ export function AttractionActionsSheet({
             </View>
 
             {/* Footer actions */}
-            <View className="flex-row gap-3 mt-6">
+            <View className="flex-row gap-2.5 mt-6">
               <Pressable
                 onPress={goEdit}
-                className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7]"
+                className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
               >
                 <Feather name="edit-2" size={16} color="#fff" />
                 <Text className="text-sm font-semibold text-white">Edit</Text>
@@ -578,13 +612,13 @@ export function AttractionActionsSheet({
               <Pressable
                 onPress={handleDuplicate}
                 disabled={duplicating}
-                className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
+                className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:bg-gray-50 dark:active:bg-neutral-800"
               >
                 {duplicating ? (
-                  <ActivityIndicator size="small" color="#374151" />
+                  <ActivityIndicator size="small" color={iconColor} />
                 ) : (
                   <>
-                    <Feather name="copy" size={16} color="#374151" />
+                    <Feather name="copy" size={16} color={iconColor} />
                     <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                       Duplicate
                     </Text>
@@ -594,7 +628,9 @@ export function AttractionActionsSheet({
               <Pressable
                 onPress={confirmDelete}
                 disabled={busy}
-                className="w-12 items-center justify-center py-3.5 rounded-xl border border-red-200 dark:border-red-900/50"
+                accessibilityRole="button"
+                accessibilityLabel="Delete attraction"
+                className="w-12 items-center justify-center py-3.5 rounded-xl border border-red-200 dark:border-red-900/50 active:bg-red-50 dark:active:bg-red-900/20"
               >
                 {busy ? (
                   <ActivityIndicator size="small" color="#dc2626" />

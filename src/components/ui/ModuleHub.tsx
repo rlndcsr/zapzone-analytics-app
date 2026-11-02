@@ -20,12 +20,14 @@ type FeatherIconName = ComponentProps<typeof Feather>["name"];
 /** For an icon Feather lacks (e.g. the Escape Rooms door); replaces `icon`. */
 type RenderIcon = (color: string, size: number) => ReactNode;
 
+/** A shortcut either opens a screen (`route`) or runs an action (`onPress`). */
 export type HubQuickLink = {
   icon: FeatherIconName;
   renderIcon?: RenderIcon;
   label: string;
-  route: string;
-};
+} & (
+  { route: string; onPress?: never } | { onPress: () => void; route?: never }
+);
 
 export type HubModule = {
   icon: FeatherIconName;
@@ -49,10 +51,11 @@ const QuickLink = ({
   renderIcon,
   label,
   route,
+  onPress,
   width,
 }: HubQuickLink & { width?: number }) => (
   <Pressable
-    onPress={() => router.push(route as never)}
+    onPress={onPress ?? (() => router.push(route as never))}
     accessibilityRole="button"
     accessibilityLabel={label}
     className={`${width ? "" : "flex-1 "}items-center py-3.5 px-1 rounded-2xl bg-white dark:bg-neutral-900 border border-gray-100 dark:border-neutral-800 active:opacity-70`}
@@ -82,6 +85,76 @@ const QuickLink = ({
     </View>
   </Pressable>
 );
+
+/**
+ * A labelled row of one-tap shortcuts. Up to four share the width; any more
+ * are sized so exactly four fit and the rest swipe in, snapping one shortcut
+ * at a time. `gutter` is the parent's horizontal padding — the swipe row
+ * bleeds past it to the screen edges. Used by the module hubs and by screens
+ * that surface their secondary actions the same way (Manage Attractions).
+ */
+export const HubShortcuts = ({
+  title = "Shortcuts",
+  links,
+  gutter = SCREEN_GUTTER,
+}: {
+  title?: string;
+  links: HubQuickLink[];
+  gutter?: number;
+}) => {
+  const { width: screenWidth } = useWindowDimensions();
+  if (links.length === 0) return null;
+
+  const swipeLinks = links.length > MAX_VISIBLE_LINKS;
+  const linkWidth =
+    (screenWidth - gutter * 2 - LINK_GAP * (MAX_VISIBLE_LINKS - 1)) /
+    MAX_VISIBLE_LINKS;
+
+  return (
+    <>
+      <View className="flex-row items-center justify-between mb-2.5">
+        <Text className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+          {title}
+        </Text>
+        {swipeLinks && (
+          <View className="flex-row items-center gap-1">
+            <Text className="text-[11px] text-gray-400 dark:text-gray-500">
+              Swipe for more
+            </Text>
+            <Feather name="chevrons-right" size={12} color="#9CA3AF" />
+          </View>
+        )}
+      </View>
+      {swipeLinks ? (
+        // Bleeds to the screen edges so cards scroll out past the gutter.
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={linkWidth + LINK_GAP}
+          decelerationRate="fast"
+          // ScrollView defaults to flexGrow: 1; without this the row soaks
+          // up spare height (e.g. Pricing's single module row) and
+          // stretches every shortcut.
+          style={{ flexGrow: 0, marginHorizontal: -gutter }}
+          contentContainerStyle={{
+            paddingHorizontal: gutter,
+            gap: LINK_GAP,
+          }}
+        >
+          {links.map((link) => (
+            <QuickLink key={link.label} {...link} width={linkWidth} />
+          ))}
+        </ScrollView>
+      ) : (
+        <View className="flex-row" style={{ gap: LINK_GAP }}>
+          {links.map((link) => (
+            <QuickLink key={link.label} {...link} />
+          ))}
+        </View>
+      )}
+    </>
+  );
+};
 
 const ModuleCard = ({ item }: { item: HubModule }) => (
   <Pressable
@@ -173,19 +246,9 @@ export const ModuleHubScreen = ({
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const { width: screenWidth } = useWindowDimensions();
   const user = getCurrentUser();
   const showLocation =
     user?.role === "company_admin" || canSwitchLocation(user);
-
-  // More than four shortcuts: size each so exactly four fit, and swipe for
-  // the rest, snapping one shortcut at a time.
-  const swipeLinks = quickLinks.length > MAX_VISIBLE_LINKS;
-  const linkWidth =
-    (screenWidth -
-      SCREEN_GUTTER * 2 -
-      LINK_GAP * (MAX_VISIBLE_LINKS - 1)) /
-    MAX_VISIBLE_LINKS;
 
   const rows: HubModule[][] = [];
   for (let i = 0; i < modules.length; i += 2) {
@@ -243,48 +306,9 @@ export const ModuleHubScreen = ({
         )}
 
         {quickLinks.length > 0 && (
-          <>
-            <View className="flex-row items-center justify-between mt-6 mb-2.5">
-              <Text className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                Shortcuts
-              </Text>
-              {swipeLinks && (
-                <View className="flex-row items-center gap-1">
-                  <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-                    Swipe for more
-                  </Text>
-                  <Feather name="chevrons-right" size={12} color="#9CA3AF" />
-                </View>
-              )}
-            </View>
-            {swipeLinks ? (
-              // Bleeds to the screen edges so cards scroll out past the gutter.
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                snapToInterval={linkWidth + LINK_GAP}
-                decelerationRate="fast"
-                // ScrollView defaults to flexGrow: 1; without this the row soaks
-                // up spare height (e.g. Pricing's single module row) and
-                // stretches every shortcut.
-                style={{ flexGrow: 0, marginHorizontal: -SCREEN_GUTTER }}
-                contentContainerStyle={{
-                  paddingHorizontal: SCREEN_GUTTER,
-                  gap: LINK_GAP,
-                }}
-              >
-                {quickLinks.map((link) => (
-                  <QuickLink key={link.label} {...link} width={linkWidth} />
-                ))}
-              </ScrollView>
-            ) : (
-              <View className="flex-row" style={{ gap: LINK_GAP }}>
-                {quickLinks.map((link) => (
-                  <QuickLink key={link.label} {...link} />
-                ))}
-              </View>
-            )}
-          </>
+          <View className="mt-6">
+            <HubShortcuts links={quickLinks} />
+          </View>
         )}
 
         <Text className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mt-6 mb-2.5">
