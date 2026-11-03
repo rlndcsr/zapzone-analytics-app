@@ -160,10 +160,10 @@ export function frameShapeTip(
   missing: PhotoFrameShape | null | undefined,
 ): string | null {
   if (missing === "portrait") {
-    return "Today’s frame has no portrait version yet, so photos taken upright cut off its sides. Hold the device sideways to get the whole frame. A manager can add a portrait version in Overlays.";
+    return "Today’s frame has no portrait version yet, so photos taken upright cut off its sides. Hold the device sideways to get the whole frame. A manager can add a portrait version in Photo Overlays.";
   }
   if (missing === "landscape") {
-    return "Today’s frame has no landscape version yet, so photos taken sideways cut off its top and bottom. Hold the device upright to get the whole frame. A manager can add a landscape version in Overlays.";
+    return "Today’s frame has no landscape version yet, so photos taken sideways cut off its top and bottom. Hold the device upright to get the whole frame. A manager can add a landscape version in Photo Overlays.";
   }
   return null;
 }

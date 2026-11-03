@@ -65,7 +65,7 @@ const MODULES: (HubModule & { managerOnly?: boolean })[] = [
   },
   {
     icon: "layers",
-    title: "Overlays",
+    title: "Photo Overlays",
     description: "The branded frame applied to every photo.",
     tags: ["Branding", "Frames"],
     accent: "#DB2777",

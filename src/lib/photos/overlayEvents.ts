@@ -6,7 +6,7 @@ import type {
 import { shortVenueName } from "../registrationForms/registrationForms.ts";
 import { joinNames } from "./photoRecipients.ts";
 
-// Event-day photo frames on the Overlays screen (web: pages/admin/photos/PhotoOverlays).
+// Event-day photo frames on the Photo Overlays screen (web: pages/admin/photos/PhotoOverlays).
 
 const WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS_SHORT = [
@@ -29,6 +29,19 @@ export function shortDay(day: string): string {
   return date
     ? `${WEEKDAYS_SHORT[date.getDay()]}, ${MONTHS_SHORT[date.getMonth()]} ${date.getDate()}`
     : day;
+}
+
+/**
+ * "10/25/2026, 6:00:00 PM" on the device's clock — what the web's
+ * `new Date(iso).toLocaleString()` prints. Built by hand because Hermes'
+ * toLocaleString follows the device locale and Intl support, so the card's
+ * hours could read differently from the website.
+ */
+export function formatInstant(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const h = d.getHours();
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}, ${h % 12 || 12}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${h < 12 ? "AM" : "PM"}`;
 }
 
 /** "Fri, Oct 23" or "Fri, Oct 23 – Sun, Oct 25". */

@@ -8,6 +8,7 @@ import {
   eventDayRange,
   eventFrameIsOver,
   eventOptionLabel,
+  formatInstant,
   isEventFrame,
   parseAppliesTo,
   scheduleLine,
@@ -158,6 +159,18 @@ describe("scheduleLine", () => {
       "Its own hours: from <a> · no end",
     );
     assert.equal(scheduleLine(overlay({ event: never }), fmt), null);
+  });
+});
+
+describe("formatInstant", () => {
+  it("prints the web's toLocaleString format on the device clock", () => {
+    assert.equal(formatInstant(new Date(2026, 9, 25, 18, 0, 0).toISOString()), "10/25/2026, 6:00:00 PM");
+    assert.equal(formatInstant(new Date(2026, 0, 5, 0, 7, 9).toISOString()), "1/5/2026, 12:07:09 AM");
+    assert.equal(formatInstant(new Date(2026, 11, 31, 12, 30, 0).toISOString()), "12/31/2026, 12:30:00 PM");
+  });
+
+  it("leaves an unreadable value as it came", () => {
+    assert.equal(formatInstant("nope"), "nope");
   });
 });
 

@@ -44,6 +44,7 @@ import {
   eventDayRange,
   eventFrameIsOver,
   eventOptionLabel,
+  formatInstant,
   isEventFrame,
   parseAppliesTo,
   scheduleLine,
@@ -143,14 +144,6 @@ const errorMessage = (e: unknown, fallback: string): string =>
 /** "2026-08-12" + "14:30" → the value a datetime-local input would submit. */
 const composeDateTime = (date: string, time: string): string =>
   date ? `${date}T${time || "00:00"}` : "";
-
-const prettyDateTime = (iso: string | null): string | null => {
-  if (!iso) return null;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d.toLocaleString();
-};
-
-const formatInstant = (iso: string): string => prettyDateTime(iso) ?? iso;
 
 /** The picked file's pixel size, or null when it can't be read (the server checks again). */
 const readImageSize = (uri: string): Promise<ImageSize | null> =>
@@ -879,7 +872,7 @@ export default function PhotoOverlaysScreen() {
           <Feather name="chevron-left" size={20} color="#111827" />
         </Pressable>
         <Text className="text-lg font-bold text-gray-900 dark:text-white">
-          Overlays
+          Photo Overlays
         </Text>
         <Pressable
           onPress={() => void onRefresh()}
@@ -906,7 +899,7 @@ export default function PhotoOverlaysScreen() {
           <View className="items-center rounded-2xl border border-gray-100 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
             <Feather name="lock" size={34} color="#9CA3AF" />
             <Text className="mt-3 text-lg font-bold text-gray-900 dark:text-white">
-              Overlays are managed by a manager
+              Photo Overlays are managed by a manager
             </Text>
             <Text className="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">
               Your role does not have access to this photo setting. Please ask a
