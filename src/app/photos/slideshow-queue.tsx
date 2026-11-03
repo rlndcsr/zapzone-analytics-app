@@ -585,11 +585,13 @@ function QueueRow({
       <View className="flex-row items-center gap-3">
         <Text className="w-5 text-sm text-gray-400">{index + 1}</Text>
         {photo.thumbnailUrl ? (
-          <Image
-            source={{ uri: photo.thumbnailUrl }}
-            style={{ height: 56, width: 56, borderRadius: 8 }}
-            contentFit="cover"
-          />
+          <View className="h-14 w-14 overflow-hidden rounded-lg bg-gray-100 dark:bg-neutral-800">
+            <Image
+              source={{ uri: photo.thumbnailUrl }}
+              style={{ height: 56, width: 56 }}
+              contentFit="contain"
+            />
+          </View>
         ) : (
           <View className="h-14 w-14 rounded-lg bg-gray-100 dark:bg-neutral-800" />
         )}

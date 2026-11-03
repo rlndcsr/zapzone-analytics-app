@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Pressable,
   RefreshControl,
+  Image as RNImage,
   ScrollView,
   StyleSheet,
   Text,
@@ -49,6 +50,26 @@ import {
   shortDay,
   venueName,
 } from "../../lib/photos/overlayEvents";
+import {
+  createFrameFiles,
+  FRAME_FILE_TYPES,
+  FRAME_SHAPES,
+  fitsShape,
+  missingShapeNote,
+  overlayVersions,
+  PORTRAIT_DROPPED_MESSAGE,
+  portraitDropped,
+  SHAPE_HINTS,
+  SHAPE_NAMES,
+  versionRows,
+  versionSavedMessage,
+  versionSizeLabel,
+  versionsKnown,
+  wrongShapeMessage,
+  type FrameShape,
+  type ImageSize,
+  type VersionRow,
+} from "../../lib/photos/frameVersions";
 import { joinNames } from "../../lib/photos/photoRecipients";
 import { shortVenueName } from "../../lib/registrationForms/registrationForms";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -61,8 +82,11 @@ import {
   deletePhotoOverlay,
   fetchPhotoEventDays,
   fetchPhotoOverlays,
+  removePhotoOverlayAltVersion,
+  savePhotoOverlayVersion,
   setPhotoOverlayEnabled,
   setPhotoOverlayRoom,
+  type OverlayFile,
   type PhotoEventDay,
   type PhotoOverlay,
   type PhotoOverlayStatus,
@@ -127,6 +151,41 @@ const prettyDateTime = (iso: string | null): string | null => {
 };
 
 const formatInstant = (iso: string): string => prettyDateTime(iso) ?? iso;
+
+/** The picked file's pixel size, or null when it can't be read (the server checks again). */
+const readImageSize = (uri: string): Promise<ImageSize | null> =>
+  new Promise((resolve) => {
+    RNImage.getSize(
+      uri,
+      (width, height) => resolve(width > 0 && height > 0 ? { width, height } : null),
+      () => resolve(null),
+    );
+  });
+
+/** Pick one frame file, keeping its original bytes so the transparency survives. */
+const pickFrameFile = async (): Promise<OverlayFile | null> => {
+  const result = await DocumentPicker.getDocumentAsync({
+    type: FRAME_FILE_TYPES,
+    copyToCacheDirectory: true,
+  });
+  if (result.canceled) return null;
+  const asset = result.assets?.[0];
+  if (!asset?.uri) return null;
+  return {
+    uri: asset.uri,
+    name: asset.name ?? "overlay.png",
+    type: asset.mimeType ?? "image/png",
+  };
+};
+
+const EMPTY_FRAME_FILES: Record<FrameShape, OverlayFile | null> = {
+  landscape: null,
+  portrait: null,
+};
+const NO_FRAME_ERRORS: Record<FrameShape, string | null> = {
+  landscape: null,
+  portrait: null,
+};
 
 /** Transparency grid behind an overlay preview (the web's 16px checkerboard). */
 function Checkerboard({ id }: { id: string }) {
@@ -312,10 +371,13 @@ export default function PhotoOverlaysScreen() {
 
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [file, setFile] = useState<{
-    uri: string;
-    name?: string;
-    type?: string;
+  const [frameFiles, setFrameFiles] = useState(EMPTY_FRAME_FILES);
+  const [frameFileErrors, setFrameFileErrors] = useState(NO_FRAME_ERRORS);
+  // Bumped per pick (and on reset) so a slow size check can't land on a newer choice.
+  const frameFileChecks = useRef<Record<FrameShape, number>>({ landscape: 0, portrait: 0 });
+  const [confirmRemoveVersion, setConfirmRemoveVersion] = useState<{
+    overlay: PhotoOverlay;
+    shape: FrameShape;
   } | null>(null);
   const [startsDate, setStartsDate] = useState("");
   const [startsTime, setStartsTime] = useState("");
@@ -529,7 +591,12 @@ export default function PhotoOverlaysScreen() {
 
   const resetForm = useCallback(() => {
     setName("");
-    setFile(null);
+    frameFileChecks.current = {
+      landscape: frameFileChecks.current.landscape + 1,
+      portrait: frameFileChecks.current.portrait + 1,
+    };
+    setFrameFiles(EMPTY_FRAME_FILES);
+    setFrameFileErrors(NO_FRAME_ERRORS);
     setStartsDate("");
     setStartsTime("");
     setEndsDate("");
@@ -550,26 +617,48 @@ export default function PhotoOverlaysScreen() {
     [endsDate, startsDate],
   );
 
-  const pickImage = useCallback(async () => {
-    // A document pick keeps the original bytes; re-encoding would flatten the
-    // transparency an overlay depends on.
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ["image/png", "image/jpeg", "image/webp"],
-      copyToCacheDirectory: true,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setFile({
-      uri: asset.uri,
-      name: asset.name ?? "overlay.png",
-      type: asset.mimeType ?? "image/png",
-    });
+  // A file of the wrong shape is refused on the spot, as on the web; a size
+  // that can't be read is left for the server to check.
+  const chooseFrameFile = useCallback(async (shape: FrameShape) => {
+    const chosen = await pickFrameFile();
+    if (!chosen) return;
+    const check = frameFileChecks.current[shape] + 1;
+    frameFileChecks.current = { ...frameFileChecks.current, [shape]: check };
+    const size = await readImageSize(chosen.uri);
+    if (frameFileChecks.current[shape] !== check) return;
+    if (size && !fitsShape(shape, size)) {
+      setFrameFiles((current) => ({ ...current, [shape]: null }));
+      setFrameFileErrors((current) => ({ ...current, [shape]: wrongShapeMessage(shape, size) }));
+      return;
+    }
+    setFrameFiles((current) => ({ ...current, [shape]: chosen }));
+    setFrameFileErrors((current) => ({ ...current, [shape]: null }));
+  }, []);
+
+  // As on the web, closing the form drops the chosen files but keeps the rest.
+  const closeForm = useCallback(() => {
+    frameFileChecks.current = {
+      landscape: frameFileChecks.current.landscape + 1,
+      portrait: frameFileChecks.current.portrait + 1,
+    };
+    setFrameFiles(EMPTY_FRAME_FILES);
+    setFrameFileErrors(NO_FRAME_ERRORS);
+    setShowForm(false);
+  }, []);
+
+  const clearFrameFile = useCallback((shape: FrameShape) => {
+    frameFileChecks.current = {
+      ...frameFileChecks.current,
+      [shape]: frameFileChecks.current[shape] + 1,
+    };
+    setFrameFiles((current) => ({ ...current, [shape]: null }));
+    setFrameFileErrors((current) => ({ ...current, [shape]: null }));
   }, []);
 
   const create = useCallback(async () => {
     const token = getToken();
-    if (!effectiveLocationId || !file || name.trim().length === 0 || !token)
+    const { image, altImage } = createFrameFiles(frameFiles);
+    if (!effectiveLocationId || !image || name.trim().length === 0 || !token)
       return;
     if (busy) return;
     const { roomId, eventId } = parseAppliesTo(appliesTo);
@@ -584,7 +673,8 @@ export default function PhotoOverlaysScreen() {
       const { overlay, copies } = await createPhotoOverlay(token, {
         locationId: effectiveLocationId,
         name: name.trim(),
-        file,
+        file: image,
+        altFile: altImage,
         startsAt: withHours ? composeDateTime(startsDate, startsTime) || undefined : undefined,
         endsAt: withHours ? composeDateTime(endsDate, endsTime) || undefined : undefined,
         priority: Number(priority) || 0,
@@ -608,10 +698,14 @@ export default function PhotoOverlaysScreen() {
         return;
       }
       const summary = copiesSummary(copies);
-      showToast({
-        message: summary ? `Overlay uploaded. ${summary}` : "Overlay uploaded.",
-        type: copies.skipped.length > 0 ? "info" : "success",
-      });
+      showToast(
+        portraitDropped(frameFiles, overlay)
+          ? { message: PORTRAIT_DROPPED_MESSAGE, type: "error" }
+          : {
+              message: summary ? `Overlay uploaded. ${summary}` : "Overlay uploaded.",
+              type: copies.skipped.length > 0 ? "info" : "success",
+            },
+      );
       setShowForm(false);
       resetForm();
       await load();
@@ -633,7 +727,7 @@ export default function PhotoOverlaysScreen() {
     effectiveLocationId,
     endsDate,
     endsTime,
-    file,
+    frameFiles,
     limitHours,
     load,
     loadEventDays,
@@ -644,6 +738,60 @@ export default function PhotoOverlaysScreen() {
     startsDate,
     startsTime,
   ]);
+
+  // Add or Replace one shape on an existing frame. The lock covers the picker
+  // too: `busy` only goes up once a file is chosen.
+  const versionLock = useRef(false);
+  const saveVersion = useCallback(
+    async (overlay: PhotoOverlay, row: VersionRow) => {
+      if (busy || versionLock.current) return;
+      versionLock.current = true;
+      try {
+        const chosen = await pickFrameFile();
+        if (!chosen) return;
+        const size = await readImageSize(chosen.uri);
+        if (size && !fitsShape(row.shape, size)) {
+          showToast({ message: wrongShapeMessage(row.shape, size), type: "error" });
+          return;
+        }
+        const token = getToken();
+        if (!token) return;
+        setBusy(true);
+        await savePhotoOverlayVersion(token, overlay.id, row.slot, chosen);
+        showToast({ message: versionSavedMessage(row.shape), type: "success" });
+        await load();
+      } catch (e) {
+        showToast({
+          message: errorMessage(e, "That version could not be saved."),
+          type: "error",
+        });
+      } finally {
+        versionLock.current = false;
+        setBusy(false);
+      }
+    },
+    [busy, load, showToast],
+  );
+
+  const removeVersion = useCallback(async () => {
+    const token = getToken();
+    if (!confirmRemoveVersion || !token || busy) return;
+    const { overlay, shape } = confirmRemoveVersion;
+    setBusy(true);
+    try {
+      await removePhotoOverlayAltVersion(token, overlay.id);
+      showToast({ message: `${SHAPE_NAMES[shape]} version removed.`, type: "info" });
+      setConfirmRemoveVersion(null);
+      await load();
+    } catch (e) {
+      showToast({
+        message: errorMessage(e, "That version could not be removed."),
+        type: "error",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, confirmRemoveVersion, load, showToast]);
 
   const toggleEnabled = useCallback(
     async (overlay: PhotoOverlay) => {
@@ -827,19 +975,25 @@ export default function PhotoOverlaysScreen() {
     const eventFrame = isEventFrame(overlay);
     const schedule = scheduleLine(overlay, formatInstant);
     const eventDayText = event ? eventDayRange(event.firstDay, event.eventDate) : "";
+    const versions = overlayVersions(overlay);
+    const shapeNote = missingShapeNote(overlay.missingShape);
     return (
       <View
         key={overlay.id}
         className="mb-4 overflow-hidden rounded-2xl border border-gray-100 bg-white dark:border-neutral-800 dark:bg-neutral-900"
       >
-        <View className="aspect-video w-full items-center justify-center overflow-hidden">
+        <View className="aspect-video w-full flex-row items-center justify-center gap-3 overflow-hidden p-3">
           <Checkerboard id={`overlay-${overlay.id}`} />
-          {overlay.imageUrl ? (
-            <Image
-              source={{ uri: overlay.imageUrl }}
-              style={{ width: "100%", height: "100%" }}
-              contentFit="contain"
-            />
+          {versions.length > 0 ? (
+            versions.map((version) => (
+              <Image
+                key={version.slot}
+                source={{ uri: version.url }}
+                style={{ flex: 1, height: "100%" }}
+                contentFit="contain"
+                accessibilityLabel={`${overlay.name}${version.shape ? ` (${version.shape})` : ""}`}
+              />
+            ))
           ) : (
             <Text className="text-xs text-gray-400">No image</Text>
           )}
@@ -928,6 +1082,63 @@ export default function PhotoOverlaysScreen() {
                 disabled={busy}
                 onSelect={(value) => void changeRoom(overlay, String(value))}
               />
+            </View>
+          )}
+
+          {versionsKnown(overlay) && (
+            <View className="mt-3 gap-1.5">
+              {versionRows(overlay).map((row) => (
+                <View key={row.shape} className="flex-row flex-wrap items-center gap-2">
+                  <Text className="w-20 text-xs text-gray-500 dark:text-gray-400">
+                    {SHAPE_NAMES[row.shape]}
+                  </Text>
+                  <Text
+                    className={`flex-1 text-xs ${
+                      row.version
+                        ? "text-gray-800 dark:text-gray-200"
+                        : "text-amber-700 dark:text-amber-400"
+                    }`}
+                  >
+                    {versionSizeLabel(row.version)}
+                  </Text>
+                  {row.action && (
+                    <Pressable
+                      onPress={() => void saveVersion(overlay, row)}
+                      disabled={busy}
+                      className={`rounded-md border border-gray-200 px-2 py-1 dark:border-neutral-700 ${
+                        busy ? "opacity-40" : "active:opacity-70"
+                      }`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${row.action === "replace" ? "Replace" : "Add"} the ${row.shape} version of ${overlay.name}`}
+                    >
+                      <Text className="text-xs text-gray-700 dark:text-gray-200">
+                        {row.action === "replace" ? "Replace" : "Add"}
+                      </Text>
+                    </Pressable>
+                  )}
+                  {row.canRemove && (
+                    <Pressable
+                      onPress={() => setConfirmRemoveVersion({ overlay, shape: row.shape })}
+                      disabled={busy}
+                      className={`rounded-md border border-gray-200 px-2 py-1 dark:border-neutral-700 ${
+                        busy ? "opacity-40" : "active:opacity-70"
+                      }`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove the ${row.shape} version of ${overlay.name}`}
+                    >
+                      <Text className="text-xs text-red-700 dark:text-red-400">Remove</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+              {!!shapeNote && (
+                <View className="flex-row items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/20">
+                  <Feather name="alert-triangle" size={13} color="#B45309" style={{ marginTop: 1 }} />
+                  <Text className="flex-1 text-xs text-amber-900 dark:text-amber-300">
+                    {shapeNote}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -1063,7 +1274,7 @@ export default function PhotoOverlaysScreen() {
 
       <BottomSheet
         visible={showForm}
-        onClose={() => setShowForm(false)}
+        onClose={closeForm}
         title="Upload an overlay"
       >
         <ScrollView
@@ -1072,10 +1283,11 @@ export default function PhotoOverlaysScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            Use a transparent PNG designed wide at 16:9, for example 1920 ×
-            1080, so its edges line up with landscape group photos. A frame of
-            another shape is scaled to cover the picture and its edges may be
-            cut off. The capture date is drawn on top.
+            Use a PNG with a see-through middle. Give the frame a landscape
+            version and a portrait version: each photo gets the version that
+            matches its shape, so the whole frame shows. With only one version,
+            photos of the other shape cut off part of the frame. The capture
+            date is drawn on top.
           </Text>
 
           <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
@@ -1089,26 +1301,48 @@ export default function PhotoOverlaysScreen() {
             className="mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
           />
 
-          <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
-            Overlay image
-          </Text>
-          {/* The web's file input: "Choose File" then the picked name. */}
-          <View className="mb-4 flex-row items-center gap-2">
-            <Pressable
-              onPress={() => void pickImage()}
-              className="rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 active:opacity-70 dark:border-neutral-600 dark:bg-neutral-800"
-              accessibilityRole="button"
-              accessibilityLabel="Choose the overlay image"
-            >
-              <Text className="text-sm text-gray-900 dark:text-white">Choose File</Text>
-            </Pressable>
-            <Text
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              numberOfLines={1}
-            >
-              {file?.name ?? "No file chosen"}
-            </Text>
-          </View>
+          {/* The web's two file inputs: "Choose File" then the picked name. */}
+          {FRAME_SHAPES.map((shape) => (
+            <View key={shape} className="mb-4">
+              <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
+                {SHAPE_NAMES[shape]} version{" "}
+                <Text className="text-gray-500 dark:text-gray-400">
+                  ({SHAPE_HINTS[shape]})
+                </Text>
+              </Text>
+              <View className="flex-row items-center gap-2">
+                <Pressable
+                  onPress={() => void chooseFrameFile(shape)}
+                  className="rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 active:opacity-70 dark:border-neutral-600 dark:bg-neutral-800"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Choose the ${shape} version`}
+                >
+                  <Text className="text-sm text-gray-900 dark:text-white">Choose File</Text>
+                </Pressable>
+                <Text
+                  className="flex-1 text-sm text-gray-900 dark:text-white"
+                  numberOfLines={1}
+                >
+                  {frameFiles[shape]?.name ?? "No file chosen"}
+                </Text>
+                {!!frameFiles[shape] && (
+                  <Pressable
+                    onPress={() => clearFrameFile(shape)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Clear the ${shape} version`}
+                  >
+                    <Feather name="x" size={16} color="#9CA3AF" />
+                  </Pressable>
+                )}
+              </View>
+              {!!frameFileErrors[shape] && (
+                <Text className="mt-1 text-xs text-red-700 dark:text-red-400">
+                  {frameFileErrors[shape]}
+                </Text>
+              )}
+            </View>
+          ))}
 
           <View className="mb-4">
             <Text className="mb-1 text-sm text-gray-700 dark:text-gray-200">
@@ -1236,7 +1470,10 @@ export default function PhotoOverlaysScreen() {
               label="Save overlay"
               onPress={() => void create()}
               loading={busy}
-              disabled={!file || name.trim().length === 0}
+              disabled={
+                !(frameFiles.landscape || frameFiles.portrait) ||
+                name.trim().length === 0
+              }
               style={{ borderRadius: CONTROL_RADIUS }}
             />
           </View>
@@ -1284,6 +1521,18 @@ export default function PhotoOverlaysScreen() {
           setEndsTime(time);
           setPicker(null);
         }}
+      />
+
+      <ConfirmationModal
+        visible={!!confirmRemoveVersion}
+        title={`Remove the ${confirmRemoveVersion?.shape ?? ""} version of "${confirmRemoveVersion?.overlay.name ?? ""}"?`}
+        message="Photos already taken keep it."
+        confirmLabel="Remove"
+        cancelLabel="Keep it"
+        destructive
+        loading={busy}
+        onConfirm={() => void removeVersion()}
+        onCancel={() => setConfirmRemoveVersion(null)}
       />
 
       <ConfirmationModal

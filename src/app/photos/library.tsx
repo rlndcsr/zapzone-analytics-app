@@ -745,7 +745,7 @@ export default function PhotoLibraryScreen() {
                             <Image
                               source={{ uri: photo.thumbnailUrl }}
                               style={{ width: "100%", height: "100%" }}
-                              contentFit="cover"
+                              contentFit="contain"
                             />
                           ) : (
                             <View className="h-full items-center justify-center">
@@ -945,12 +945,16 @@ export default function PhotoLibraryScreen() {
           {(confirmDelete?.photos.length ?? 0) > 1 && (
             <View className="mb-5 flex-row flex-wrap items-center gap-2">
               {confirmDelete?.photos.slice(0, 8).map((photo) => (
-                <Image
+                <View
                   key={photo.id}
-                  source={{ uri: photo.thumbnailUrl ?? "" }}
-                  style={{ height: 48, width: 48, borderRadius: 6 }}
-                  contentFit="cover"
-                />
+                  className="h-12 w-12 overflow-hidden rounded-md bg-gray-100 dark:bg-neutral-800"
+                >
+                  <Image
+                    source={{ uri: photo.thumbnailUrl ?? "" }}
+                    style={{ height: 48, width: 48 }}
+                    contentFit="contain"
+                  />
+                </View>
               ))}
               {(confirmDelete?.photos.length ?? 0) > 8 && (
                 <Text className="text-xs text-gray-500 dark:text-gray-400">

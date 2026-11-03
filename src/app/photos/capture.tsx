@@ -33,6 +33,7 @@ import { Toast, type ToastType } from "../../components/ui/Toast";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { needsQrFallback, recipientLabel } from "../../lib/photos/deliveryOutcome";
+import { frameShapeTip } from "../../lib/photos/frameVersions";
 import { receivingCount, recipientIds } from "../../lib/photos/photoRecipients";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -208,6 +209,7 @@ export default function PhotoCaptureScreen() {
     [session],
   );
   const selectableCount = receivingCount(selected, textRegistrants);
+  const frameTip = frameShapeTip(context?.activeOverlay?.missingShape);
 
   useEffect(() => {
     if (!effectiveLocationId) {
@@ -633,6 +635,15 @@ export default function PhotoCaptureScreen() {
                 />
               ) : (
                 <View className="aspect-[4/3] w-full rounded-2xl bg-black" />
+              )}
+
+              {!!frameTip && (
+                <View className="mt-2 flex-row items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/20">
+                  <Feather name="alert-triangle" size={13} color="#B45309" style={{ marginTop: 1 }} />
+                  <Text className="flex-1 text-xs text-amber-900 dark:text-amber-300">
+                    {frameTip}
+                  </Text>
+                </View>
               )}
 
               <View className="mt-4 gap-3">

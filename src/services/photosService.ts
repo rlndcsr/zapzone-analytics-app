@@ -1,4 +1,14 @@
 import { ApiError, apiRequest, apiUrl } from "../lib/api";
+import {
+  asFrameShape,
+  mapOverlayVersions,
+  type FrameSlot,
+  type PhotoFrameShape,
+  type PhotoOverlayVersion,
+  type RawOverlayVersion,
+} from "../lib/photos/frameVersions";
+
+export type { PhotoFrameShape, PhotoOverlayVersion } from "../lib/photos/frameVersions";
 
 export type PhotoSessionStatus =
   "in_progress" | "awaiting_preview" | "processing" | "ready";
@@ -192,7 +202,12 @@ export type PhotoCaptureContext = {
     timezone: string;
   };
   operatingDay: string;
-  activeOverlay: { id: number; name: string } | null;
+  activeOverlay: {
+    id: number;
+    name: string;
+    /** The shape today's frame has no version for; null when it has both (or the server predates versions). */
+    missingShape: PhotoFrameShape | null;
+  } | null;
   hasOverlay: boolean;
   limits: {
     staffMaxPhotos: number;
@@ -313,6 +328,13 @@ export type PhotoOverlay = {
   name: string;
   /** Public disk URL — overlays are venue branding, not customer media. */
   imageUrl: string | null;
+  /** The second (other-shape) version, when the frame has one. */
+  altImageUrl: string | null;
+  /** Null from a server that predates landscape/portrait versions. */
+  versions: PhotoOverlayVersion[] | null;
+  missingShape: PhotoFrameShape | null;
+  /** False when the server can't keep a second version; null when it didn't say. */
+  versionsSupported: boolean | null;
   startsAt: string | null;
   endsAt: string | null;
   isEnabled: boolean;
@@ -687,7 +709,7 @@ export async function fetchCaptureContext(
     data: {
       location: PhotoCaptureContext["location"];
       operating_day: string;
-      active_overlay: { id: number; name: string } | null;
+      active_overlay: { id: number; name: string; missing_shape?: string | null } | null;
       has_overlay: boolean;
       limits: {
         staff_max_photos: number;
@@ -717,7 +739,13 @@ export async function fetchCaptureContext(
   return {
     location: d.location,
     operatingDay: d.operating_day,
-    activeOverlay: d.active_overlay,
+    activeOverlay: d.active_overlay
+      ? {
+          id: d.active_overlay.id,
+          name: d.active_overlay.name,
+          missingShape: asFrameShape(d.active_overlay.missing_shape),
+        }
+      : null,
     hasOverlay: d.has_overlay,
     limits: {
       staffMaxPhotos: d.limits.staff_max_photos,
@@ -1887,6 +1915,10 @@ type ApiOverlay = {
   event?: ApiOverlayEvent | null;
   name: string;
   image_url: string | null;
+  alt_image_url?: string | null;
+  versions?: RawOverlayVersion[] | null;
+  missing_shape?: string | null;
+  versions_supported?: boolean | null;
   starts_at: string | null;
   ends_at: string | null;
   is_enabled: boolean;
@@ -1924,6 +1956,11 @@ function mapOverlay(raw: ApiOverlay): PhotoOverlay {
     event: mapOverlayEvent(raw.event),
     name: raw.name,
     imageUrl: raw.image_url,
+    altImageUrl: raw.alt_image_url ?? null,
+    versions: mapOverlayVersions(raw.versions),
+    missingShape: asFrameShape(raw.missing_shape),
+    versionsSupported:
+      typeof raw.versions_supported === "boolean" ? raw.versions_supported : null,
     startsAt: raw.starts_at,
     endsAt: raw.ends_at,
     isEnabled: Boolean(raw.is_enabled),
@@ -2041,11 +2078,41 @@ export async function fetchPhotoEventDays(
   }
 }
 
+export type OverlayFile = { uri: string; name?: string; type?: string };
+
+const overlayFilePart = (file: OverlayFile): Blob =>
+  ({
+    uri: file.uri,
+    name: file.name ?? "overlay.png",
+    type: file.type ?? "image/png",
+  }) as unknown as Blob;
+
+/** Multipart POST for the overlay routes; RN sets the boundary itself. */
+async function postOverlayForm(
+  token: string,
+  path: string,
+  form: FormData,
+  fallback: string,
+): Promise<{ data?: unknown; copies?: unknown } & Record<string, unknown>> {
+  const res = await fetch(apiUrl(path), {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error((data?.message as string) ?? fallback);
+  }
+  return data ?? {};
+}
+
 export type CreatePhotoOverlayInput = {
   locationId: number;
   name: string;
   /** The picked file, kept in its original encoding so PNG alpha survives. */
-  file: { uri: string; name?: string; type?: string };
+  file: OverlayFile;
+  /** The other-shape version (`alt_image`); an older server ignores it. */
+  altFile?: OverlayFile | null;
   startsAt?: string;
   endsAt?: string;
   priority: number;
@@ -2068,11 +2135,8 @@ export async function createPhotoOverlay(
   const form = new FormData();
   form.append("location_id", String(input.locationId));
   form.append("name", input.name);
-  form.append("image", {
-    uri: input.file.uri,
-    name: input.file.name ?? "overlay.png",
-    type: input.file.type ?? "image/png",
-  } as unknown as Blob);
+  form.append("image", overlayFilePart(input.file));
+  if (input.altFile) form.append("alt_image", overlayFilePart(input.altFile));
   if (input.startsAt) form.append("starts_at", input.startsAt);
   if (input.endsAt) form.append("ends_at", input.endsAt);
   form.append("priority", String(input.priority));
@@ -2082,17 +2146,12 @@ export async function createPhotoOverlay(
   }
   if (input.alsoOtherLocations) form.append("also_other_locations", "1");
 
-  const res = await fetch(apiUrl("/api/photo-overlays"), {
-    method: "POST",
-    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
-    body: form,
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    throw new Error(
-      (data?.message as string) ?? "That overlay could not be saved.",
-    );
-  }
+  const data = await postOverlayForm(
+    token,
+    "/api/photo-overlays",
+    form,
+    "That overlay could not be saved.",
+  );
   const copies = data?.copies as {
     created?: { overlay_id: number; location_name: string | null }[];
     skipped?: { location_name: string | null; reason: string | null }[];
@@ -2110,6 +2169,40 @@ export async function createPhotoOverlay(
       })),
     },
   };
+}
+
+/**
+ * POST /api/photo-overlays/{id} — add or replace one version of a frame:
+ * `image` is the main file, `alt_image` the other-shape one. The server
+ * refuses (422, reason in `message`) two versions of the same shape, a frame
+ * with no see-through area, or one over 12.5 megapixels.
+ */
+export async function savePhotoOverlayVersion(
+  token: string,
+  overlayId: number,
+  slot: FrameSlot,
+  file: OverlayFile,
+): Promise<void> {
+  const form = new FormData();
+  form.append(slot, overlayFilePart(file));
+  await postOverlayForm(
+    token,
+    `/api/photo-overlays/${overlayId}`,
+    form,
+    "That version could not be saved.",
+  );
+}
+
+/** POST /api/photo-overlays/{id} — drop the second version; the main image stays. */
+export async function removePhotoOverlayAltVersion(
+  token: string,
+  overlayId: number,
+): Promise<void> {
+  await apiRequest(`/api/photo-overlays/${overlayId}`, {
+    method: "POST",
+    token,
+    body: { remove_alt_image: true },
+  });
 }
 
 /** POST /api/photo-overlays/{id} — tie the overlay to one escape room, or null for all photos. */
