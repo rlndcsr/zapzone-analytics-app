@@ -199,8 +199,8 @@ export function venueDateKey(iso: string | null | undefined): string | null {
 export type VenueNow = VenueParts;
 
 /** Venue wall-clock "now", broken into parts — for a live current-time indicator. */
-export function venueNow(): VenueNow {
-  return venueParts(new Date());
+export function venueNow(now: Date = new Date()): VenueNow {
+  return venueParts(now);
 }
 
 /**

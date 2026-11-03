@@ -40,7 +40,12 @@ type DatePickerSheetProps = {
   /** Emits the chosen day as YYYY-MM-DD, then the parent typically closes. */
   onSelect: (date: string) => void;
   title?: string;
+  /** Visit days that get a special → its label; marked "%" (web dealDates). */
+  dealDates?: Record<string, string>;
 };
+
+/** The "%" deal-day mark, in an inline colour so the cell's classes never change. */
+const DEAL_MARK_COLOR = "#059669";
 
 const LegendItem = ({ color, label }: { color: string; label: string }) => (
   <View className="flex-row items-center gap-1.5">
@@ -70,7 +75,9 @@ export function DatePickerSheet({
   onClose,
   onSelect,
   title = "Select Date",
+  dealDates,
 }: DatePickerSheetProps) {
+  const hasDeals = !!dealDates && Object.keys(dealDates).length > 0;
   const todayKey = useMemo(() => toKey(new Date()), []);
   const minKey = minDate ?? todayKey;
   // Availability mode = at least one availability set was supplied. Off for the
@@ -188,6 +195,7 @@ export function DatePickerSheet({
                   ? PRIMARY
                   : "#60A5FA";
               const showDot = availabilityMode && !isSelected && !disabled;
+              const deal = !disabled ? dealDates?.[key] : undefined;
               return (
                 <View
                   key={key}
@@ -198,7 +206,7 @@ export function DatePickerSheet({
                     disabled={disabled}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isSelected, disabled }}
-                    accessibilityLabel={key}
+                    accessibilityLabel={deal ? `${key}, special price: ${deal}` : key}
                     className={`w-10 h-10 rounded-full items-center justify-center ${
                       isSelected
                         ? "bg-[#0644C7]"
@@ -251,12 +259,35 @@ export function DatePickerSheet({
                         }}
                       />
                     )}
+                    {!!deal && (
+                      <Text
+                        style={{
+                          position: "absolute",
+                          top: 1,
+                          right: 2,
+                          fontSize: 9,
+                          fontWeight: "700",
+                          color: isSelected ? "#FFFFFF" : DEAL_MARK_COLOR,
+                        }}
+                      >
+                        %
+                      </Text>
+                    )}
                   </Pressable>
                 </View>
               );
             })}
           </View>
         ))}
+
+        {hasDeals && (
+          <View className="flex-row items-center justify-center gap-1.5 mt-3">
+            <Text style={{ fontSize: 11, fontWeight: "700", color: DEAL_MARK_COLOR }}>%</Text>
+            <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+              Special price
+            </Text>
+          </View>
+        )}
 
         {/* Legend */}
         {availabilityMode ? (

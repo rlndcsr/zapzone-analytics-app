@@ -3,6 +3,7 @@ import React from "react";
 import { Text, View } from "react-native";
 
 import { ConnectedWaiversPanel } from "../ui/ConnectedWaiversPanel";
+import { confirmedTicketBalance } from "../../lib/checkin/ticketBalance";
 import type { PurchaseRow, PurchaseStatus } from "../../services/attractionPurchasesService";
 import type { EntityWaivers } from "../../services/waiversService";
 
@@ -204,6 +205,9 @@ export function VerifyTicketDetails({
   const time = fmtTime(purchase.scheduledTime);
   const longDate = fmtLong(purchase.scheduledDate);
   const outstanding = Math.max(0, purchase.totalAmount - purchase.amountPaid);
+  // A confirmed ticket whose total rose after it was paid (e.g. rescheduled
+  // off a special day) still owes the difference (web CheckIn, ae48a92).
+  const confirmedBalance = confirmedTicketBalance(purchase);
 
   const schedule = purchase.scheduledDate
     ? `${fmtShort(purchase.scheduledDate)}${time ? ` at ${time}` : ""}`
@@ -247,6 +251,20 @@ export function VerifyTicketDetails({
           </Text>
         </View>
       </View>
+
+      {confirmedBalance > 0 && (
+        <View
+          className="mb-4 flex-row items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-900/20"
+          accessibilityRole="alert"
+        >
+          <Feather name="alert-circle" size={16} color="#D97706" style={{ marginTop: 1 }} />
+          <Text className="flex-1 text-sm text-amber-800 dark:text-amber-300">
+            <Text className="font-semibold">Balance due: {money(confirmedBalance)}.</Text>{" "}
+            The ticket total changed after it was paid. Collect the balance before
+            checking in.
+          </Text>
+        </View>
+      )}
 
       {/* Waivers — same panel (Kiosk / Copy link) as the web modal */}
       <View className="mb-4 rounded-xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">

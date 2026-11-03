@@ -2,9 +2,10 @@ import { apiRequest } from "../lib/api";
 import { fetchAllPages } from "../lib/fetchAllPages";
 import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
 import { checkoutTokenBody, rememberCheckoutToken } from "../lib/payments/checkoutTokens";
-import type {
-  AppliedDiscount as PayloadAppliedDiscount,
-  AppliedFee as PayloadAppliedFee,
+import {
+  mapSavedDiscount,
+  type AppliedDiscount as PayloadAppliedDiscount,
+  type AppliedFee as PayloadAppliedFee,
 } from "./pricingService";
 
 /** Purchase status, normalized like the web ("completed" -> "confirmed"). */
@@ -28,6 +29,11 @@ export type PurchaseRow = {
   status: PurchaseStatus;
   totalAmount: number;
   amountPaid: number;
+  /**
+   * The server sent an amount paid (older rows may not). Without one, a
+   * balance can't be told from an unrecorded payment, so none is shown.
+   */
+  amountPaidRecorded?: boolean;
   paymentMethod: string;
   /** "Visa ending in 1234" — the most relevant paid card, or null. */
   cardLabel: string | null;
@@ -123,6 +129,7 @@ function mapPurchase(raw: RawPurchase): PurchaseRow {
     status: status ?? "pending",
     totalAmount: Number(raw.total_amount ?? 0),
     amountPaid: Number(raw.amount_paid ?? 0),
+    amountPaidRecorded: raw.amount_paid != null && raw.amount_paid !== "",
     paymentMethod: raw.payment_method ?? "",
     cardLabel: cardLabelFromPayments(raw.payments),
     createdAt: raw.created_at ?? "",
@@ -507,6 +514,10 @@ export type AttractionPurchaseEditRecord = {
   paymentMethod: AttractionPaymentMethod;
   amountPaid: number;
   discountAmount: number;
+  /** What the purchase was saved at, for working out an older row's ticket price. */
+  totalAmount: number;
+  /** The ticket price it was sold at (backend 44e1a85); null on older rows. */
+  unitPrice: number | null;
   notes: string;
   /** YYYY-MM-DD, or "" when unscheduled. */
   scheduledDate: string;
@@ -533,6 +544,8 @@ type RawEditPurchase = Omit<RawPurchaseDetail, "attraction"> & {
   attraction_id?: number | null;
   customer_id?: number | null;
   discount_amount?: number | string | null;
+  unit_price?: number | string | null;
+  total_amount?: number | string | null;
   attraction?: {
     id?: number;
     name?: string | null;
@@ -549,6 +562,10 @@ type RawEditPurchase = Omit<RawPurchaseDetail, "attraction"> & {
         discount_type?: "fixed" | "percentage" | null;
         original_price?: number | string | null;
         special_pricing_id?: number | null;
+        source?: string | null;
+        discount_label?: string | null;
+        unit_discount_amount?: number | string | null;
+        quantity?: number | string | null;
       }[]
     | null;
 };
@@ -574,6 +591,9 @@ function mapEditRecord(raw: RawEditPurchase): AttractionPurchaseEditRecord {
     paymentMethod: (raw.payment_method || "in-store") as AttractionPaymentMethod,
     amountPaid: Number(raw.amount_paid ?? 0),
     discountAmount: Number(raw.discount_amount ?? 0),
+    totalAmount: Number(raw.total_amount ?? 0),
+    unitPrice:
+      raw.unit_price != null && raw.unit_price !== "" ? Number(raw.unit_price) : null,
     notes: raw.notes ?? "",
     scheduledDate: raw.scheduled_date ? raw.scheduled_date.split("T")[0] : "",
     scheduledTime: raw.scheduled_time ?? "",
@@ -589,13 +609,7 @@ function mapEditRecord(raw: RawEditPurchase): AttractionPurchaseEditRecord {
       fee_amount: Number(f.fee_amount ?? 0),
       fee_application_type: f.fee_application_type ?? "additive",
     })),
-    appliedDiscounts: (raw.applied_discounts ?? []).map((d) => ({
-      discount_name: d.discount_name?.trim() || "",
-      discount_amount: Number(d.discount_amount ?? 0),
-      discount_type: d.discount_type ?? "fixed",
-      original_price: Number(d.original_price ?? 0),
-      special_pricing_id: d.special_pricing_id ?? null,
-    })),
+    appliedDiscounts: (raw.applied_discounts ?? []).map(mapSavedDiscount),
     attraction: raw.attraction?.id
       ? {
           id: raw.attraction.id,

@@ -170,6 +170,14 @@ const CreateSpecialPricing = () => {
     loadLocations();
   }, [loadLocations]);
 
+  // The recurrence the edited record was loaded with. This form has no
+  // day-of-month picker, so a monthly special keeps the day it already had —
+  // the server refuses a monthly update without one (backend 44e1a85).
+  const loadedRecurrenceRef = useRef<{
+    type: RecurrenceType;
+    value: number | null;
+  } | null>(null);
+
   // Edit mode: load the record, prefill, then release the entity loader.
   useEffect(() => {
     if (!editId) return;
@@ -183,6 +191,10 @@ const CreateSpecialPricing = () => {
         setDiscountType(d.discountType);
         setAmount(String(d.discountAmount));
         setRecurrence(d.recurrenceType);
+        loadedRecurrenceRef.current = {
+          type: d.recurrenceType,
+          value: d.dayOfWeek,
+        };
         if (d.dayOfWeek != null) setDayOfWeek(d.dayOfWeek);
         setStartDate(d.startDate);
         setEndDate(d.endDate);
@@ -282,9 +294,16 @@ const CreateSpecialPricing = () => {
       discount_type: discountType,
       discount_amount: Number(amount) || 0,
       recurrence_type: recurrence,
-      recurrence_value: recurrence === "weekly" ? dayOfWeek : null,
-      start_date: startDate.trim() || null,
-      end_date: endDate.trim() || null,
+      recurrence_value:
+        recurrence === "weekly"
+          ? dayOfWeek
+          : recurrence === "monthly" && loadedRecurrenceRef.current?.type === "monthly"
+            ? loadedRecurrenceRef.current.value
+            : null,
+      // A one-time special is its one visit day; it has no first/last visit
+      // date window (web SpecialPricings — the server clears them too).
+      start_date: recurrence === "one_time" ? null : startDate.trim() || null,
+      end_date: recurrence === "one_time" ? null : endDate.trim() || null,
       time_start: timeFrom.trim() || null,
       time_end: timeTo.trim() || null,
       entity_type: entityType,
@@ -471,7 +490,7 @@ const CreateSpecialPricing = () => {
           <Section
             icon="calendar"
             title="Schedule"
-            subtitle="Control when this discount is active — one-time, weekly, or monthly."
+            subtitle="Control when this discount is active — one-time, weekly, or monthly. It applies to visits scheduled on these days, no matter which day the guest buys."
           />
           <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
             Recurrence
@@ -533,28 +552,30 @@ const CreateSpecialPricing = () => {
             </>
           )}
 
+          {recurrence !== "one_time" && (
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <Field
+                  label="First Visit Date"
+                  value={startDate}
+                  onChangeText={setStartDate}
+                  placeholder="YYYY-MM-DD"
+                />
+              </View>
+              <View className="flex-1">
+                <Field
+                  label="Last Visit Date"
+                  value={endDate}
+                  onChangeText={setEndDate}
+                  placeholder="YYYY-MM-DD"
+                />
+              </View>
+            </View>
+          )}
           <View className="flex-row gap-3">
             <View className="flex-1">
               <Field
-                label="Start Date"
-                value={startDate}
-                onChangeText={setStartDate}
-                placeholder="YYYY-MM-DD"
-              />
-            </View>
-            <View className="flex-1">
-              <Field
-                label="End Date"
-                value={endDate}
-                onChangeText={setEndDate}
-                placeholder="YYYY-MM-DD"
-              />
-            </View>
-          </View>
-          <View className="flex-row gap-3">
-            <View className="flex-1">
-              <Field
-                label="Time From"
+                label="Visit Time From"
                 value={timeFrom}
                 onChangeText={setTimeFrom}
                 placeholder="HH:MM"
@@ -562,13 +583,19 @@ const CreateSpecialPricing = () => {
             </View>
             <View className="flex-1">
               <Field
-                label="Time To"
+                label="Visit Time To"
                 value={timeTo}
                 onChangeText={setTimeTo}
                 placeholder="HH:MM"
               />
             </View>
           </View>
+          <Text className="text-xs text-gray-500 dark:text-gray-400 -mt-1 mb-4">
+            Leave the times empty for all day. A percentage comes off each
+            ticket&apos;s price; a fixed amount comes off every ticket (every
+            participant on per-person packages, once on other packages). Add-ons
+            are not discounted.
+          </Text>
 
           {/* Apply To */}
           <Section

@@ -68,8 +68,17 @@ import {
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import {
+  specialPaymentBlocker,
+  venueTodayKey,
+} from "../../lib/pricing/specialPricing";
+import {
+  SpecialCheckAlert,
+  SpecialDealNote,
+} from "../../components/pricing/SpecialPricingNotes";
 import {
   credentialsMatchChargeLocation,
   STALE_GATEWAY_LOCATION_MESSAGE,
@@ -908,15 +917,29 @@ const CreatePurchaseScreen = () => {
     specialPricing,
     specialPricingDiscount,
     total,
+    specialChecking,
+    specialCheckFailed,
+    retrySpecial,
+    specialDate,
+    specialTime,
   } = useOnsitePricing({
     entity: selected,
     entityType: "attraction",
     quantity,
     addonQty,
     discountNum: Number(discount) || 0,
+    // The special follows the visit picked here, not the day of the sale.
     purchaseDate: scheduledDate,
     purchaseTime: scheduledTime,
   });
+  const specialBlocker = specialPaymentBlocker(
+    specialCheckFailed ? "failed" : specialChecking ? "checking" : "ready",
+  );
+  const { deals: specialDeals, dealDates } = useSpecialDeals(
+    "attraction",
+    selected?.id ?? null,
+    selected?.locationId ?? null,
+  );
 
   // Today's key (YYYY-MM-DD) — the visit-date floor and the transaction's
   // `purchase_date`. Computed once, timezone-safe.
@@ -1289,6 +1312,10 @@ const CreatePurchaseScreen = () => {
     );
   }
   if (cardBlocker) purchaseBlockers.push(cardBlocker);
+  // Payment waits for the special for this visit; a failed check holds it
+  // rather than charge full price (web CreatePurchase). Bulk orders are priced
+  // by the server's order quote instead, so this is single purchases only.
+  if (selected && specialBlocker) purchaseBlockers.push(specialBlocker);
 
   const blockers = orderMode ? orderBlockers : purchaseBlockers;
   const submitDisabled =
@@ -1589,6 +1616,11 @@ const CreatePurchaseScreen = () => {
       );
       return;
     }
+    // Backstop for the disabled button: never charge on an unchecked special.
+    if (specialBlocker) {
+      Alert.alert("Special price", specialBlocker);
+      return;
+    }
     if (submitLockRef.current) return;
     const now = Date.now();
     if (now - lastSubmitAtRef.current < 3000) return;
@@ -1628,14 +1660,23 @@ const CreatePurchaseScreen = () => {
     // can still reflect the debounced fee/special-pricing effect from BEFORE
     // the user's latest quantity/add-on/discount change. `baseTotal` itself is
     // synchronous (not debounced), so it already reflects current inputs.
+    // Lock BEFORE the pricing round-trip, not after: a second tap during a
+    // slow lookup (past the 3s throttle) must not start a second sale. Nothing
+    // between here and the try below can return or throw, and its finally
+    // releases the lock.
+    submitLockRef.current = true;
+    setSubmitting(true);
     const freshPricing = await resolveFreshPricing({
       token,
       entityType: "attraction",
       entityId: selected.id,
       basePrice: baseTotal,
+      // The special: one ticket's price × tickets, for the visit.
+      specialPricingBasePrice: selected.price,
+      specialQuantity: quantity,
       locationId: effectiveLocationId,
-      date: scheduledDate,
-      time: scheduledTime,
+      date: specialDate ?? scheduledDate,
+      time: specialTime,
     });
     const freshTotal = freshPricing?.total ?? total;
     const freshAppliedFees = buildAppliedFees(
@@ -1686,7 +1727,8 @@ const CreatePurchaseScreen = () => {
       payment_method: paymentMethod,
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
       location_id: effectiveLocationId,
-      purchase_date: todayKey,
+      // The day of the sale at the venue (web michiganTodayKey), not the device's.
+      purchase_date: venueTodayKey(),
       scheduled_date: scheduledDate,
       scheduled_time: scheduledTime,
       notes:
@@ -1711,8 +1753,6 @@ const CreatePurchaseScreen = () => {
       ]),
     };
 
-    submitLockRef.current = true;
-    setSubmitting(true);
     setIsProcessingPayment(isCardPayment);
     try {
       // Web order: the purchase row is created first (unpaid), then charged, so
@@ -2421,6 +2461,7 @@ const CreatePurchaseScreen = () => {
                       availableTimeSlots={availableTimeSlots}
                       slotRemaining={slotRemaining}
                       minDate={todayKey}
+                      dealDates={dealDates}
                       onDateSelect={setScheduledDate}
                       onTimeSelect={(time) => {
                         setScheduledTime(time);
@@ -2433,6 +2474,14 @@ const CreatePurchaseScreen = () => {
                           ),
                         );
                       }}
+                    />
+                    <SpecialDealNote
+                      deals={specialDeals}
+                      selectedDate={scheduledDate}
+                      applied={!!specialPricing?.has_special_pricing}
+                      checkFailed={specialCheckFailed}
+                      onRetry={retrySpecial}
+                      className="mt-3"
                     />
                   </View>
                 )}
@@ -3130,6 +3179,11 @@ const CreatePurchaseScreen = () => {
                     />
                   </View>
 
+                  <SpecialCheckAlert
+                    failed={specialCheckFailed}
+                    onRetry={retrySpecial}
+                    className="mb-3"
+                  />
                   <Pressable
                     onPress={handleSubmit}
                     disabled={submitDisabled}

@@ -99,6 +99,17 @@ import {
   type FeeBreakdown,
   type SpecialPricingBreakdown,
 } from "../../services/pricingService";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
+import {
+  hhmm,
+  packageSpecialQuantity,
+  specialCheckState,
+  specialPaymentBlocker,
+} from "../../lib/pricing/specialPricing";
+import {
+  SpecialCheckAlert,
+  SpecialDealNote,
+} from "../../components/pricing/SpecialPricingNotes";
 import {
   createBooking,
   createPackageSpace,
@@ -428,6 +439,10 @@ const ManualBookingScreen = () => {
 
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
   const [special, setSpecial] = useState<SpecialPricingBreakdown | null>(null);
+  // Which inputs the special on screen was checked for, and whether that check
+  // failed — payment waits until it matches the current inputs (web ae48a92).
+  const [specialAnswer, setSpecialAnswer] = useState<{ key: string; failed: boolean } | null>(null);
+  const [specialAttempt, setSpecialAttempt] = useState(0);
 
   // Card (Authorize.Net) fields — same anatomy as the web Card Details panel.
   const [cardNumber, setCardNumber] = useState("");
@@ -749,39 +764,65 @@ const ManualBookingScreen = () => {
     };
   }, [pkg, subtotal, effectiveLocationId]);
 
-  // Special pricing / discounts (debounced; needs the date).
+  // Special pricing (debounced; needs the visit date). Priced from the
+  // package's own price × the units it covers: every participant on a
+  // per-person package, the booking once otherwise (web ManualBooking).
+  const specialQuantity = packageSpecialQuantity(pkg?.pricingType, participants);
+  const specialKey =
+    pkg && scheduledDate
+      ? [pkg.id, pkg.price, specialQuantity, scheduledDate, hhmm(scheduledTime), effectiveLocationId ?? "", specialAttempt].join("|")
+      : "";
   useEffect(() => {
     if (!pkg || !scheduledDate) {
       setSpecial(null);
+      setSpecialAnswer(null);
       return;
     }
     const token = getToken();
-    if (!token) return;
+    if (!token) {
+      setSpecialAnswer({ key: specialKey, failed: true });
+      return;
+    }
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        setSpecial(
-          await fetchSpecialPricing({
-            token,
-            entityType: "package",
-            entityId: pkg.id,
-            // the package's own price, as the on-site and online pages price specials (web ManualBooking)
-            basePrice: pkg.price,
-            date: scheduledDate,
-            time: scheduledTime || undefined,
-            locationId: effectiveLocationId ?? undefined,
-            signal: controller.signal,
-          }),
-        );
+        const sp = await fetchSpecialPricing({
+          token,
+          entityType: "package",
+          entityId: pkg.id,
+          // the package's own price, as the on-site and online pages price specials (web ManualBooking)
+          basePrice: pkg.price,
+          quantity: specialQuantity,
+          date: scheduledDate,
+          time: hhmm(scheduledTime) || undefined,
+          locationId: effectiveLocationId ?? undefined,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        setSpecial(sp);
+        setSpecialAnswer({ key: specialKey, failed: false });
       } catch {
+        if (controller.signal.aborted) return;
+        // Not "no special": the check failed, so payment is held (Try again).
         setSpecial(null);
+        setSpecialAnswer({ key: specialKey, failed: true });
       }
     }, 300);
     return () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [pkg, scheduledDate, scheduledTime, subtotal, effectiveLocationId]);
+    // specialKey captures the package, units, visit, location and retries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [specialKey]);
+  const specialState = specialCheckState(!!specialKey, specialKey, specialAnswer);
+  const specialBlocker = specialPaymentBlocker(specialState);
+  const retrySpecial = () => setSpecialAttempt((n) => n + 1);
+  const { deals: specialDeals, dealDates } = useSpecialDeals(
+    "package",
+    pkg?.id ?? null,
+    effectiveLocationId ?? null,
+  );
 
   // total_amount is base+fees less the special-pricing discount — the total
   // shown is the one saved and charged (web ManualBooking); the discount is
@@ -810,6 +851,8 @@ const ManualBookingScreen = () => {
   const submitDisabled =
     submitting ||
     isProcessingPayment ||
+    // Payment waits for this visit's special; a failed check holds it.
+    !!specialBlocker ||
     (chargesCard && (cardIncomplete || authorizeUnavailable));
 
   /**
@@ -906,6 +949,11 @@ const ManualBookingScreen = () => {
       );
       return;
     }
+    // Backstop for the disabled button: never charge on an unchecked special.
+    if (specialBlocker) {
+      Alert.alert("Special price", specialBlocker);
+      return;
+    }
     // Only Flexible mode offers a space picker — Standard takes its room from
     // the chosen slot, so requiring one there would block slots that carry none.
     if (bookingMode === "flexible" && pkg.rooms.length > 0 && selectedRoomId == null) {
@@ -965,9 +1013,10 @@ const ManualBookingScreen = () => {
         entityId: pkg.id,
         basePrice: subtotal,
         specialPricingBasePrice: pkg.price,
+        specialQuantity,
         locationId: effectiveLocationId,
         date: scheduledDate,
-        time: scheduledTime || undefined,
+        time: hhmm(scheduledTime) || undefined,
       });
       const freshFeeBreakdown = freshPricing?.feeBreakdown ?? feeBreakdown;
       const freshFeeTotal = freshFeeBreakdown ? freshFeeBreakdown.total : subtotal;
@@ -1629,6 +1678,21 @@ const ManualBookingScreen = () => {
                                   {cell.day}
                                 </Text>
                               )}
+                              {/* Deal day (web dealDates "%"); inline colour so the classes never change. */}
+                              {!!cell.key && cell.bookable && !!dealDates?.[cell.key] && (
+                                <Text
+                                  style={{
+                                    position: "absolute",
+                                    top: 0,
+                                    right: 1,
+                                    fontSize: 9,
+                                    fontWeight: "700",
+                                    color: selected ? "#FFFFFF" : "#059669",
+                                  }}
+                                >
+                                  %
+                                </Text>
+                              )}
                             </View>
                           </Pressable>
                         );
@@ -1640,6 +1704,23 @@ const ManualBookingScreen = () => {
                       Past dates allowed
                     </Text>
                   )}
+                  {!!dealDates && (
+                    <View className="flex-row items-center justify-center gap-1.5 mt-1">
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#059669" }}>%</Text>
+                      <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+                        Special price
+                      </Text>
+                    </View>
+                  )}
+                  <SpecialDealNote
+                    deals={specialDeals}
+                    selectedDate={scheduledDate}
+                    applied={!!special?.has_special_pricing}
+                    unit={pkg?.pricingType === "per_person" ? "person" : "booking"}
+                    checkFailed={specialState === "failed"}
+                    onRetry={retrySpecial}
+                    className="mt-3"
+                  />
                 </View>
 
                 {/* Time — standard: slot grid; flexible: tap-to-pick time.
@@ -2369,6 +2450,11 @@ const ManualBookingScreen = () => {
         </ScrollView>
 
         {/* Sticky footer */}
+        {pkg && specialState === "failed" && (
+          <View className="bg-white dark:bg-neutral-900 px-5 pt-3">
+            <SpecialCheckAlert failed onRetry={retrySpecial} />
+          </View>
+        )}
         {pkg && (
           <View
             className="flex-row gap-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 pt-3"

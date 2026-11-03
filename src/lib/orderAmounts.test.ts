@@ -1,7 +1,37 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { clampAmount, clampAmountText } from "./orderAmounts.ts";
+import {
+  clampAmount,
+  clampAmountText,
+  editBalance,
+  editPaidCeiling,
+} from "./orderAmounts.ts";
+
+describe("amount paid on an edit after a reschedule", () => {
+  it("a total that went up leaves the paid amount alone and shows the balance due", () => {
+    // Paid $40; moved off the special day, the total is now $52.
+    assert.equal(clampAmount(40, editPaidCeiling(52, 40)), 40);
+    assert.deepEqual(editBalance(52, 40), { kind: "due", amount: 12 });
+  });
+
+  it("a total that went down never cuts the recorded payment — it's a credit", () => {
+    // Paid $52; moved onto a special day, the total is now $39.
+    assert.equal(clampAmount(52, editPaidCeiling(39, 52)), 52);
+    assert.deepEqual(editBalance(39, 52), { kind: "credit", amount: 13 });
+  });
+
+  it("still won't let staff type more than the larger of the two", () => {
+    assert.equal(clampAmount(500, editPaidCeiling(39, 52)), 52);
+    assert.equal(clampAmount(500, editPaidCeiling(60, 0)), 60);
+  });
+
+  it("is fully paid only when nothing is owed either way (no false 'paid')", () => {
+    assert.deepEqual(editBalance(40, 40), { kind: "paid", amount: 0 });
+    assert.deepEqual(editBalance(40, 39.99), { kind: "due", amount: 0.01 });
+    assert.deepEqual(editBalance(0.004, 0), { kind: "paid", amount: 0 });
+  });
+});
 
 describe("clamping a money field", () => {
   it("leaves a value inside the range alone", () => {

@@ -2,6 +2,7 @@ import { apiRequest } from "../lib/api";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { cardLabelFromPayments, type CardBearingPayment } from "../lib/payments/cardLabel";
 import { checkoutTokenFor, rememberCheckoutToken } from "../lib/payments/checkoutTokens";
+import { perTicketOffLabel } from "../lib/pricing/specialPricing";
 
 /*
  * Ticket-order (multi-item order) API client — mirrors the web admin's
@@ -252,14 +253,21 @@ const mapOrderLineAddOn = (
   };
 };
 
-/** Web parity: `name` / `discount_name`, then the "(20% off)" suffix. */
+/**
+ * Web parity: `name` / `discount_name`, then the "(20% off)" suffix — "($13.00
+ * off each)" for a fixed special on several tickets (web perTicketOffLabel).
+ */
 const mapDiscountLabel = (raw: Record<string, unknown>): string => {
   const name =
     (typeof raw.name === "string" && raw.name) ||
     (typeof raw.discount_name === "string" && raw.discount_name) ||
     "Special pricing";
-  const label = str(raw.discount_label);
-  return label ? `${name} (${label} off)` : name;
+  const label = perTicketOffLabel({
+    discount_label: str(raw.discount_label),
+    discount_type: str(raw.discount_type),
+    quantity: raw.quantity == null ? null : num(raw.quantity),
+  });
+  return label ? `${name} (${label})` : name;
 };
 
 const mapOrderLine = (raw: Record<string, unknown>): TicketOrderLine => ({

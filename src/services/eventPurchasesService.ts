@@ -5,7 +5,11 @@ import {
   followUpOf,
   type VisitFollowUpSummary,
 } from "../lib/visitFollowUp/visitFollowUp";
-import type { AppliedDiscount, AppliedFee } from "./pricingService";
+import {
+  mapSavedDiscount,
+  type AppliedDiscount,
+  type AppliedFee,
+} from "./pricingService";
 
 /** Booking lifecycle status, mirroring the backend `status` enum. */
 export type EventPurchaseStatus =
@@ -630,6 +634,10 @@ export type EventPurchaseEditRecord = {
   paymentMethod: EventPaymentMethod;
   amountPaid: number;
   discountAmount: number;
+  /** What the purchase was saved at, for working out an older row's ticket price. */
+  totalAmount: number;
+  /** The ticket price it was sold at (backend 44e1a85); null on older rows. */
+  unitPrice: number | null;
   notes: string;
   specialRequests: string;
   /** YYYY-MM-DD, or "" when unscheduled. */
@@ -658,6 +666,8 @@ type RawEventEditPurchase = Omit<
   line_position?: number | null;
   event_id?: number | null;
   customer_id?: number | null;
+  unit_price?: number | string | null;
+  total_amount?: number | string | null;
   event?: {
     id?: number;
     name?: string | null;
@@ -680,6 +690,10 @@ type RawEventEditPurchase = Omit<
         discount_type?: "fixed" | "percentage" | null;
         original_price?: number | string | null;
         special_pricing_id?: number | null;
+        source?: string | null;
+        discount_label?: string | null;
+        unit_discount_amount?: number | string | null;
+        quantity?: number | string | null;
       }[]
     | null;
 };
@@ -712,6 +726,9 @@ function mapEditRecord(raw: RawEventEditPurchase): EventPurchaseEditRecord {
     paymentMethod: (raw.payment_method || "in-store") as EventPaymentMethod,
     amountPaid: Number(raw.amount_paid ?? 0),
     discountAmount: Number(raw.discount_amount ?? 0),
+    totalAmount: Number(raw.total_amount ?? 0),
+    unitPrice:
+      raw.unit_price != null && raw.unit_price !== "" ? Number(raw.unit_price) : null,
     notes: raw.notes ?? "",
     specialRequests: raw.special_requests ?? "",
     purchaseDate: raw.purchase_date ? raw.purchase_date.split("T")[0] : "",
@@ -728,13 +745,7 @@ function mapEditRecord(raw: RawEventEditPurchase): EventPurchaseEditRecord {
       fee_amount: Number(f.fee_amount ?? 0),
       fee_application_type: f.fee_application_type ?? "additive",
     })),
-    appliedDiscounts: (raw.applied_discounts ?? []).map((d) => ({
-      discount_name: d.discount_name?.trim() || "",
-      discount_amount: Number(d.discount_amount ?? 0),
-      discount_type: d.discount_type ?? "fixed",
-      original_price: Number(d.original_price ?? 0),
-      special_pricing_id: d.special_pricing_id ?? null,
-    })),
+    appliedDiscounts: (raw.applied_discounts ?? []).map(mapSavedDiscount),
     event: raw.event?.id
       ? {
           id: raw.event.id,

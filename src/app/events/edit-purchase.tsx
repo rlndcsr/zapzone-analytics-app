@@ -32,7 +32,19 @@ import {
   DEFAULT_MAX_QUANTITY,
 } from "../../lib/addOnQuantity";
 import { eventEditDayOffs } from "../../lib/attractions/dayOffAvailability";
-import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import {
+  clampAmount,
+  clampAmountText,
+  editBalance,
+  editPaidCeiling,
+} from "../../lib/orderAmounts";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
+import { useSpecialRepricing } from "../../lib/hooks/useSpecialRepricing";
+import {
+  isSpecialPricingDiscount,
+  soldTicketPrice,
+} from "../../lib/pricing/specialPricing";
+import { RepricingNotice } from "../../components/pricing/SpecialPricingNotes";
 import { WEEKDAY_NAMES_LOWER, formatFullDate } from "../../lib/date/calendar";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { getToken } from "../../lib/session";
@@ -185,7 +197,25 @@ type DiscountDraft = {
   discount_type: "fixed" | "percentage";
   original_price: string;
   special_pricing_id: number | null;
+  /** A special's tag and per-ticket figures, carried through untouched. */
+  source?: string;
+  discount_label?: string;
+  unit_discount_amount?: number;
+  quantity?: number;
 };
+
+/** A saved / quoted discount as an editable row (amounts as typed text). */
+const toDraft = (d: AppliedDiscount): DiscountDraft => ({
+  discount_name: d.discount_name,
+  discount_amount: String(d.discount_amount),
+  discount_type: d.discount_type,
+  original_price: String(d.original_price),
+  special_pricing_id: d.special_pricing_id,
+  ...(d.source !== undefined && { source: d.source }),
+  ...(d.discount_label !== undefined && { discount_label: d.discount_label }),
+  ...(d.unit_discount_amount !== undefined && { unit_discount_amount: d.unit_discount_amount }),
+  ...(d.quantity !== undefined && { quantity: d.quantity }),
+});
 
 const Section = ({
   icon,
@@ -416,15 +446,7 @@ const EditEventPurchaseScreen = () => {
             fee_application_type: f.fee_application_type,
           })),
         );
-        setAppliedDiscounts(
-          purchase.appliedDiscounts.map((d) => ({
-            discount_name: d.discount_name,
-            discount_amount: String(d.discount_amount),
-            discount_type: d.discount_type,
-            original_price: String(d.original_price),
-            special_pricing_id: d.special_pricing_id,
-          })),
-        );
+        setAppliedDiscounts(purchase.appliedDiscounts.map(toDraft));
         setDiscountAmount(String(purchase.discountAmount));
         setLoading(false);
 
@@ -532,7 +554,24 @@ const EditEventPurchaseScreen = () => {
 
   /* --- Totals (identical to the web EditEventPurchase) --------------------- */
 
-  const baseSubtotal = eventPrice * quantity;
+  // The ticket keeps the price it was sold at, even if the event's price or
+  // its specials changed since (web ae48a92).
+  const soldPrice = useMemo(
+    () =>
+      record
+        ? soldTicketPrice({
+            unitPrice: record.unitPrice,
+            totalAmount: record.totalAmount,
+            discountAmount: record.discountAmount,
+            quantity: record.quantity,
+            addOns: record.addOns,
+            fees: record.appliedFees,
+          })
+        : null,
+    [record],
+  );
+  const ticketUnitPrice = soldPrice ?? eventPrice;
+  const baseSubtotal = ticketUnitPrice * quantity;
   const addOnsTotal = useMemo(
     () =>
       Object.entries(selectedAddOns).reduce((sum, [addId, qty]) => {
@@ -554,8 +593,51 @@ const EditEventPurchaseScreen = () => {
   // half-typed or out-of-range amount can never reach the totals or the payload.
   const discountNum = clampAmount(discountAmount, discountCeiling);
   const displayTotal = Math.max(0, discountCeiling - discountNum);
-  const amountPaidNum = clampAmount(amountPaid, displayTotal);
+  // Never cut what was already paid down to a lower new total: that is a
+  // credit due, not a smaller payment.
+  const paidCeiling = editPaidCeiling(displayTotal, record?.amountPaid ?? 0);
+  const amountPaidNum = clampAmount(amountPaid, paidCeiling);
   const balance = displayTotal - amountPaidNum;
+  const balanceState = editBalance(displayTotal, amountPaidNum);
+
+  /* --- Special pricing follows the visit ----------------------------------- */
+
+  const { dealDates } = useSpecialDeals("event", eventId, record?.locationId ?? null);
+  const originalSpecial = useMemo(
+    () => (record?.appliedDiscounts ?? []).filter(isSpecialPricingDiscount).map(toDraft),
+    [record],
+  );
+  const {
+    notice: specialNotice,
+    checking: specialChecking,
+    failed: specialFailed,
+    retry: retrySpecial,
+  } = useSpecialRepricing<DiscountDraft>({
+    entityType: "event",
+    purchaseId: record?.id ?? null,
+    ready: !!record && eventPrice > 0,
+    isOrderLine,
+    original: {
+      entityId: eventId,
+      date: originalPurchaseDate,
+      time: originalPurchaseTime,
+      quantity: record?.quantity ?? 1,
+    },
+    current: {
+      entityId: eventId,
+      date: purchaseDate,
+      time: purchaseTime,
+      quantity,
+    },
+    originalSpecial,
+    applied: appliedDiscounts,
+    setApplied: setAppliedDiscounts,
+    discountAmount: Number(discountAmount) || 0,
+    setDiscountAmount: (n) => setDiscountAmount(String(n)),
+    fromEntry: toDraft,
+    dateWord: "date",
+  });
+  const saveBlocked = submitting || specialChecking || specialFailed;
 
   /* --- Schedule ------------------------------------------------------------ */
 
@@ -659,6 +741,16 @@ const EditEventPurchaseScreen = () => {
       setToast({ message: "Please select a date and time.", type: "error" });
       return;
     }
+    // The total isn't the new visit's yet — never save a price nobody checked.
+    if (specialChecking || specialFailed) {
+      setToast({
+        message: specialFailed
+          ? "Could not check the special price for this change. Try again before saving."
+          : "Checking the special price for this change…",
+        type: "error",
+      });
+      return;
+    }
     const token = getToken();
     if (!token) {
       setToast({
@@ -694,6 +786,11 @@ const EditEventPurchaseScreen = () => {
       discount_type: d.discount_type,
       original_price: num(d.original_price),
       special_pricing_id: d.special_pricing_id,
+      // A special's tag and per-ticket figures survive the re-save.
+      ...(d.source !== undefined && { source: d.source }),
+      ...(d.discount_label !== undefined && { discount_label: d.discount_label }),
+      ...(d.unit_discount_amount !== undefined && { unit_discount_amount: d.unit_discount_amount }),
+      ...(d.quantity !== undefined && { quantity: d.quantity }),
     }));
 
     const body: UpdateEventPurchaseInput | UpdateEventOrderLineInput = isOrderLine
@@ -902,7 +999,7 @@ const EditEventPurchaseScreen = () => {
                 </View>
               )}
               <Text className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                {money(eventPrice)} per ticket
+                {money(ticketUnitPrice)} per ticket
               </Text>
               <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                 The event and location cannot be changed on an existing purchase.
@@ -919,7 +1016,7 @@ const EditEventPurchaseScreen = () => {
                   max={9999}
                 />
                 <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  {money(eventPrice)} × {quantity} ={" "}
+                  {money(ticketUnitPrice)} × {quantity} ={" "}
                   <Text className="font-semibold text-gray-800 dark:text-gray-100">
                     {money(baseSubtotal)}
                   </Text>
@@ -995,6 +1092,7 @@ const EditEventPurchaseScreen = () => {
                 scheduledDate={purchaseDate}
                 scheduledTime={purchaseTime}
                 availableTimeSlots={availableTimeSlots}
+                dealDates={dealDates}
                 onDateSelect={(dateKey) => {
                   setPurchaseDate(dateKey);
                   setPurchaseTime("");
@@ -1008,6 +1106,11 @@ const EditEventPurchaseScreen = () => {
                 </Text>
               </View>
             )}
+            <RepricingNotice
+              notice={specialNotice}
+              failed={specialFailed}
+              onRetry={retrySpecial}
+            />
           </Section>
 
           {/* Add-ons */}
@@ -1277,15 +1380,23 @@ const EditEventPurchaseScreen = () => {
                 value={amountPaid}
                 onChangeText={setAmountPaid}
                 onBlur={() =>
-                  setAmountPaid(clampAmountText(amountPaid, displayTotal))
+                  setAmountPaid(clampAmountText(amountPaid, paidCeiling))
                 }
               />
             </View>
-            {balance > 0 ? (
+            {balanceState.kind === "due" ? (
               <View className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 px-4 py-3">
                 <Text className="text-sm font-medium text-red-700 dark:text-red-300">
                   Balance Due:{" "}
                   <Text className="font-bold">{money(balance)}</Text>
+                </Text>
+              </View>
+            ) : balanceState.kind === "credit" ? (
+              <View className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+                <Text className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  Overpaid by{" "}
+                  <Text className="font-bold">{money(balanceState.amount)}</Text>
+                  {" "}— refund or credit due
                 </Text>
               </View>
             ) : (
@@ -1343,7 +1454,7 @@ const EditEventPurchaseScreen = () => {
                 {eventName}
               </Text>
               <Text className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                {money(eventPrice)} × {quantity}
+                {money(ticketUnitPrice)} × {quantity}
               </Text>
             </View>
 
@@ -1459,12 +1570,19 @@ const EditEventPurchaseScreen = () => {
             />
 
             <View className="pt-2 mt-1 border-t border-gray-100 dark:border-neutral-800">
-              {balance > 0 ? (
+              {balanceState.kind === "due" ? (
                 <SummaryRow
                   label="Balance Due"
                   value={money(balance)}
                   labelClass="text-sm font-medium text-red-700 dark:text-red-300"
                   valueClass="text-sm font-bold text-red-600 dark:text-red-400"
+                />
+              ) : balanceState.kind === "credit" ? (
+                <SummaryRow
+                  label="Credit Due"
+                  value={money(balanceState.amount)}
+                  labelClass="text-sm font-medium text-amber-700 dark:text-amber-300"
+                  valueClass="text-sm font-bold text-amber-600 dark:text-amber-400"
                 />
               ) : (
                 <SummaryRow
@@ -1493,9 +1611,9 @@ const EditEventPurchaseScreen = () => {
             </Pressable>
             <Pressable
               onPress={handleSubmit}
-              disabled={submitting}
+              disabled={saveBlocked}
               className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] ${
-                submitting ? "opacity-50" : "active:opacity-90"
+                saveBlocked ? "opacity-50" : "active:opacity-90"
               }`}
             >
               {submitting ? (

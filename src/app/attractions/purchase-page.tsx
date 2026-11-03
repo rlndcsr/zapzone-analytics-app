@@ -74,6 +74,15 @@ import {
 } from "../../services/attractionPurchasesService";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
+import {
+  specialPaymentBlocker,
+  venueTodayKey,
+} from "../../lib/pricing/specialPricing";
+import {
+  SpecialCheckAlert,
+  SpecialDealNote,
+} from "../../components/pricing/SpecialPricingNotes";
 import { SignaturePad } from "../../components/ui/SignaturePad";
 import {
   CARD_MONTHS,
@@ -553,15 +562,29 @@ const PurchasePageScreen = () => {
     specialPricing,
     specialPricingDiscount,
     total,
+    specialChecking,
+    specialCheckFailed,
+    retrySpecial,
   } = useOnsitePricing({
     entity: detail,
     entityType: "attraction",
     quantity,
     addonQty,
     discountNum: 0,
+    // The special follows the picked visit — its time too, since a special can
+    // run only some hours (web PurchaseAttraction). None until a date is picked.
     purchaseDate: scheduledDate,
-    purchaseTime: "",
+    purchaseTime: scheduledTime,
+    requireDate: true,
   });
+  const specialBlocker = specialPaymentBlocker(
+    specialCheckFailed ? "failed" : specialChecking ? "checking" : "ready",
+  );
+  const { deals: specialDeals, dealDates } = useSpecialDeals(
+    "attraction",
+    detail?.id ?? null,
+    detail?.locationId ?? null,
+  );
 
   /**
    * Apply an add-on quantity, clamped to its own min/max. Attraction add-ons are
@@ -582,6 +605,8 @@ const PurchasePageScreen = () => {
   const submitDisabled =
     submitting ||
     isProcessingPayment ||
+    // Payment waits for this visit's special; a failed check holds it.
+    !!specialBlocker ||
     (paymentMethod === "card" && (cardIncomplete || authorizeUnavailable));
 
   const onGalleryScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -635,6 +660,11 @@ const PurchasePageScreen = () => {
 
   const handlePurchase = async () => {
     if (!detail) return;
+    // Backstop for the disabled button: never charge on an unchecked special.
+    if (specialBlocker) {
+      Alert.alert("Special price", specialBlocker);
+      return;
+    }
     const locationId = detail.locationId;
     if (locationId == null) {
       Alert.alert("Location unavailable", "This attraction has no location set.");
@@ -694,13 +724,23 @@ const PurchasePageScreen = () => {
     // Resolve pricing fresh, right now — `total` can still reflect the
     // debounced fee/special-pricing effect from before the latest quantity /
     // add-on change. `baseTotal` is synchronous, so it's already current.
+    // Lock BEFORE the pricing round-trip, not after: a second tap during a
+    // slow lookup (past the 3s throttle) must not start a second sale. Nothing
+    // between here and the try below can return or throw, and its finally
+    // releases the lock.
+    submitLockRef.current = true;
+    setSubmitting(true);
     const freshPricing = await resolveFreshPricing({
       token,
       entityType: "attraction",
       entityId: detail.id,
       basePrice: baseTotal,
+      // The special: one ticket's price × tickets, for the visit.
+      specialPricingBasePrice: detail.price,
+      specialQuantity: quantity,
       locationId,
       date: scheduledDate,
+      time: scheduledTime || undefined,
     });
     const freshTotal = freshPricing?.total ?? total;
     const freshAppliedFees = buildAppliedFees(
@@ -738,7 +778,8 @@ const PurchasePageScreen = () => {
       payment_method: isCardPayment ? "authorize.net" : paymentMethod,
       ...(paymentMethod === "in-store" ? { status: "confirmed" as const } : {}),
       location_id: locationId,
-      purchase_date: todayKey,
+      // The day of the sale at the venue (web michiganTodayKey), not the device's.
+      purchase_date: venueTodayKey(),
       scheduled_date: scheduledDate,
       scheduled_time: scheduledTime,
       notes: `Attraction Purchase: ${detail.name} (${quantity} ticket${quantity > 1 ? "s" : ""})`,
@@ -751,8 +792,6 @@ const PurchasePageScreen = () => {
         freshAppliedDiscounts.length > 0 ? freshAppliedDiscounts : undefined,
     };
 
-    submitLockRef.current = true;
-    setSubmitting(true);
     setIsProcessingPayment(isCardPayment);
     try {
       // Web order: create the purchase (unpaid) first so the charge has a
@@ -1226,6 +1265,14 @@ const PurchasePageScreen = () => {
                   No available times on this day. Please pick another date.
                 </Text>
               )}
+              <SpecialDealNote
+                deals={specialDeals}
+                selectedDate={scheduledDate}
+                applied={!!specialPricing?.has_special_pricing}
+                checkFailed={specialCheckFailed}
+                onRetry={retrySpecial}
+                className="mt-3"
+              />
             </Section>
             )}
 
@@ -1669,6 +1716,13 @@ const PurchasePageScreen = () => {
             {/* No online payment for a Call to Book attraction — the venue
                 takes the booking on the phone. */}
             {callToBook ? null : (
+              <SpecialCheckAlert
+                failed={specialCheckFailed}
+                onRetry={retrySpecial}
+                className="mb-3"
+              />
+            )}
+            {callToBook ? null : (
             <Pressable
               onPress={handlePurchase}
               disabled={submitDisabled}
@@ -1727,6 +1781,7 @@ const PurchasePageScreen = () => {
         dayOffDates={dayOffAvailability.fullDayOffDates}
         limitedDates={dayOffAvailability.partialDates}
         availableWeekdays={dayOffAvailability.availableWeekdays}
+        dealDates={dealDates}
         title="Select Visit Date"
         onClose={() => setSheet(null)}
         onSelect={(date) => {

@@ -40,8 +40,20 @@ import {
   DEFAULT_MAX_QUANTITY,
 } from "../../lib/addOnQuantity";
 import { WEEKDAY_NAMES_LOWER, formatFullDate } from "../../lib/date/calendar";
-import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import {
+  clampAmount,
+  clampAmountText,
+  editBalance,
+  editPaidCeiling,
+} from "../../lib/orderAmounts";
 import { markAttractionPurchasesStale } from "../../lib/hooks/useAttractionPurchases";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
+import { useSpecialRepricing } from "../../lib/hooks/useSpecialRepricing";
+import {
+  isSpecialPricingDiscount,
+  soldTicketPrice,
+} from "../../lib/pricing/specialPricing";
+import { RepricingNotice } from "../../components/pricing/SpecialPricingNotes";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchAttractionPurchaseForEdit,
@@ -186,7 +198,25 @@ type DiscountDraft = {
   discount_type: "fixed" | "percentage";
   original_price: string;
   special_pricing_id: number | null;
+  /** A special's tag and per-ticket figures, carried through untouched. */
+  source?: string;
+  discount_label?: string;
+  unit_discount_amount?: number;
+  quantity?: number;
 };
+
+/** A saved / quoted discount as an editable row (amounts as typed text). */
+const toDraft = (d: AppliedDiscount): DiscountDraft => ({
+  discount_name: d.discount_name,
+  discount_amount: String(d.discount_amount),
+  discount_type: d.discount_type,
+  original_price: String(d.original_price),
+  special_pricing_id: d.special_pricing_id,
+  ...(d.source !== undefined && { source: d.source }),
+  ...(d.discount_label !== undefined && { discount_label: d.discount_label }),
+  ...(d.unit_discount_amount !== undefined && { unit_discount_amount: d.unit_discount_amount }),
+  ...(d.quantity !== undefined && { quantity: d.quantity }),
+});
 
 const Section = ({
   icon,
@@ -418,15 +448,7 @@ const EditPurchaseScreen = () => {
             fee_application_type: f.fee_application_type,
           })),
         );
-        setAppliedDiscounts(
-          purchase.appliedDiscounts.map((d) => ({
-            discount_name: d.discount_name,
-            discount_amount: String(d.discount_amount),
-            discount_type: d.discount_type,
-            original_price: String(d.original_price),
-            special_pricing_id: d.special_pricing_id,
-          })),
-        );
+        setAppliedDiscounts(purchase.appliedDiscounts.map(toDraft));
         setDiscountAmount(String(purchase.discountAmount));
         setLoading(false);
 
@@ -561,7 +583,29 @@ const EditPurchaseScreen = () => {
 
   /* --- Totals (identical to the web EditPurchase) -------------------------- */
 
-  const baseSubtotal = selectedAttraction ? selectedAttraction.price * quantity : 0;
+  // The ticket keeps the price it was sold at, even if the attraction's price
+  // or its specials changed since (web ae48a92); a switch to another
+  // attraction takes that one's current price.
+  const soldPrice = useMemo(
+    () =>
+      record
+        ? soldTicketPrice({
+            unitPrice: record.unitPrice,
+            totalAmount: record.totalAmount,
+            discountAmount: record.discountAmount,
+            quantity: record.quantity,
+            addOns: record.addOns,
+            fees: record.appliedFees,
+          })
+        : null,
+    [record],
+  );
+  const ticketUnitPrice = selectedAttraction
+    ? selectedAttraction.id === record?.attractionId
+      ? (soldPrice ?? selectedAttraction.price)
+      : selectedAttraction.price
+    : 0;
+  const baseSubtotal = selectedAttraction ? ticketUnitPrice * quantity : 0;
   const addOnsTotal = useMemo(
     () =>
       Object.entries(selectedAddOns).reduce((sum, [addId, qty]) => {
@@ -583,8 +627,51 @@ const EditPurchaseScreen = () => {
   // half-typed or out-of-range amount can never reach the totals or the payload.
   const discountNum = clampAmount(discountAmount, discountCeiling);
   const displayTotal = Math.max(0, discountCeiling - discountNum);
-  const amountPaidNum = clampAmount(amountPaid, displayTotal);
+  // Never cut what was already paid down to a lower new total: that is a
+  // credit due, not a smaller payment.
+  const paidCeiling = editPaidCeiling(displayTotal, record?.amountPaid ?? 0);
+  const amountPaidNum = clampAmount(amountPaid, paidCeiling);
   const balance = displayTotal - amountPaidNum;
+  const balanceState = editBalance(displayTotal, amountPaidNum);
+
+  /* --- Special pricing follows the visit ----------------------------------- */
+
+  const { dealDates } = useSpecialDeals("attraction", attractionId, locationId);
+  const originalSpecial = useMemo(
+    () => (record?.appliedDiscounts ?? []).filter(isSpecialPricingDiscount).map(toDraft),
+    [record],
+  );
+  const {
+    notice: specialNotice,
+    checking: specialChecking,
+    failed: specialFailed,
+    retry: retrySpecial,
+  } = useSpecialRepricing<DiscountDraft>({
+    entityType: "attraction",
+    purchaseId: record?.id ?? null,
+    ready: !!record && !!selectedAttraction,
+    isOrderLine,
+    original: {
+      entityId: record?.attractionId ?? null,
+      date: originalScheduledDate,
+      time: originalScheduledTime,
+      quantity: record?.quantity ?? 1,
+    },
+    current: {
+      entityId: selectedAttraction?.id ?? null,
+      date: scheduledDate,
+      time: scheduledTime,
+      quantity,
+    },
+    originalSpecial,
+    applied: appliedDiscounts,
+    setApplied: setAppliedDiscounts,
+    discountAmount: Number(discountAmount) || 0,
+    setDiscountAmount: (n) => setDiscountAmount(String(n)),
+    fromEntry: toDraft,
+    dateWord: "visit date",
+  });
+  const saveBlocked = submitting || specialChecking || specialFailed;
 
   /* --- Schedule ------------------------------------------------------------ */
 
@@ -710,6 +797,16 @@ const EditPurchaseScreen = () => {
       });
       return;
     }
+    // The total isn't the new visit's yet — never save a price nobody checked.
+    if (specialChecking || specialFailed) {
+      setToast({
+        message: specialFailed
+          ? "Could not check the special price for this change. Try again before saving."
+          : "Checking the special price for this change…",
+        type: "error",
+      });
+      return;
+    }
     const token = getToken();
     if (!token) {
       setToast({ message: "Error updating purchase. Please try again.", type: "error" });
@@ -742,6 +839,11 @@ const EditPurchaseScreen = () => {
       discount_type: d.discount_type,
       original_price: num(d.original_price),
       special_pricing_id: d.special_pricing_id,
+      // A special's tag and per-ticket figures survive the re-save.
+      ...(d.source !== undefined && { source: d.source }),
+      ...(d.discount_label !== undefined && { discount_label: d.discount_label }),
+      ...(d.unit_discount_amount !== undefined && { unit_discount_amount: d.unit_discount_amount }),
+      ...(d.quantity !== undefined && { quantity: d.quantity }),
     }));
 
     const text = purchaseTextFields({ guestName, guestEmail, guestPhone, notes });
@@ -973,7 +1075,7 @@ const EditPurchaseScreen = () => {
                 />
                 {!!selectedAttraction && (
                   <Text className="text-sm text-gray-500 dark:text-gray-400">
-                    {money(selectedAttraction.price)} × {quantity} ={" "}
+                    {money(ticketUnitPrice)} × {quantity} ={" "}
                     <Text className="font-semibold text-gray-800 dark:text-gray-100">
                       {money(baseSubtotal)}
                     </Text>
@@ -1044,6 +1146,7 @@ const EditPurchaseScreen = () => {
                 scheduledDate={scheduledDate}
                 scheduledTime={scheduledTime}
                 availableTimeSlots={availableTimeSlots}
+                dealDates={dealDates}
                 onDateSelect={(dateKey) => {
                   setScheduledDate(dateKey);
                   setScheduledTime("");
@@ -1057,6 +1160,11 @@ const EditPurchaseScreen = () => {
                 </Text>
               </View>
             )}
+            <RepricingNotice
+              notice={specialNotice}
+              failed={specialFailed}
+              onRetry={retrySpecial}
+            />
           </Section>
 
           {/* Add-ons */}
@@ -1316,15 +1424,23 @@ const EditPurchaseScreen = () => {
                 value={amountPaid}
                 onChangeText={setAmountPaid}
                 onBlur={() =>
-                  setAmountPaid(clampAmountText(amountPaid, displayTotal))
+                  setAmountPaid(clampAmountText(amountPaid, paidCeiling))
                 }
               />
             </View>
-            {balance > 0 ? (
+            {balanceState.kind === "due" ? (
               <View className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 px-4 py-3">
                 <Text className="text-sm font-medium text-red-700 dark:text-red-300">
                   Balance Due:{" "}
                   <Text className="font-bold">{money(balance)}</Text>
+                </Text>
+              </View>
+            ) : balanceState.kind === "credit" ? (
+              <View className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+                <Text className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  Overpaid by{" "}
+                  <Text className="font-bold">{money(balanceState.amount)}</Text>
+                  {" "}— refund or credit due
                 </Text>
               </View>
             ) : (
@@ -1428,7 +1544,7 @@ const EditPurchaseScreen = () => {
                   {selectedAttraction.name}
                 </Text>
                 <Text className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  {money(selectedAttraction.price)} × {quantity}
+                  {money(ticketUnitPrice)} × {quantity}
                 </Text>
               </View>
             )}
@@ -1545,12 +1661,19 @@ const EditPurchaseScreen = () => {
             />
 
             <View className="pt-2 mt-1 border-t border-gray-100 dark:border-neutral-800">
-              {balance > 0 ? (
+              {balanceState.kind === "due" ? (
                 <SummaryRow
                   label="Balance Due"
                   value={money(balance)}
                   labelClass="text-sm font-medium text-red-700 dark:text-red-300"
                   valueClass="text-sm font-bold text-red-600 dark:text-red-400"
+                />
+              ) : balanceState.kind === "credit" ? (
+                <SummaryRow
+                  label="Credit Due"
+                  value={money(balanceState.amount)}
+                  labelClass="text-sm font-medium text-amber-700 dark:text-amber-300"
+                  valueClass="text-sm font-bold text-amber-600 dark:text-amber-400"
                 />
               ) : (
                 <SummaryRow
@@ -1579,9 +1702,9 @@ const EditPurchaseScreen = () => {
             </Pressable>
             <Pressable
               onPress={handleSubmit}
-              disabled={submitting}
+              disabled={saveBlocked}
               className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] ${
-                submitting ? "opacity-50" : "active:opacity-90"
+                saveBlocked ? "opacity-50" : "active:opacity-90"
               }`}
             >
               {submitting ? (

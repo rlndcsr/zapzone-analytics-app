@@ -151,6 +151,17 @@ import {
   type FeeBreakdown,
   type SpecialPricingBreakdown,
 } from "../../services/pricingService";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
+import {
+  hhmm,
+  packageSpecialQuantity,
+  specialCheckState,
+  specialPaymentBlocker,
+} from "../../lib/pricing/specialPricing";
+import {
+  SpecialCheckAlert,
+  SpecialDealNote,
+} from "../../components/pricing/SpecialPricingNotes";
 
 const PRIMARY = "#0644C7";
 type IconName = ComponentProps<typeof Feather>["name"];
@@ -420,9 +431,12 @@ const SummaryItemRow = ({
 const MonthCalendar = ({
   value,
   onSelect,
+  dealDates,
 }: {
   value: string;
   onSelect: (dateKey: string) => void;
+  /** Visit days that get a special → its label; marked "%" (web dealDates). */
+  dealDates?: Record<string, string>;
 }) => {
   const todayKey = useMemo(() => toKey(new Date()), []);
   const [viewMonth, setViewMonth] = useState<Date>(() => {
@@ -497,6 +511,7 @@ const MonthCalendar = ({
             }
             const selected = key === value;
             const unavailable = key < todayKey;
+            const deal = !unavailable ? dealDates?.[key] : undefined;
             return (
               <View key={key} className="flex-1 h-12 p-0.5">
                 <Pressable
@@ -504,7 +519,7 @@ const MonthCalendar = ({
                   disabled={unavailable}
                   accessibilityRole="button"
                   accessibilityState={{ selected, disabled: unavailable }}
-                  accessibilityLabel={key}
+                  accessibilityLabel={deal ? `${key}, special price: ${deal}` : key}
                   className={`flex-1 items-center justify-center rounded-lg ${
                     selected
                       ? "bg-[#0644C7]"
@@ -524,6 +539,21 @@ const MonthCalendar = ({
                   >
                     {Number(key.substring(8, 10))}
                   </Text>
+                  {/* Inline colour so the cell's classes never change. */}
+                  {!!deal && (
+                    <Text
+                      style={{
+                        position: "absolute",
+                        top: 1,
+                        right: 3,
+                        fontSize: 9,
+                        fontWeight: "700",
+                        color: selected ? "#FFFFFF" : "#059669",
+                      }}
+                    >
+                      %
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             );
@@ -553,6 +583,14 @@ const MonthCalendar = ({
             Unavailable
           </Text>
         </View>
+        {!!dealDates && (
+          <View className="flex-row items-center gap-1.5">
+            <Text style={{ fontSize: 10, fontWeight: "700", color: "#059669" }}>%</Text>
+            <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+              Special price
+            </Text>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -786,6 +824,10 @@ const CreateBookingScreen = () => {
   // Pricing (fees + special pricing), fetched only on the Payment step.
   const [feeBreakdown, setFeeBreakdown] = useState<FeeBreakdown | null>(null);
   const [special, setSpecial] = useState<SpecialPricingBreakdown | null>(null);
+  // Which inputs the special on screen was checked for, and whether that check
+  // failed — payment waits until it matches the current inputs (web ae48a92).
+  const [specialAnswer, setSpecialAnswer] = useState<{ key: string; failed: boolean } | null>(null);
+  const [specialAttempt, setSpecialAttempt] = useState(0);
 
   // ---- Customer lookup (Step 4) --------------------------------------------
   useEffect(() => {
@@ -1543,14 +1585,26 @@ const CreateBookingScreen = () => {
     };
   }, [pkg, subtotal, effectiveLocationId]);
 
-  // Special pricing needs a date, matching the web's gate.
+  // Special pricing needs a date, matching the web's gate. Priced from the
+  // package's own price × the units it covers: every participant on a
+  // per-person package, the booking once otherwise (web OnsiteBooking).
+  const specialQuantity = packageSpecialQuantity(pkg?.pricingType, participants);
+  const specialSlotTime = hhmm(slot?.startTime);
+  const specialKey =
+    pkg && scheduledDate
+      ? [pkg.id, pkg.price, specialQuantity, scheduledDate, specialSlotTime, effectiveLocationId ?? "", specialAttempt].join("|")
+      : "";
   useEffect(() => {
     if (!pkg || !scheduledDate) {
       setSpecial(null);
+      setSpecialAnswer(null);
       return;
     }
     const token = getToken();
-    if (!token) return;
+    if (!token) {
+      setSpecialAnswer({ key: specialKey, failed: true });
+      return;
+    }
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
@@ -1559,21 +1613,37 @@ const CreateBookingScreen = () => {
           entityType: "package",
           entityId: pkg.id,
           basePrice: pkg.price,
-          date: scheduledDate || undefined,
-          time: slot?.startTime || undefined,
+          quantity: specialQuantity,
+          date: scheduledDate,
+          time: specialSlotTime || undefined,
           locationId: effectiveLocationId ?? undefined,
           signal: controller.signal,
         });
+        if (controller.signal.aborted) return;
         setSpecial(sp);
+        setSpecialAnswer({ key: specialKey, failed: false });
       } catch {
+        if (controller.signal.aborted) return;
+        // Not "no special": the check failed, so payment is held (Try again).
         setSpecial(null);
+        setSpecialAnswer({ key: specialKey, failed: true });
       }
     }, 300);
     return () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [pkg, scheduledDate, slot, effectiveLocationId]);
+    // specialKey captures the package, units, visit, location and retries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [specialKey]);
+  const specialState = specialCheckState(!!specialKey, specialKey, specialAnswer);
+  const specialBlocker = specialPaymentBlocker(specialState);
+  const retrySpecial = () => setSpecialAttempt((n) => n + 1);
+  const { deals: specialDeals, dealDates } = useSpecialDeals(
+    "package",
+    pkg?.id ?? null,
+    effectiveLocationId ?? null,
+  );
 
   const specialDiscount = special?.has_special_pricing ? special.total_discount : 0;
   // Submitted total = base+fees less special pricing, so the amount saved and
@@ -1737,6 +1807,8 @@ const CreateBookingScreen = () => {
   const confirmDisabled =
     submitting ||
     isProcessingPayment ||
+    // Payment waits for this visit's special; a failed check holds it.
+    !!specialBlocker ||
     (paymentMethod === "authorize.net" &&
       amountPaid > 0 &&
       (cardIncomplete || authorizeUnavailable));
@@ -1755,6 +1827,11 @@ const CreateBookingScreen = () => {
   const handleSubmit = async () => {
     if (submitLockRef.current) return;
     if (!pkg) return;
+    // Backstop for the disabled button: never charge on an unchecked special.
+    if (specialBlocker) {
+      Alert.alert("Special price", specialBlocker);
+      return;
+    }
 
     // A booking that overlaps, or that takes a start off the website, is never saved on a single
     // tap. An overlap needs a manager's PIN; losing an online start only needs staff to say yes.
@@ -1866,9 +1943,10 @@ const CreateBookingScreen = () => {
         // keyed off the package's own price, not the full subtotal — matched
         // here so this stays a faithful fresh re-fetch, not a behavior change.
         specialPricingBasePrice: pkg.price,
+        specialQuantity,
         locationId: effectiveLocationId,
         date: scheduledDate,
-        time: slot.startTime,
+        time: hhmm(slot.startTime) || undefined,
       });
       const freshFeeBreakdown = freshPricing?.feeBreakdown ?? feeBreakdown;
       const freshSpecial = freshPricing?.specialPricing ?? special;
@@ -2517,10 +2595,20 @@ const CreateBookingScreen = () => {
                   selectable, matching the web's Select Date card. */}
               <MonthCalendar
                 value={scheduledDate}
+                dealDates={dealDates}
                 onSelect={(key) => {
                   setScheduledDate(key);
                   setSlot(null);
                 }}
+              />
+              <SpecialDealNote
+                deals={specialDeals}
+                selectedDate={scheduledDate}
+                applied={!!special?.has_special_pricing}
+                unit={pkg.pricingType === "per_person" ? "person" : "booking"}
+                checkFailed={specialState === "failed"}
+                onRetry={retrySpecial}
+                className="mt-3"
               />
 
               {/* Participants — moved here from the add-ons step so the web's
@@ -4116,6 +4204,11 @@ const CreateBookingScreen = () => {
           </View>
         </ScrollView>
 
+        {step === TOTAL_STEPS && specialState === "failed" && (
+          <View className="bg-white dark:bg-neutral-900 px-5 pt-3">
+            <SpecialCheckAlert failed onRetry={retrySpecial} />
+          </View>
+        )}
         {/* Sticky footer: Back / Next / Create */}
         <View
           className="flex-row gap-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 pt-3"

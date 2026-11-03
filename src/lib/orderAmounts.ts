@@ -34,3 +34,27 @@ export function clampAmountText(
   const n = clampAmount(value, max);
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
+
+/**
+ * The most "Amount Paid" may read on an edit: the new total, or what was
+ * already recorded as paid if that is more. When a reschedule or a change of
+ * special lowers the total below what the guest handed over, the payment on
+ * record is never cut down to match — it shows as a credit due instead (web
+ * EditPurchase "Overpaid by … — refund or credit due").
+ */
+export function editPaidCeiling(total: number, recordedPaid: number): number {
+  return Math.max(0, total, Number(recordedPaid) || 0);
+}
+
+export type EditBalance =
+  | { kind: "due"; amount: number }
+  | { kind: "paid"; amount: 0 }
+  | { kind: "credit"; amount: number };
+
+/** What is left after paying: owed, settled, or owed back to the guest. */
+export function editBalance(total: number, paid: number): EditBalance {
+  const balance = Math.round((total - paid) * 100) / 100;
+  if (balance > 0.005) return { kind: "due", amount: balance };
+  if (balance < -0.005) return { kind: "credit", amount: -balance };
+  return { kind: "paid", amount: 0 };
+}

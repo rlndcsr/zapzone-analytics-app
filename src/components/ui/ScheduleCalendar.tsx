@@ -72,7 +72,12 @@ type ScheduleCalendarProps = {
   onDateSelect: (dateKey: string) => void;
   onTimeSelect: (time: string) => void;
   minDate?: string;
+  /** Visit days that get a special → its label; marked "%" (web dealDates). */
+  dealDates?: Record<string, string>;
 };
+
+/** The "%" deal-day mark, in an inline colour so the cell's classes never change. */
+const DEAL_MARK_COLOR = "#059669";
 
 export function ScheduleCalendar({
   availability,
@@ -85,7 +90,9 @@ export function ScheduleCalendar({
   onDateSelect,
   onTimeSelect,
   minDate,
+  dealDates,
 }: ScheduleCalendarProps) {
+  const hasDeals = !!dealDates && Object.keys(dealDates).length > 0;
   const todayKey = useMemo(() => toKey(new Date()), []);
   const minKey = minDate ?? todayKey;
 
@@ -230,6 +237,7 @@ export function ScheduleCalendar({
               const isDayOff = dayOffDates.has(key);
               const isLimited = !isDayOff && !!limitedDates?.has(key);
               const disabled = isPast || weekdayClosed || isDayOff;
+              const deal = !disabled ? dealDates?.[key] : undefined;
 
               return (
                 <View key={key} className="flex-1 h-11 p-0.5">
@@ -238,7 +246,7 @@ export function ScheduleCalendar({
                     disabled={disabled}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isSelected, disabled }}
-                    accessibilityLabel={key}
+                    accessibilityLabel={deal ? `${key}, special price: ${deal}` : key}
                     className={`flex-1 rounded-lg items-center justify-center ${
                       isSelected
                         ? "bg-[#0644C7]"
@@ -293,6 +301,20 @@ export function ScheduleCalendar({
                         }}
                       />
                     )}
+                    {!!deal && (
+                      <Text
+                        style={{
+                          position: "absolute",
+                          top: 1,
+                          right: 3,
+                          fontSize: 8,
+                          fontWeight: "700",
+                          color: isSelected ? "#FFFFFF" : DEAL_MARK_COLOR,
+                        }}
+                      >
+                        %
+                      </Text>
+                    )}
                   </Pressable>
                 </View>
               );
@@ -311,6 +333,18 @@ export function ScheduleCalendar({
             label="Limited hours"
           />
           <LegendItem color="#F3F4F6" label="Unavailable" />
+          {hasDeals && (
+            <View className="flex-row items-center mr-3 mb-1">
+              <Text
+                style={{ fontSize: 10, fontWeight: "700", color: DEAL_MARK_COLOR, marginRight: 4 }}
+              >
+                %
+              </Text>
+              <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+                Special price
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 

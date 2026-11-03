@@ -45,8 +45,14 @@ import {
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markEventPurchasesStale } from "../../lib/hooks/useEventPurchases";
 import { useOnsitePricing } from "../../lib/hooks/useOnsitePricing";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
 import { useVenuePhone } from "../../lib/hooks/useVenuePhone";
 import { clampAmount, clampAmountText } from "../../lib/orderAmounts";
+import { specialPaymentBlocker } from "../../lib/pricing/specialPricing";
+import {
+  SpecialCheckAlert,
+  SpecialDealNote,
+} from "../../components/pricing/SpecialPricingNotes";
 import {
   credentialsMatchChargeLocation,
   STALE_GATEWAY_LOCATION_MESSAGE,
@@ -616,15 +622,28 @@ const CreateEventPurchaseScreen = () => {
     specialPricing,
     specialPricingDiscount,
     feeBreakdown,
+    specialChecking,
+    specialCheckFailed,
+    retrySpecial,
   } = useOnsitePricing({
     entity: selected,
     entityType: "event",
     quantity,
     addonQty,
     discountNum: Number(discount) || 0,
+    // An event's purchase_date IS the visit date; no special before it is picked.
     purchaseDate,
     purchaseTime,
+    requireDate: true,
   });
+  const specialBlocker = specialPaymentBlocker(
+    specialCheckFailed ? "failed" : specialChecking ? "checking" : "ready",
+  );
+  const { deals: specialDeals, dealDates } = useSpecialDeals(
+    "event",
+    selected?.id ?? null,
+    selected?.locationId ?? null,
+  );
 
   const cardValid = validateCardNumber(cardNumber);
   const cardIncomplete =
@@ -639,6 +658,8 @@ const CreateEventPurchaseScreen = () => {
   const submitDisabled =
     submitting ||
     isProcessingPayment ||
+    // Payment waits for this visit's special; a failed check holds it.
+    !!specialBlocker ||
     (paymentMethod === "authorize.net" &&
       cardEntryRequired &&
       (cardIncomplete || authorizeUnavailable));
@@ -717,6 +738,11 @@ const CreateEventPurchaseScreen = () => {
       );
       return;
     }
+    // Backstop for the disabled button: never charge on an unchecked special.
+    if (specialBlocker) {
+      Alert.alert("Special price", specialBlocker);
+      return;
+    }
     if (submitLockRef.current) return;
     const now = Date.now();
     if (now - lastSubmitAtRef.current < 3000) return;
@@ -755,11 +781,20 @@ const CreateEventPurchaseScreen = () => {
     // Resolve pricing fresh, right now — `total` can still reflect the
     // debounced fee/special-pricing effect from before the latest quantity /
     // add-on / discount change. `baseTotal` is synchronous, so it's current.
+    // Lock BEFORE the pricing round-trip, not after: a second tap during a
+    // slow lookup (past the 3s throttle) must not start a second sale. Nothing
+    // between here and the try below can return or throw, and its finally
+    // releases the lock.
+    submitLockRef.current = true;
+    setSubmitting(true);
     const freshPricing = await resolveFreshPricing({
       token,
       entityType: "event",
       entityId: selected.id,
       basePrice: baseTotal,
+      // The special: one ticket's price × tickets, for the visit.
+      specialPricingBasePrice: selected.price,
+      specialQuantity: quantity,
       locationId: effectiveLocationId,
       date: purchaseDate,
       time: purchaseTime,
@@ -827,8 +862,6 @@ const CreateEventPurchaseScreen = () => {
       ]),
     };
 
-    submitLockRef.current = true;
-    setSubmitting(true);
     setIsProcessingPayment(isCardPayment);
     try {
       // Web order: create the purchase (unpaid) first so the charge has a
@@ -1351,6 +1384,14 @@ const CreateEventPurchaseScreen = () => {
                       No available time slots for this date.
                     </Text>
                   ) : null}
+                  <SpecialDealNote
+                    deals={specialDeals}
+                    selectedDate={purchaseDate}
+                    applied={!!specialPricing?.has_special_pricing}
+                    checkFailed={specialCheckFailed}
+                    onRetry={retrySpecial}
+                    className="mt-3"
+                  />
                 </Section>
               )}
 
@@ -1677,6 +1718,13 @@ const CreateEventPurchaseScreen = () => {
           {/* Actions — no purchase action for a Call to Book event; the venue
               takes it on the phone. */}
           {selected && !callToBook && (
+            <SpecialCheckAlert
+              failed={specialCheckFailed}
+              onRetry={retrySpecial}
+              className="mb-2"
+            />
+          )}
+          {selected && !callToBook && (
             <View className="flex-row gap-3 mt-1">
               <Pressable
                 onPress={() => router.back()}
@@ -1771,15 +1819,23 @@ const CreateEventPurchaseScreen = () => {
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {d.label}
-                </Text>
+                <View className="flex-1 mr-2">
+                  <Text
+                    className={`text-base font-medium ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {d.label}
+                  </Text>
+                  {/* Deal days, as the web labels its date options "— $5.00 off". */}
+                  {!!dealDates?.[d.value.slice(0, 10)] && (
+                    <Text className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                      Special price: {dealDates[d.value.slice(0, 10)]}
+                    </Text>
+                  )}
+                </View>
                 {isSelected && (
                   <Feather name="check" size={16} color="#3B82F6" />
                 )}

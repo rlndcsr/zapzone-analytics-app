@@ -70,6 +70,8 @@ import {
   participantLimitsLabel,
 } from "../../lib/participants";
 import { useBookingQuote } from "../../lib/hooks/useBookingQuote";
+import { useSpecialDeals } from "../../lib/hooks/useSpecialDeals";
+import { hhmm } from "../../lib/pricing/specialPricing";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   bookingUpdateEmailWanted,
@@ -770,6 +772,9 @@ const EditBookingScreen = () => {
     clampOnPackageLoadRef.current = true;
   };
 
+  // Deal-day marks only — the price itself comes from the reprice quote.
+  const { dealDates } = useSpecialDeals("package", packageId ?? null, locationId ?? null);
+
   const handleSelectDate = (key: string) => {
     setDate(key);
     setTime(key === originalDate ? (originalTime ?? "") : "");
@@ -896,6 +901,8 @@ const EditBookingScreen = () => {
       participants: clampParticipants(participants, packageDetail),
       packageId: packageId ?? undefined,
       date: date || undefined,
+      // The special follows the visit's time as well as its day (web ae48a92).
+      time: hhmm(time) || undefined,
       locationId: locationId ?? undefined,
       additionalAddons: buildAdditionalAddons().map(
         ({ addon_id, quantity }) => ({ addon_id, quantity }),
@@ -907,7 +914,7 @@ const EditBookingScreen = () => {
         ? { additionalAttractions: [] }
         : {}),
     }),
-    [participants, packageDetail, packageId, date, locationId, buildAdditionalAddons, detail?.packageId],
+    [participants, packageDetail, packageId, date, time, locationId, buildAdditionalAddons, detail?.packageId],
   );
 
   /**
@@ -921,6 +928,7 @@ const EditBookingScreen = () => {
         repriceIntent.participants,
         repriceIntent.packageId ?? "",
         repriceIntent.date ?? "",
+        repriceIntent.time ?? "",
         repriceIntent.locationId ?? "",
         repriceIntent.additionalAddons
           .map((a) => `${a.addon_id}:${a.quantity}`)
@@ -1107,6 +1115,12 @@ const EditBookingScreen = () => {
           priceQuote.quote.persistFees.length > 0
             ? priceQuote.quote.persistFees
             : null,
+      }),
+      // When the move changed the special, the quote's discount list carries
+      // the new one; saving it keeps the specials in step with the total
+      // (web EditBooking). Absent when the special didn't change.
+      ...(priceQuote.quote?.appliedDiscounts && {
+        appliedDiscounts: priceQuote.quote.appliedDiscounts,
       }),
     });
   };
@@ -1463,12 +1477,35 @@ const EditBookingScreen = () => {
                               {cell.day}
                             </Text>
                           )}
+                          {/* Deal day (web EditBooking dealDates "%"); inline colour so the classes never change. */}
+                          {!!cell.key && cell.bookable && !!dealDates?.[cell.key] && (
+                            <Text
+                              style={{
+                                position: "absolute",
+                                top: 0,
+                                right: 1,
+                                fontSize: 9,
+                                fontWeight: "700",
+                                color: selected ? "#FFFFFF" : "#059669",
+                              }}
+                            >
+                              %
+                            </Text>
+                          )}
                         </View>
                       </Pressable>
                     );
                   })}
                 </View>
               ))}
+              {!!dealDates && (
+                <View className="flex-row items-center justify-center gap-1.5 mt-1">
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: "#059669" }}>%</Text>
+                  <Text className="text-[10px] text-gray-500 dark:text-gray-400">
+                    Special price
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Booking Details: time */}

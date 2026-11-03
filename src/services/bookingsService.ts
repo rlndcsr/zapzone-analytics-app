@@ -2089,6 +2089,8 @@ export type BookingUpdateInput = {
   totalAmount?: number;
   discountAmount?: number;
   appliedFees?: BookingQuoteFee[] | null;
+  /** From the reprice quote, raw server entries; null clears the list. */
+  appliedDiscounts?: Record<string, unknown>[] | null;
   amountPaid?: number;
   paymentStatus?: string;
   /** Sent up front only when retrying with a reason already given, so it is not asked twice. */
@@ -2195,6 +2197,14 @@ export async function updateBooking(
           }))
         : null;
   }
+  // The discount list the reprice quote priced (its special swapped for the
+  // new visit's), sent as-is so the saved specials match the saved total.
+  if (input.appliedDiscounts !== undefined) {
+    body.applied_discounts =
+      input.appliedDiscounts && input.appliedDiscounts.length > 0
+        ? input.appliedDiscounts
+        : null;
+  }
   if (input.amountPaid !== undefined) body.amount_paid = input.amountPaid;
   if (input.paymentStatus !== undefined)
     body.payment_status = input.paymentStatus;
@@ -2239,12 +2249,21 @@ export type BookingQuote = {
   paymentStatus: string;
   delta: number | null;
   pricingConsistent: boolean | null;
+  /**
+   * The booking's discount list with its special swapped for the one the new
+   * visit gets (backend 44e1a85), raw server entries. `null` when the special
+   * didn't change — or from a server that predates this — so the list is left
+   * as it is.
+   */
+  appliedDiscounts: Record<string, unknown>[] | null;
 };
 
 export type BookingRepriceIntent = {
   participants?: number;
   packageId?: number | null;
   date?: string;
+  /** "HH:MM" — a special can run only some hours, so the time is priced too. */
+  time?: string;
   locationId?: number;
   additionalAddons?: { addon_id: number; quantity: number }[];
   additionalAttractions?: { attraction_id: number; quantity: number }[];
@@ -2272,6 +2291,7 @@ export async function repriceBooking(
   if (intent.participants != null) body.participants = intent.participants;
   if (intent.packageId !== undefined) body.package_id = intent.packageId;
   if (intent.date != null) body.booking_date = intent.date;
+  if (intent.time) body.booking_time = intent.time;
   if (intent.locationId != null) body.location_id = intent.locationId;
   if (intent.additionalAddons !== undefined)
     body.additional_addons = intent.additionalAddons;
@@ -2315,6 +2335,11 @@ export async function repriceBooking(
     delta: q.delta == null ? null : Number(q.delta),
     pricingConsistent:
       q.pricing_consistent == null ? null : Boolean(q.pricing_consistent),
+    appliedDiscounts: Array.isArray(q.applied_discounts)
+      ? (q.applied_discounts as unknown[]).filter(
+          (d): d is Record<string, unknown> => !!d && typeof d === "object",
+        )
+      : null,
   };
 }
 
