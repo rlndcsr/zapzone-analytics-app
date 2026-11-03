@@ -9,6 +9,8 @@ import {
   View,
 } from "react-native";
 
+import { pickCaptureSize } from "../../lib/photos/captureSize";
+
 /** Mirrors the web `usePhotoCamera` states the capture screen reacts to. */
 export type PhotoCameraState = "starting" | "live" | "denied" | "unavailable";
 
@@ -103,8 +105,9 @@ export function PhotoCameraView({
     );
   }
 
-  // Match the web's 1920x1080 capture request: a full-resolution sensor frame
-  // would be several megabytes of base64 on the wire for no visible gain.
+  // Match the web's capture request (fc8caa6): 4K at 16:9 when the camera has
+  // it, else the closest 16:9 size below (1080p), never a 4:3 one — a 4:3
+  // photo cuts the edges off the venue's 16:9 frames.
   const handleReady = async () => {
     onStateChange("live");
     if (pictureSize) return;
@@ -124,27 +127,15 @@ export function PhotoCameraView({
         ref={cameraRef}
         style={{ flex: 1 }}
         facing="back"
+        // Android only: without it CameraX prefers 4:3 over the size asked
+        // for. It also fits the preview to the frame (bars, no crop), so the
+        // preview shows exactly what the photo will hold. iOS ignores it; its
+        // 3840x2160 / 1920x1080 presets are already 16:9.
+        ratio="16:9"
         pictureSize={pictureSize}
         onCameraReady={() => void handleReady()}
         onMountError={() => setMountFailed(true)}
       />
     </View>
-  );
-}
-
-/** Smallest offered size at or above ~2MP, falling back to the largest. */
-function pickCaptureSize(sizes: string[]): string | undefined {
-  const parsed = sizes
-    .map((size) => {
-      const [w, h] = size.split("x").map(Number);
-      return { size, area: w * h };
-    })
-    .filter((s) => Number.isFinite(s.area) && s.area > 0)
-    .sort((a, b) => a.area - b.area);
-
-  if (parsed.length === 0) return undefined;
-  return (
-    parsed.find((s) => s.area >= 1_800_000)?.size ??
-    parsed[parsed.length - 1].size
   );
 }

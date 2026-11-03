@@ -27,8 +27,8 @@ export const SHAPE_NAMES: Record<FrameShape, string> = {
 };
 
 export const SHAPE_HINTS: Record<FrameShape, string> = {
-  landscape: "wide, for example 1920 × 1080; used for photos taken sideways",
-  portrait: "tall, for example 1080 × 1920; used for photos taken upright",
+  landscape: "wide, for example 3840 × 2160; used for photos taken sideways",
+  portrait: "tall, for example 2160 × 3840; used for photos taken upright",
 };
 
 /** PNG and WebP only: a frame needs a see-through middle, which JPEG can't hold. */
