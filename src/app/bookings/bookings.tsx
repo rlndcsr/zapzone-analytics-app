@@ -1,14 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -28,12 +21,14 @@ import {
   type BookingBulkAction,
 } from "../../components/ui/BookingsBulkBar";
 import { BookingsImportSheet } from "../../components/ui/BookingsImportSheet";
-import { BookingsMoreSheet } from "../../components/ui/BookingsMoreSheet";
 import { BookingsReportSheet } from "../../components/ui/BookingsReportSheet";
 import {
+  BookingStatusBadge,
   BookingsTable,
   allBookingColumnKeys,
   bookingColumns,
+  bookingStatusLabel,
+  bookingStatusTone,
   defaultBookingColumnKeys,
   type BookingRowHandlers,
 } from "../../components/ui/BookingsTable";
@@ -50,18 +45,14 @@ import {
   CategoryChips,
 } from "../../components/ui/CategoryChips";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
-import {
-  FilterPill,
-  PillDivider,
-  PillSegment,
-} from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { ProcessPaymentSheet } from "../../components/ui/ProcessPaymentSheet";
-import { StatusBadge } from "../../components/ui/StatusBadge";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
-import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import { AttractionsSummarySkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { BookingsListSkeleton } from "../../components/ui/skeleton/BookingsSkeleton";
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
 import { categoryKeyOf } from "../../lib/calendar/categoryFilter";
 import {
   changeReasonPromptAvailable,
@@ -92,15 +83,8 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
-type ComponentIconName = ComponentProps<typeof Feather>["name"];
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 type StatusFilter = "all" | BookingStatus;
 type DateFilter = "all" | "upcoming" | "today" | "past";
@@ -290,18 +274,125 @@ function compareBookingsDefault(
   return timeToMinutes(b.time) - timeToMinutes(a.time);
 }
 
-const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
-  <View className="flex-row items-center gap-1.5">
-    <Feather name={icon} size={12} color="#9CA3AF" />
+/**
+ * One cell of the summary panel. Cells sit in a single bordered card and are
+ * separated by hairlines (`divideLeft` / `divideTop`) rather than each being
+ * its own shadowed tile — the same panel as Manage Attractions.
+ */
+const SummaryCell = ({
+  icon,
+  title,
+  value,
+  hint,
+  divideLeft = false,
+  divideTop = false,
+}: {
+  icon: FeatherIconName;
+  title: string;
+  value: string;
+  hint: string;
+  divideLeft?: boolean;
+  divideTop?: boolean;
+}) => (
+  <View
+    className={`flex-1 p-4 ${
+      divideLeft ? "border-l border-gray-100 dark:border-neutral-800" : ""
+    } ${divideTop ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
+  >
+    <View className="flex-row items-center gap-1.5">
+      <Feather name={icon} size={13} color="#9CA3AF" />
+      <Text
+        numberOfLines={1}
+        className="shrink text-xs font-medium text-gray-500 dark:text-gray-400"
+      >
+        {title}
+      </Text>
+    </View>
     <Text
-      className="text-xs text-gray-500 dark:text-gray-400"
       numberOfLines={1}
+      adjustsFontSizeToFit
+      className="text-2xl font-semibold text-gray-900 dark:text-white mt-1.5"
     >
-      {label}
+      {value}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+    >
+      {hint}
     </Text>
   </View>
 );
 
+/** Square icon button used in the list header (Columns). */
+const ToolbarIconButton = ({
+  icon,
+  label,
+  active = false,
+  onPress,
+}: {
+  icon: FeatherIconName;
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className={`w-9 h-9 rounded-xl items-center justify-center active:opacity-70 ${
+      active
+        ? "bg-blue-50 dark:bg-blue-900/30"
+        : "bg-gray-100 dark:bg-neutral-800"
+    }`}
+  >
+    <Feather name={icon} size={16} color={active ? PRIMARY : "#6B7280"} />
+  </Pressable>
+);
+
+/** One labelled cell in the card's Date / Guests / Total strip. */
+const Spec = ({
+  label,
+  value,
+  hint,
+  divider = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  divider?: boolean;
+}) => (
+  <View
+    className={`flex-1 px-3 py-2.5 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-800" : ""
+    }`}
+  >
+    <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+      {label}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5"
+    >
+      {value}
+    </Text>
+    {!!hint && (
+      <Text
+        numberOfLines={1}
+        className="text-[11px] text-gray-400 dark:text-gray-500"
+      >
+        {hint}
+      </Text>
+    )}
+  </View>
+);
+
+/**
+ * Card layout for a single booking, matching the Manage Attractions card:
+ * customer + status, a reference · package line, a Date / Guests / Total
+ * strip and a quiet footer. Tapping the card opens the full details; the
+ * three-dot opens the per-booking actions sheet (restore for deleted rows).
+ */
 const BookingCard = ({
   booking,
   showLocation,
@@ -313,139 +404,88 @@ const BookingCard = ({
   onPress: () => void;
   onMore: () => void;
 }) => {
-  const dateTime = [formatDate(booking.date), formatTime(booking.time)]
+  const subtitle = [
+    booking.referenceNumber ? `#${booking.referenceNumber}` : "",
+    booking.packageName,
+  ]
     .filter(Boolean)
-    .join(" · ");
+    .join("  ·  ");
 
   return (
     <Pressable
       onPress={onPress}
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
-      style={CARD_SHADOW}
+      className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
       accessibilityRole="button"
       accessibilityLabel={`View booking for ${booking.customerName}`}
     >
-      {/* Header: customer + ref (left), status (right) */}
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {booking.customerName}
-          </Text>
-          {!!booking.referenceNumber && (
-            <Text
-              className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
-              numberOfLines={1}
-            >
-              #{booking.referenceNumber}
-            </Text>
-          )}
-        </View>
-        <StatusBadge status={booking.status} />
-      </View>
-
-      {/* Package */}
-      <View className="flex-row items-center gap-1.5">
-        <Feather name="package" size={12} color="#9CA3AF" />
+      {/* Customer + status */}
+      <View className="flex-row items-start justify-between gap-3">
         <Text
-          className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
           numberOfLines={1}
         >
-          {booking.packageName}
+          {booking.customerName}
         </Text>
+        <BookingStatusBadge status={booking.status} />
       </View>
 
-      {/* Date / time */}
-      <View className="flex-row items-center gap-1.5 mt-1">
-        <Feather name="calendar" size={12} color="#9CA3AF" />
+      {/* Reference · package */}
+      {!!subtitle && (
         <Text
-          className="text-xs text-gray-500 dark:text-gray-400"
+          className="text-xs text-gray-500 dark:text-gray-400 mt-1"
           numberOfLines={1}
         >
-          {dateTime}
+          {subtitle}
         </Text>
-      </View>
-
-      {/* Location */}
-      {showLocation && !!booking.locationName && (
-        <View className="flex-row items-center gap-1.5 mt-1">
-          <Feather name="map-pin" size={12} color="#9CA3AF" />
-          <Text
-            className="text-xs text-gray-500 dark:text-gray-400"
-            numberOfLines={1}
-          >
-            {booking.locationName}
-          </Text>
-        </View>
       )}
 
-      {/* Footer: guests + total + More */}
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <Stat icon="users" label={`${booking.participants} guests`} />
-        <View className="flex-row items-center gap-1">
-          <Text className="text-sm font-bold text-gray-900 dark:text-white">
-            {formatMoney(booking.totalAmount)}
-          </Text>
+      {/* Date / Guests / Total */}
+      <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+        <Spec
+          label="Date"
+          value={formatDate(booking.date)}
+          hint={formatTime(booking.time) || undefined}
+        />
+        <Spec divider label="Guests" value={String(booking.participants)} />
+        <Spec divider label="Total" value={formatMoney(booking.totalAmount)} />
+      </View>
+
+      {/* Location + actions */}
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        <View className="shrink flex-row items-center gap-1.5">
+          {showLocation && !!booking.locationName && (
+            <>
+              <Feather name="map-pin" size={12} color="#9CA3AF" />
+              <Text
+                numberOfLines={1}
+                className="shrink text-xs text-gray-400 dark:text-gray-500"
+              >
+                {booking.locationName}
+              </Text>
+            </>
+          )}
+        </View>
+        <View className="flex-row items-center gap-2">
+          <View className="flex-row items-center gap-0.5">
+            <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              Details
+            </Text>
+            <Feather name="chevron-right" size={14} color="#9CA3AF" />
+          </View>
           <Pressable
             onPress={onMore}
             hitSlop={10}
             accessibilityRole="button"
             accessibilityLabel={`More actions for ${booking.customerName}`}
-            className="ml-1 p-1.5 rounded-full active:bg-gray-100 dark:active:bg-neutral-800"
+            className="w-8 h-8 rounded-lg items-center justify-center border border-gray-200 dark:border-neutral-700 active:bg-gray-100 dark:active:bg-neutral-800"
           >
-            <Feather name="more-vertical" size={18} color="#9CA3AF" />
+            <Feather name="more-horizontal" size={16} color="#6B7280" />
           </Pressable>
         </View>
       </View>
     </Pressable>
   );
 };
-
-type KpiTone = { bg: string; tint: string };
-
-/** All metric cards share one blue accent, as every web card does. */
-const KPI_TONE: KpiTone = { bg: "#0644C720", tint: PRIMARY };
-
-const KpiCard = ({
-  icon,
-  tone,
-  title,
-  value,
-  change,
-}: {
-  icon: ComponentIconName;
-  tone: KpiTone;
-  title: string;
-  value: string;
-  change: string;
-}) => (
-  <View
-    className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 m-1.5 shadow-sm"
-    style={CARD_SHADOW}
-  >
-    <View
-      className="w-9 h-9 rounded-xl items-center justify-center"
-      style={{ backgroundColor: tone.bg }}
-    >
-      <Feather name={icon} size={18} color={tone.tint} />
-    </View>
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
-      {title}
-    </Text>
-    <Text
-      className="text-2xl font-bold text-gray-900 dark:text-white mt-1"
-      numberOfLines={1}
-      adjustsFontSizeToFit
-    >
-      {value}
-    </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      {change}
-    </Text>
-  </View>
-);
 
 const Bookings = () => {
   const insets = useSafeAreaInsets();
@@ -472,7 +512,9 @@ const Bookings = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>(ALL_CATEGORIES);
-  const [sheet, setSheet] = useState<null | "status" | "date">(null);
+  // One Filters sheet (Status + Date) beside the search, like Manage
+  // Attractions. Picks apply immediately, as the two separate sheets did.
+  const [showFilters, setShowFilters] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
@@ -555,8 +597,7 @@ const Bookings = () => {
     null,
   );
 
-  // Page-level "More" menu (mirrors the web header ActionMenu) + its flows.
-  const [moreOpen, setMoreOpen] = useState(false);
+  // The web header ActionMenu's flows, reached from the "More" shortcuts.
   const [showReport, setShowReport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -623,7 +664,6 @@ const Bookings = () => {
       } else {
         Alert.alert("Export ready", `Saved to ${uri}`);
       }
-      setMoreOpen(false);
     } catch (e) {
       Alert.alert(
         "Export failed",
@@ -896,11 +936,13 @@ const Bookings = () => {
     );
   }, [selectedIds, refetch]);
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ??
-    "All Statuses";
-  const dateLabel =
-    DATE_OPTIONS.find((o) => o.value === dateFilter)?.label ?? "All Dates";
+  // Status + Date live in the Filters sheet; category has its own visible chips.
+  const activeFilterCount =
+    (statusFilter !== "all" ? 1 : 0) + (dateFilter !== "all" ? 1 : 0);
+  const clearFilters = useCallback(() => {
+    setStatusFilter("all");
+    setDateFilter("all");
+  }, []);
   const hasResults = filtered.length > 0;
 
   /**
@@ -1007,30 +1049,63 @@ const Bookings = () => {
     [refetch, currentUser?.id],
   );
 
+  // The web header ActionMenu, laid out as module-hub shortcuts like the
+  // Manage Attractions "More" row. Create Booking (the step-by-step wizard)
+  // leads, since the header's New opens Manual Booking.
+  const moreShortcuts: HubQuickLink[] = [
+    {
+      label: "Create Booking",
+      icon: "plus-circle",
+      route: "/bookings/create-booking",
+    },
+    { label: "Bulk Import", icon: "upload", onPress: () => setShowImport(true) },
+    {
+      label: exporting ? "Exporting…" : "Export Bookings",
+      icon: "download",
+      onPress: () => {
+        if (!exporting) void runExport();
+      },
+    },
+    {
+      label: "Generate Report",
+      icon: "file-text",
+      onPress: () => setShowReport(true),
+    },
+    {
+      label: showDeleted ? "Active Bookings" : "Deleted Bookings",
+      icon: showDeleted ? "rotate-ccw" : "archive",
+      onPress: () => setShowDeleted((v) => !v),
+    },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+      {/* Header — back, title, and the primary New action (Manual Booking,
+          the web's lead CTA; the step-by-step wizard is in More). */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Manage Bookings
           </Text>
-          {/* Page-level "More" menu (mirrors the web header ActionMenu). */}
           <Pressable
-            onPress={() => setMoreOpen(true)}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            onPress={() => router.push("/bookings/manual-booking")}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
-            accessibilityLabel="More actions"
+            accessibilityLabel="New manual booking"
           >
-            <Feather name="more-horizontal" size={20} color={headerIcon} />
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
           </Pressable>
         </View>
       </View>
@@ -1038,6 +1113,7 @@ const Bookings = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -1049,157 +1125,197 @@ const Bookings = () => {
           />
         }
       >
-        <View className="px-5 mt-5">
+        <View className="px-4 mt-4">
           {/* Global workspace location selector (company-admin only). */}
-          <View className="mb-5">
+          <View className="mb-4">
             <LocationWorkspaceSelector />
           </View>
 
-          {/* The two entry points, side by side: Manual Booking (a single-page
-              manual entry flow mirroring the web admin, with Standard and
-              Flexible modes) leads as the filled CTA, and Create Booking (the
-              step-by-step wizard) sits beside it as the outlined one. */}
-          <View className="flex-row items-stretch gap-3 mb-5">
-            <Pressable
-              onPress={() => router.push("/bookings/manual-booking")}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-white"
-              >
-                Manual Booking
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => router.push("/bookings/create-booking")}
-              className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-[#0644C7] bg-white dark:bg-neutral-900 active:opacity-70"
-            >
-              <Feather name="plus" size={16} color={PRIMARY} />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-semibold text-[#0644C7]"
-              >
-                Create Booking
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* Error state */}
-          {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
+          {/* Error state — the active list's, or the deleted list's while
+              that view is on. */}
+          {!listLoading && listError && (
+            <View className="flex-row gap-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4 mb-4">
+              <Feather name="alert-circle" size={18} color="#DC2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  {showDeleted
+                    ? "Could not load deleted bookings"
+                    : "Could not load bookings"}
+                </Text>
+                <Text className="text-sm text-red-600/90 dark:text-red-400/80 mt-0.5">
+                  {listError}
+                </Text>
+                <Pressable
+                  onPress={onRefresh}
+                  className="self-start mt-2.5 px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-900/50 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-xs font-semibold text-red-700 dark:text-red-400">
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
-          {/* KPI cards */}
+          {/* Summary — one panel, five figures, divided by hairlines. */}
           {loading ? (
-            <AttractionsKpiSkeleton />
+            <AttractionsSummarySkeleton />
           ) : (
-            <View className="flex-row flex-wrap -mx-1.5 mb-3">
-              <View className="w-1/2">
-                <KpiCard
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+              <View className="flex-row">
+                <SummaryCell
                   icon="calendar"
-                  tone={KPI_TONE}
                   title="Total Bookings"
                   value={String(kpis.total)}
-                  change={`${kpis.total} total bookings`}
+                  hint={`${kpis.total} total bookings`}
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
+                <SummaryCell
+                  divideLeft
                   icon="package"
-                  tone={KPI_TONE}
                   title="Package Bookings"
                   value={String(kpis.total)}
-                  change={`${kpis.confirmed} confirmed`}
+                  hint={`${kpis.confirmed} confirmed`}
                 />
               </View>
-              <View className="w-1/2">
-                <KpiCard
+              <View className="flex-row">
+                <SummaryCell
+                  divideTop
                   icon="users"
-                  tone={KPI_TONE}
                   title="Participants"
                   value={String(kpis.participants)}
-                  change={`${kpis.total} bookings`}
+                  hint={`${kpis.total} bookings`}
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
+                <SummaryCell
+                  divideTop
+                  divideLeft
                   icon="dollar-sign"
-                  tone={KPI_TONE}
                   title="Revenue"
                   value={formatMoney(kpis.revenue)}
-                  change={`Excludes ${kpis.cancelled} cancelled`}
+                  hint={`Excludes ${kpis.cancelled} cancelled`}
                 />
               </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="dollar-sign"
-                  tone={KPI_TONE}
+              <View className="flex-row">
+                <SummaryCell
+                  divideTop
+                  icon="trending-up"
                   title="Possible Revenue"
                   value={formatMoney(kpis.possibleRevenue)}
-                  change="Total if all bookings fully paid"
+                  hint="Total if all bookings fully paid"
                 />
               </View>
             </View>
           )}
 
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mt-2 mb-3">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search bookings..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+          {/* More — the page's secondary actions as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {/* Filters — full-width segmented pill (Status · Date) */}
-          <FilterPill>
-            <PillSegment
-              label={statusLabel}
-              active={sheet === "status"}
-              onPress={() => setSheet("status")}
-              renderIcon={(c) => (
-                <Feather name="check-circle" size={15} color={c} />
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <View className="flex-1 flex-row items-center gap-2 h-11 px-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="search" size={16} color="#9CA3AF" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search bookings"
+                placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+              />
+              {search.length > 0 && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Feather name="x-circle" size={16} color="#9CA3AF" />
+                </Pressable>
               )}
-            />
-            <PillSegment
-              label={dateLabel}
-              active={sheet === "date"}
-              onPress={() => setSheet("date")}
-              renderIcon={(c) => (
-                <Feather name="calendar" size={15} color={c} />
+            </View>
+            <Pressable
+              onPress={() => setShowFilters(true)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                activeFilterCount > 0
+                  ? `Filters, ${activeFilterCount} applied`
+                  : "Filters"
+              }
+              className={`flex-row items-center gap-1.5 h-11 px-3.5 rounded-xl border active:opacity-70 ${
+                activeFilterCount > 0
+                  ? "bg-blue-50 dark:bg-blue-900/30 border-[#0644C7]/40"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
+              }`}
+            >
+              <Feather
+                name="sliders"
+                size={15}
+                color={activeFilterCount > 0 ? PRIMARY : "#6B7280"}
+              />
+              <Text
+                className={`text-sm font-medium ${
+                  activeFilterCount > 0
+                    ? "text-[#0644C7] dark:text-blue-300"
+                    : "text-gray-700 dark:text-gray-200"
+                }`}
+              >
+                Filters
+              </Text>
+              {activeFilterCount > 0 && (
+                <View className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#0644C7] items-center justify-center">
+                  <Text className="text-[10px] font-bold text-white">
+                    {activeFilterCount}
+                  </Text>
+                </View>
               )}
-            />
-            {/* Columns — table layout only (cards have no columns). */}
-            {viewMode === "table" && (
-              <>
-                <PillDivider />
-                <PillSegment
-                  label="Columns"
-                  active={showColumnsSheet}
-                  onPress={() => setShowColumnsSheet(true)}
-                  renderIcon={(c) => (
-                    <Feather name="columns" size={15} color={c} />
-                  )}
-                />
-              </>
-            )}
-          </FilterPill>
+            </Pressable>
+          </View>
+
+          {/* Applied-filters hint with a one-tap reset. */}
+          {activeFilterCount > 0 && (
+            <View className="flex-row items-center justify-between mb-3 -mt-1">
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                {activeFilterCount}{" "}
+                {activeFilterCount === 1 ? "filter" : "filters"} applied
+              </Text>
+              <Pressable
+                onPress={clearFilters}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Clear all
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Deleted-view hint — the More shortcut switched the list to the
+              trashed bookings; this is the one-tap way back. */}
+          {showDeleted && (
+            <View className="flex-row items-center gap-2 mb-3 px-3.5 py-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="archive" size={14} color="#6B7280" />
+              <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300">
+                Showing deleted bookings
+              </Text>
+              <Pressable
+                onPress={() => setShowDeleted(false)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Back to active bookings"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Back to active
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* Category chips — reads the package's display label, so escape
               rooms group under one chip instead of splitting by difficulty. */}
@@ -1211,24 +1327,31 @@ const Bookings = () => {
             allLabel="All Categories"
           />
 
-          {/* List header + top pagination (same state as the bottom control) */}
+          {/* List header — title + count, Columns (table only), layout toggle
+              (active list only; the deleted list keeps cards). */}
           {!listLoading && !listError && (
-            <View className="flex-row items-center gap-2 mb-4 flex-wrap">
-              <Text
-                numberOfLines={1}
-                className="shrink text-lg font-bold text-gray-900 dark:text-white"
-              >
-                {showDeleted ? "Deleted Bookings" : "All Bookings"}
-              </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+            <View className="flex-row items-center justify-between gap-2 mb-3">
+              <View className="flex-row items-baseline gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-base font-semibold text-gray-900 dark:text-white"
+                >
+                  {showDeleted ? "Deleted Bookings" : "All Bookings"}
+                </Text>
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
                   {filtered.length}
                 </Text>
               </View>
-              
-              {/* Layout toggle (Table default / Cards) — active list only. */}
               {!showDeleted && (
-                <View className="ml-auto">
+                <View className="flex-row items-center gap-2">
+                  {viewMode === "table" && (
+                    <ToolbarIconButton
+                      icon="columns"
+                      label="Toggle columns"
+                      active={showColumnsSheet}
+                      onPress={() => setShowColumnsSheet(true)}
+                    />
+                  )}
                   <ViewToggle mode={viewMode} onChange={setViewMode} />
                 </View>
               )}
@@ -1239,6 +1362,7 @@ const Bookings = () => {
               selection exists; disappears when selection is cleared. */}
           {!showDeleted && viewMode === "table" && selectedIds.size > 0 && (
             <BookingsBulkBar
+              flat
               count={selectedIds.size}
               busy={bulkBusy}
               onStatus={runBulkStatus}
@@ -1247,38 +1371,61 @@ const Bookings = () => {
             />
           )}
 
-          {/* Deleted-list error (active-list error is shown above the KPIs) */}
-          {showDeleted && !listLoading && listError && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{listError}</Text>
-            </View>
-          )}
-
           {/* List / states */}
           {listLoading ? (
-            <BookingsListSkeleton />
+            <BookingsListSkeleton view={showDeleted ? "cards" : viewMode} />
           ) : !listError && !hasResults ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 px-6 py-10 items-center">
+              <View className="w-12 h-12 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
                 <Feather
-                  name={showDeleted ? "archive" : "calendar"}
-                  size={26}
+                  name={
+                    showDeleted
+                      ? "archive"
+                      : bookings.length === 0
+                        ? "calendar"
+                        : "search"
+                  }
+                  size={20}
                   color="#9CA3AF"
                 />
               </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
+              <Text className="text-base font-semibold text-gray-900 dark:text-white">
                 {showDeleted ? "No deleted bookings" : "No bookings found"}
               </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+              <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1 max-w-xs">
                 {showDeleted
                   ? "Deleted bookings will appear here."
                   : bookings.length === 0
                     ? "There are no bookings for this account yet."
                     : "Try adjusting your search or filters."}
               </Text>
+              {!showDeleted &&
+                (bookings.length === 0 ? (
+                  <Pressable
+                    onPress={() => router.push("/bookings/manual-booking")}
+                    className="flex-row items-center gap-1.5 mt-4 px-4 py-2.5 rounded-xl bg-[#0644C7] active:opacity-90"
+                    accessibilityRole="button"
+                  >
+                    <Feather name="plus" size={15} color="#FFFFFF" />
+                    <Text className="text-sm font-semibold text-white">
+                      Manual Booking
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={() => {
+                      setSearch("");
+                      clearFilters();
+                      setCategoryFilter(ALL_CATEGORIES);
+                    }}
+                    className="mt-4 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                    accessibilityRole="button"
+                  >
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      Clear search & filters
+                    </Text>
+                  </Pressable>
+                ))}
             </View>
           ) : (
             !listError && (
@@ -1313,7 +1460,7 @@ const Bookings = () => {
                   ))
                 )}
 
-                {/* Pagination (bottom) — same state as the top control */}
+                {/* Pagination — shared control (same as Attractions/Purchases). */}
                 <PaginationControls
                   page={page}
                   lastPage={lastPage}
@@ -1328,35 +1475,45 @@ const Bookings = () => {
         </View>
       </ScrollView>
 
-      {/* Status filter */}
+      {/* Filters — Status and Date in one sheet. A pick applies at once (as
+          the two separate sheets did); Done closes, Clear resets both. */}
       <BottomSheet
-        visible={sheet === "status"}
-        onClose={() => setSheet(null)}
-        title="Filter by Status"
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
       >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+        <ScrollView className="px-4" showsVerticalScrollIndicator={false}>
+          <Text className="px-1 mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            Status
+          </Text>
           {STATUS_OPTIONS.map((option) => {
             const isSelected = statusFilter === option.value;
             return (
               <Pressable
                 key={option.value}
-                onPress={() => {
-                  setStatusFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                onPress={() => setStatusFilter(option.value)}
+                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
+                <View className="flex-row items-center gap-2.5">
+                  {option.value !== "all" && (
+                    <View
+                      className={`w-2 h-2 rounded-full ${
+                        bookingStatusTone(option.value).dot
+                      }`}
+                    />
+                  )}
+                  <Text
+                    className={`text-base font-medium ${
+                      isSelected
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {option.label}
+                  </Text>
+                </View>
                 {isSelected && (
                   <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                     <Feather name="check" size={14} color="#FFFFFF" />
@@ -1365,26 +1522,17 @@ const Bookings = () => {
               </Pressable>
             );
           })}
-        </ScrollView>
-      </BottomSheet>
 
-      {/* Date filter */}
-      <BottomSheet
-        visible={sheet === "date"}
-        onClose={() => setSheet(null)}
-        title="Filter by Date"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          <Text className="px-1 mt-4 mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            Date
+          </Text>
           {DATE_OPTIONS.map((option) => {
             const isSelected = dateFilter === option.value;
             return (
               <Pressable
                 key={option.value}
-                onPress={() => {
-                  setDateFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
+                onPress={() => setDateFilter(option.value)}
+                className={`flex-row items-center justify-between px-4 py-3 rounded-xl mb-1 ${
                   isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
@@ -1405,6 +1553,25 @@ const Bookings = () => {
               </Pressable>
             );
           })}
+
+          <View className="flex-row gap-3 mt-4 mb-6">
+            <Pressable
+              onPress={clearFilters}
+              className="flex-1 items-center py-3 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+              accessibilityRole="button"
+            >
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Clear
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowFilters(false)}
+              className="flex-1 items-center py-3 rounded-xl bg-[#0644C7] active:opacity-90"
+              accessibilityRole="button"
+            >
+              <Text className="text-sm font-semibold text-white">Done</Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </BottomSheet>
 
@@ -1471,15 +1638,22 @@ const Bookings = () => {
                   isCurrent ? "bg-blue-50 dark:bg-blue-900/20" : ""
                 }`}
               >
-                <Text
-                  className={`text-base font-medium capitalize ${
-                    isCurrent
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option === "checked-in" ? "Checked In" : option}
-                </Text>
+                <View className="flex-row items-center gap-2.5">
+                  <View
+                    className={`w-2 h-2 rounded-full ${
+                      bookingStatusTone(option).dot
+                    }`}
+                  />
+                  <Text
+                    className={`text-base font-medium ${
+                      isCurrent
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {bookingStatusLabel(option)}
+                  </Text>
+                </View>
                 {isCurrent && <Feather name="check" size={16} color="#3B82F6" />}
               </Pressable>
             );
@@ -1564,18 +1738,6 @@ const Bookings = () => {
           }
         }}
         onChanged={showDeleted ? loadDeleted : refetch}
-      />
-
-      {/* Page-level "More" menu (mirrors the web header ActionMenu) */}
-      <BookingsMoreSheet
-        visible={moreOpen}
-        onClose={() => setMoreOpen(false)}
-        showDeleted={showDeleted}
-        exporting={exporting}
-        onBulkImport={() => setShowImport(true)}
-        onExport={runExport}
-        onGenerateReport={() => setShowReport(true)}
-        onToggleDeleted={() => setShowDeleted((v) => !v)}
       />
 
       <BookingsReportSheet

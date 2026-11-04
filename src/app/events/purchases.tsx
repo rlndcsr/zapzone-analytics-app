@@ -3,13 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { router, useFocusEffect } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { useColorScheme } from "nativewind";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentProps,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,20 +25,34 @@ import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
 import {
   EMPTY_EVENT_PURCHASE_FILTERS,
   EventPurchaseFiltersSheet,
-  countActiveEventPurchaseFilters, 
+  countActiveEventPurchaseFilters,
   type EventPurchaseDateTarget,
   type EventPurchaseFilterValues,
 } from "../../components/ui/EventPurchaseFiltersSheet";
-import { EventPurchasesTable } from "../../components/ui/EventPurchasesTable";
+import {
+  DotBadge,
+  EventPurchasesTable,
+  EventStatusBadge,
+  eventStatusTone,
+  prettyEventMethod,
+} from "../../components/ui/EventPurchasesTable";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
-import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import { AttractionsSummarySkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
+import {
+  formatMoney,
+  formatPurchaseDateTime,
+  formatScheduled,
+  prettyStatus,
+} from "../../lib/attractions/purchaseDisplay";
 import {
   consumeEventPurchasesStale,
   useEventPurchases,
 } from "../../lib/hooks/useEventPurchases";
-import { formatDateTimeET } from "../../lib/date/venueTime";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { countTransactions } from "../../lib/purchaseMetrics";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -63,17 +71,10 @@ import {
 
 const PRIMARY = "#0644C7";
 
-type IconName = ComponentProps<typeof Feather>["name"];
-
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PER_PAGE_OPTIONS = [5, 10, 15];
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 // Status options offered by the per-row "Set Status" picker, matching the web
 // event purchase status dropdown.
@@ -102,129 +103,128 @@ const STATUS_PRIORITY: Record<string, number> = {
 // Statuses the web excludes from its event transaction count and revenue.
 const ENDED_STATUSES = ["cancelled", "refunded", "voided"];
 
-const STATUS_BADGE: Record<EventPurchaseStatus, string> = {
-  confirmed: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
-  "checked-in":
-    "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
-  completed: "bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400",
-  pending:
-    "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
-  cancelled: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
+// Card payment-status badge — the stored `payment_status`, in the same colours
+// the card has always used, now drawn as a dot pill.
+const PAYMENT_STATUS_TONE: Record<
+  EventPaymentStatus,
+  { bg: string; dot: string; text: string }
+> = {
+  paid: {
+    bg: "bg-green-50 dark:bg-green-900/30",
+    dot: "bg-green-500",
+    text: "text-green-700 dark:text-green-400",
+  },
+  partial: {
+    bg: "bg-amber-50 dark:bg-amber-900/30",
+    dot: "bg-amber-500",
+    text: "text-amber-700 dark:text-amber-400",
+  },
+  pending: {
+    bg: "bg-gray-100 dark:bg-neutral-800",
+    dot: "bg-gray-400",
+    text: "text-gray-600 dark:text-gray-400",
+  },
+  refunded: {
+    bg: "bg-purple-50 dark:bg-purple-900/30",
+    dot: "bg-purple-500",
+    text: "text-purple-700 dark:text-purple-400",
+  },
+  voided: {
+    bg: "bg-red-50 dark:bg-red-900/30",
+    dot: "bg-red-500",
+    text: "text-red-700 dark:text-red-400",
+  },
 };
-
-const PAYMENT_STATUS_BADGE: Record<EventPaymentStatus, string> = {
-  paid: "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
-  partial:
-    "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
-  pending: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
-  refunded:
-    "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400",
-  voided: "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400",
-};
-
-// Payment-method labels matching the web ("Authorize Net", "In-Store", …).
-const METHOD_LABELS: Record<string, string> = {
-  "authorize.net": "Authorize Net",
-  "in-store": "In-Store",
-  paylater: "Pay Later",
-  card: "Card",
-  cash: "Cash",
-};
-
-const formatMoney = (value: number) =>
-  `$${value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
-function prettyStatus(status: EventPurchaseStatus): string {
-  return status === "checked-in"
-    ? "Checked In"
-    : status.charAt(0).toUpperCase() + status.slice(1);
-}
 
 function prettyPaymentStatus(status: EventPaymentStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-function prettyMethod(method: string): string {
-  if (!method) return "—";
-  return (
-    METHOD_LABELS[method] ??
-    (() => {
-      const spaced = method.replace(/_/g, " ");
-      return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-    })()
-  );
-}
-
-/** Purchase instant in venue time — no zone suffix, matching the web page. */
-function formatDateTime(dateString: string): string {
-  return formatDateTimeET(dateString, { month: "short", showZone: false });
-}
-
-function formatScheduled(dateStr: string, timeStr: string | null): string {
-  const d = new Date(`${dateStr.substring(0, 10)}T00:00:00`);
-  const datePart = Number.isNaN(d.getTime())
-    ? dateStr
-    : d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-  if (!timeStr) return datePart;
-  const [hStr, mStr] = timeStr.split(":");
-  let hour = Number(hStr);
-  const meridian = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  return `${datePart} · ${hour}:${mStr ?? "00"} ${meridian}`;
-}
-
-const StatusBadge = ({ status }: { status: EventPurchaseStatus }) => {
-  const cls = STATUS_BADGE[status] ?? STATUS_BADGE.pending;
-  const [bg1, bg2, fg1, fg2] = cls.split(" ");
-  return (
-    <View className={`px-2.5 py-1 rounded-full ${bg1} ${bg2}`}>
-      <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>
-        {prettyStatus(status)}
+/**
+ * One cell of the summary panel. Cells sit in a single bordered card and are
+ * separated by hairlines (`divideLeft` / `divideTop`) rather than each being
+ * its own shadowed tile — the same panel as Manage Attractions.
+ */
+const SummaryCell = ({
+  icon,
+  title,
+  value,
+  hint,
+  divideLeft = false,
+  divideTop = false,
+}: {
+  icon: FeatherIconName;
+  title: string;
+  value: string;
+  hint: string;
+  divideLeft?: boolean;
+  divideTop?: boolean;
+}) => (
+  <View
+    className={`flex-1 p-4 ${
+      divideLeft ? "border-l border-gray-100 dark:border-neutral-800" : ""
+    } ${divideTop ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
+  >
+    <View className="flex-row items-center gap-1.5">
+      <Feather name={icon} size={13} color="#9CA3AF" />
+      <Text
+        numberOfLines={1}
+        className="shrink text-xs font-medium text-gray-500 dark:text-gray-400"
+      >
+        {title}
       </Text>
     </View>
-  );
-};
+    <Text
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      className="text-2xl font-semibold text-gray-900 dark:text-white mt-1.5"
+    >
+      {value}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+    >
+      {hint}
+    </Text>
+  </View>
+);
 
-const PaymentBadge = ({ status }: { status: EventPaymentStatus }) => {
-  const cls = PAYMENT_STATUS_BADGE[status] ?? PAYMENT_STATUS_BADGE.pending;
-  const [bg1, bg2, fg1, fg2] = cls.split(" ");
-  return (
-    <View className={`px-2.5 py-1 rounded-full ${bg1} ${bg2}`}>
-      <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>
-        {prettyPaymentStatus(status)}
-      </Text>
-    </View>
-  );
-};
-
-const Stat = ({
+/** One labelled cell in the card's Tickets / Total / Paid strip. */
+const Spec = ({
   label,
   value,
-  valueClass = "",
+  valueClass = "text-gray-900 dark:text-white",
+  divider = false,
 }: {
   label: string;
   value: string;
   valueClass?: string;
+  divider?: boolean;
 }) => (
-  <View>
-    <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-0.5">
+  <View
+    className={`flex-1 px-3 py-2.5 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-800" : ""
+    }`}
+  >
+    <Text className="text-[11px] text-gray-500 dark:text-gray-400">
       {label}
     </Text>
     <Text
-      className={`text-sm font-bold text-gray-900 dark:text-white ${valueClass}`}
+      numberOfLines={1}
+      className={`text-sm font-semibold mt-0.5 ${valueClass}`}
     >
       {value}
     </Text>
   </View>
 );
 
+/**
+ * Card layout for a single event purchase, matching the Manage Attractions
+ * card: name + status, email · reference, the event, a Tickets / Total / Paid
+ * strip and a quiet footer with the payment status. Tapping anywhere opens
+ * Purchase Details.
+ */
 const PurchaseCard = ({
   purchase,
   onPress,
@@ -233,83 +233,76 @@ const PurchaseCard = ({
   onPress: () => void;
 }) => {
   const paidInFull = purchase.amountPaid >= purchase.totalAmount;
+  const contact = [purchase.email, purchase.referenceNumber]
+    .filter(Boolean)
+    .join("  ·  ");
+  const paymentTone =
+    PAYMENT_STATUS_TONE[purchase.paymentStatus] ?? PAYMENT_STATUS_TONE.pending;
   return (
     <Pressable
       onPress={onPress}
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
-      style={CARD_SHADOW}
+      className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
       accessibilityRole="button"
       accessibilityLabel={`View purchase for ${purchase.customerName}`}
     >
       {/* Customer + status */}
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {purchase.customerName}
-          </Text>
-          {!!purchase.email && (
-            <Text
-              className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-              numberOfLines={1}
-            >
-              {purchase.email}
-            </Text>
-          )}
-          {!!purchase.referenceNumber && (
-            <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-              {purchase.referenceNumber}
-            </Text>
-          )}
-        </View>
-        <StatusBadge status={purchase.status} />
+      <View className="flex-row items-start justify-between gap-3">
+        <Text
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {purchase.customerName}
+        </Text>
+        <EventStatusBadge status={purchase.status} />
       </View>
 
+      {/* Email · reference */}
+      {!!contact && (
+        <Text
+          className="text-xs text-gray-500 dark:text-gray-400 mt-1"
+          numberOfLines={1}
+        >
+          {contact}
+        </Text>
+      )}
+
       {/* Event */}
-      <View className="flex-row items-center gap-1.5">
+      <View className="flex-row items-center gap-1.5 mt-2">
         <Feather name="calendar" size={13} color="#9CA3AF" />
         <Text
-          className="text-sm font-medium text-gray-700 dark:text-gray-200"
+          className="shrink text-[13px] font-medium text-gray-700 dark:text-gray-200"
           numberOfLines={1}
         >
           {purchase.eventName}
         </Text>
       </View>
 
-      {/* Stats */}
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <Stat label="Tickets" value={String(purchase.quantity)} />
-        <Stat label="Total" value={formatMoney(purchase.totalAmount)} />
-        <Stat
+      {/* Tickets / Total / Paid */}
+      <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+        <Spec label="Tickets" value={String(purchase.quantity)} />
+        <Spec
+          divider
+          label="Total"
+          value={formatMoney(purchase.totalAmount)}
+        />
+        <Spec
+          divider
           label="Paid"
           value={formatMoney(purchase.amountPaid)}
-          valueClass={paidInFull ? "text-green-600" : "text-amber-600"}
+          valueClass={
+            paidInFull
+              ? "text-green-700 dark:text-green-400"
+              : "text-amber-700 dark:text-amber-400"
+          }
         />
       </View>
 
-      {/* Footer: payment method + payment status + created date */}
-      <View className="flex-row items-center justify-between mt-3">
-        <View className="flex-row items-center gap-2 flex-1 mr-2">
-          <View className="bg-gray-100 dark:bg-neutral-800 px-2.5 py-1 rounded-lg">
-            <Text className="text-xs font-medium text-gray-600 dark:text-gray-300">
-              {prettyMethod(purchase.paymentMethod)}
-            </Text>
-          </View>
-          <PaymentBadge status={purchase.paymentStatus} />
-        </View>
-        <Text className="text-xs text-gray-400 dark:text-gray-500">
-          {formatDateTime(purchase.createdAt)}
-        </Text>
-      </View>
-
-      {/* Scheduled */}
+      {/* Event date */}
       {!!purchase.purchaseDate && (
-        <View className="flex-row items-center gap-1.5 mt-2">
+        <View className="flex-row items-center gap-1.5 mt-3">
           <Feather name="clock" size={12} color="#9CA3AF" />
           <Text className="text-xs text-gray-500 dark:text-gray-400">
-            Event:{" "}
+            Event{" "}
             {formatScheduled(purchase.purchaseDate, purchase.purchaseTime)}
           </Text>
         </View>
@@ -318,56 +311,40 @@ const PurchaseCard = ({
       {/* Deleted timestamp (trashed view) */}
       {!!purchase.deletedAt && (
         <View className="flex-row items-center gap-1.5 mt-2">
-          <Feather name="trash-2" size={12} color="#EF4444" />
-          <Text className="text-xs text-red-500">
-            Deleted: {formatDateTime(purchase.deletedAt)}
+          <Feather name="trash-2" size={12} color="#DC2626" />
+          <Text className="text-xs text-red-600 dark:text-red-400">
+            Deleted {formatPurchaseDateTime(purchase.deletedAt)}
           </Text>
         </View>
       )}
+
+      {/* Payment status · method · created + affordance */}
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        <View className="shrink flex-row items-center gap-2">
+          <DotBadge
+            tone={paymentTone}
+            label={prettyPaymentStatus(purchase.paymentStatus)}
+          />
+          <Text
+            numberOfLines={1}
+            className="shrink text-xs text-gray-400 dark:text-gray-500"
+          >
+            {prettyEventMethod(purchase.paymentMethod)}
+            {purchase.createdAt
+              ? `  ·  ${formatPurchaseDateTime(purchase.createdAt)}`
+              : ""}
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-0.5">
+          <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+            Details
+          </Text>
+          <Feather name="chevron-right" size={14} color="#9CA3AF" />
+        </View>
+      </View>
     </Pressable>
   );
 };
-
-type KpiTone = { bg: string; tint: string };
-
-const KpiCard = ({
-  icon,
-  tone,
-  title,
-  value,
-  change,
-}: {
-  icon: IconName;
-  tone: KpiTone;
-  title: string;
-  value: string;
-  change: string;
-}) => (
-  <View
-    className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 m-1.5 shadow-sm"
-    style={CARD_SHADOW}
-  >
-    <View
-      className="w-9 h-9 rounded-xl items-center justify-center"
-      style={{ backgroundColor: tone.bg }}
-    >
-      <Feather name={icon} size={18} color={tone.tint} />
-    </View>
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
-      {title}
-    </Text>
-    <Text
-      className="text-2xl font-bold text-gray-900 dark:text-white mt-1"
-      numberOfLines={1}
-      adjustsFontSizeToFit
-    >
-      {value}
-    </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      {change}
-    </Text>
-  </View>
-);
 
 const EventPurchases = () => {
   const insets = useSafeAreaInsets();
@@ -797,7 +774,7 @@ const EventPurchases = () => {
           p.totalAmount,
           p.status,
           p.paymentMethod,
-          p.createdAt ? formatDateTime(p.createdAt) : "",
+          p.createdAt ? formatPurchaseDateTime(p.createdAt) : "",
         ]
           .map(esc)
           .join(","),
@@ -881,36 +858,60 @@ const EventPurchases = () => {
 
   const hasResults = filtered.length > 0;
 
+  const openPurchaseDetails = useCallback((purchase: EventPurchaseRow) => {
+    router.push({
+      pathname: "/events/purchase-details",
+      params: { id: String(purchase.id) },
+    });
+  }, []);
+
+  // The page's secondary actions as module-hub shortcuts, like the Manage
+  // Attractions "More" row. Deleted Purchases flips the list to the trashed
+  // view (and back); Export CSV shares the filtered rows.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Manage Events", icon: "calendar", route: "/events/manage-events" },
+    { label: "Check-In", icon: "check-square", route: "/check-in" },
+    {
+      label: showDeleted ? "Active Purchases" : "Deleted Purchases",
+      icon: showDeleted ? "rotate-ccw" : "archive",
+      onPress: () => setShowDeleted((v) => !v),
+    },
+    {
+      label: "Export CSV",
+      icon: "file-text",
+      onPress: () => {
+        if (!exporting) exportCsv();
+      },
+    },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Event Purchases
           </Text>
-          {/* Export CSV — icon-only in the header, so the list actions below
-              are just the primary "New Purchase" CTA. */}
           <Pressable
-            onPress={exportCsv}
-            disabled={exporting}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            onPress={() => router.push("/events/create-purchase")}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
-            accessibilityLabel="Export CSV"
+            accessibilityLabel="New purchase"
           >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
           </Pressable>
         </View>
       </View>
@@ -918,6 +919,7 @@ const EventPurchases = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -929,173 +931,215 @@ const EventPurchases = () => {
           />
         }
       >
-        <View className="px-5">
-          {/* New Purchase — the primary filled CTA, full width. Export CSV
-              lives in the header. */}
-          <Pressable
-            onPress={() => router.push("/events/create-purchase")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mt-6 mb-5"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              New Purchase
-            </Text>
-          </Pressable>
+        <View className="px-4 mt-4">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
+          </View>
 
           {/* Error state */}
           {!listLoading && listError && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{listError}</Text>
+            <View className="flex-row gap-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4 mb-4">
+              <Feather name="alert-circle" size={18} color="#DC2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  {showDeleted
+                    ? "Could not load deleted purchases"
+                    : "Could not load purchases"}
+                </Text>
+                <Text className="text-sm text-red-600/90 dark:text-red-400/80 mt-0.5">
+                  {listError}
+                </Text>
+                <Pressable
+                  onPress={onRefresh}
+                  className="self-start mt-2.5 px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-900/50 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-xs font-semibold text-red-700 dark:text-red-400">
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
-          {/* KPI cards */}
+          {/* Summary — one panel, four figures, divided by hairlines. */}
           {loading ? (
-            <AttractionsKpiSkeleton />
+            <AttractionsSummarySkeleton />
           ) : (
-            <View className="flex-row flex-wrap -mx-1.5 mb-3">
-              <View className="w-1/2">
-                <KpiCard
-                  icon="credit-card"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+              <View className="flex-row">
+                <SummaryCell
+                  icon="shopping-bag"
                   title="Total Purchases"
                   value={String(kpis.total)}
-                  change={`${kpis.lines} ticket lines · ${kpis.confirmed} confirmed`}
+                  hint={`${kpis.lines} lines · ${kpis.confirmed} confirmed`}
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="check-circle"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+                <SummaryCell
+                  divideLeft
+                  icon="dollar-sign"
                   title="Total Revenue"
                   value={formatMoney(kpis.revenue)}
-                  change="Collected, excluding cancelled/refunded"
+                  hint="Excl. cancelled / refunded"
                 />
               </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="dollar-sign"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+              <View className="flex-row">
+                <SummaryCell
+                  divideTop
+                  icon="trending-up"
                   title="Avg. Purchase"
                   value={formatMoney(kpis.avg)}
-                  change="Per transaction"
+                  hint="Per transaction"
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="user"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
+                <SummaryCell
+                  divideTop
+                  divideLeft
+                  icon="users"
                   title="Unique Customers"
                   value={String(kpis.customers)}
-                  change="Total customers"
+                  hint="Total customers"
                 />
               </View>
             </View>
           )}
 
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mt-2 mb-3">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search purchases..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+          {/* More — the page's secondary actions as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {/* "Filters" button (→ sheet, badge = active count) + the View Deleted
-              toggle beside it — identical to the Manage Purchases toolbar. */}
-          <View className="flex-row items-center gap-3">
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <View className="flex-1 flex-row items-center gap-2 h-11 px-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="search" size={16} color="#9CA3AF" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search purchases"
+                placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+              />
+              {search.length > 0 && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Feather name="x-circle" size={16} color="#9CA3AF" />
+                </Pressable>
+              )}
+            </View>
             <Pressable
               onPress={openFilters}
               accessibilityRole="button"
-              accessibilityLabel={`Open filters${
-                activeFilterCount > 0 ? `, ${activeFilterCount} active` : ""
-              }`}
-              className="flex-1 flex-row items-center gap-2.5 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 active:opacity-70"
-            >
-              <Feather name="sliders" size={16} color="#6B7280" />
-              <Text className="flex-1 text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Filters
-              </Text>
-              {activeFilterCount > 0 && (
-                <View className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#0644C7] items-center justify-center">
-                  <Text className="text-[11px] font-bold text-white">
-                    {activeFilterCount}
-                  </Text>
-                </View>
-              )}
-              <Feather name="chevron-right" size={18} color="#9CA3AF" />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setShowDeleted((v) => !v)}
-              accessibilityRole="button"
               accessibilityLabel={
-                showDeleted ? "View active purchases" : "View deleted purchases"
+                activeFilterCount > 0
+                  ? `Filters, ${activeFilterCount} applied`
+                  : "Filters"
               }
-              className={`flex-row items-center gap-2 px-4 py-3.5 rounded-xl border active:opacity-70 ${
-                showDeleted
-                  ? "bg-blue-50 dark:bg-blue-900/20 border-[#0644C7]"
-                  : "bg-white dark:bg-neutral-900 border-gray-100 dark:border-neutral-800"
+              className={`flex-row items-center gap-1.5 h-11 px-3.5 rounded-xl border active:opacity-70 ${
+                activeFilterCount > 0
+                  ? "bg-blue-50 dark:bg-blue-900/30 border-[#0644C7]/40"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
               }`}
             >
               <Feather
-                name={showDeleted ? "rotate-ccw" : "archive"}
-                size={16}
-                color={showDeleted ? PRIMARY : "#6B7280"}
+                name="sliders"
+                size={15}
+                color={activeFilterCount > 0 ? PRIMARY : "#6B7280"}
               />
               <Text
-                className={`text-sm font-semibold ${
-                  showDeleted
+                className={`text-sm font-medium ${
+                  activeFilterCount > 0
                     ? "text-[#0644C7] dark:text-blue-300"
                     : "text-gray-700 dark:text-gray-200"
                 }`}
               >
-                {showDeleted ? "Active" : "Deleted"}
+                Filters
               </Text>
+              {activeFilterCount > 0 && (
+                <View className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#0644C7] items-center justify-center">
+                  <Text className="text-[10px] font-bold text-white">
+                    {activeFilterCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
           </View>
 
-          {/* List header + layout toggle — stays visible during loading; only
-              the records below skeletonize. */}
-          {!listError && (
-            <View className="flex-row items-center gap-2 mb-4 flex-wrap mt-4">
-              <Text
-                className="shrink text-lg font-bold text-gray-900 dark:text-white"
-                numberOfLines={1}
-              >
-                {showDeleted ? "Deleted Purchases" : "All Purchases"}
+          {/* Applied-filters hint with a one-tap reset. */}
+          {activeFilterCount > 0 && (
+            <View className="flex-row items-center justify-between mb-3 -mt-1">
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                {activeFilterCount}{" "}
+                {activeFilterCount === 1 ? "filter" : "filters"} applied
               </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              <Pressable
+                onPress={() => setFilters(EMPTY_EVENT_PURCHASE_FILTERS)}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Clear all
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Deleted-view hint — the More shortcut switched the list to the
+              trashed purchases; this is the one-tap way back. */}
+          {showDeleted && (
+            <View className="flex-row items-center gap-2 mb-3 px-3.5 py-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="archive" size={14} color="#6B7280" />
+              <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300">
+                Showing deleted purchases
+              </Text>
+              <Pressable
+                onPress={() => setShowDeleted(false)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Back to active purchases"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Back to active
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* List header — title + count, layout toggle (active list only;
+              the deleted list stays cards). Stays visible during loading;
+              only the records below skeletonize. */}
+          {!listError && (
+            <View className="flex-row items-center justify-between gap-2 mb-3">
+              <View className="flex-row items-baseline gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-base font-semibold text-gray-900 dark:text-white"
+                >
+                  {showDeleted ? "Deleted Purchases" : "All Purchases"}
+                </Text>
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
                   {filtered.length}
                 </Text>
               </View>
-
-              {/* Table/Cards toggle — active list only (deleted stays cards). */}
               {!showDeleted && (
-                <View className="ml-auto">
-                  <ViewToggle mode={viewMode} onChange={setViewMode} />
-                </View>
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
               )}
             </View>
           )}
 
           {/* Bulk-action toolbar — table view of the active list, shown while a
-              selection exists (reuses the shared Bookings bulk bar). */}
+              selection exists (the shared Bookings bulk bar, in its flat look). */}
           {!showDeleted && viewMode === "table" && selectedIds.size > 0 && (
             <BookingsBulkBar
+              flat
               count={selectedIds.size}
               busy={bulkBusy}
               onStatus={runBulkStatus}
@@ -1106,47 +1150,80 @@ const EventPurchases = () => {
 
           {/* List / states */}
           {listLoading ? (
-            <PurchasesListSkeleton view={showDeleted ? "cards" : viewMode} />
+            <PurchasesListSkeleton
+              flat
+              view={showDeleted ? "cards" : viewMode}
+            />
           ) : !listError && !hasResults ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 px-6 py-10 items-center">
+              <View className="w-12 h-12 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
                 <Feather
-                  name={showDeleted ? "archive" : "shopping-bag"}
-                  size={26}
+                  name={
+                    listSource.length > 0
+                      ? "search"
+                      : showDeleted
+                        ? "archive"
+                        : "shopping-bag"
+                  }
+                  size={20}
                   color="#9CA3AF"
                 />
               </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
+              <Text className="text-base font-semibold text-gray-900 dark:text-white">
                 {showDeleted
                   ? "No deleted purchases found"
-                  : "No purchases found"}
+                  : listSource.length === 0
+                    ? "No purchases yet"
+                    : "No purchases found"}
               </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+              <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1 max-w-xs">
                 {listSource.length === 0
                   ? showDeleted
                     ? "There are no deleted purchases."
                     : "There are no event purchases for this account yet."
                   : "Try adjusting your search or filters."}
               </Text>
+              {listSource.length > 0 ? (
+                <Pressable
+                  onPress={() => {
+                    setSearch("");
+                    setFilters(EMPTY_EVENT_PURCHASE_FILTERS);
+                  }}
+                  className="mt-4 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    Clear search & filters
+                  </Text>
+                </Pressable>
+              ) : (
+                !showDeleted && (
+                  <Pressable
+                    onPress={() => router.push("/events/create-purchase")}
+                    className="flex-row items-center gap-1.5 mt-4 px-4 py-2.5 rounded-xl bg-[#0644C7] active:opacity-90"
+                    accessibilityRole="button"
+                  >
+                    <Feather name="plus" size={15} color="#FFFFFF" />
+                    <Text className="text-sm font-semibold text-white">
+                      New Purchase
+                    </Text>
+                  </Pressable>
+                )
+              )}
             </View>
           ) : (
             !listError && (
               <>
                 {/* Table (default) and card layouts render from the same `paged`
                     slice — switching is instant and never refetches. Deleted list
-                    keeps cards. Row/card tap both open Purchase Details. */}
+                    keeps cards. The eye action / card tap open Purchase Details. */}
                 {!showDeleted && viewMode === "table" ? (
                   <EventPurchasesTable
                     purchases={paged}
                     selectedIds={selectedIds}
                     onToggleRow={toggleRow}
                     onToggleAll={toggleAllVisible}
-                    onView={(purchase) =>
-                      router.push({
-                        pathname: "/events/purchase-details",
-                        params: { id: String(purchase.id) },
-                      })
-                    }
+                    onView={openPurchaseDetails}
                     onEdit={(purchase) =>
                       router.push({
                         pathname: "/events/edit-purchase",
@@ -1161,12 +1238,7 @@ const EventPurchases = () => {
                     <PurchaseCard
                       key={purchase.id}
                       purchase={purchase}
-                      onPress={() =>
-                        router.push({
-                          pathname: "/events/purchase-details",
-                          params: { id: String(purchase.id) },
-                        })
-                      }
+                      onPress={() => openPurchaseDetails(purchase)}
                     />
                   ))
                 )}
@@ -1238,15 +1310,22 @@ const EventPurchases = () => {
                     isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
                   }`}
                 >
-                  <Text
-                    className={`text-base font-medium ${
-                      isSelected
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    {prettyStatus(option)}
-                  </Text>
+                  <View className="flex-row items-center gap-2.5">
+                    <View
+                      className={`w-2 h-2 rounded-full ${
+                        eventStatusTone(option).dot
+                      }`}
+                    />
+                    <Text
+                      className={`text-base font-medium ${
+                        isSelected
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-gray-700 dark:text-gray-200"
+                      }`}
+                    >
+                      {prettyStatus(option)}
+                    </Text>
+                  </View>
                   {isSelected && (
                     <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
                       <Feather name="check" size={14} color="#FFFFFF" />

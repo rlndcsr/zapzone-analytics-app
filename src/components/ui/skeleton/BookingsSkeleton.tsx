@@ -1,17 +1,11 @@
 import React from "react";
 import { View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
+import type { ViewMode } from "../ViewToggle";
+import { PurchasesListSkeleton } from "./AttractionPurchasesSkeleton";
 import { SkeletonBlock, usePulse } from "./SkeletonBlock";
 
 const LIST_COUNT = 5;
-
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
 
 /** A skeleton bar vertically centered within a text line's height. */
 function SkeletonLine({
@@ -34,39 +28,43 @@ function SkeletonLine({
   );
 }
 
-/** Matches BookingCard: customer + ref (left), status pill (right), package +
- *  date/time/location rows, then the guests + total footer. */
+/** Matches the flat BookingCard: customer + status, reference · package line,
+ *  the Date / Guests / Total strip, and the meta + actions footer. */
 function BookingCardSkeleton({ pulse }: { pulse: SharedValue<number> }) {
   return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
-      style={CARD_SHADOW}
-    >
-      {/* customer/ref (left) + status pill (right) */}
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <SkeletonLine pulse={pulse} width="w-36" line="h-6" bar="h-4" />
-          <SkeletonLine pulse={pulse} width="w-24" line="h-4" className="mt-1" />
-        </View>
-        <SkeletonBlock pulse={pulse} className="w-20 h-6 rounded-full" />
+    <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3">
+      <View className="flex-row items-start justify-between">
+        <SkeletonLine pulse={pulse} width="w-36" line="h-6" bar="h-4" />
+        <SkeletonBlock pulse={pulse} className="w-20 h-5 rounded-full" />
       </View>
-
-      {/* package + date/time + location rows */}
-      <SkeletonLine pulse={pulse} width="w-44" line="h-4" bar="h-2.5" className="mt-1" />
-      <SkeletonLine pulse={pulse} width="w-32" line="h-4" bar="h-2.5" className="mt-1" />
-
-      {/* guests + total footer */}
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <SkeletonLine pulse={pulse} width="w-20" line="h-4" bar="h-2.5" />
-        <SkeletonLine pulse={pulse} width="w-16" line="h-5" bar="h-4" />
+      <SkeletonLine
+        pulse={pulse}
+        width="w-44"
+        line="h-4"
+        bar="h-2.5"
+        className="mt-1"
+      />
+      <SkeletonBlock pulse={pulse} className="w-full h-14 rounded-xl mt-3" />
+      <View className="flex-row items-center justify-between mt-3">
+        <SkeletonLine pulse={pulse} width="w-28" line="h-4" bar="h-2.5" />
+        <SkeletonLine pulse={pulse} width="w-16" line="h-4" bar="h-2.5" />
       </View>
     </View>
   );
 }
 
-/** The booking card list placeholder. */
-export function BookingsListSkeleton() {
+/**
+ * Records-only placeholder for Manage Bookings: the flat selectable table
+ * skeleton (shared with Manage Purchases) in table view, booking cards
+ * otherwise. The page header and controls stay real above it.
+ */
+export function BookingsListSkeleton({
+  view = "cards",
+}: {
+  view?: ViewMode;
+} = {}) {
   const pulse = usePulse();
+  if (view === "table") return <PurchasesListSkeleton flat view="table" />;
   return (
     <View>
       {Array.from({ length: LIST_COUNT }).map((_, i) => (

@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
-import { useCallback, useMemo, useRef, useState, type ComponentProps } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,21 +18,23 @@ import {
   BULK_ORDER_COLUMN_META,
   BulkOrdersTable,
   DEFAULT_BULK_ORDER_COLUMNS,
+  ENDED_ORDER_STATUSES as ENDED,
+  OrderStatusBadge,
+  money,
 } from "../../components/ui/BulkOrdersTable";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
-import {
-  FilterPill,
-  PillDivider,
-  PillSegment,
-} from "../../components/ui/FilterPill";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import {
   countActiveOrderFilters,
   EMPTY_ORDER_FILTERS,
   OrderFiltersSheet,
   type OrderFilterValues,
 } from "../../components/ui/OrderFiltersSheet";
-import { StatTile } from "../../components/ui/StatTile";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
+import { AttractionsSummarySkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
 import { getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
@@ -43,44 +45,8 @@ import {
 
 const PRIMARY = "#0644C7";
 
-type IconName = ComponentProps<typeof Feather>["name"];
-
-const money = (n: number | null | undefined) => `$${Number(n ?? 0).toFixed(2)}`;
-
-const STATUS_STYLE: Record<string, { wrap: string; text: string; icon: IconName }> = {
-  draft: {
-    wrap: "bg-gray-100 dark:bg-neutral-800",
-    text: "text-gray-800 dark:text-gray-200",
-    icon: "clock",
-  },
-  pending: {
-    wrap: "bg-yellow-100 dark:bg-yellow-900/30",
-    text: "text-yellow-800 dark:text-yellow-300",
-    icon: "clock",
-  },
-  confirmed: {
-    wrap: "bg-blue-100 dark:bg-blue-900/30",
-    text: "text-blue-800 dark:text-blue-300",
-    icon: "check-circle",
-  },
-  "checked-in": {
-    wrap: "bg-green-100 dark:bg-green-900/30",
-    text: "text-green-800 dark:text-green-300",
-    icon: "check-circle",
-  },
-  cancelled: {
-    wrap: "bg-gray-100 dark:bg-neutral-800",
-    text: "text-gray-800 dark:text-gray-200",
-    icon: "x-circle",
-  },
-  refunded: {
-    wrap: "bg-purple-100 dark:bg-purple-900/30",
-    text: "text-purple-800 dark:text-purple-300",
-    icon: "x-circle",
-  },
-};
-
-const ENDED = ["cancelled", "refunded"];
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 /** Web parity: "authorize.net" reads as "Authorize.Net", anything else verbatim. */
 const methodLabel = (method: string | null) =>
@@ -89,20 +55,116 @@ const methodLabel = (method: string | null) =>
 const allCheckedIn = (o: TicketOrderDetail) =>
   o.lines.length > 0 && o.lines.every((l) => l.checkedInAt);
 
-function StatusPill({ status }: { status: string }) {
-  const style = STATUS_STYLE[status] ?? STATUS_STYLE.pending;
-  return (
-    <View
-      className={`flex-row items-center gap-1 rounded-full px-2.5 py-1 ${style.wrap}`}
-    >
-      <Feather name={style.icon} size={11} color="#6B7280" />
-      <Text className={`text-[11px] font-medium capitalize ${style.text}`}>
-        {status.replace("-", " ")}
+/**
+ * One cell of the summary panel. Cells sit in a single bordered card and are
+ * separated by hairlines (`divideLeft` / `divideTop`) rather than each being
+ * its own shadowed tile — the same panel as Manage Attractions.
+ */
+const SummaryCell = ({
+  icon,
+  title,
+  value,
+  hint,
+  divideLeft = false,
+  divideTop = false,
+}: {
+  icon: FeatherIconName;
+  title: string;
+  value: string;
+  hint: string;
+  divideLeft?: boolean;
+  divideTop?: boolean;
+}) => (
+  <View
+    className={`flex-1 p-4 ${
+      divideLeft ? "border-l border-gray-100 dark:border-neutral-800" : ""
+    } ${divideTop ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
+  >
+    <View className="flex-row items-center gap-1.5">
+      <Feather name={icon} size={13} color="#9CA3AF" />
+      <Text
+        numberOfLines={1}
+        className="shrink text-xs font-medium text-gray-500 dark:text-gray-400"
+      >
+        {title}
       </Text>
     </View>
-  );
-}
+    <Text
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      className="text-2xl font-semibold text-gray-900 dark:text-white mt-1.5"
+    >
+      {value}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+    >
+      {hint}
+    </Text>
+  </View>
+);
 
+/** Square icon button used in the list header (Columns). */
+const ToolbarIconButton = ({
+  icon,
+  label,
+  active = false,
+  onPress,
+}: {
+  icon: FeatherIconName;
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className={`w-9 h-9 rounded-xl items-center justify-center active:opacity-70 ${
+      active
+        ? "bg-blue-50 dark:bg-blue-900/30"
+        : "bg-gray-100 dark:bg-neutral-800"
+    }`}
+  >
+    <Feather name={icon} size={16} color={active ? PRIMARY : "#6B7280"} />
+  </Pressable>
+);
+
+/** One labelled cell in the card's Total / Paid / Due strip. */
+const Spec = ({
+  label,
+  value,
+  valueClass = "text-gray-900 dark:text-white",
+  divider = false,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+  divider?: boolean;
+}) => (
+  <View
+    className={`flex-1 px-3 py-2.5 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-800" : ""
+    }`}
+  >
+    <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+      {label}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className={`text-sm font-semibold mt-0.5 ${valueClass}`}
+    >
+      {value}
+    </Text>
+  </View>
+);
+
+/**
+ * Card layout for a single bulk order, matching the Manage Attractions card:
+ * reference + status, customer, items, a Total / Paid / Due strip and a quiet
+ * footer. Tapping the card opens Order Details; Check In is a nested button.
+ */
 function OrderCard({
   order,
   checkingIn,
@@ -116,82 +178,106 @@ function OrderCard({
 }) {
   const settled = order.remainingBalance <= 0;
   const ended = ENDED.includes(order.status);
-  const canCheckIn = !allCheckedIn(order) && !ended && settled;
+  const checkedIn = allCheckedIn(order);
+  const canCheckIn = !checkedIn && !ended && settled;
+  const owing = order.remainingBalance > 0 && !ended;
+  const customer = [order.customerName, order.customerEmail]
+    .filter(Boolean)
+    .join("  ·  ");
+  const meta = [methodLabel(order.paymentMethod), order.locationName, order.purchaseDate]
+    .filter(Boolean)
+    .join("  ·  ");
 
   return (
     <Pressable
       onPress={onOpen}
       accessibilityRole="button"
       accessibilityLabel={`Open order ${order.referenceNumber}`}
-      className="mb-3 rounded-2xl border border-gray-100 bg-white p-4 active:opacity-80 dark:border-neutral-800 dark:bg-neutral-900"
+      className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
     >
+      {/* Reference + status */}
       <View className="flex-row items-start justify-between gap-3">
-        <View className="min-w-0 flex-1">
-          <Text
-            className="text-sm font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {order.referenceNumber || `Order #${order.id}`}
-          </Text>
-          <Text
-            className="mt-0.5 text-sm text-gray-700 dark:text-gray-200"
-            numberOfLines={1}
-          >
-            {order.customerName}
-          </Text>
-          {!!order.customerEmail && (
-            <Text
-              className="text-xs text-gray-500 dark:text-gray-400"
-              numberOfLines={1}
-            >
-              {order.customerEmail}
-            </Text>
-          )}
-        </View>
-        <StatusPill status={order.status} />
+        <Text
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {order.referenceNumber || `Order #${order.id}`}
+        </Text>
+        <OrderStatusBadge status={order.status} />
       </View>
 
-      <View className="mt-3 flex-row items-center gap-2">
+      {/* Customer · email */}
+      {!!customer && (
+        <Text
+          className="text-xs text-gray-500 dark:text-gray-400 mt-1"
+          numberOfLines={1}
+        >
+          {customer}
+        </Text>
+      )}
+
+      {/* Items / tickets */}
+      <View className="flex-row items-center gap-1.5 mt-2">
         <Feather name="tag" size={13} color="#9CA3AF" />
-        <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+        <Text
+          className="shrink text-[13px] font-medium text-gray-700 dark:text-gray-200"
+          numberOfLines={1}
+        >
           {order.itemCount} {order.itemCount === 1 ? "item" : "items"} ·{" "}
           {order.ticketCount} tickets
-          {allCheckedIn(order) ? " · all checked in" : ""}
         </Text>
-      </View>
-
-      <View className="mt-1.5 flex-row items-center gap-2">
-        <Feather name="credit-card" size={13} color="#9CA3AF" />
-        <Text className="flex-1 text-xs capitalize text-gray-500 dark:text-gray-400">
-          {methodLabel(order.paymentMethod)}
-          {order.locationName ? ` · ${order.locationName}` : ""}
-          {order.purchaseDate ? ` · ${order.purchaseDate}` : ""}
-        </Text>
-      </View>
-
-      <View className="mt-3 flex-row items-end justify-between border-t border-gray-100 pt-3 dark:border-neutral-800">
-        <View>
-          <Text className="text-base font-bold text-gray-900 dark:text-white">
-            {money(order.totalAmount)}
-          </Text>
-          <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-            {money(order.amountPaid)} paid
-          </Text>
-          {order.remainingBalance > 0 && !ended && (
-            <Text className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
-              {money(order.remainingBalance)} due
+        {checkedIn && (
+          <View className="flex-row items-center gap-1 px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/30">
+            <Feather name="check" size={10} color="#16A34A" />
+            <Text className="text-[10px] font-semibold text-green-700 dark:text-green-400">
+              All checked in
             </Text>
-          )}
-        </View>
+          </View>
+        )}
+      </View>
 
-        <View className="flex-row items-center gap-2">
+      {/* Total / Paid / Due */}
+      <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+        <Spec label="Total" value={money(order.totalAmount)} />
+        <Spec
+          divider
+          label="Paid"
+          value={money(order.amountPaid)}
+          valueClass={
+            owing
+              ? "text-gray-900 dark:text-white"
+              : "text-green-700 dark:text-green-400"
+          }
+        />
+        <Spec
+          divider
+          label="Due"
+          value={owing ? money(order.remainingBalance) : "—"}
+          valueClass={
+            owing
+              ? "text-amber-700 dark:text-amber-400"
+              : "text-gray-400 dark:text-gray-500"
+          }
+        />
+      </View>
+
+      {/* Method · location · date + actions */}
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        <Text
+          numberOfLines={1}
+          className="shrink text-xs capitalize text-gray-400 dark:text-gray-500"
+        >
+          {meta}
+        </Text>
+        <View className="flex-row items-center gap-3">
           {canCheckIn && (
             <Pressable
               onPress={onCheckIn}
               disabled={checkingIn}
+              hitSlop={6}
               accessibilityRole="button"
               accessibilityLabel="Check in every ticket on this order"
-              className={`flex-row items-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 py-2 active:opacity-70 dark:border-green-900/40 dark:bg-green-900/20 ${
+              className={`flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/30 active:opacity-70 ${
                 checkingIn ? "opacity-50" : ""
               }`}
             >
@@ -207,11 +293,11 @@ function OrderCard({
               )}
             </Pressable>
           )}
-          <View className="flex-row items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 dark:border-neutral-700">
-            <Feather name="eye" size={13} color={PRIMARY} />
-            <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-400">
-              View
+          <View className="flex-row items-center gap-0.5">
+            <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              Details
             </Text>
+            <Feather name="chevron-right" size={14} color="#9CA3AF" />
           </View>
         </View>
       </View>
@@ -428,43 +514,68 @@ export default function BulkOrdersScreen() {
     }
   }, [filtered]);
 
+  const openOrder = useCallback((order: TicketOrderDetail) => {
+    router.push({
+      pathname: "/attractions/order-details",
+      params: { id: String(order.id) },
+    });
+  }, []);
+
+  // The page's secondary actions as module-hub shortcuts, like the Manage
+  // Attractions "More" row.
+  const moreShortcuts: HubQuickLink[] = [
+    {
+      label: "Manage Purchases",
+      icon: "shopping-bag",
+      route: "/attractions/purchases",
+    },
+    { label: "Check-In", icon: "check-square", route: "/check-in" },
+    {
+      label: "Export CSV",
+      icon: "file-text",
+      onPress: () => {
+        if (!exporting) void exportCsv();
+      },
+    },
+  ];
+
+  const initialLoad = loading && orders.length === 0;
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      <View className="z-10 w-full border-b border-gray-100 bg-white px-5 pb-5 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
-        <View className="flex-row items-center justify-between">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Bulk Orders
           </Text>
           <Pressable
-            onPress={exportCsv}
-            disabled={exporting}
-            className="rounded-full bg-gray-100 p-2 active:opacity-70 dark:bg-neutral-800"
+            onPress={() => router.push("/attractions/create-purchase")}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
-            accessibilityLabel="Export CSV"
+            accessibilityLabel="New order"
           >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
           </Pressable>
         </View>
-        <Text className="mt-1 text-center text-xs text-gray-500 dark:text-gray-400">
-          View and manage all bulk orders
-        </Text>
       </View>
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -472,195 +583,281 @@ export default function BulkOrdersScreen() {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="mt-5 px-5">
+        <View className="px-4 mt-4">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
+          </View>
+
+          {/* Error state */}
           {!!error && (
-            <View className="mb-5 rounded-2xl border border-red-100 bg-red-50 p-5 dark:border-red-900/40 dark:bg-red-900/20">
-              <Text className="font-semibold text-red-600 dark:text-red-400">
-                Something went wrong
-              </Text>
-              <Text className="mt-1 text-sm text-red-500 dark:text-red-300">
-                {error}
-              </Text>
+            <View className="flex-row gap-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4 mb-4">
+              <Feather name="alert-circle" size={18} color="#DC2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  Could not load orders
+                </Text>
+                <Text className="text-sm text-red-600/90 dark:text-red-400/80 mt-0.5">
+                  {error}
+                </Text>
+                <Pressable
+                  onPress={onRefresh}
+                  className="self-start mt-2.5 px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-900/50 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-xs font-semibold text-red-700 dark:text-red-400">
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
-          <View className="-mx-1.5 mb-3 flex-row flex-wrap">
-            <View className="w-1/2 px-1.5 pb-3">
-              <StatTile
-                icon="shopping-cart"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Total Orders"
-                value={String(kpis.total)}
-                hint={`${kpis.lines} ticket lines`}
-              />
+          {/* Summary — one panel, four figures, divided by hairlines. */}
+          {initialLoad ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+              <View className="flex-row">
+                <SummaryCell
+                  icon="layers"
+                  title="Total Orders"
+                  value={String(kpis.total)}
+                  hint={`${kpis.lines} ticket lines`}
+                />
+                <SummaryCell
+                  divideLeft
+                  icon="check-circle"
+                  title="Collected"
+                  value={money(kpis.collected)}
+                  hint="Payments received"
+                />
+              </View>
+              <View className="flex-row">
+                <SummaryCell
+                  divideTop
+                  icon="dollar-sign"
+                  title="Outstanding"
+                  value={money(kpis.outstanding)}
+                  hint="Due at the venue"
+                />
+                <SummaryCell
+                  divideTop
+                  divideLeft
+                  icon="tag"
+                  title="Tickets"
+                  value={String(kpis.tickets)}
+                  hint="Across all orders"
+                />
+              </View>
             </View>
-            <View className="w-1/2 px-1.5 pb-3">
-              <StatTile
-                icon="check-circle"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Collected"
-                value={money(kpis.collected)}
-                hint="Payments received on orders"
-              />
-            </View>
-            <View className="w-1/2 px-1.5 pb-3">
-              <StatTile
-                icon="dollar-sign"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Outstanding"
-                value={money(kpis.outstanding)}
-                hint="Due at the venue"
-              />
-            </View>
-            <View className="w-1/2 px-1.5 pb-3">
-              <StatTile
-                icon="tag"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Tickets"
-                value={String(kpis.tickets)}
-                hint="Across all orders"
-              />
-            </View>
-          </View>
+          )}
 
-          <View className="mb-3 mt-2 flex-row items-center gap-2 rounded-xl border border-gray-100 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search by reference, customer, email, phone..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+          {/* More — the page's secondary actions as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {/* Filters + Columns — one toolbar pill, mirroring the web table
-              toolbar's button pair (same as Payments). Columns only applies to
-              the table layout, so it's hidden in Cards. */}
-          <FilterPill>
-            <PillSegment
-              label={
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <View className="flex-1 flex-row items-center gap-2 h-11 px-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="search" size={16} color="#9CA3AF" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search orders"
+                placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+              />
+              {search.length > 0 && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Feather name="x-circle" size={16} color="#9CA3AF" />
+                </Pressable>
+              )}
+            </View>
+            <Pressable
+              onPress={() => setShowFilters(true)}
+              accessibilityRole="button"
+              accessibilityLabel={
                 activeFilterCount > 0
-                  ? `Filters (${activeFilterCount})`
+                  ? `Filters, ${activeFilterCount} applied`
                   : "Filters"
               }
-              active={showFilters || activeFilterCount > 0}
-              onPress={() => setShowFilters(true)}
-              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
-            />
-            {viewMode === "table" && (
-              <>
-                <PillDivider />
-                <PillSegment
-                  label="Columns"
+              className={`flex-row items-center gap-1.5 h-11 px-3.5 rounded-xl border active:opacity-70 ${
+                activeFilterCount > 0
+                  ? "bg-blue-50 dark:bg-blue-900/30 border-[#0644C7]/40"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
+              }`}
+            >
+              <Feather
+                name="sliders"
+                size={15}
+                color={activeFilterCount > 0 ? PRIMARY : "#6B7280"}
+              />
+              <Text
+                className={`text-sm font-medium ${
+                  activeFilterCount > 0
+                    ? "text-[#0644C7] dark:text-blue-300"
+                    : "text-gray-700 dark:text-gray-200"
+                }`}
+              >
+                Filters
+              </Text>
+              {activeFilterCount > 0 && (
+                <View className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#0644C7] items-center justify-center">
+                  <Text className="text-[10px] font-bold text-white">
+                    {activeFilterCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Applied-filters hint with a one-tap reset. */}
+          {activeFilterCount > 0 && (
+            <View className="flex-row items-center justify-between mb-3 -mt-1">
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                {activeFilterCount}{" "}
+                {activeFilterCount === 1 ? "filter" : "filters"} applied
+              </Text>
+              <Pressable
+                onPress={() => setFilters(EMPTY_ORDER_FILTERS)}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Clear all
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* List header — title + count, Columns (table only), layout toggle. */}
+          <View className="flex-row items-center justify-between gap-2 mb-3">
+            <View className="flex-row items-baseline gap-2 shrink">
+              <Text
+                numberOfLines={1}
+                className="shrink text-base font-semibold text-gray-900 dark:text-white"
+              >
+                All Orders
+              </Text>
+              {!initialLoad && (
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
+                  {filtered.length}
+                </Text>
+              )}
+            </View>
+            <View className="flex-row items-center gap-2">
+              {viewMode === "table" && (
+                <ToolbarIconButton
+                  icon="columns"
+                  label="Toggle columns"
                   active={showColumns}
                   onPress={() => setShowColumns(true)}
-                  renderIcon={(c) => (
-                    <Feather name="columns" size={15} color={c} />
-                  )}
                 />
-              </>
-            )}
-          </FilterPill>
-
-          {/* Full-width primary action, stacked under the toolbar pill. */}
-          <Pressable
-            onPress={() => router.push("/attractions/create-purchase")}
-            accessibilityRole="button"
-            accessibilityLabel="New order"
-            className="w-full flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] px-4 py-3.5 active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">New Order</Text>
-          </Pressable>
-
-          <View className="mt-4">
-            {loading && orders.length === 0 ? (
-              <View
-                key="orders-loading"
-                className="items-center rounded-2xl border border-gray-100 bg-white p-8 dark:border-neutral-800 dark:bg-neutral-900"
-              >
-                <ActivityIndicator color={PRIMARY} />
-              </View>
-            ) : filtered.length === 0 ? (
-              // Distinct key + matching class features: a View that gains shadow-*/dark:/pseudo
-              // after mount makes css-interop upgrade in place, which crashes.
-              <View
-                key="orders-empty"
-                className="items-center rounded-2xl border border-gray-100 bg-white p-8 dark:border-neutral-800 dark:bg-neutral-900"
-              >
-                <View className="mb-3 h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-neutral-800">
-                  <Feather name="shopping-cart" size={26} color="#9CA3AF" />
-                </View>
-                <Text className="text-lg font-semibold text-gray-700 dark:text-gray-200">
-                  {orders.length === 0 ? "No bulk orders yet" : "No orders found"}
-                </Text>
-                <Text className="mt-1 max-w-xs text-center text-sm text-gray-400 dark:text-gray-500">
-                  {orders.length === 0
-                    ? "Orders placed from the cart or Create Purchase appear here"
-                    : "Try adjusting your search or filters."}
-                </Text>
-              </View>
-            ) : (
-              <>
-                {/* List header + layout toggle, matching the Purchases screen. */}
-                <View className="mb-3 flex-row items-center gap-2">
-                  <Text className="shrink text-xs text-gray-500 dark:text-gray-400">
-                    {filtered.length} {filtered.length === 1 ? "order" : "orders"}
-                  </Text>
-                  <View className="ml-auto">
-                    <ViewToggle mode={viewMode} onChange={setViewMode} />
-                  </View>
-                </View>
-
-                {/* Table and card layouts render from the same `filtered` list —
-                    switching is instant and never refetches. */}
-                {viewMode === "table" ? (
-                  <BulkOrdersTable
-                    orders={filtered}
-                    checkingInId={checkingIn}
-                    visibleKeys={visibleColumns}
-                    onView={(order) =>
-                      router.push({
-                        pathname: "/attractions/order-details",
-                        params: { id: String(order.id) },
-                      })
-                    }
-                    onCheckIn={(order) => void checkInAll(order)}
-                    methodLabel={methodLabel}
-                    allCheckedIn={allCheckedIn}
-                  />
-                ) : (
-                  filtered.map((order) => (
-                    <OrderCard
-                      key={order.id}
-                      order={order}
-                      checkingIn={checkingIn === order.id}
-                      onOpen={() =>
-                        router.push({
-                          pathname: "/attractions/order-details",
-                          params: { id: String(order.id) },
-                        })
-                      }
-                      onCheckIn={() => void checkInAll(order)}
-                    />
-                  ))
-                )}
-              </>
-            )}
+              )}
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+            </View>
           </View>
+
+          {/* List / states. Distinct keys per state: a View that gains
+              shadow, dark: or pseudo classes after mount makes css-interop
+              upgrade in place, which crashes. */}
+          {initialLoad ? (
+            <View key="orders-loading">
+              <PurchasesListSkeleton
+                flat
+                selectable={false}
+                view={viewMode}
+              />
+            </View>
+          ) : filtered.length === 0 ? (
+            <View
+              key="orders-empty"
+              className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 px-6 py-10 items-center"
+            >
+              <View className="w-12 h-12 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                <Feather
+                  name={orders.length === 0 ? "layers" : "search"}
+                  size={20}
+                  color="#9CA3AF"
+                />
+              </View>
+              <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                {orders.length === 0 ? "No bulk orders yet" : "No orders found"}
+              </Text>
+              <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1 max-w-xs">
+                {orders.length === 0
+                  ? "Orders placed from the cart or Create Purchase appear here."
+                  : "Try adjusting your search or filters."}
+              </Text>
+              {orders.length === 0 ? (
+                <Pressable
+                  onPress={() => router.push("/attractions/create-purchase")}
+                  className="flex-row items-center gap-1.5 mt-4 px-4 py-2.5 rounded-xl bg-[#0644C7] active:opacity-90"
+                  accessibilityRole="button"
+                >
+                  <Feather name="plus" size={15} color="#FFFFFF" />
+                  <Text className="text-sm font-semibold text-white">
+                    New Order
+                  </Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => {
+                    setSearch("");
+                    setFilters(EMPTY_ORDER_FILTERS);
+                  }}
+                  className="mt-4 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    Clear search & filters
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          ) : (
+            // Table and card layouts render from the same `filtered` list —
+            // switching is instant and never refetches.
+            <View key="orders-list">
+              {viewMode === "table" ? (
+                <BulkOrdersTable
+                  orders={filtered}
+                  checkingInId={checkingIn}
+                  visibleKeys={visibleColumns}
+                  onView={openOrder}
+                  onCheckIn={(order) => void checkInAll(order)}
+                  methodLabel={methodLabel}
+                  allCheckedIn={allCheckedIn}
+                />
+              ) : (
+                filtered.map((order) => (
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    checkingIn={checkingIn === order.id}
+                    onOpen={() => openOrder(order)}
+                    onCheckIn={() => void checkInAll(order)}
+                  />
+                ))
+              )}
+            </View>
+          )}
         </View>
       </ScrollView>
 

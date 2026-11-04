@@ -10,9 +10,84 @@ import type { CalendarBooking } from "../../services/bookingsService";
 import type { ColumnMeta } from "./ColumnsSheet";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
 import { PaymentStatusBadge } from "./PaymentStatusBadge";
-import { StatusBadge } from "./StatusBadge";
 
 const PRIMARY = "#0644C7";
+
+/**
+ * Booking status colours — the web's getStatusColor() palette (the same one
+ * the shared StatusBadge "default" palette mirrors), as a soft pill with a
+ * leading dot in the Manage Attractions style.
+ */
+const BOOKING_STATUS_TONE: Record<
+  string,
+  { bg: string; dot: string; text: string; chevron: string }
+> = {
+  confirmed: {
+    bg: "bg-emerald-50 dark:bg-emerald-900/30",
+    dot: "bg-emerald-500",
+    text: "text-emerald-700 dark:text-emerald-400",
+    chevron: "#059669",
+  },
+  completed: {
+    bg: "bg-emerald-50 dark:bg-emerald-900/30",
+    dot: "bg-emerald-500",
+    text: "text-emerald-700 dark:text-emerald-400",
+    chevron: "#059669",
+  },
+  "checked-in": {
+    bg: "bg-green-50 dark:bg-green-900/30",
+    dot: "bg-green-500",
+    text: "text-green-700 dark:text-green-400",
+    chevron: "#16A34A",
+  },
+  pending: {
+    bg: "bg-amber-50 dark:bg-amber-900/30",
+    dot: "bg-amber-500",
+    text: "text-amber-700 dark:text-amber-400",
+    chevron: "#D97706",
+  },
+  cancelled: {
+    bg: "bg-rose-50 dark:bg-rose-900/30",
+    dot: "bg-rose-500",
+    text: "text-rose-700 dark:text-rose-400",
+    chevron: "#E11D48",
+  },
+};
+
+const STATUS_FALLBACK = {
+  bg: "bg-gray-100 dark:bg-neutral-800",
+  dot: "bg-gray-400",
+  text: "text-gray-600 dark:text-gray-400",
+  chevron: "#9CA3AF",
+};
+
+export const bookingStatusTone = (status: string | null | undefined) =>
+  BOOKING_STATUS_TONE[(status ?? "").toLowerCase()] ?? STATUS_FALLBACK;
+
+export const bookingStatusLabel = (status: string | null | undefined) => {
+  if (!status) return "—";
+  if (status === "checked-in") return "Checked In";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+};
+
+/** Read-only booking status badge (card view) — soft pill with a status dot. */
+export const BookingStatusBadge = ({
+  status,
+}: {
+  status: string | null | undefined;
+}) => {
+  const tone = bookingStatusTone(status);
+  return (
+    <View
+      className={`flex-row items-center gap-1.5 px-2 py-0.5 rounded-full ${tone.bg}`}
+    >
+      <View className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+      <Text className={`text-xs font-medium ${tone.text}`}>
+        {bookingStatusLabel(status)}
+      </Text>
+    </View>
+  );
+};
 
 /** Per-row handlers behind the inline action icons. */
 export type BookingRowHandlers = {
@@ -36,31 +111,32 @@ export type BookingRowHandlers = {
   onCheckIn: (booking: CalendarBooking) => void;
 };
 
-/** One icon button in the Actions cell. Nested Pressable — owns its own touch. */
+/** One button of the Actions segmented group (matches AttractionsTable).
+ *  Nested Pressable — owns its own touch. */
 const IconAction = ({
   icon,
   tint,
   label,
-  filled = false,
+  divider = false,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   tint: string;
   label: string;
-  /** Solid tinted button (used for Delete, as on the web). */
-  filled?: boolean;
+  /** Hairline on the leading edge — separates buttons inside the group. */
+  divider?: boolean;
   onPress: () => void;
 }) => (
   <PressableScale
     onPress={onPress}
-    hitSlop={4}
+    pressScale="flat"
     accessibilityRole="button"
     accessibilityLabel={label}
-    className={`w-7 h-7 items-center justify-center rounded-md ${
-      filled ? "bg-red-500" : ""
+    className={`w-8 h-8 items-center justify-center ${
+      divider ? "border-l border-gray-200 dark:border-neutral-700" : ""
     }`}
   >
-    <Feather name={icon} size={14} color={filled ? "#FFFFFF" : tint} />
+    <Feather name={icon} size={15} color={tint} />
   </PressableScale>
 );
 
@@ -121,15 +197,19 @@ const PILL_FALLBACK =
 
 const Pill = ({ style, label }: { style: string; label: string }) => (
   <View className="flex-row">
-    <View className={`px-2 py-1 rounded-full ${style}`}>
-      <Text className={`text-[10px] font-semibold capitalize ${style}`}>
+    <View className={`px-2 py-1 rounded-md ${style}`}>
+      <Text className={`text-xs font-medium capitalize ${style}`}>
         {label}
       </Text>
     </View>
   </View>
 );
 
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+/** Shared secondary-cell text style so every column reads consistently. */
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
+
+/** Muted second line under a cell's main value (time, room, card). */
+const CELL_HINT = "text-xs text-gray-400 dark:text-gray-500 mt-0.5";
 /** A cell that opens an editor — coloured so it reads as tappable, like the
  *  web's clickable Location / Duration cells. */
 const LINK_TEXT = "text-sm font-medium text-[#0644C7]";
@@ -158,8 +238,8 @@ function buildColumns(
       label: "ID",
       width: 90,
       render: (b) => (
-        <View className="flex-row">
-          <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded">
+        <View className="self-start px-1.5 h-7 rounded-md bg-gray-100 dark:bg-neutral-800 items-center justify-center">
+          <Text className="text-xs font-semibold text-gray-600 dark:text-gray-300">
             #{b.id}
           </Text>
         </View>
@@ -180,7 +260,7 @@ function buildColumns(
     });
   }
 
-  // Date/Time — one cell with icon-led lines, like the web.
+  // Date/Time — date over a muted time line, like the web.
   if (vis("date") || vis("time")) {
     columns.push({
       key: "dateTime",
@@ -189,26 +269,17 @@ function buildColumns(
       render: (b) => (
         <View>
           {vis("date") && (
-            <View className="flex-row items-center gap-1">
-              <Feather name="calendar" size={11} color="#9CA3AF" />
-              <Text
-                numberOfLines={1}
-                className="text-sm font-medium text-gray-900 dark:text-white"
-              >
-                {shortDate(b.date)}
-              </Text>
-            </View>
+            <Text
+              numberOfLines={1}
+              className="text-sm font-medium text-gray-900 dark:text-white"
+            >
+              {shortDate(b.date)}
+            </Text>
           )}
           {vis("time") && !!b.time && (
-            <View className="mt-0.5 flex-row items-center gap-1">
-              <Feather name="clock" size={11} color="#9CA3AF" />
-              <Text
-                numberOfLines={1}
-                className="text-xs text-gray-500 dark:text-gray-400"
-              >
-                {time12(b.time)}
-              </Text>
-            </View>
+            <Text numberOfLines={1} className={CELL_HINT}>
+              {time12(b.time)}
+            </Text>
           )}
         </View>
       ),
@@ -232,7 +303,7 @@ function buildColumns(
         {vis("customerEmail") && !!b.customerEmail && (
           <Text
             numberOfLines={1}
-            className="text-xs text-gray-500 dark:text-gray-400"
+            className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
           >
             {b.customerEmail}
           </Text>
@@ -240,7 +311,7 @@ function buildColumns(
         {vis("customerPhone") && !!b.customerPhone && (
           <Text
             numberOfLines={1}
-            className="text-xs text-gray-500 dark:text-gray-400"
+            className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5"
           >
             {b.customerPhone}
           </Text>
@@ -248,7 +319,7 @@ function buildColumns(
         {vis("address") && !!b.address && (
           <Text
             numberOfLines={1}
-            className="text-xs text-gray-400 dark:text-gray-500"
+            className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5"
           >
             {b.address}
           </Text>
@@ -257,7 +328,7 @@ function buildColumns(
     ),
   });
 
-  // Package/Room — package in caps with a box icon, room beneath in blue.
+  // Package/Room — package over a muted room line.
   if (vis("package") || vis("room")) {
     columns.push({
       key: "packageRoom",
@@ -266,22 +337,19 @@ function buildColumns(
       render: (b) => (
         <View>
           {vis("package") && (
-            <View className="flex-row items-center gap-1">
-              <Feather name="package" size={11} color="#9CA3AF" />
-              <Text
-                numberOfLines={1}
-                className="flex-1 text-xs font-semibold uppercase text-gray-900 dark:text-white"
-              >
-                {b.packageName}
-              </Text>
-            </View>
+            <Text
+              numberOfLines={1}
+              className="text-sm font-medium text-gray-900 dark:text-white"
+            >
+              {b.packageName}
+            </Text>
           )}
           {vis("room") && !!b.roomName && (
             <View className="mt-0.5 flex-row items-center gap-1">
-              <Feather name="home" size={11} color="#93C5FD" />
+              <Feather name="home" size={11} color="#9CA3AF" />
               <Text
                 numberOfLines={1}
-                className="flex-1 text-xs text-[#0644C7] dark:text-blue-300"
+                className="flex-1 text-xs text-gray-500 dark:text-gray-400"
               >
                 {b.roomName}
               </Text>
@@ -345,12 +413,14 @@ function buildColumns(
       label: "Guests",
       width: 80,
       render: (b) => (
-        <Text
-          numberOfLines={1}
-          className="text-sm font-medium text-[#0644C7] dark:text-blue-300"
-        >
-          {b.participants}
-        </Text>
+        <View className="self-start min-w-[28px] h-7 px-1.5 rounded-md bg-gray-100 dark:bg-neutral-800 items-center justify-center">
+          <Text
+            numberOfLines={1}
+            className="text-xs font-semibold text-gray-600 dark:text-gray-300"
+          >
+            {b.participants}
+          </Text>
+        </View>
       ),
     });
   }
@@ -362,19 +432,25 @@ function buildColumns(
       key: "status",
       label: "Status",
       width: 140,
-      render: (b) => (
-        <View className="flex-row">
-          <PressableScale
-            onPress={() => h.onStatusPress(b)}
-            accessibilityRole="button"
-            accessibilityLabel={`Change status for ${b.customerName}, currently ${b.status}`}
-            className="flex-row items-center gap-1"
-          >
-            <StatusBadge status={b.status} />
-            <Feather name="chevron-down" size={13} color="#6B7280" />
-          </PressableScale>
-        </View>
-      ),
+      render: (b) => {
+        const tone = bookingStatusTone(b.status);
+        return (
+          <View className="flex-row">
+            <PressableScale
+              onPress={() => h.onStatusPress(b)}
+              accessibilityRole="button"
+              accessibilityLabel={`Change status for ${b.customerName}, currently ${b.status}`}
+              className={`flex-row items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full ${tone.bg}`}
+            >
+              <View className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+              <Text className={`text-xs font-medium ${tone.text}`}>
+                {bookingStatusLabel(b.status)}
+              </Text>
+              <Feather name="chevron-down" size={12} color={tone.chevron} />
+            </PressableScale>
+          </View>
+        );
+      },
     });
   }
 
@@ -390,7 +466,7 @@ function buildColumns(
             label={paymentMethodLabel(b.paymentMethod)}
           />
           {!!b.cardLabel && (
-            <Text className="mt-0.5 text-[10px] text-gray-400 dark:text-gray-500">
+            <Text numberOfLines={1} className={CELL_HINT}>
               {b.cardLabel}
             </Text>
           )}
@@ -520,7 +596,7 @@ function buildColumns(
     // Details, Edit, Delete.
     key: "actions",
     label: "Actions",
-    width: 190,
+    width: 232,
     render: (b) => {
       const payment = resolvePaymentState({
         payment_status: b.paymentStatus,
@@ -536,8 +612,12 @@ function buildColumns(
       // must not be checked in, and the web gates on `paymentStatus === 'paid'`
       // for the same reason.
       const canCheckIn = payment.state === "paid" && b.status !== "checked-in";
+      // The first visible button carries no leading hairline.
+      const firstIcon = unpaid ? "payment" : canCheckIn ? "checkIn" : "notes";
       return (
-        <View className="flex-row items-center gap-0.5">
+        // One bordered segmented group, like the Manage Attractions table:
+        // neutral icons, with only payment, edit and delete tinted.
+        <View className="flex-row items-center self-start rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
           {unpaid && (
             <IconAction
               icon="dollar-sign"
@@ -548,34 +628,38 @@ function buildColumns(
           )}
           {canCheckIn && (
             <IconAction
+              divider={firstIcon !== "checkIn"}
               icon="check-circle"
-              tint="#6B7280"
+              tint="#16A34A"
               label={`Check in ${b.customerName}`}
               onPress={() => h.onCheckIn(b)}
             />
           )}
           <IconAction
+            divider={firstIcon !== "notes"}
             icon="file-text"
-            tint="#D97706"
+            tint="#6B7280"
             label={`Internal notes for ${b.customerName}`}
             onPress={() => h.onNotes(b)}
           />
           <IconAction
+            divider
             icon="eye"
-            tint="#374151"
+            tint="#6B7280"
             label={`View details for ${b.customerName}`}
             onPress={() => h.onView(b)}
           />
           <IconAction
+            divider
             icon="edit-2"
             tint={PRIMARY}
             label={`Edit booking for ${b.customerName}`}
             onPress={() => h.onEdit(b)}
           />
           <IconAction
+            divider
             icon="trash-2"
-            tint="#FFFFFF"
-            filled
+            tint="#DC2626"
             label={`Delete booking for ${b.customerName}`}
             onPress={() => h.onDelete(b)}
           />
@@ -709,6 +793,7 @@ export function BookingsTable({
 
   return (
     <SelectableTable
+      flat
       columns={columns}
       rows={bookings}
       rowId={(b) => b.id}

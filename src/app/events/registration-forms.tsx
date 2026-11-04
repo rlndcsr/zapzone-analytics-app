@@ -3,7 +3,6 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,10 +12,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RegistrationStatusPill } from "../../components/events/RegistrationStatusPill";
-import { RegistrationTile } from "../../components/events/RegistrationTile";
+import { RegistrationSummary } from "../../components/events/RegistrationTile";
 import { SelectField } from "../../components/ui/FormControls";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
 import { Toast, type ToastType } from "../../components/ui/Toast";
+import { AttractionsListSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
 import { venueDateKey } from "../../lib/date/venueTime";
 import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
@@ -42,14 +42,6 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const openEvent = (id: number) =>
   router.push({
     pathname: "/events/registration-event",
@@ -59,42 +51,81 @@ const openEvent = (id: number) =>
 const openNewEvent = () =>
   router.push("/events/registration-event-editor" as never);
 
-const EventRow = ({ group }: { group: RegistrationEventGroupSummary }) => (
+/** One labelled cell in the card's Event date / Entries strip. */
+const Spec = ({
+  label,
+  value,
+  divider = false,
+}: {
+  label: string;
+  value: string;
+  divider?: boolean;
+}) => (
+  <View
+    className={`flex-1 px-3 py-2.5 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-800" : ""
+    }`}
+  >
+    <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+      {label}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5"
+    >
+      {value}
+    </Text>
+  </View>
+);
+
+/** Card for one registration event, matching the Manage Attractions card:
+ *  name + status, the venues, a date / entries strip and a Details hint. */
+const EventCard = ({ group }: { group: RegistrationEventGroupSummary }) => (
   <Pressable
     onPress={() => openEvent(group.id)}
     accessibilityRole="button"
     accessibilityLabel={`View ${group.name}`}
-    className="px-4 py-4 border-b border-gray-100 dark:border-neutral-800 flex-row items-center gap-3 active:opacity-70"
+    className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
   >
-    <View className="flex-1 gap-1.5">
-      <View className="flex-row flex-wrap items-center gap-2">
-        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-          {group.name}
-        </Text>
-        <RegistrationStatusPill status={group.status} />
-      </View>
-      <View className="flex-row flex-wrap items-center gap-x-4 gap-y-1">
-        <View className="flex-row items-center gap-1.5">
-          <Feather name="calendar" size={13} color="#9CA3AF" />
-          <Text className="text-sm text-gray-600 dark:text-gray-400">
-            {formatDateLong(group.eventDate)}
-          </Text>
-        </View>
-        <View className="flex-row items-center gap-1.5 shrink">
-          <Feather name="map-pin" size={13} color="#9CA3AF" />
-          <Text numberOfLines={1} className="shrink text-sm text-gray-600 dark:text-gray-400">
-            {venueSummary(group.locationNames, group.locationForms)}
-          </Text>
-        </View>
-        <View className="flex-row items-center gap-1.5">
-          <Feather name="users" size={13} color="#9CA3AF" />
-          <Text className="text-sm text-gray-600 dark:text-gray-400">
-            {group.totalEntries} {entryWord(group.totalEntries)}
-          </Text>
-        </View>
-      </View>
+    {/* Name + status */}
+    <View className="flex-row items-start justify-between gap-3">
+      <Text
+        numberOfLines={1}
+        className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+      >
+        {group.name}
+      </Text>
+      <RegistrationStatusPill status={group.status} />
     </View>
-    <Feather name="chevron-right" size={18} color="#9CA3AF" />
+
+    {/* Participating venues */}
+    <View className="flex-row items-center gap-1.5 mt-1">
+      <Feather name="map-pin" size={12} color="#9CA3AF" />
+      <Text
+        numberOfLines={1}
+        className="shrink text-xs text-gray-500 dark:text-gray-400"
+      >
+        {venueSummary(group.locationNames, group.locationForms)}
+      </Text>
+    </View>
+
+    {/* Event date / Entries */}
+    <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+      <Spec label="Event date" value={formatDateLong(group.eventDate)} />
+      <Spec
+        divider
+        label="Entries"
+        value={`${group.totalEntries} ${entryWord(group.totalEntries)}`}
+      />
+    </View>
+
+    {/* Affordance */}
+    <View className="flex-row items-center justify-end gap-0.5 mt-3">
+      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+        Details
+      </Text>
+      <Feather name="chevron-right" size={14} color="#9CA3AF" />
+    </View>
   </Pressable>
 );
 
@@ -229,20 +260,32 @@ const RegistrationForms = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Registration Forms
           </Text>
-          <View style={{ width: 36 }} />
+          <Pressable
+            onPress={openNewEvent}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="New event"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -256,38 +299,48 @@ const RegistrationForms = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5">
-          <View className="mt-5">
+        <View className="px-4 mt-4">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-4">
             <LocationWorkspaceSelector />
           </View>
 
-          <View className="mt-6 mb-4">
-            <Text className="text-2xl font-bold text-gray-900 dark:text-white">
-              Registration Forms
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Manage events and their participating location forms.
-            </Text>
-            <Pressable
-              onPress={openNewEvent}
-              className="flex-row items-center justify-center gap-2 mt-4 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
-              accessibilityRole="button"
-              accessibilityLabel="New event"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text numberOfLines={1} className="shrink-0 text-sm font-semibold text-white">
-                New event
-              </Text>
-            </Pressable>
-          </View>
+          {/* Error state */}
+          {!!loadError && (
+            <View className="flex-row gap-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4 mb-4">
+              <Feather name="alert-circle" size={18} color="#DC2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  Could not load registration events
+                </Text>
+                <Text className="text-sm text-red-600/90 dark:text-red-400/80 mt-0.5">
+                  {loadError}
+                </Text>
+                <Pressable
+                  onPress={() => void load()}
+                  className="self-start mt-2.5 px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-900/50 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-xs font-semibold text-red-700 dark:text-red-400">
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
-          <View className="mb-4 rounded-2xl bg-white dark:bg-neutral-900 border border-gray-100 dark:border-neutral-800 px-4 py-3 gap-2">
-            <View className="flex-row items-center gap-2">
-              <Feather name="calendar" size={15} color={PRIMARY} />
-              <Text numberOfLines={1} className="flex-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+          {/* Scope + year — the year drives the totals and the list below. */}
+          <View className="mb-4 gap-2">
+            <View className="flex-row items-center gap-1.5">
+              <Feather name="calendar" size={13} color="#9CA3AF" />
+              <Text
+                numberOfLines={1}
+                className="flex-1 text-xs font-medium text-gray-500 dark:text-gray-400"
+              >
                 All events · {scopeLabel}
               </Text>
             </View>
@@ -298,83 +351,102 @@ const RegistrationForms = () => {
             />
           </View>
 
-          <View className="flex-row flex-wrap -m-1.5">
-            <RegistrationTile
-              label="Total entries"
-              value={totals?.totalEntries ?? null}
-              hint="Every form submitted, including repeats."
-            />
-            <RegistrationTile
-              label="Unique registrations"
-              value={totals?.uniqueRegistrations ?? null}
-              hint="Entries with the same phone and email count once."
-            />
-            <RegistrationTile
-              label="Events"
-              value={totals?.events ?? null}
-              hint={`Total events in ${year}.`}
-            />
-            <RegistrationTile
-              label="Location forms"
-              value={totals?.locationForms ?? null}
-              hint="Total location forms across all events."
-            />
-          </View>
-          <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-4">
+          {/* Summary — one panel, four counts, divided by hairlines. */}
+          <RegistrationSummary
+            tiles={[
+              {
+                icon: "file-text",
+                label: "Total entries",
+                value: totals?.totalEntries ?? null,
+                hint: "Every form submitted, including repeats.",
+              },
+              {
+                icon: "user-check",
+                label: "Unique registrations",
+                value: totals?.uniqueRegistrations ?? null,
+                hint: "Entries with the same phone and email count once.",
+              },
+              {
+                icon: "calendar",
+                label: "Events",
+                value: totals?.events ?? null,
+                hint: `Total events in ${year}.`,
+              },
+              {
+                icon: "map-pin",
+                label: "Location forms",
+                value: totals?.locationForms ?? null,
+                hint: "Total location forms across all events.",
+              },
+            ]}
+          />
+          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2 mb-5">
             Totals include all {year} events and their location forms{where}.
             They count registrations only, not who attended.
           </Text>
 
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl overflow-hidden border border-gray-100 dark:border-neutral-800 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <View className="flex-row items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-neutral-800">
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                {year} events
-              </Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
+          {/* List header — title + count, and the sort order. */}
+          {!loadError && (
+            <View className="flex-row items-center justify-between gap-2 mb-3">
+              <View className="flex-row items-baseline gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-base font-semibold text-gray-900 dark:text-white"
+                >
+                  {year} events
+                </Text>
+                {!!shown && !resolving && (
+                  <Text className="text-sm text-gray-400 dark:text-gray-500">
+                    {groups.length}
+                  </Text>
+                )}
+              </View>
+              <Text className="text-xs text-gray-400 dark:text-gray-500">
                 Newest event first
               </Text>
             </View>
+          )}
 
-            {loadError ? (
-              <View className="p-6 items-center gap-3">
-                <Text className="text-sm text-red-600 text-center">{loadError}</Text>
-                <Pressable
-                  onPress={() => void load()}
-                  className="px-4 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-70"
-                  accessibilityRole="button"
-                >
-                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                    Try again
-                  </Text>
-                </Pressable>
+          {/* List / states. Distinct keys per state so css-interop never
+              upgrades one container into another in place. */}
+          {loadError ? null : resolving || !shown ? (
+            <View key="events-loading">
+              <AttractionsListSkeleton />
+            </View>
+          ) : groups.length === 0 ? (
+            <View
+              key="events-empty"
+              className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 px-6 py-10 items-center"
+            >
+              <View className="w-12 h-12 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                <Feather name="calendar" size={20} color="#9CA3AF" />
               </View>
-            ) : resolving || !shown ? (
-              <View className="py-16 items-center">
-                <ActivityIndicator color={PRIMARY} />
-              </View>
-            ) : groups.length === 0 ? (
-              <View className="px-6 py-12 items-center">
-                <Feather name="calendar" size={34} color="#D1D5DB" />
-                <Text className="text-gray-700 dark:text-gray-200 font-semibold mt-3 text-center">
-                  No events in {year}{where} yet
+              <Text className="text-base font-semibold text-gray-900 dark:text-white text-center">
+                No events in {year}{where} yet
+              </Text>
+              <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1 max-w-xs">
+                Create an event like Trunk or Treat, pick the locations
+                running it, and each one gets its own sign-up form, QR code
+                and registration list.
+              </Text>
+              <Pressable
+                onPress={openNewEvent}
+                className="flex-row items-center gap-1.5 mt-4 px-4 py-2.5 rounded-xl bg-[#0644C7] active:opacity-90"
+                accessibilityRole="button"
+              >
+                <Feather name="plus" size={15} color="#FFFFFF" />
+                <Text className="text-sm font-semibold text-white">
+                  New event
                 </Text>
-                <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1">
-                  Create an event like Trunk or Treat, pick the locations
-                  running it, and each one gets its own sign-up form, QR code
-                  and registration list.
-                </Text>
-              </View>
-            ) : (
-              <View style={{ opacity: loading ? 0.6 : 1 }}>
-                {groups.map((group) => (
-                  <EventRow key={group.id} group={group} />
-                ))}
-              </View>
-            )}
-          </View>
+              </Pressable>
+            </View>
+          ) : (
+            <View key="events-list" style={{ opacity: loading ? 0.6 : 1 }}>
+              {groups.map((group) => (
+                <EventCard key={group.id} group={group} />
+              ))}
+            </View>
+          )}
         </View>
       </ScrollView>
 

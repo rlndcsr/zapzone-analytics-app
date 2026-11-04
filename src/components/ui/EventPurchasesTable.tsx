@@ -2,21 +2,31 @@ import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
-import { formatDateTimeET } from "../../lib/date/venueTime";
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
+import {
+  PURCHASE_STATUS_TONE,
+  formatMoney,
+  formatPurchaseDateTime,
+  formatScheduled,
+  prettyStatus,
+} from "../../lib/attractions/purchaseDisplay";
+import {
+  resolvePaymentState,
+  type PaymentState,
+} from "../../lib/payments/paymentState";
 import type {
   EventPurchaseRow,
   EventPurchaseStatus,
 } from "../../services/eventPurchasesService";
-import { PaymentStatusBadge } from "./PaymentStatusBadge";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
 
 const PRIMARY = "#0644C7";
 
-const money = (n: number) =>
-  `$${n.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+/** Shared secondary-cell text style so every column reads consistently. */
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
+
+/** Muted second line under a cell's main value (card label, balance). */
+const CELL_HINT = "text-xs text-gray-400 dark:text-gray-500 mt-0.5";
 
 // Payment-method labels matching the web ("Authorize Net", "In-Store", …).
 const METHOD_LABELS: Record<string, string> = {
@@ -27,7 +37,7 @@ const METHOD_LABELS: Record<string, string> = {
   cash: "Cash",
 };
 
-function prettyMethod(method: string): string {
+export function prettyEventMethod(method: string): string {
   if (!method) return "—";
   return (
     METHOD_LABELS[method] ??
@@ -38,41 +48,77 @@ function prettyMethod(method: string): string {
   );
 }
 
-/** "…-07-24T…" -> "Jul 24, 2026, 4:00 PM" (created cell). */
-function formatDateTime(dateString: string): string {
-  return formatDateTimeET(dateString, { month: "short", showZone: false });
-}
+type Tone = { bg: string; dot: string; text: string; chevron: string };
 
-/** Scheduled date (+ optional 12-hour time), mirroring the web scheduled cell. */
-function formatScheduled(dateStr: string, timeStr: string | null): string {
-  const d = new Date(`${dateStr.substring(0, 10)}T00:00:00`);
-  const datePart = Number.isNaN(d.getTime())
-    ? dateStr
-    : d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-  if (!timeStr) return datePart;
-  const [hStr, mStr] = timeStr.split(":");
-  let hour = Number(hStr);
-  const meridian = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  return `${datePart} · ${hour}:${mStr ?? "00"} ${meridian}`;
-}
-
-// Status + payment-status colors match the Event Purchases card badges.
-const STATUS_STYLE: Record<EventPurchaseStatus, string> = {
-  confirmed: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
-  "checked-in":
-    "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
-  completed: "bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400",
-  pending: "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
-  cancelled: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
+// "completed" is event-only, so it gets its own teal tone; every other status
+// shares the Manage Purchases palette.
+const COMPLETED_TONE: Tone = {
+  bg: "bg-teal-50 dark:bg-teal-900/30",
+  dot: "bg-teal-500",
+  text: "text-teal-700 dark:text-teal-400",
+  chevron: "#0D9488",
 };
 
-const prettyStatus = (s: string) =>
-  s === "checked-in" ? "Checked In" : s.charAt(0).toUpperCase() + s.slice(1);
+export const eventStatusTone = (status: EventPurchaseStatus): Tone =>
+  status === "completed"
+    ? COMPLETED_TONE
+    : (PURCHASE_STATUS_TONE[status] ?? PURCHASE_STATUS_TONE.pending);
+
+/** A soft pill with a leading status dot — the Attractions / Purchases badge. */
+export const DotBadge = ({
+  tone,
+  label,
+}: {
+  tone: Pick<Tone, "bg" | "dot" | "text">;
+  label: string;
+}) => (
+  <View
+    className={`flex-row items-center gap-1.5 px-2 py-0.5 rounded-full ${tone.bg}`}
+  >
+    <View className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+    <Text numberOfLines={1} className={`text-xs font-medium ${tone.text}`}>
+      {label}
+    </Text>
+  </View>
+);
+
+/** Read-only event purchase status badge (card view). */
+export const EventStatusBadge = ({
+  status,
+}: {
+  status: EventPurchaseStatus;
+}) => <DotBadge tone={eventStatusTone(status)} label={prettyStatus(status)} />;
+
+// Payment-status dot tones. Same colour rule as PaymentStatusBadge /
+// resolvePaymentState (paid green, owed red, refunded/voided slate) — only the
+// pill shape changes.
+const PAYMENT_TONE: Record<PaymentState, Pick<Tone, "bg" | "dot" | "text">> = {
+  paid: {
+    bg: "bg-green-50 dark:bg-green-900/30",
+    dot: "bg-green-500",
+    text: "text-green-700 dark:text-green-400",
+  },
+  partial: {
+    bg: "bg-red-50 dark:bg-red-900/30",
+    dot: "bg-red-500",
+    text: "text-red-700 dark:text-red-400",
+  },
+  pending: {
+    bg: "bg-red-50 dark:bg-red-900/30",
+    dot: "bg-red-500",
+    text: "text-red-700 dark:text-red-400",
+  },
+  refunded: {
+    bg: "bg-slate-100 dark:bg-slate-800/60",
+    dot: "bg-slate-400",
+    text: "text-slate-700 dark:text-slate-300",
+  },
+  voided: {
+    bg: "bg-slate-100 dark:bg-slate-800/60",
+    dot: "bg-slate-400",
+    text: "text-slate-700 dark:text-slate-300",
+  },
+};
 
 /**
  * Status cell as a tap-to-change pill — the same pattern as the Manage Accounts
@@ -81,57 +127,60 @@ const prettyStatus = (s: string) =>
  * Pressable, so it swallows its own touch and never opens the row's details.
  */
 const StatusPill = ({
-  style,
-  label,
+  status,
   onPress,
 }: {
-  style: string;
-  label: string;
+  status: EventPurchaseStatus;
   onPress: () => void;
 }) => {
-  const [bg1, bg2, fg1, fg2] = style.split(" ");
+  const tone = eventStatusTone(status);
   return (
     <View className="flex-row">
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
-        accessibilityLabel={`Change status, currently ${label}`}
-        className={`flex-row items-center gap-1 px-2.5 py-1 rounded-full ${bg1} ${bg2} active:opacity-70`}
+        accessibilityLabel={`Change status, currently ${prettyStatus(status)}`}
+        className={`flex-row items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full ${tone.bg} active:opacity-70`}
       >
-        <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>{label}</Text>
-        <Feather name="chevron-down" size={12} color="#6B7280" />
+        <View className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+        <Text className={`text-xs font-medium ${tone.text}`}>
+          {prettyStatus(status)}
+        </Text>
+        <Feather name="chevron-down" size={12} color={tone.chevron} />
       </Pressable>
     </View>
   );
 };
 
-/** A small circular icon button for the Actions column (matches AccountsTable). */
-const IconAction = ({
+/** One button of the Actions segmented group (matches AttractionsTable). */
+const ActionIconButton = ({
   icon,
-  tint,
+  color,
   label,
+  divider = false,
   onPress,
 }: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  tint: string;
+  icon: FeatherIconName;
+  color: string;
   label: string;
+  /** Hairline on the leading edge — separates buttons inside the group. */
+  divider?: boolean;
   onPress: () => void;
 }) => (
   <Pressable
     onPress={onPress}
-    hitSlop={6}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+    className={`w-8 h-8 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-700" : ""
+    }`}
   >
-    <Feather name={icon} size={16} color={tint} />
+    <Feather name={icon} size={15} color={color} />
   </Pressable>
 );
 
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
-
 type Handlers = {
-  /** Eye icon + row tap — open Purchase Details. */
+  /** Eye icon — open Purchase Details. */
   onView: (purchase: EventPurchaseRow) => void;
   /** Pencil icon — open Edit Event Purchase. */
   onEdit: (purchase: EventPurchaseRow) => void;
@@ -151,190 +200,221 @@ type Handlers = {
  */
 function buildColumns(h: Handlers): TableColumn<EventPurchaseRow>[] {
   return [
-  {
-    key: "reference",
-    label: "Reference",
-    width: 130,
-    render: (p) => (
-      <Text
-        numberOfLines={1}
-        className="text-xs font-semibold text-[#0644C7] dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded self-start"
-      >
-        {p.referenceNumber || "—"}
-      </Text>
-    ),
-  },
-  {
-    key: "customer",
-    label: "Customer",
-    width: 200,
-    render: (p) => (
-      <View>
+    {
+      key: "reference",
+      label: "Reference",
+      width: 130,
+      render: (p) => (
+        <View className="self-start max-w-full px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-900/30">
+          <Text
+            numberOfLines={1}
+            className="text-xs font-semibold text-[#0644C7] dark:text-blue-300"
+          >
+            {p.referenceNumber || "—"}
+          </Text>
+        </View>
+      ),
+    },
+    {
+      key: "customer",
+      label: "Customer",
+      width: 200,
+      render: (p) => (
+        <View>
+          <Text
+            numberOfLines={1}
+            className="text-sm font-semibold text-gray-900 dark:text-white"
+          >
+            {p.customerName}
+          </Text>
+          {!!p.email && (
+            <Text
+              numberOfLines={1}
+              className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
+            >
+              {p.email}
+            </Text>
+          )}
+        </View>
+      ),
+    },
+    {
+      key: "event",
+      label: "Event",
+      width: 170,
+      render: (p) => (
+        <Text
+          numberOfLines={1}
+          className="text-sm font-medium text-gray-900 dark:text-white"
+        >
+          {p.eventName}
+        </Text>
+      ),
+    },
+    {
+      key: "quantity",
+      label: "Qty",
+      width: 70,
+      render: (p) => (
+        <View className="self-start min-w-[28px] h-7 px-1.5 rounded-md bg-gray-100 dark:bg-neutral-800 items-center justify-center">
+          <Text
+            numberOfLines={1}
+            className="text-xs font-semibold text-gray-600 dark:text-gray-300"
+          >
+            {p.quantity}
+          </Text>
+        </View>
+      ),
+    },
+    {
+      key: "total",
+      label: "Total",
+      width: 100,
+      render: (p) => (
         <Text
           numberOfLines={1}
           className="text-sm font-semibold text-gray-900 dark:text-white"
         >
-          {p.customerName}
+          {formatMoney(p.totalAmount)}
         </Text>
-        {!!p.email && (
-          <Text numberOfLines={1} className="text-xs text-gray-500 dark:text-gray-400">
-            {p.email}
-          </Text>
-        )}
-      </View>
-    ),
-  },
-  {
-    key: "event",
-    label: "Event",
-    width: 170,
-    render: (p) => (
-      <Text
-        numberOfLines={1}
-        className="text-sm font-medium text-gray-900 dark:text-white"
-      >
-        {p.eventName}
-      </Text>
-    ),
-  },
-  {
-    key: "quantity",
-    label: "Qty",
-    width: 70,
-    render: (p) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {p.quantity}
-      </Text>
-    ),
-  },
-  {
-    key: "total",
-    label: "Total",
-    width: 100,
-    render: (p) => (
-      <Text
-        numberOfLines={1}
-        className="text-sm font-semibold text-gray-900 dark:text-white"
-      >
-        {money(p.totalAmount)}
-      </Text>
-    ),
-  },
-  {
-    key: "paid",
-    label: "Paid",
-    width: 100,
-    render: (p) => (
-      <Text
-        numberOfLines={1}
-        className={`text-sm font-medium ${
-          p.amountPaid >= p.totalAmount ? "text-green-600" : "text-amber-600"
-        }`}
-      >
-        {money(p.amountPaid)}
-      </Text>
-    ),
-  },
-  {
-    key: "method",
-    label: "Method",
-    width: 120,
-    render: (p) => (
-      <View>
-        <Text numberOfLines={1} className={CELL_TEXT}>
-          {prettyMethod(p.paymentMethod)}
-        </Text>
-        {!!p.cardLabel && (
-          <Text numberOfLines={1} className="text-xs text-gray-400 dark:text-gray-500">
-            {p.cardLabel}
-          </Text>
-        )}
-      </View>
-    ),
-  },
-  {
-    key: "paymentStatus",
-    label: "Payment Status",
-    width: 130,
-    render: (p) => (
-      <PaymentStatusBadge
-        payment={{
+      ),
+    },
+    {
+      key: "paid",
+      label: "Paid",
+      width: 110,
+      render: (p) => {
+        const paidInFull = p.amountPaid >= p.totalAmount;
+        return (
+          <View>
+            <Text
+              numberOfLines={1}
+              className={`text-sm font-medium ${
+                paidInFull
+                  ? "text-green-700 dark:text-green-400"
+                  : "text-amber-700 dark:text-amber-400"
+              }`}
+            >
+              {formatMoney(p.amountPaid)}
+            </Text>
+            {!paidInFull && (
+              <Text numberOfLines={1} className={CELL_HINT}>
+                {formatMoney(p.totalAmount - p.amountPaid)} due
+              </Text>
+            )}
+          </View>
+        );
+      },
+    },
+    {
+      key: "method",
+      label: "Method",
+      width: 130,
+      render: (p) => (
+        <View>
+          <View className="self-start max-w-full px-2 py-1 rounded-md bg-gray-100 dark:bg-neutral-800">
+            <Text
+              numberOfLines={1}
+              className="text-xs font-medium text-gray-700 dark:text-gray-300"
+            >
+              {prettyEventMethod(p.paymentMethod)}
+            </Text>
+          </View>
+          {!!p.cardLabel && (
+            <Text numberOfLines={1} className={CELL_HINT}>
+              {p.cardLabel}
+            </Text>
+          )}
+        </View>
+      ),
+    },
+    {
+      key: "paymentStatus",
+      label: "Payment Status",
+      width: 140,
+      // Label and state come from the canonical resolvePaymentState, exactly
+      // as PaymentStatusBadge rendered them — only the pill gains a dot.
+      render: (p) => {
+        const state = resolvePaymentState({
           payment_status: p.paymentStatus,
           total_amount: p.totalAmount,
           amount_paid: p.amountPaid,
-        }}
-        size="sm"
-      />
-    ),
-  },
-  {
-    key: "scheduled",
-    label: "Scheduled",
-    width: 160,
-    render: (p) => (
-      <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
-        {p.purchaseDate ? formatScheduled(p.purchaseDate, p.purchaseTime) : "—"}
-      </Text>
-    ),
-  },
-  {
-    key: "created",
-    label: "Created",
-    width: 160,
-    render: (p) => (
-      <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
-        {formatDateTime(p.createdAt)}
-      </Text>
-    ),
-  },
-  {
-    key: "status",
-    label: "Status",
-    width: 140,
-    render: (p) => (
-      <StatusPill
-        style={STATUS_STYLE[p.status] ?? STATUS_STYLE.pending}
-        label={prettyStatus(p.status)}
-        onPress={() => h.onStatusPress(p)}
-      />
-    ),
-  },
-  {
-    key: "actions",
-    label: "Actions",
-    width: 140,
-    render: (p) => (
-      <View className="flex-row items-center gap-0.5">
-        <IconAction
-          icon="eye"
-          tint={PRIMARY}
-          label={`View details for ${p.customerName}`}
-          onPress={() => h.onView(p)}
-        />
-        <IconAction
-          icon="edit-2"
-          tint="#D97706"
-          label={`Edit purchase for ${p.customerName}`}
-          onPress={() => h.onEdit(p)}
-        />
-        <IconAction
-          icon="trash-2"
-          tint="#EF4444"
-          label={`Delete purchase for ${p.customerName}`}
-          onPress={() => h.onDelete(p)}
-        />
-      </View>
-    ),
-  },
+        });
+        return (
+          <View className="flex-row">
+            <DotBadge tone={PAYMENT_TONE[state.state]} label={state.label} />
+          </View>
+        );
+      },
+    },
+    {
+      key: "scheduled",
+      label: "Scheduled",
+      width: 160,
+      render: (p) => (
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {p.purchaseDate ? formatScheduled(p.purchaseDate, p.purchaseTime) : "—"}
+        </Text>
+      ),
+    },
+    {
+      key: "created",
+      label: "Created",
+      width: 160,
+      render: (p) => (
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {formatPurchaseDateTime(p.createdAt)}
+        </Text>
+      ),
+    },
+    {
+      key: "status",
+      label: "Status",
+      width: 140,
+      render: (p) => (
+        <StatusPill status={p.status} onPress={() => h.onStatusPress(p)} />
+      ),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      width: 132,
+      render: (p) => (
+        // One bordered segmented group: neutral icons, with only the edit and
+        // destructive actions tinted, so the column reads as a single control.
+        <View className="flex-row items-center self-start rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
+          <ActionIconButton
+            icon="eye"
+            color="#6B7280"
+            label={`View details for ${p.customerName}`}
+            onPress={() => h.onView(p)}
+          />
+          <ActionIconButton
+            divider
+            icon="edit-2"
+            color={PRIMARY}
+            label={`Edit purchase for ${p.customerName}`}
+            onPress={() => h.onEdit(p)}
+          />
+          <ActionIconButton
+            divider
+            icon="trash-2"
+            color="#DC2626"
+            label={`Delete purchase for ${p.customerName}`}
+            onPress={() => h.onDelete(p)}
+          />
+        </View>
+      ),
+    },
   ];
 }
 
 /**
  * Table layout for the Event Purchases list. Thin wrapper over the generic
- * SelectableTable (same shell as Bookings/Manage Purchases), rendering from the
- * same `EventPurchaseRow[]` as the cards. Rows are inert: Purchase Details opens
- * from the row's eye action only, so the checkbox / status pill / actions own
- * every touch and a stray tap can't navigate.
+ * SelectableTable (in its `flat` look, matching the Manage Attractions table),
+ * rendering from the same `EventPurchaseRow[]` as the cards. Rows are inert:
+ * Purchase Details opens from the row's eye action only, so the checkbox /
+ * status pill / actions own every touch and a stray tap can't navigate.
  */
 export function EventPurchasesTable({
   purchases,
@@ -364,6 +444,7 @@ export function EventPurchasesTable({
   );
   return (
     <SelectableTable
+      flat
       columns={columns}
       rows={purchases}
       rowId={(p) => p.id}

@@ -2,63 +2,25 @@ import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
-import { formatDateTimeET } from "../../lib/date/venueTime";
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
+import {
+  formatMoney,
+  formatPurchaseDateTime,
+  formatScheduled,
+  paymentLabel,
+  prettyStatus,
+  purchaseStatusTone,
+} from "../../lib/attractions/purchaseDisplay";
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
 
 const PRIMARY = "#0644C7";
 
-const money = (n: number) =>
-  `$${n.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+/** Shared secondary-cell text style so every column reads consistently. */
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
 
-/** Title-case a payment method ("in_store" -> "In Store"), like the web cell. */
-function paymentLabel(method: string): string {
-  if (!method) return "—";
-  const spaced = method.replace(/_/g, " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
-/** "…-07-24T…" -> "Jul 24, 2026 at 4:00 PM" (purchase-date cell), venue time. */
-function formatDateTime(dateString: string): string {
-  return formatDateTimeET(dateString, { month: "short", showZone: false });
-}
-
-/** Scheduled date (+ optional 12-hour time), mirroring the web scheduled cell. */
-function formatScheduled(dateStr: string, timeStr: string | null): string {
-  const d = new Date(`${dateStr.substring(0, 10)}T00:00:00`);
-  const datePart = Number.isNaN(d.getTime())
-    ? dateStr
-    : d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-  if (!timeStr) return datePart;
-  const [hStr, mStr] = timeStr.split(":");
-  let hour = Number(hStr);
-  const meridian = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  return `${datePart} · ${hour}:${mStr ?? "00"} ${meridian}`;
-}
-
-// Purchase-specific status colors (includes refunded/voided the shared
-// StatusBadge lacks), matching the card's StatusBadge in purchases.tsx.
-const STATUS_STYLE: Record<string, string> = {
-  confirmed: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
-  "checked-in":
-    "bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400",
-  pending: "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
-  cancelled: "bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400",
-  refunded:
-    "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400",
-  voided: "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400",
-};
-
-const prettyStatus = (s: string) =>
-  s === "checked-in" ? "Checked In" : s.charAt(0).toUpperCase() + s.slice(1);
+/** Muted second line under a cell's main value (card label, time). */
+const CELL_HINT = "text-xs text-gray-400 dark:text-gray-500 mt-0.5";
 
 /**
  * Status cell as a tap-to-change pill — the same pattern as the Manage Accounts
@@ -73,49 +35,51 @@ const StatusPill = ({
   status: PurchaseRow["status"];
   onPress: () => void;
 }) => {
-  const cls = STATUS_STYLE[status] ?? STATUS_STYLE.pending;
-  const [bg1, bg2, fg1, fg2] = cls.split(" ");
+  const tone = purchaseStatusTone(status);
   return (
     <View className="flex-row">
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={`Change status, currently ${prettyStatus(status)}`}
-        className={`flex-row items-center gap-1 px-2.5 py-1 rounded-full ${bg1} ${bg2} active:opacity-70`}
+        className={`flex-row items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full ${tone.bg} active:opacity-70`}
       >
-        <Text className={`text-xs font-semibold ${fg1} ${fg2}`}>
+        <View className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+        <Text className={`text-xs font-medium ${tone.text}`}>
           {prettyStatus(status)}
         </Text>
-        <Feather name="chevron-down" size={12} color="#6B7280" />
+        <Feather name="chevron-down" size={12} color={tone.chevron} />
       </Pressable>
     </View>
   );
 };
 
-/** A small circular icon button for the Actions column (matches AccountsTable). */
-const IconAction = ({
+/** One button of the Actions segmented group (matches AttractionsTable). */
+const ActionIconButton = ({
   icon,
-  tint,
+  color,
   label,
+  divider = false,
   onPress,
 }: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  tint: string;
+  icon: FeatherIconName;
+  color: string;
   label: string;
+  /** Hairline on the leading edge — separates buttons inside the group. */
+  divider?: boolean;
   onPress: () => void;
 }) => (
   <Pressable
     onPress={onPress}
-    hitSlop={6}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
+    className={`w-8 h-8 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-700" : ""
+    }`}
   >
-    <Feather name={icon} size={16} color={tint} />
+    <Feather name={icon} size={15} color={color} />
   </Pressable>
 );
-
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
 
 /**
  * "BULK #1" chip trailing the attraction name when the purchase is one line of
@@ -137,7 +101,7 @@ const BulkBadge = ({
     accessibilityLabel={`Item ${linePosition ?? ""} of a bulk order — view the order`}
     className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 active:opacity-70"
   >
-    <Text className="text-[10px] font-bold uppercase tracking-wide text-blue-800 dark:text-blue-300">
+    <Text className="text-[10px] font-semibold text-blue-700 dark:text-blue-300">
       {linePosition != null ? `Bulk #${linePosition}` : "Bulk"}
     </Text>
   </Pressable>
@@ -167,173 +131,206 @@ type Handlers = {
  */
 function buildColumns(h: Handlers): TableColumn<PurchaseRow>[] {
   return [
-  {
-    key: "customer",
-    label: "Customer",
-    width: 200,
-    render: (p) => (
-      <View>
+    {
+      key: "customer",
+      label: "Customer",
+      width: 200,
+      render: (p) => (
+        <View>
+          <Text
+            numberOfLines={1}
+            className="text-sm font-semibold text-gray-900 dark:text-white"
+          >
+            {p.customerName}
+          </Text>
+          {!!p.email && (
+            <Text
+              numberOfLines={1}
+              className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
+            >
+              {p.email}
+            </Text>
+          )}
+          {!!p.phone && (
+            <Text
+              numberOfLines={1}
+              className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5"
+            >
+              {p.phone}
+            </Text>
+          )}
+        </View>
+      ),
+    },
+    {
+      key: "attraction",
+      label: "Attraction",
+      width: 220,
+      render: (p) => (
+        <View className="flex-row items-center gap-1.5">
+          <Text
+            numberOfLines={1}
+            className="shrink text-sm font-medium text-gray-900 dark:text-white"
+          >
+            {p.attractionName}
+          </Text>
+          {p.ticketOrderId != null && (
+            <BulkBadge
+              linePosition={p.linePosition}
+              onPress={() => h.onOpenOrder(p)}
+            />
+          )}
+        </View>
+      ),
+    },
+    {
+      key: "quantity",
+      label: "Quantity",
+      width: 90,
+      render: (p) => (
+        <View className="self-start min-w-[28px] h-7 px-1.5 rounded-md bg-gray-100 dark:bg-neutral-800 items-center justify-center">
+          <Text
+            numberOfLines={1}
+            className="text-xs font-semibold text-gray-600 dark:text-gray-300"
+          >
+            {p.quantity}
+          </Text>
+        </View>
+      ),
+    },
+    {
+      key: "total",
+      label: "Total",
+      width: 100,
+      render: (p) => (
         <Text
           numberOfLines={1}
           className="text-sm font-semibold text-gray-900 dark:text-white"
         >
-          {p.customerName}
+          {formatMoney(p.totalAmount)}
         </Text>
-        {!!p.email && (
-          <Text numberOfLines={1} className="text-xs text-gray-500 dark:text-gray-400">
-            {p.email}
-          </Text>
-        )}
-        {!!p.phone && (
-          <Text numberOfLines={1} className="text-xs text-gray-500 dark:text-gray-400">
-            {p.phone}
-          </Text>
-        )}
-      </View>
-    ),
-  },
-  {
-    key: "attraction",
-    label: "Attraction",
-    width: 220,
-    render: (p) => (
-      <View className="flex-row items-center gap-2">
-        <Text
-          numberOfLines={1}
-          className="shrink text-sm font-medium text-gray-900 dark:text-white"
-        >
-          {p.attractionName}
-        </Text>
-        {p.ticketOrderId != null && (
-          <BulkBadge
-            linePosition={p.linePosition}
-            onPress={() => h.onOpenOrder(p)}
-          />
-        )}
-      </View>
-    ),
-  },
-  {
-    key: "quantity",
-    label: "Quantity",
-    width: 90,
-    render: (p) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {p.quantity}
-      </Text>
-    ),
-  },
-  {
-    key: "total",
-    label: "Total",
-    width: 100,
-    render: (p) => (
-      <Text
-        numberOfLines={1}
-        className="text-sm font-semibold text-gray-900 dark:text-white"
-      >
-        {money(p.totalAmount)}
-      </Text>
-    ),
-  },
-  {
-    key: "paid",
-    label: "Paid",
-    width: 100,
-    render: (p) => (
-      <Text
-        numberOfLines={1}
-        className={`text-sm font-medium ${
-          p.amountPaid >= p.totalAmount ? "text-green-600" : "text-amber-600"
-        }`}
-      >
-        {money(p.amountPaid)}
-      </Text>
-    ),
-  },
-  {
-    key: "paymentMethod",
-    label: "Payment",
-    width: 120,
-    render: (p) => (
-      <View>
+      ),
+    },
+    {
+      key: "paid",
+      label: "Paid",
+      width: 110,
+      render: (p) => {
+        const paidInFull = p.amountPaid >= p.totalAmount;
+        return (
+          <View>
+            <Text
+              numberOfLines={1}
+              className={`text-sm font-medium ${
+                paidInFull
+                  ? "text-green-700 dark:text-green-400"
+                  : "text-amber-700 dark:text-amber-400"
+              }`}
+            >
+              {formatMoney(p.amountPaid)}
+            </Text>
+            {!paidInFull && (
+              <Text numberOfLines={1} className={CELL_HINT}>
+                {formatMoney(p.totalAmount - p.amountPaid)} due
+              </Text>
+            )}
+          </View>
+        );
+      },
+    },
+    {
+      key: "paymentMethod",
+      label: "Payment",
+      width: 130,
+      render: (p) => (
+        <View>
+          <View className="self-start max-w-full px-2 py-1 rounded-md bg-gray-100 dark:bg-neutral-800">
+            <Text
+              numberOfLines={1}
+              className="text-xs font-medium text-gray-700 dark:text-gray-300"
+            >
+              {paymentLabel(p.paymentMethod)}
+            </Text>
+          </View>
+          {!!p.cardLabel && (
+            <Text numberOfLines={1} className={CELL_HINT}>
+              {p.cardLabel}
+            </Text>
+          )}
+        </View>
+      ),
+    },
+    {
+      key: "purchaseDate",
+      label: "Purchase Date",
+      width: 170,
+      render: (p) => (
         <Text numberOfLines={1} className={CELL_TEXT}>
-          {paymentLabel(p.paymentMethod)}
+          {formatPurchaseDateTime(p.createdAt)}
         </Text>
-        {!!p.cardLabel && (
-          <Text numberOfLines={1} className="text-xs text-gray-400 dark:text-gray-500">
-            {p.cardLabel}
-          </Text>
-        )}
-      </View>
-    ),
-  },
-  {
-    key: "purchaseDate",
-    label: "Purchase Date",
-    width: 170,
-    render: (p) => (
-      <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
-        {formatDateTime(p.createdAt)}
-      </Text>
-    ),
-  },
-  {
-    key: "scheduled",
-    label: "Scheduled",
-    width: 170,
-    render: (p) => (
-      <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
-        {p.scheduledDate
-          ? formatScheduled(p.scheduledDate, p.scheduledTime)
-          : "—"}
-      </Text>
-    ),
-  },
-  {
-    key: "status",
-    label: "Status",
-    width: 140,
-    render: (p) => (
-      <StatusPill status={p.status} onPress={() => h.onStatusPress(p)} />
-    ),
-  },
-  {
-    key: "actions",
-    label: "Actions",
-    width: 140,
-    render: (p) => (
-      <View className="flex-row items-center gap-0.5">
-        <IconAction
-          icon="eye"
-          tint={PRIMARY}
-          label={`View details for ${p.customerName}`}
-          onPress={() => h.onView(p)}
-        />
-        <IconAction
-          icon="edit-2"
-          tint="#D97706"
-          label={`Edit purchase for ${p.customerName}`}
-          onPress={() => h.onEdit(p)}
-        />
-        <IconAction
-          icon="trash-2"
-          tint="#EF4444"
-          label={`Delete purchase for ${p.customerName}`}
-          onPress={() => h.onDelete(p)}
-        />
-      </View>
-    ),
-  },
+      ),
+    },
+    {
+      key: "scheduled",
+      label: "Scheduled",
+      width: 170,
+      render: (p) => (
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {p.scheduledDate
+            ? formatScheduled(p.scheduledDate, p.scheduledTime)
+            : "—"}
+        </Text>
+      ),
+    },
+    {
+      key: "status",
+      label: "Status",
+      width: 140,
+      render: (p) => (
+        <StatusPill status={p.status} onPress={() => h.onStatusPress(p)} />
+      ),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      width: 132,
+      render: (p) => (
+        // One bordered segmented group: neutral icons, with only the edit and
+        // destructive actions tinted, so the column reads as a single control.
+        <View className="flex-row items-center self-start rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
+          <ActionIconButton
+            icon="eye"
+            color="#6B7280"
+            label={`View details for ${p.customerName}`}
+            onPress={() => h.onView(p)}
+          />
+          <ActionIconButton
+            divider
+            icon="edit-2"
+            color={PRIMARY}
+            label={`Edit purchase for ${p.customerName}`}
+            onPress={() => h.onEdit(p)}
+          />
+          <ActionIconButton
+            divider
+            icon="trash-2"
+            color="#DC2626"
+            label={`Delete purchase for ${p.customerName}`}
+            onPress={() => h.onDelete(p)}
+          />
+        </View>
+      ),
+    },
   ];
 }
 
 /**
  * Table layout for the Manage Purchases list. Thin wrapper over the generic
- * SelectableTable (same shell as BookingsTable), rendering the web-parity
- * purchase columns from the same `PurchaseRow[]` as the card view. Tapping a row
- * opens Purchase Details, like the eye action and the card view; the checkbox,
- * status pill and action icons are nested Pressables that keep their own touches.
+ * SelectableTable (in its `flat` look, matching the Manage Attractions table),
+ * rendering the web-parity purchase columns from the same `PurchaseRow[]` as
+ * the card view. Tapping a row opens Purchase Details, like the eye action and
+ * the card view; the checkbox, status pill and action icons are nested
+ * Pressables that keep their own touches.
  */
 export function PurchasesTable({
   purchases,
@@ -366,6 +363,7 @@ export function PurchasesTable({
   );
   return (
     <SelectableTable
+      flat
       columns={columns}
       rows={purchases}
       rowId={(p) => p.id}

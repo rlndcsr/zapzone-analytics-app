@@ -8,27 +8,27 @@ import {
   View,
 } from "react-native";
 
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
 import type { EventRow } from "../../services/eventsService";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+// Same flat row rhythm as the Manage Attractions table. These are floors —
+// real cell padding does the breathing so rows stay centered.
+const HEADER_MIN_HEIGHT = 44;
+const ROW_MIN_HEIGHT = 64;
 
-// Comfortable, SaaS-style row rhythm (matches the Special Pricing table). These
-// are floors — real cell padding does the breathing so rows stay centered.
-const HEADER_MIN_HEIGHT = 48;
-const ROW_MIN_HEIGHT = 72;
+const PRIMARY = "#0644C7";
 
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+/** Shared secondary-cell text style so every column reads consistently. */
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
+
+/** Muted second line under a cell's main value (units, hints). */
+const CELL_HINT = "text-xs text-gray-400 dark:text-gray-500 mt-0.5";
 
 /**
  * Tap-to-flip status pill — the mobile stand-in for the web column's
  * Active/Inactive dropdown, hitting the same PATCH toggle-status endpoint.
- * Shows a spinner in place of its icon while that request is in flight.
+ * A leading status dot (like the Attractions pill) that becomes a spinner
+ * while that request is in flight.
  */
 const StatusPill = ({
   status,
@@ -48,7 +48,7 @@ const StatusPill = ({
       accessibilityLabel={
         active ? "Deactivate this event" : "Activate this event"
       }
-      className={`flex-row items-center gap-1 self-start px-2.5 py-1 rounded-full active:opacity-70 ${
+      className={`flex-row items-center gap-1.5 self-start pl-2 pr-2.5 py-1 rounded-full active:opacity-70 ${
         active
           ? "bg-green-50 dark:bg-green-900/30"
           : "bg-gray-100 dark:bg-neutral-800"
@@ -60,13 +60,17 @@ const StatusPill = ({
           color={active ? "#16A34A" : "#9CA3AF"}
         />
       ) : (
-        <Feather name="power" size={11} color={active ? "#16A34A" : "#9CA3AF"} />
+        <View
+          className={`w-1.5 h-1.5 rounded-full ${
+            active ? "bg-green-500" : "bg-gray-400"
+          }`}
+        />
       )}
       <Text
-        className={`text-xs font-semibold ${
+        className={`text-xs font-medium ${
           active
-            ? "text-green-600 dark:text-green-400"
-            : "text-gray-500 dark:text-gray-400"
+            ? "text-green-700 dark:text-green-400"
+            : "text-gray-600 dark:text-gray-400"
         }`}
       >
         {active ? "Active" : "Inactive"}
@@ -74,6 +78,36 @@ const StatusPill = ({
     </Pressable>
   );
 };
+
+/** One button of the Actions segmented group (matches AttractionsTable). */
+const ActionIconButton = ({
+  icon,
+  color,
+  label,
+  disabled,
+  divider = false,
+  onPress,
+}: {
+  icon: FeatherIconName;
+  color: string;
+  label: string;
+  disabled: boolean;
+  /** Hairline on the leading edge — separates buttons inside the group. */
+  divider?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    disabled={disabled}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className={`w-8 h-8 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-700" : ""
+    }`}
+  >
+    <Feather name={icon} size={15} color={color} />
+  </Pressable>
+);
 
 /** Per-row callbacks + in-flight flag, handed to each cell renderer. */
 type RowContext = {
@@ -113,17 +147,17 @@ function buildColumns(fmt: EventFormatters, withRegistration: boolean): Column[]
           >
             {e.name}
           </Text>
+          {/* Location and date type share one quiet meta line. */}
           <Text
             numberOfLines={1}
-            className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
+            className="text-[11px] text-gray-400 dark:text-gray-500 mt-1"
           >
-            {e.locationName || "—"}
-          </Text>
-          <Text
-            numberOfLines={1}
-            className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
-          >
-            {e.dateType === "one_time" ? "One Time" : "Date Range"}
+            {[
+              e.locationName,
+              e.dateType === "one_time" ? "One Time" : "Date Range",
+            ]
+              .filter(Boolean)
+              .join("  ·  ")}
           </Text>
         </View>
       ),
@@ -153,12 +187,17 @@ function buildColumns(fmt: EventFormatters, withRegistration: boolean): Column[]
       label: "Price",
       width: 110,
       render: (e) => (
-        <Text
-          numberOfLines={1}
-          className="text-sm font-semibold text-gray-900 dark:text-white"
-        >
-          {fmt.money(e.price)}
-        </Text>
+        <View>
+          <Text
+            numberOfLines={1}
+            className="text-sm font-semibold text-gray-900 dark:text-white"
+          >
+            {fmt.money(e.price)}
+          </Text>
+          <Text numberOfLines={1} className={CELL_HINT}>
+            per ticket
+          </Text>
+        </View>
       ),
     },
     {
@@ -172,38 +211,36 @@ function buildColumns(fmt: EventFormatters, withRegistration: boolean): Column[]
     {
       key: "actions",
       label: "Actions",
-      width: withRegistration ? 160 : 120,
+      width: withRegistration ? 136 : 104,
       render: (e, ctx) => (
-        <View className="flex-row items-center gap-2">
-          <Pressable
+        // One bordered segmented group: neutral icons, with only the edit and
+        // destructive actions tinted, so the column reads as a single control.
+        <View className="flex-row items-center self-start rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
+          <ActionIconButton
+            icon="edit-2"
+            color={PRIMARY}
+            label={`Edit ${e.name}`}
+            disabled={ctx.busy}
             onPress={ctx.onEdit}
-            disabled={ctx.busy}
-            accessibilityRole="button"
-            accessibilityLabel={`Edit ${e.name}`}
-            className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 items-center justify-center active:opacity-70"
-          >
-            <Feather name="edit-2" size={15} color="#0644C7" />
-          </Pressable>
+          />
           {ctx.onRegistrationForm && (
-            <Pressable
-              onPress={ctx.onRegistrationForm}
+            <ActionIconButton
+              divider
+              icon="clipboard"
+              color="#6B7280"
+              label={`Registration form for ${e.name}`}
               disabled={ctx.busy}
-              accessibilityRole="button"
-              accessibilityLabel={`Registration form for ${e.name}`}
-              className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center active:opacity-70"
-            >
-              <Feather name="clipboard" size={15} color="#4B5563" />
-            </Pressable>
+              onPress={ctx.onRegistrationForm}
+            />
           )}
-          <Pressable
-            onPress={ctx.onDelete}
+          <ActionIconButton
+            divider
+            icon="trash-2"
+            color="#DC2626"
+            label={`Delete ${e.name}`}
             disabled={ctx.busy}
-            accessibilityRole="button"
-            accessibilityLabel={`Delete ${e.name}`}
-            className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/30 items-center justify-center active:opacity-70"
-          >
-            <Feather name="trash-2" size={15} color="#EF4444" />
-          </Pressable>
+            onPress={ctx.onDelete}
+          />
         </View>
       ),
     },
@@ -224,9 +261,10 @@ export type EventFormatters = {
 
 /**
  * Table layout for the All Events list — the same rows the card list renders,
- * laid out as the web `/events` grid. The whole grid scrolls horizontally
- * (fixed per-column widths keep header + rows aligned) and reads the same
- * `EventRow[]` page as the cards, so switching layout never refetches.
+ * laid out as the web `/events` grid in the flat Manage Attractions style. The
+ * whole grid scrolls horizontally (fixed per-column widths keep header + rows
+ * aligned) and reads the same `EventRow[]` page as the cards, so switching
+ * layout never refetches.
  * Rows are deliberately NOT tappable: a whole-row target is too easy to hit
  * while scrolling sideways, and the row's real actions (the status pill, Edit and
  * Delete) own their own touches — the same call the Special Pricing and
@@ -255,10 +293,7 @@ export const EventsTable = memo(function EventsTable({
   const tableWidth = columns.reduce((sum, c) => sum + c.width, 0);
 
   return (
-    <View
-      className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-100 dark:border-neutral-800 mb-3"
-      style={CARD_SHADOW}
-    >
+    <View className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-200 dark:border-neutral-800 mb-3">
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -267,7 +302,7 @@ export const EventsTable = memo(function EventsTable({
         <View style={{ width: tableWidth }}>
           {/* Header */}
           <View
-            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
+            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/50 border-b border-gray-200 dark:border-neutral-800"
             style={{ minHeight: HEADER_MIN_HEIGHT }}
           >
             {columns.map((col) => (
@@ -278,7 +313,7 @@ export const EventsTable = memo(function EventsTable({
               >
                 <Text
                   numberOfLines={1}
-                  className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
+                  className="text-xs font-medium text-gray-500 dark:text-gray-400"
                 >
                   {col.label}
                 </Text>

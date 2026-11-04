@@ -18,6 +18,11 @@ const HEADER_MIN_HEIGHT = 48;
 const ROW_MIN_HEIGHT = 68;
 const CHECKBOX_WIDTH = 48;
 
+// The `flat` look (Manage Attractions redesign): no shadow, a hairline border,
+// sentence-case header labels, tighter rows and rounded-square checkboxes.
+const FLAT_HEADER_MIN_HEIGHT = 44;
+const FLAT_ROW_MIN_HEIGHT = 64;
+
 export type TableColumn<T> = {
   key: string;
   label: string;
@@ -34,10 +39,12 @@ const CheckboxCell = ({
   state,
   onPress,
   label,
+  flat,
 }: {
   state: "off" | "on" | "some";
   onPress: () => void;
   label: string;
+  flat: boolean;
 }) => (
   <View
     className="items-center justify-center"
@@ -50,18 +57,37 @@ const CheckboxCell = ({
       accessibilityRole="checkbox"
       accessibilityState={{ checked: state === "on" }}
       accessibilityLabel={label}
+      className={
+        flat
+          ? `w-[18px] h-[18px] rounded-[5px] items-center justify-center border ${
+              state === "off"
+                ? "border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-900"
+                : "border-[#0644C7] bg-[#0644C7]"
+            }`
+          : undefined
+      }
     >
-      <Feather
-        name={
-          state === "on"
-            ? "check-square"
-            : state === "some"
-              ? "minus-square"
-              : "square"
-        }
-        size={19}
-        color={state === "off" ? "#9CA3AF" : "#0644C7"}
-      />
+      {flat ? (
+        state !== "off" && (
+          <Feather
+            name={state === "on" ? "check" : "minus"}
+            size={12}
+            color="#FFFFFF"
+          />
+        )
+      ) : (
+        <Feather
+          name={
+            state === "on"
+              ? "check-square"
+              : state === "some"
+                ? "minus-square"
+                : "square"
+          }
+          size={19}
+          color={state === "off" ? "#9CA3AF" : "#0644C7"}
+        />
+      )}
     </PressableScale>
   </View>
 );
@@ -88,6 +114,11 @@ type Props<T> = {
   onToggleAll?: () => void;
   /** Accessible verb for a row's checkbox, e.g. "booking for Jane". */
   rowLabel?: (row: T) => string;
+  /**
+   * The flatter Manage Attractions table look — opt-in so every other table
+   * keeps its current style.
+   */
+  flat?: boolean;
 };
 
 /**
@@ -107,6 +138,7 @@ function SelectableTableInner<T>({
   onToggleRow,
   onToggleAll,
   rowLabel,
+  flat = false,
 }: Props<T>) {
   // Selection is opt-in: a table given no `selectedIds` drops the checkbox
   // column entirely rather than showing one that does nothing.
@@ -128,8 +160,12 @@ function SelectableTableInner<T>({
 
   return (
     <View
-      className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-100 dark:border-neutral-800 mb-3"
-      style={CARD_SHADOW}
+      className={`rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border mb-3 ${
+        flat
+          ? "border-gray-200 dark:border-neutral-800"
+          : "border-gray-100 dark:border-neutral-800"
+      }`}
+      style={flat ? undefined : CARD_SHADOW}
     >
       <ScrollView
         horizontal
@@ -139,11 +175,18 @@ function SelectableTableInner<T>({
         <View style={{ width: tableWidth }}>
           {/* Header */}
           <View
-            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
-            style={{ minHeight: HEADER_MIN_HEIGHT }}
+            className={`flex-row items-center border-b ${
+              flat
+                ? "bg-gray-50 dark:bg-neutral-800/50 border-gray-200 dark:border-neutral-800"
+                : "bg-gray-50 dark:bg-neutral-800/60 border-gray-100 dark:border-neutral-800"
+            }`}
+            style={{
+              minHeight: flat ? FLAT_HEADER_MIN_HEIGHT : HEADER_MIN_HEIGHT,
+            }}
           >
             {selectable && (
               <CheckboxCell
+                flat={flat}
                 state={headerState}
                 onPress={() => onToggleAll?.()}
                 label={
@@ -161,7 +204,11 @@ function SelectableTableInner<T>({
               >
                 <Text
                   numberOfLines={1}
-                  className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
+                  className={
+                    flat
+                      ? "text-xs font-medium text-gray-500 dark:text-gray-400"
+                      : "text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
+                  }
                 >
                   {col.label}
                 </Text>
@@ -193,16 +240,23 @@ function SelectableTableInner<T>({
                     onRowPress && rowLabel ? `View ${rowLabel(row)}` : undefined
                   }
                   className={`flex-row items-center ${
-                    selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                    selected
+                      ? flat
+                        ? "bg-blue-50/70 dark:bg-blue-900/20"
+                        : "bg-blue-50 dark:bg-blue-900/20"
+                      : ""
                   } ${
                     i < rows.length - 1
                       ? "border-b border-gray-100 dark:border-neutral-800"
                       : ""
                   }`}
-                  style={{ minHeight: ROW_MIN_HEIGHT }}
+                  style={{
+                    minHeight: flat ? FLAT_ROW_MIN_HEIGHT : ROW_MIN_HEIGHT,
+                  }}
                 >
                   {selectable && (
                     <CheckboxCell
+                      flat={flat}
                       state={selected ? "on" : "off"}
                       onPress={() => onToggleRow?.(id)}
                       label={`${selected ? "Deselect" : "Select"} ${
@@ -213,7 +267,7 @@ function SelectableTableInner<T>({
                   {columns.map((col) => (
                     <View
                       key={col.key}
-                      className="justify-center px-4 py-4"
+                      className={`justify-center px-4 ${flat ? "py-3" : "py-4"}`}
                       style={{ width: col.width }}
                     >
                       {col.render(row)}

@@ -1,63 +1,50 @@
 import { Feather } from "@expo/vector-icons";
-import { memo, useMemo, type ComponentProps, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
+import {
+  PURCHASE_STATUS_TONE,
+  prettyStatus,
+} from "../../lib/attractions/purchaseDisplay";
+import type { PurchaseStatus } from "../../services/attractionPurchasesService";
 import type { TicketOrderDetail } from "../../services/ticketOrdersService";
 import type { ColumnMeta } from "./ColumnsSheet";
 
-const PRIMARY = "#0644C7";
+// Same flat row rhythm as the Manage Attractions table.
+const HEADER_MIN_HEIGHT = 44;
+const ROW_MIN_HEIGHT = 64;
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Shared secondary-cell text style so every column reads consistently. */
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
 
-const HEADER_MIN_HEIGHT = 48;
-const ROW_MIN_HEIGHT = 68;
+/** Muted second line under a cell's main value (paid, card label). */
+const CELL_HINT = "text-xs text-gray-400 dark:text-gray-500 mt-0.5";
 
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+export const money = (n: number | null | undefined) =>
+  `$${Number(n ?? 0).toFixed(2)}`;
 
-type IconName = ComponentProps<typeof Feather>["name"];
+export const ENDED_ORDER_STATUSES = ["cancelled", "refunded"];
 
-const money = (n: number | null | undefined) => `$${Number(n ?? 0).toFixed(2)}`;
-
-const ENDED = ["cancelled", "refunded"];
-
-/** Same pill palette as the card list, so both layouts read identically. */
-const STATUS_STYLE: Record<string, { wrap: string; text: string; icon: IconName }> = {
-  draft: {
-    wrap: "bg-gray-100 dark:bg-neutral-800",
-    text: "text-gray-800 dark:text-gray-200",
-    icon: "clock",
-  },
-  pending: {
-    wrap: "bg-yellow-100 dark:bg-yellow-900/30",
-    text: "text-yellow-800 dark:text-yellow-300",
-    icon: "clock",
-  },
-  confirmed: {
-    wrap: "bg-blue-100 dark:bg-blue-900/30",
-    text: "text-blue-800 dark:text-blue-300",
-    icon: "check-circle",
-  },
-  "checked-in": {
-    wrap: "bg-green-100 dark:bg-green-900/30",
-    text: "text-green-800 dark:text-green-300",
-    icon: "check-circle",
-  },
-  cancelled: {
-    wrap: "bg-gray-100 dark:bg-neutral-800",
-    text: "text-gray-800 dark:text-gray-200",
-    icon: "x-circle",
-  },
-  refunded: {
-    wrap: "bg-purple-100 dark:bg-purple-900/30",
-    text: "text-purple-800 dark:text-purple-300",
-    icon: "x-circle",
-  },
+/**
+ * Order status badge — a soft pill with a leading status dot, the same look as
+ * the Attractions / Purchases badges. Orders share the purchase palette; a
+ * draft reads as neutral. Used by both the table and the card list.
+ */
+export const OrderStatusBadge = ({ status }: { status: string }) => {
+  const tone =
+    PURCHASE_STATUS_TONE[status as PurchaseStatus] ??
+    PURCHASE_STATUS_TONE.cancelled;
+  return (
+    <View
+      className={`flex-row items-center gap-1.5 px-2 py-0.5 rounded-full ${tone.bg}`}
+    >
+      <View className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+      <Text className={`text-xs font-medium ${tone.text}`}>
+        {prettyStatus(status)}
+      </Text>
+    </View>
+  );
 };
 
 type RowContext = {
@@ -70,33 +57,37 @@ type RowContext = {
   allCheckedIn: (order: TicketOrderDetail) => boolean;
 };
 
-/** A single icon action. Nested Pressable, so it swallows its own touch and the
- *  row's open-details press never fires behind it. */
+/** One button of the Actions segmented group (matches AttractionsTable).
+ *  Nested Pressable, so it swallows its own touch. */
 const ActionIconButton = ({
   icon,
   color,
   label,
   busy = false,
+  divider = false,
   onPress,
 }: {
-  icon: IconName;
+  icon: FeatherIconName;
   color: string;
   label: string;
   busy?: boolean;
+  /** Hairline on the leading edge — separates buttons inside the group. */
+  divider?: boolean;
   onPress: () => void;
 }) => (
   <Pressable
     onPress={onPress}
     disabled={busy}
-    hitSlop={6}
     accessibilityRole="button"
     accessibilityLabel={label}
-    className="h-8 w-8 items-center justify-center rounded-lg active:opacity-60"
+    className={`w-8 h-8 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-700" : ""
+    }`}
   >
     {busy ? (
       <ActivityIndicator size="small" color={color} />
     ) : (
-      <Feather name={icon} size={16} color={color} />
+      <Feather name={icon} size={15} color={color} />
     )}
   </Pressable>
 );
@@ -123,7 +114,7 @@ const COLUMNS: Column[] = [
     render: (o) => (
       <Text
         numberOfLines={1}
-        className="text-sm font-bold text-gray-900 dark:text-white"
+        className="text-sm font-semibold text-gray-900 dark:text-white"
       >
         {o.referenceNumber || `Order #${o.id}`}
       </Text>
@@ -167,7 +158,7 @@ const COLUMNS: Column[] = [
     label: "Date",
     width: 150,
     render: (o) => (
-      <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
+      <Text numberOfLines={1} className={CELL_TEXT}>
         {o.purchaseDate || "—"}
       </Text>
     ),
@@ -183,9 +174,12 @@ const COLUMNS: Column[] = [
           tickets
         </Text>
         {ctx.allCheckedIn(o) && (
-          <Text className="mt-0.5 text-[11px] font-medium text-green-600 dark:text-green-400">
-            All checked in
-          </Text>
+          <View className="flex-row items-center gap-1 mt-0.5">
+            <Feather name="check" size={11} color="#16A34A" />
+            <Text className="text-xs text-green-700 dark:text-green-400">
+              All checked in
+            </Text>
+          </View>
         )}
       </View>
     ),
@@ -198,16 +192,20 @@ const COLUMNS: Column[] = [
       <View>
         <Text
           numberOfLines={1}
-          className="text-sm font-bold text-gray-900 dark:text-white"
+          className="text-sm font-semibold text-gray-900 dark:text-white"
         >
           {money(o.totalAmount)}
         </Text>
-        <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-          {money(o.amountPaid)} paid
-        </Text>
-        {o.remainingBalance > 0 && !ENDED.includes(o.status) && (
-          <Text className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+        {o.remainingBalance > 0 && !ENDED_ORDER_STATUSES.includes(o.status) ? (
+          <Text
+            numberOfLines={1}
+            className="text-xs text-amber-700 dark:text-amber-400 mt-0.5"
+          >
             {money(o.remainingBalance)} due
+          </Text>
+        ) : (
+          <Text numberOfLines={1} className={CELL_HINT}>
+            {money(o.amountPaid)} paid
           </Text>
         )}
       </View>
@@ -219,11 +217,16 @@ const COLUMNS: Column[] = [
     width: 140,
     render: (o, ctx) => (
       <View>
-        <Text numberOfLines={1} className={`capitalize ${CELL_TEXT}`}>
-          {ctx.methodLabel(o.paymentMethod)}
-        </Text>
+        <View className="self-start max-w-full px-2 py-1 rounded-md bg-gray-100 dark:bg-neutral-800">
+          <Text
+            numberOfLines={1}
+            className="text-xs font-medium capitalize text-gray-700 dark:text-gray-300"
+          >
+            {ctx.methodLabel(o.paymentMethod)}
+          </Text>
+        </View>
         {!!o.cardLabel && (
-          <Text numberOfLines={1} className="text-xs text-gray-400 dark:text-gray-500">
+          <Text numberOfLines={1} className={CELL_HINT}>
             {o.cardLabel}
           </Text>
         )}
@@ -234,21 +237,11 @@ const COLUMNS: Column[] = [
     key: "status",
     label: "Status",
     width: 140,
-    render: (o) => {
-      const style = STATUS_STYLE[o.status] ?? STATUS_STYLE.pending;
-      return (
-        <View className="flex-row">
-          <View
-            className={`flex-row items-center gap-1 rounded-full px-2.5 py-1 ${style.wrap}`}
-          >
-            <Feather name={style.icon} size={11} color="#6B7280" />
-            <Text className={`text-[11px] font-medium capitalize ${style.text}`}>
-              {o.status.replace("-", " ")}
-            </Text>
-          </View>
-        </View>
-      );
-    },
+    render: (o) => (
+      <View className="flex-row">
+        <OrderStatusBadge status={o.status} />
+      </View>
+    ),
   },
   {
     key: "subtotal",
@@ -286,20 +279,24 @@ const COLUMNS: Column[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 110,
+    width: 100,
     render: (o, ctx) => {
       const canCheckIn =
-        !ctx.allCheckedIn(o) && !ENDED.includes(o.status) && o.remainingBalance <= 0;
+        !ctx.allCheckedIn(o) &&
+        !ENDED_ORDER_STATUSES.includes(o.status) &&
+        o.remainingBalance <= 0;
       return (
-        <View className="flex-row items-center gap-0.5">
+        // One bordered segmented group, like the Manage Attractions table.
+        <View className="flex-row items-center self-start rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
           <ActionIconButton
             icon="eye"
-            color={PRIMARY}
+            color="#6B7280"
             label={`View order ${o.referenceNumber}`}
             onPress={() => ctx.onView(o)}
           />
           {canCheckIn && (
             <ActionIconButton
+              divider
               icon="check-circle"
               color="#16A34A"
               label={`Check in every ticket on order ${o.referenceNumber}`}
@@ -350,10 +347,10 @@ export const DEFAULT_BULK_ORDER_COLUMNS = [
 
 /**
  * Table layout for the Bulk Orders list — the same rows the card list renders,
- * laid out like the web admin's orders table. Horizontally scrollable with fixed
- * column widths (matching GroupInvitesTable/WaiversTable). Rows are inert: order
- * details open from the row's eye action only, so a stray tap while scrolling
- * can't navigate.
+ * laid out like the web admin's orders table in the flat Manage Attractions
+ * style. Horizontally scrollable with fixed column widths. Rows are inert:
+ * order details open from the row's eye action only, so a stray tap while
+ * scrolling can't navigate.
  */
 export const BulkOrdersTable = memo(function BulkOrdersTable({
   orders,
@@ -394,15 +391,12 @@ export const BulkOrdersTable = memo(function BulkOrdersTable({
   };
 
   return (
-    <View
-      className="mb-3 overflow-hidden rounded-2xl border border-gray-100 bg-white dark:border-neutral-800 dark:bg-neutral-900"
-      style={CARD_SHADOW}
-    >
+    <View className="mb-3 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
       <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
         <View style={{ width: tableWidth }}>
           {/* Header */}
           <View
-            className="flex-row items-center border-b border-gray-100 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/60"
+            className="flex-row items-center border-b border-gray-200 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/50"
             style={{ minHeight: HEADER_MIN_HEIGHT }}
           >
             {columns.map((col) => (
@@ -413,7 +407,7 @@ export const BulkOrdersTable = memo(function BulkOrdersTable({
               >
                 <Text
                   numberOfLines={1}
-                  className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
+                  className="text-xs font-medium text-gray-500 dark:text-gray-400"
                 >
                   {col.label}
                 </Text>

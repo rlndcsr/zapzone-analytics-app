@@ -1,15 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useColorScheme } from "nativewind";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentProps,
-} from "react";
-import {
-  ActivityIndicator,
   Alert,
   Pressable,
   RefreshControl,
@@ -29,11 +22,19 @@ import {
   type EventFilterValues,
 } from "../../components/ui/EventFiltersSheet";
 import { EventsTable } from "../../components/ui/EventsTable";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { PaginationControls } from "../../components/ui/PaginationControls";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
-import { AttractionsKpiSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
-import { EventsListSkeleton } from "../../components/ui/skeleton/EventsSkeleton";
+import { AttractionsSummarySkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  EventsListSkeleton,
+  EventsTableSkeleton,
+} from "../../components/ui/skeleton/EventsSkeleton";
+import {
+  AttractionStatusBadge,
+  type FeatherIconName,
+} from "../../lib/attractions/attractionDisplay";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import {
   consumeEventsStale,
@@ -46,22 +47,14 @@ import {
   deleteEvent,
   toggleEventStatus,
   type EventRow,
-  type EventStatus,
 } from "../../services/eventsService";
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
-type ComponentIconName = ComponentProps<typeof Feather>["name"];
-
 const PER_PAGE_OPTIONS = [5, 10, 15];
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 /** Local "today" as YYYY-MM-DD (matches the web Events `localToday`). */
 const localToday = (): string => {
@@ -118,36 +111,126 @@ function dateLabel(event: EventRow): string {
   return formatDate(event.startDate);
 }
 
-const StatusBadge = ({ status }: { status: EventStatus }) => {
-  const active = status === "active";
-  return (
-    <View
-      className={`px-2.5 py-1 rounded-full ${
-        active
-          ? "bg-green-50 dark:bg-green-900/30"
-          : "bg-gray-100 dark:bg-neutral-800"
-      }`}
-    >
+/**
+ * One cell of the summary panel. Cells sit in a single bordered card and are
+ * separated by hairlines (`divideLeft` / `divideTop`) rather than each being
+ * its own shadowed tile — the same panel as Manage Attractions.
+ */
+const SummaryCell = ({
+  icon,
+  title,
+  value,
+  hint,
+  divideLeft = false,
+  divideTop = false,
+}: {
+  icon: FeatherIconName;
+  title: string;
+  value: string;
+  hint: string;
+  divideLeft?: boolean;
+  divideTop?: boolean;
+}) => (
+  <View
+    className={`flex-1 p-4 ${
+      divideLeft ? "border-l border-gray-100 dark:border-neutral-800" : ""
+    } ${divideTop ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
+  >
+    <View className="flex-row items-center gap-1.5">
+      <Feather name={icon} size={13} color="#9CA3AF" />
       <Text
-        className={`text-xs font-semibold capitalize ${
-          active
-            ? "text-green-600 dark:text-green-400"
-            : "text-gray-500 dark:text-gray-400"
-        }`}
+        numberOfLines={1}
+        className="shrink text-xs font-medium text-gray-500 dark:text-gray-400"
       >
-        {status}
+        {title}
       </Text>
     </View>
-  );
-};
-
-const Stat = ({ icon, label }: { icon: ComponentIconName; label: string }) => (
-  <View className="flex-row items-center gap-1.5">
-    <Feather name={icon} size={12} color="#9CA3AF" />
-    <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
+    <Text
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      className="text-2xl font-semibold text-gray-900 dark:text-white mt-1.5"
+    >
+      {value}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+    >
+      {hint}
+    </Text>
   </View>
 );
 
+/** One labelled cell in the card's Date / Time / Price strip. */
+const Spec = ({
+  label,
+  value,
+  hint,
+  divider = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  divider?: boolean;
+}) => (
+  <View
+    className={`flex-1 px-3 py-2.5 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-800" : ""
+    }`}
+  >
+    <Text className="text-[11px] text-gray-500 dark:text-gray-400">
+      {label}
+    </Text>
+    <Text
+      numberOfLines={1}
+      className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5"
+    >
+      {value}
+    </Text>
+    {!!hint && (
+      <Text
+        numberOfLines={1}
+        className="text-[11px] text-gray-400 dark:text-gray-500"
+      >
+        {hint}
+      </Text>
+    )}
+  </View>
+);
+
+/** One button of the card's segmented action group (matches EventsTable). */
+const CardAction = ({
+  icon,
+  color,
+  label,
+  divider = false,
+  onPress,
+}: {
+  icon: FeatherIconName;
+  color: string;
+  label: string;
+  divider?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    hitSlop={4}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    className={`w-8 h-8 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800 ${
+      divider ? "border-l border-gray-200 dark:border-neutral-700" : ""
+    }`}
+  >
+    <Feather name={icon} size={15} color={color} />
+  </Pressable>
+);
+
+/**
+ * Card layout for a single event, matching the Manage Attractions card: name +
+ * status, a meta line, description, a Date / Time / Price strip and a quiet
+ * footer. Events have no details sheet, so the card itself stays inert and
+ * Edit / Registration form live in the footer's action group.
+ */
 const EventCard = ({
   event,
   onEdit,
@@ -165,135 +248,99 @@ const EventCard = ({
       : `${event.maxBookingsPerSlot} group${event.maxBookingsPerSlot === 1 ? "" : "s"}/slot`;
 
   return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
-      style={CARD_SHADOW}
-    >
-      {/* Header: name + date (left), status (right) */}
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {event.name}
-          </Text>
-          <View className="flex-row items-center gap-1 mt-0.5">
-            <Feather name="calendar" size={11} color="#9CA3AF" />
-            <Text
-              className="text-xs text-gray-500 dark:text-gray-400"
-              numberOfLines={1}
-            >
-              {dateLabel(event)}
-            </Text>
-          </View>
-          {!!event.locationName && (
-            <View className="flex-row items-center gap-1 mt-0.5">
-              <Feather name="map-pin" size={11} color="#9CA3AF" />
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
-                {event.locationName}
-              </Text>
-            </View>
-          )}
-        </View>
-        <View className="flex-row items-center gap-2">
-          <StatusBadge status={event.status} />
-          <Pressable
-            onPress={onEdit}
-            hitSlop={6}
-            accessibilityRole="button"
-            accessibilityLabel={`Edit ${event.name}`}
-            className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 items-center justify-center active:opacity-70"
-          >
-            <Feather name="edit-2" size={15} color="#0644C7" />
-          </Pressable>
-          {onRegistrationForm && (
-            <Pressable
-              onPress={onRegistrationForm}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel={`Registration form for ${event.name}`}
-              className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-neutral-800 items-center justify-center active:opacity-70"
-            >
-              <Feather name="clipboard" size={15} color="#4B5563" />
-            </Pressable>
-          )}
-        </View>
+    <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3">
+      {/* Name + status */}
+      <View className="flex-row items-start justify-between gap-3">
+        <Text
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {event.name}
+        </Text>
+        <AttractionStatusBadge status={event.status} />
       </View>
 
-      {/* Description */}
+      {/* Date type · location */}
+      <View className="flex-row items-center gap-1.5 mt-1">
+        <Text
+          numberOfLines={1}
+          className="shrink-0 text-xs font-medium text-gray-600 dark:text-gray-300"
+        >
+          {event.dateType === "date_range" ? "Date Range" : "One Time"}
+        </Text>
+        {!!event.locationName && (
+          <>
+            <Text className="text-xs text-gray-300 dark:text-neutral-600">
+              •
+            </Text>
+            <Text
+              numberOfLines={1}
+              className="shrink text-xs text-gray-500 dark:text-gray-400"
+            >
+              {event.locationName}
+            </Text>
+          </>
+        )}
+      </View>
+
       {!!event.description && (
         <Text
-          className="text-xs text-gray-500 dark:text-gray-400 leading-5"
+          className="text-[13px] text-gray-500 dark:text-gray-400 leading-5 mt-2"
           numberOfLines={2}
         >
           {event.description}
         </Text>
       )}
 
-      {/* Date type + price */}
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
-          <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-            {event.dateType === "date_range" ? "Date Range" : "One Time"}
-          </Text>
-        </View>
-        <Text className="text-sm font-bold text-gray-900 dark:text-white">
-          {formatMoney(event.price)}
-          <Text className="text-xs font-normal text-gray-400"> /ticket</Text>
-        </Text>
+      {/* Date / Time / Price */}
+      <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+        <Spec label="Date" value={dateLabel(event) || "—"} />
+        <Spec
+          divider
+          label="Time"
+          value={timeRange || "—"}
+          hint={`Every ${event.intervalMinutes} min`}
+        />
+        <Spec
+          divider
+          label="Price"
+          value={formatMoney(event.price)}
+          hint="/ticket"
+        />
       </View>
 
-      {/* Time / interval / capacity */}
-      <View className="flex-row items-center flex-wrap gap-x-4 gap-y-1 mt-2">
-        {!!timeRange && <Stat icon="clock" label={timeRange} />}
-        <Stat icon="repeat" label={`${event.intervalMinutes} min`} />
-        <Stat icon="users" label={capacityLabel} />
+      {/* Capacity + actions */}
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        <View className="shrink flex-row items-center gap-1.5">
+          <Feather name="users" size={12} color="#9CA3AF" />
+          <Text
+            numberOfLines={1}
+            className="shrink text-xs text-gray-400 dark:text-gray-500"
+          >
+            {capacityLabel}
+          </Text>
+        </View>
+        <View className="flex-row items-center rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
+          <CardAction
+            icon="edit-2"
+            color={PRIMARY}
+            label={`Edit ${event.name}`}
+            onPress={onEdit}
+          />
+          {onRegistrationForm && (
+            <CardAction
+              divider
+              icon="clipboard"
+              color="#6B7280"
+              label={`Registration form for ${event.name}`}
+              onPress={onRegistrationForm}
+            />
+          )}
+        </View>
       </View>
     </View>
   );
 };
-
-type KpiTone = { bg: string; tint: string };
-
-const KpiCard = ({
-  icon,
-  tone,
-  title,
-  value,
-  change,
-}: {
-  icon: ComponentIconName;
-  tone: KpiTone;
-  title: string;
-  value: string;
-  change: string;
-}) => (
-  <View
-    className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 m-1.5 shadow-sm"
-    style={CARD_SHADOW}
-  >
-    <View
-      className="w-9 h-9 rounded-xl items-center justify-center"
-      style={{ backgroundColor: tone.bg }}
-    >
-      <Feather name={icon} size={18} color={tone.tint} />
-    </View>
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
-      {title}
-    </Text>
-    <Text
-      className="text-2xl font-bold text-gray-900 dark:text-white mt-1"
-      numberOfLines={1}
-      adjustsFontSizeToFit
-    >
-      {value}
-    </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      {change}
-    </Text>
-  </View>
-);
 
 const ManageEvents = () => {
   const insets = useSafeAreaInsets();
@@ -628,36 +675,60 @@ const ManageEvents = () => {
     [],
   );
 
+  // The page's secondary actions as module-hub shortcuts, like the Manage
+  // Attractions "More" row. Registration Forms keeps the Events hub's role gate.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Event Purchases", icon: "shopping-bag", route: "/events/purchases" },
+    {
+      label: "Onsite Purchase",
+      icon: "plus-circle",
+      route: "/events/create-purchase",
+    },
+    ...(canManageRegistrationForms
+      ? [
+          {
+            label: "Registration Forms",
+            icon: "clipboard",
+            route: "/events/registration-forms",
+          } as HubQuickLink,
+        ]
+      : []),
+    {
+      label: "Export CSV",
+      icon: "file-text",
+      onPress: () => {
+        if (!exporting) void exportCsv();
+      },
+    },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Gradient header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Manage Events
           </Text>
-          {/* Export CSV — icon-only in the header, so the list actions below
-              are just the primary "Create New Event" CTA. */}
           <Pressable
-            onPress={exportCsv}
-            disabled={exporting}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            onPress={() => router.push("/events/create-event")}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
-            accessibilityLabel="Export CSV"
+            accessibilityLabel="New event"
           >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
           </Pressable>
         </View>
       </View>
@@ -665,6 +736,7 @@ const ManageEvents = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -676,151 +748,238 @@ const ManageEvents = () => {
           />
         }
       >
-        <View className="px-5 mt-5">
+        <View className="px-4 mt-4">
           {/* Global workspace location selector (company-admin only). */}
-          <View className="mb-5">
+          <View className="mb-4">
             <LocationWorkspaceSelector />
           </View>
 
-          {/* Create New Event — the primary filled CTA, full width (same as the
-              Attractions module). Export CSV lives in the header. */}
-          <Pressable
-            onPress={() => router.push("/events/create-event")}
-            className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90 mb-5"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create New Event
-            </Text>
-          </Pressable>
-
           {/* Error state */}
           {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
+            <View className="flex-row gap-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4 mb-4">
+              <Feather name="alert-circle" size={18} color="#DC2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  Could not load events
+                </Text>
+                <Text className="text-sm text-red-600/90 dark:text-red-400/80 mt-0.5">
+                  {error}
+                </Text>
+                <Pressable
+                  onPress={onRefresh}
+                  className="self-start mt-2.5 px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-900/50 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-xs font-semibold text-red-700 dark:text-red-400">
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
-          {/* KPI cards */}
+          {/* Summary — one panel, four figures, divided by hairlines. */}
           {loading ? (
-            <AttractionsKpiSkeleton />
+            <AttractionsSummarySkeleton />
           ) : (
-            <View className="flex-row flex-wrap -mx-1.5 mb-3">
-              <View className="w-1/2">
-                <KpiCard
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+              <View className="flex-row">
+                <SummaryCell
                   icon="star"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Total Events"
                   value={String(kpis.total)}
-                  change={`${kpis.active} active`}
+                  hint={`${kpis.active} active`}
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
+                <SummaryCell
+                  divideLeft
                   icon="zap"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Active Events"
                   value={String(kpis.active)}
-                  change={`${kpis.inactive} inactive`}
+                  hint={`${kpis.inactive} inactive`}
                 />
               </View>
-              <View className="w-1/2">
-                <KpiCard
+              <View className="flex-row">
+                <SummaryCell
+                  divideTop
                   icon="dollar-sign"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Avg. Price"
                   value={formatMoney(kpis.avgPrice)}
-                  change="Per ticket"
+                  hint="Per ticket"
                 />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
+                <SummaryCell
+                  divideTop
+                  divideLeft
                   icon="calendar"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
                   title="Date Range Events"
                   value={String(kpis.dateRange)}
-                  change={`${kpis.oneTime} one-time`}
+                  hint={`${kpis.oneTime} one-time`}
                 />
               </View>
             </View>
           )}
 
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mt-2 mb-3">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search events..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+          {/* More — the page's secondary actions as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {/* Filters — opens the full filter panel (all web-admin filters). */}
-          <FilterPill>
-            <PillSegment
-              label={
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <View className="flex-1 flex-row items-center gap-2 h-11 px-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="search" size={16} color="#9CA3AF" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search events"
+                placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+              />
+              {search.length > 0 && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Feather name="x-circle" size={16} color="#9CA3AF" />
+                </Pressable>
+              )}
+            </View>
+            <Pressable
+              onPress={() => setShowFilterSheet(true)}
+              accessibilityRole="button"
+              accessibilityLabel={
                 activeFilterCount > 0
-                  ? `Filters (${activeFilterCount})`
+                  ? `Filters, ${activeFilterCount} applied`
                   : "Filters"
               }
-              active={showFilterSheet || activeFilterCount > 0}
-              onPress={() => setShowFilterSheet(true)}
-              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
-            />
-          </FilterPill>
-
-          {/* List header */}
-          {!loading && !error && (
-            <View className="flex-row items-center gap-2 mb-4">
+              className={`flex-row items-center gap-1.5 h-11 px-3.5 rounded-xl border active:opacity-70 ${
+                activeFilterCount > 0
+                  ? "bg-blue-50 dark:bg-blue-900/30 border-[#0644C7]/40"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
+              }`}
+            >
+              <Feather
+                name="sliders"
+                size={15}
+                color={activeFilterCount > 0 ? PRIMARY : "#6B7280"}
+              />
               <Text
-                numberOfLines={1}
-                className="shrink text-lg font-bold text-gray-900 dark:text-white"
+                className={`text-sm font-medium ${
+                  activeFilterCount > 0
+                    ? "text-[#0644C7] dark:text-blue-300"
+                    : "text-gray-700 dark:text-gray-200"
+                }`}
               >
-                All Events
+                Filters
               </Text>
-              <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              {activeFilterCount > 0 && (
+                <View className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#0644C7] items-center justify-center">
+                  <Text className="text-[10px] font-bold text-white">
+                    {activeFilterCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Applied-filters hint with a one-tap reset. */}
+          {activeFilterCount > 0 && (
+            <View className="flex-row items-center justify-between mb-3 -mt-1">
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                {activeFilterCount}{" "}
+                {activeFilterCount === 1 ? "filter" : "filters"} applied
+              </Text>
+              <Pressable
+                onPress={() => setFilters(EMPTY_EVENT_FILTERS)}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Clear all
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* List header — title + count, layout toggle. */}
+          {!loading && !error && (
+            <View className="flex-row items-center justify-between gap-2 mb-3">
+              <View className="flex-row items-baseline gap-2 shrink">
+                <Text
+                  numberOfLines={1}
+                  className="shrink text-base font-semibold text-gray-900 dark:text-white"
+                >
+                  All Events
+                </Text>
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
                   {filtered.length}
                 </Text>
               </View>
-
-              {/* Table/Cards toggle — same switch the other catalog lists use. */}
-              <View className="ml-auto">
-                <ViewToggle mode={viewMode} onChange={setViewMode} />
-              </View>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
             </View>
           )}
 
           {/* List / states */}
           {loading ? (
-            <EventsListSkeleton />
+            viewMode === "table" ? (
+              <EventsTableSkeleton />
+            ) : (
+              <EventsListSkeleton />
+            )
           ) : !error && !hasResults ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="calendar" size={26} color="#9CA3AF" />
+            <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 px-6 py-10 items-center">
+              <View className="w-12 h-12 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                <Feather
+                  name={events.length === 0 ? "calendar" : "search"}
+                  size={20}
+                  color="#9CA3AF"
+                />
               </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No events found
+              <Text className="text-base font-semibold text-gray-900 dark:text-white">
+                {events.length === 0 ? "No events yet" : "No events found"}
               </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
+              <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1 max-w-xs">
                 {events.length === 0
                   ? "There are no events for this account yet."
                   : "Try adjusting your search or filters."}
               </Text>
+              {events.length === 0 ? (
+                <Pressable
+                  onPress={() => router.push("/events/create-event")}
+                  className="flex-row items-center gap-1.5 mt-4 px-4 py-2.5 rounded-xl bg-[#0644C7] active:opacity-90"
+                  accessibilityRole="button"
+                >
+                  <Feather name="plus" size={15} color="#FFFFFF" />
+                  <Text className="text-sm font-semibold text-white">
+                    New Event
+                  </Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => {
+                    setSearch("");
+                    setFilters(EMPTY_EVENT_FILTERS);
+                  }}
+                  className="mt-4 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  accessibilityRole="button"
+                >
+                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    Clear search & filters
+                  </Text>
+                </Pressable>
+              )}
             </View>
           ) : (
             !error && (
               <>
+                {/* Table (default) and card layouts render from the same
+                    `paged` slice — switching is instant and never refetches. */}
                 {viewMode === "table" ? (
                   <EventsTable
                     events={paged}
@@ -850,88 +1009,15 @@ const ManageEvents = () => {
                   ))
                 )}
 
-                {/* Pagination */}
-                <View className="mt-1 mb-4">
-                  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800">
-                    <View className="flex-row items-center justify-between mb-4">
-                      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                        Items per page
-                      </Text>
-                      <View className="flex-row gap-1.5">
-                        {PER_PAGE_OPTIONS.map((option) => {
-                          const isActive = perPage === option;
-                          return (
-                            <Pressable
-                              key={option}
-                              onPress={() => setPerPage(option)}
-                              className={`px-3 py-1.5 rounded-lg border ${
-                                isActive
-                                  ? "bg-[#0644C7] border-[#0644C7]"
-                                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                              }`}
-                            >
-                              <Text
-                                className={`text-xs font-medium ${
-                                  isActive
-                                    ? "text-white"
-                                    : "text-gray-600 dark:text-gray-300"
-                                }`}
-                              >
-                                {option}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
-
-                    <View className="flex-row items-center justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
-                      <Pressable
-                        onPress={() => setPage(page - 1)}
-                        disabled={page === 1}
-                        className={`px-4 py-2 rounded-lg border ${
-                          page === 1
-                            ? "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 opacity-50"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                        }`}
-                      >
-                        <Text
-                          className={`text-sm font-medium ${
-                            page === 1
-                              ? "text-gray-400 dark:text-gray-500"
-                              : "text-gray-700 dark:text-gray-200"
-                          }`}
-                        >
-                          Previous
-                        </Text>
-                      </Pressable>
-
-                      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        Page {page} of {lastPage}
-                      </Text>
-
-                      <Pressable
-                        onPress={() => setPage(page + 1)}
-                        disabled={page >= lastPage}
-                        className={`px-4 py-2 rounded-lg border ${
-                          page >= lastPage
-                            ? "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 opacity-50"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                        }`}
-                      >
-                        <Text
-                          className={`text-sm font-medium ${
-                            page >= lastPage
-                              ? "text-gray-400 dark:text-gray-500"
-                              : "text-gray-700 dark:text-gray-200"
-                          }`}
-                        >
-                          Next
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
+                {/* Pagination — shared control (same as Attractions/Purchases). */}
+                <PaginationControls
+                  page={page}
+                  lastPage={lastPage}
+                  perPage={perPage}
+                  perPageOptions={PER_PAGE_OPTIONS}
+                  onPageChange={setPage}
+                  onPerPageChange={setPerPage}
+                />
               </>
             )
           )}

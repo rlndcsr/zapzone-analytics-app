@@ -23,9 +23,13 @@ import { RegistrationHistorySheet } from "../../components/events/RegistrationHi
 import { RegistrationLoadFailure } from "../../components/events/RegistrationLoadFailure";
 import { RegistrationQrPanel } from "../../components/events/RegistrationQrPanel";
 import { RegistrationStatusPill } from "../../components/events/RegistrationStatusPill";
-import { RegistrationTile } from "../../components/events/RegistrationTile";
+import {
+  RegistrationSummary,
+  type RegistrationTileData,
+} from "../../components/events/RegistrationTile";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { SelectField } from "../../components/ui/FormControls";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Toast, type ToastType } from "../../components/ui/Toast";
 import { toCsv } from "../../lib/attractions/attractionsCsv";
 import { formatDateTimeET } from "../../lib/date/venueTime";
@@ -74,6 +78,9 @@ const PRIMARY = "#0644C7";
 /** The backend refuses a search longer than this. */
 const MAX_SEARCH = 100;
 
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
+
 type IconName = ComponentProps<typeof Feather>["name"];
 
 /** Which photo frame this location's event day uses (web: RegistrationEventDetails). */
@@ -95,7 +102,7 @@ const PhotoFrameLine = ({
       : `${formatDateLong(frames.firstDay)} – ${formatDateLong(frames.eventDate)}`;
   return (
     <View className="flex-row items-start gap-2">
-      <Feather name="camera" size={15} color={PRIMARY} style={{ marginTop: 2 }} />
+      <Feather name="camera" size={14} color="#9CA3AF" style={{ marginTop: 3 }} />
       {first ? (
         <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
           {"Photo frame: "}
@@ -138,59 +145,18 @@ const Chip = ({
   label: string;
   tone: "amber" | "blue" | "gray";
 }) => {
+  // Soft, borderless chips — the quiet tag look of the Attractions table.
   const styles = {
-    amber: [
-      "bg-amber-100 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800",
-      "text-amber-800 dark:text-amber-300",
-    ],
-    blue: [
-      "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800",
-      "text-blue-800 dark:text-blue-300",
-    ],
-    gray: [
-      "bg-gray-100 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700",
-      "text-gray-700 dark:text-gray-300",
-    ],
+    amber: ["bg-amber-50 dark:bg-amber-900/30", "text-amber-700 dark:text-amber-400"],
+    blue: ["bg-blue-50 dark:bg-blue-900/30", "text-blue-700 dark:text-blue-400"],
+    gray: ["bg-gray-100 dark:bg-neutral-800", "text-gray-700 dark:text-gray-300"],
   }[tone];
   return (
-    <View className={`px-2 py-0.5 rounded-full border ${styles[0]}`}>
+    <View className={`px-2 py-0.5 rounded-md ${styles[0]}`}>
       <Text className={`text-xs font-medium ${styles[1]}`}>{label}</Text>
     </View>
   );
 };
-
-const ActionButton = ({
-  label,
-  icon,
-  loading,
-  disabled,
-  onPress,
-}: {
-  label: string;
-  icon: IconName;
-  loading?: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-}) => (
-  <Pressable
-    onPress={onPress}
-    disabled={disabled}
-    accessibilityRole="button"
-    accessibilityLabel={label}
-    className={`flex-row items-center gap-1.5 px-3 py-2 rounded-lg border active:opacity-70 border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 ${
-      disabled ? "opacity-50" : ""
-    }`}
-  >
-    {loading ? (
-      <ActivityIndicator size="small" color={PRIMARY} />
-    ) : (
-      <Feather name={icon} size={14} color={PRIMARY} />
-    )}
-    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-      {label}
-    </Text>
-  </Pressable>
-);
 
 /** One contact: a compact row (web d5a759e) that opens to its details and entries. */
 const ContactRow = ({
@@ -201,6 +167,7 @@ const ContactRow = ({
   onToggle,
   onMenu,
   onToggleEntry,
+  isFirst,
 }: {
   group: RegistrationGroup;
   open: boolean;
@@ -209,11 +176,17 @@ const ContactRow = ({
   onToggle: () => void;
   onMenu: () => void;
   onToggleEntry: (entry: RegistrationEntry) => void;
+  /** The first row sits on the card's own border, so it draws no hairline. */
+  isFirst: boolean;
 }) => {
   const primaryName = group.entries[0]?.name ?? group.names[0] ?? group.email;
   const otherNames = Math.max(group.names.length - 1, 0);
   return (
-    <View className="border-t border-gray-100 dark:border-neutral-800">
+    // Divider width via style: a dark: class added after mount crashes css-interop.
+    <View
+      className="border-gray-100 dark:border-neutral-800"
+      style={{ borderTopWidth: isFirst ? 0 : 1 }}
+    >
       <View className="flex-row items-center gap-2 px-4 py-3">
         <Pressable
           onPress={onToggle}
@@ -251,7 +224,7 @@ const ContactRow = ({
 
       {open && (
         <View className="px-4 pb-4 gap-3">
-          <View className="rounded-xl border border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800 px-3 py-2 gap-1">
+          <View className="rounded-xl border border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-800/60 px-3 py-2.5 gap-1">
             <Text selectable className="text-sm text-gray-700 dark:text-gray-300">
               {group.email}
             </Text>
@@ -615,20 +588,22 @@ const RegistrationFormDetails = () => {
   };
 
   const header = (
-    <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-      <View className="flex-row items-center justify-between">
+    <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+      <View className="flex-row items-center gap-3">
         <Pressable
           onPress={() => router.back()}
-          className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+          className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
           <Feather name="chevron-left" size={20} color={headerIcon} />
         </Pressable>
-        <Text className="text-gray-900 dark:text-white text-lg font-bold">
+        <Text
+          numberOfLines={1}
+          className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+        >
           Location Form
         </Text>
-        <View style={{ width: 36 }} />
       </View>
     </View>
   );
@@ -670,6 +645,83 @@ const RegistrationFormDetails = () => {
   const shortVenue = shortVenueName(form.locationName) ?? venue;
   const eventName = form.group?.name ?? form.name;
 
+  const summaryTiles: RegistrationTileData[] = [
+    {
+      icon: "file-text",
+      label: "Total entries",
+      value: tallies.totalEntries,
+      hint: totalEntriesHint(tallies),
+    },
+    {
+      icon: "user-check",
+      label: "Unique registrations",
+      value: tallies.uniqueRegistrations,
+      hint: "Entries with the same phone and the same email count once.",
+    },
+    {
+      icon: "users",
+      label: "Same-contact groups",
+      value: tallies.duplicateGroups,
+      hint: duplicateHint(tallies),
+    },
+    {
+      icon: "rotate-ccw",
+      label: "Registered before",
+      value: tallies.returningContacts,
+      hint: "Registered for an earlier event that had already taken place.",
+    },
+    ...(hasPreviousEdition
+      ? [
+          {
+            icon: "repeat",
+            label: `Registered for ${previousName}`,
+            value: tallies.previousEditionRegistrants,
+            hint: "The same person also registered for last year's edition here.",
+          } as RegistrationTileData,
+        ]
+      : []),
+  ];
+
+  // The form's actions as module-hub shortcuts, like the Manage Attractions
+  // "More" row. A shortcut can't disable itself, so each one ignores taps while
+  // another action runs, and Close / Reopen is left out once the date passed.
+  const whenIdle = (run: () => void) => () => {
+    if (acting === null) run();
+  };
+  const moreShortcuts: HubQuickLink[] = [
+    ...(form.group
+      ? [
+          {
+            label: eventName,
+            icon: "arrow-left",
+            onPress: whenIdle(openParentEvent),
+          } as HubQuickLink,
+        ]
+      : []),
+    { label: "Edit form", icon: "edit-2", onPress: whenIdle(openEditor) },
+    ...(past
+      ? []
+      : [
+          {
+            label:
+              acting === "toggle"
+                ? "Updating…"
+                : form.isOpen
+                  ? "Close registration"
+                  : "Reopen registration",
+            icon: form.isOpen ? "lock" : "unlock",
+            onPress: whenIdle(() => void toggleOpen()),
+          } as HubQuickLink,
+        ]),
+    {
+      label: acting === "export" ? "Exporting…" : "Export CSV",
+      icon: "download",
+      onPress: whenIdle(() => void exportCsv()),
+    },
+  ];
+
+  const pageBusy = (atEdge: boolean) => atEdge || listLoading;
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {header}
@@ -680,9 +732,9 @@ const RegistrationFormDetails = () => {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
-        <View className="px-5 pt-5 gap-5">
+        <View className="px-4 mt-4">
           {/* Breadcrumb, then this location's title, the event, and the year links. */}
-          <View className="gap-2">
+          <View className="gap-1.5 mb-4">
             <View className="flex-row flex-wrap items-center gap-1.5">
               <Pressable
                 onPress={() => router.dismissTo("/events/registration-forms" as never)}
@@ -703,33 +755,31 @@ const RegistrationFormDetails = () => {
               <Text className="text-sm text-gray-400">/</Text>
               <Text className="text-sm text-gray-700 dark:text-gray-300">{shortVenue}</Text>
             </View>
-            <View className="flex-row flex-wrap items-center gap-2">
-              <Text className="text-2xl font-bold text-gray-900 dark:text-white">
+            <View className="flex-row items-start justify-between gap-3">
+              <Text className="flex-1 text-xl font-semibold text-gray-900 dark:text-white">
                 {venue}
               </Text>
-              <RegistrationStatusPill status={form.status} />
+              <View className="mt-1">
+                <RegistrationStatusPill status={form.status} />
+              </View>
             </View>
-            <View className="flex-row items-center gap-1.5">
-              <Feather name="calendar" size={14} color="#9CA3AF" />
-              <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
-                {eventName} · {formatDateLong(form.eventDate)}
-              </Text>
-            </View>
+            <Text className="text-xs text-gray-500 dark:text-gray-400">
+              {eventName}  ·  {formatDateLong(form.eventDate)}
+            </Text>
             {form.event && (
-              <View className="flex-row flex-wrap items-center gap-x-1.5">
-                <Feather name="check-square" size={14} color="#9CA3AF" />
-                <Text className="text-sm text-gray-600 dark:text-gray-400">
+              <View className="flex-row flex-wrap items-center gap-x-1">
+                <Text className="text-xs text-gray-500 dark:text-gray-400">
                   For the event
                 </Text>
                 <Pressable
                   onPress={() => openLinkedEvent(form.event!.id)}
                   accessibilityRole="link"
                 >
-                  <Text className="text-sm font-medium text-[#0644C7] dark:text-blue-400">
+                  <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-400">
                     {form.event.name}
                   </Text>
                 </Pressable>
-                <Text className="text-sm text-gray-600 dark:text-gray-400">
+                <Text className="text-xs text-gray-500 dark:text-gray-400">
                   · {formatEventDates(form.event)}
                 </Text>
               </View>
@@ -754,63 +804,71 @@ const RegistrationFormDetails = () => {
                 </Text>
               </Pressable>
             )}
-
-            <View className="flex-row flex-wrap gap-2 mt-1">
-              {form.group && (
-                <ActionButton
-                  label={eventName}
-                  icon="arrow-left"
-                  disabled={acting !== null}
-                  onPress={openParentEvent}
-                />
-              )}
-              <ActionButton
-                label="Edit form"
-                icon="edit-2"
-                disabled={acting !== null}
-                onPress={openEditor}
-              />
-              <ActionButton
-                label={
-                  form.isOpen ? "Close registration" : "Reopen registration"
-                }
-                icon={form.isOpen ? "lock" : "unlock"}
-                loading={acting === "toggle"}
-                disabled={past || acting !== null}
-                onPress={() => void toggleOpen()}
-              />
-            </View>
             {past && (
-              <Text className="text-sm text-gray-600 dark:text-gray-400">
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
                 Registration closed automatically after the event date.
                 Everything stays here.
               </Text>
             )}
           </View>
 
-          <View className="flex-row items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
-            <Feather name="map-pin" size={15} color={PRIMARY} />
-            <Text className="flex-1 text-sm text-gray-800 dark:text-gray-100">
+          {/* Scope — which location these numbers cover. */}
+          <View className="flex-row items-center gap-2 mb-4 px-3.5 py-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+            <Feather name="map-pin" size={14} color="#6B7280" />
+            <Text className="flex-1 text-xs text-gray-600 dark:text-gray-300">
               <Text className="font-semibold">This event</Text> · {shortVenue} only
             </Text>
           </View>
 
+          {/* Summary — this location form's tallies, never one page's or the event's. */}
+          <RegistrationSummary tiles={summaryTiles} />
+          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+            {`Registration totals for ${shortVenue}'s ${eventName} form only. They don't show who attended.`}
+          </Text>
+          {tallies.hiddenEntries > 0 && filter !== "hidden" && (
+            <Pressable
+              onPress={() => {
+                setFilter("hidden");
+                setPage(1);
+              }}
+              accessibilityRole="button"
+              className="self-start mt-1 py-1"
+            >
+              <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                {hiddenEntriesLink(tallies.hiddenEntries)}
+              </Text>
+            </Pressable>
+          )}
+
+          {/* More — the form's actions as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
+            />
+          </View>
+
+          {/* Photos — the frame and email this location's registrants get,
+              as one bordered detail panel divided by a hairline. */}
           {form.photoFrames && (
-            <View className="gap-2">
-              <PhotoFrameLine
-                frames={form.photoFrames}
-                past={past}
-                onOpenOverlays={() => router.push("/photos/overlays" as never)}
-                onAddFrame={() =>
-                  router.push({
-                    pathname: "/photos/overlays",
-                    params: { event: String(form.id), location: String(form.locationId) },
-                  } as never)
-                }
-              />
+            <View className="mt-4 bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden">
+              <View className="p-4">
+                <PhotoFrameLine
+                  frames={form.photoFrames}
+                  past={past}
+                  onOpenOverlays={() => router.push("/photos/overlays" as never)}
+                  onAddFrame={() =>
+                    router.push({
+                      pathname: "/photos/overlays",
+                      params: { event: String(form.id), location: String(form.locationId) },
+                    } as never)
+                  }
+                />
+              </View>
               {/* Which email registrants' photos go out with (web: RegistrationEventDetails). */}
-              <View className="flex-row items-start gap-2">
-                <Feather name="mail" size={15} color={PRIMARY} style={{ marginTop: 2 }} />
+              <View className="p-4 flex-row items-start gap-2 border-t border-gray-100 dark:border-neutral-800">
+                <Feather name="mail" size={14} color="#9CA3AF" style={{ marginTop: 3 }} />
                 {form.photoEmail ? (
                   <Text className="flex-1 text-sm text-gray-600 dark:text-gray-400">
                     {"Photos sent to people who registered use the "}
@@ -860,210 +918,174 @@ const RegistrationFormDetails = () => {
             </View>
           )}
 
-          {/* Count tiles — this location form's tallies, never one page's or the event's. */}
-          <View>
-            <View className="flex-row flex-wrap -m-1.5">
-              <RegistrationTile
-                label="Total entries"
-                value={tallies.totalEntries}
-                hint={totalEntriesHint(tallies)}
-              />
-              <RegistrationTile
-                label="Unique registrations"
-                value={tallies.uniqueRegistrations}
-                hint="Entries with the same phone and the same email count once."
-              />
-              <RegistrationTile
-                label="Same-contact groups"
-                value={tallies.duplicateGroups}
-                hint={duplicateHint(tallies)}
-              />
-              <RegistrationTile
-                label="Registered before"
-                value={tallies.returningContacts}
-                hint="Registered for an earlier event that had already taken place."
-              />
-              {hasPreviousEdition && (
-                <RegistrationTile
-                  label={`Registered for ${previousName}`}
-                  value={tallies.previousEditionRegistrants}
-                  hint={
-                    "The same person also registered for last year's edition here."
-                  }
-                />
-              )}
-            </View>
-            <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              {`Registration totals for ${shortVenue}'s ${eventName} form only. They don't show who attended.`}
+          <View className="mt-4">
+            <RegistrationQrPanel form={form} onNotify={notify} />
+          </View>
+
+          {/* Registrations — list header, search, then the filter. */}
+          <View className="mt-5 mb-3">
+            <Text className="text-base font-semibold text-gray-900 dark:text-white">
+              Registrations
             </Text>
-            {tallies.hiddenEntries > 0 && filter !== "hidden" && (
+            {pagination && (
+              <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                {listSummary(pagination, tallies.totalEntries, unfiltered)}
+              </Text>
+            )}
+          </View>
+
+          <View className="flex-row items-center gap-2 h-11 px-3.5 mb-2 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+            <Feather name="search" size={16} color="#9CA3AF" />
+            <TextInput
+              value={searchInput}
+              onChangeText={setSearchInput}
+              maxLength={MAX_SEARCH}
+              placeholder="Search name, email or phone"
+              placeholderTextColor="#9CA3AF"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              className="flex-1 text-sm text-gray-900 dark:text-white"
+              accessibilityLabel="Search registrations"
+            />
+            {searchInput.length > 0 && (
               <Pressable
-                onPress={() => {
-                  setFilter("hidden");
-                  setPage(1);
-                }}
+                onPress={() => setSearchInput("")}
+                hitSlop={8}
                 accessibilityRole="button"
-                className="self-start mt-1 py-1"
+                accessibilityLabel="Clear search"
               >
-                <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-400">
-                  {hiddenEntriesLink(tallies.hiddenEntries)}
-                </Text>
+                <Feather name="x-circle" size={16} color="#9CA3AF" />
               </Pressable>
             )}
           </View>
 
-          <RegistrationQrPanel form={form} onNotify={notify} />
-
-          {/* Registrations */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-100 dark:border-neutral-800">
-            <View className="p-4 gap-3">
-              <View className="flex-row items-center justify-between gap-2">
-                <View className="flex-row items-center gap-2">
-                  <Feather name="users" size={17} color={PRIMARY} />
-                  <Text className="text-base font-semibold text-gray-900 dark:text-white">
-                    Registrations
-                  </Text>
-                </View>
-                <ActionButton
-                  label="Export CSV"
-                  icon="download"
-                  loading={acting === "export"}
-                  disabled={acting !== null}
-                  onPress={() => void exportCsv()}
-                />
-              </View>
-
-              <View className="flex-row items-center gap-2 rounded-xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3.5 py-3">
-                <Feather name="search" size={15} color="#9CA3AF" />
-                <TextInput
-                  value={searchInput}
-                  onChangeText={setSearchInput}
-                  maxLength={MAX_SEARCH}
-                  placeholder="Search name, email or phone"
-                  placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  className="flex-1 text-sm text-gray-900 dark:text-white"
-                  accessibilityLabel="Search registrations"
-                />
-                {searchInput.length > 0 && (
-                  <Pressable onPress={() => setSearchInput("")} hitSlop={8}>
-                    <Feather name="x" size={15} color="#9CA3AF" />
-                  </Pressable>
-                )}
-              </View>
-
-              <SelectField
-                value={filter}
-                options={filterOptions(
-                  hasPreviousEdition ? previousName : null,
-                  tallies.hiddenEntries,
-                )}
-                onSelect={(value) => {
-                  setFilter(value as RegistrationListFilter);
-                  setPage(1);
-                }}
-              />
-
-              {pagination && (
-                <Text className="text-xs text-gray-500 dark:text-gray-400">
-                  {listSummary(pagination, tallies.totalEntries, unfiltered)}
-                </Text>
+          <View className="mb-3">
+            <SelectField
+              value={filter}
+              options={filterOptions(
+                hasPreviousEdition ? previousName : null,
+                tallies.hiddenEntries,
               )}
-            </View>
+              onSelect={(value) => {
+                setFilter(value as RegistrationListFilter);
+                setPage(1);
+              }}
+            />
+          </View>
 
-            {listError ? (
-              <View className="p-6 items-center gap-3 border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-sm text-red-600 text-center">
+          {/* List / states. Distinct keys per state so css-interop never
+              upgrades one container into another in place. */}
+          {listError ? (
+            <View
+              key="registrations-error"
+              className="flex-row gap-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4"
+            >
+              <Feather name="alert-circle" size={18} color="#DC2626" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  Could not load registrations
+                </Text>
+                <Text className="text-sm text-red-600/90 dark:text-red-400/80 mt-0.5">
                   {listError}
                 </Text>
                 <Pressable
                   onPress={() => void loadList()}
-                  className="px-4 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  className="self-start mt-2.5 px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-900/50 active:opacity-70"
                   accessibilityRole="button"
                 >
-                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  <Text className="text-xs font-semibold text-red-700 dark:text-red-400">
                     Try again
                   </Text>
                 </Pressable>
               </View>
-            ) : listLoading && groups.length === 0 ? (
-              <View className="py-12 items-center border-t border-gray-100 dark:border-neutral-800">
-                <ActivityIndicator color={PRIMARY} />
+            </View>
+          ) : listLoading && groups.length === 0 ? (
+            <View
+              key="registrations-loading"
+              className="py-12 items-center bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800"
+            >
+              <ActivityIndicator color={PRIMARY} />
+            </View>
+          ) : groups.length === 0 ? (
+            <View
+              key="registrations-empty"
+              className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 px-6 py-10 items-center"
+            >
+              <View className="w-12 h-12 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
+                <Feather name={unfiltered ? "users" : "search"} size={20} color="#9CA3AF" />
               </View>
-            ) : groups.length === 0 ? (
-              <View className="p-10 items-center border-t border-gray-100 dark:border-neutral-800">
-                <Text className="text-sm text-gray-500 dark:text-gray-400 text-center">
-                  {emptyListMessage(filter, search)}
+              <Text className="text-sm font-semibold text-gray-900 dark:text-white text-center">
+                {emptyListMessage(filter, search)}
+              </Text>
+              {unfiltered && (
+                <Text className="text-sm text-gray-500 dark:text-gray-400 text-center mt-1 max-w-xs">
+                  Share the QR code or link above. Registrations show up here
+                  as soon as guests submit the form.
                 </Text>
-                {unfiltered && (
-                  <Text className="text-xs text-gray-400 dark:text-gray-500 text-center mt-1">
-                    Share the QR code or link above. Registrations show up here
-                    as soon as guests submit the form.
-                  </Text>
-                )}
-              </View>
-            ) : (
-              <View style={{ opacity: listLoading ? 0.6 : 1 }}>
-                {groups.map((group) => (
-                  <ContactRow
-                    key={group.contactId}
-                    group={group}
-                    open={expanded.has(group.contactId)}
-                    previousName={previousName}
-                    disabled={acting !== null}
-                    onToggle={() => toggleExpanded(group.contactId)}
-                    onMenu={() => setMenuGroup(group)}
-                    onToggleEntry={toggleEntry}
-                  />
-                ))}
-              </View>
-            )}
+              )}
+            </View>
+          ) : (
+            <View
+              key="registrations-list"
+              className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden"
+              style={{ opacity: listLoading ? 0.6 : 1 }}
+            >
+              {groups.map((group, index) => (
+                <ContactRow
+                  key={group.contactId}
+                  group={group}
+                  isFirst={index === 0}
+                  open={expanded.has(group.contactId)}
+                  previousName={previousName}
+                  disabled={acting !== null}
+                  onToggle={() => toggleExpanded(group.contactId)}
+                  onMenu={() => setMenuGroup(group)}
+                  onToggleEntry={toggleEntry}
+                />
+              ))}
+            </View>
+          )}
 
-            {pagination && pagination.lastPage > 1 && (
-              <View className="flex-row items-center justify-between gap-2 p-4 border-t border-gray-100 dark:border-neutral-800">
-                <Pressable
-                  onPress={() => setPage((current) => Math.max(1, current - 1))}
-                  disabled={pagination.currentPage <= 1 || listLoading}
-                  className={`flex-row items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 ${
-                    pagination.currentPage <= 1 || listLoading
-                      ? "opacity-50"
-                      : ""
-                  }`}
-                  accessibilityRole="button"
-                >
-                  <Feather name="chevron-left" size={14} color={headerIcon} />
-                  <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                    Previous
-                  </Text>
-                </Pressable>
-                <Text className="text-sm text-gray-600 dark:text-gray-400">
-                  Page {pagination.currentPage} of {pagination.lastPage}
+          {pagination && pagination.lastPage > 1 && (
+            <View className="flex-row items-center justify-between gap-2 mt-3">
+              <Pressable
+                onPress={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={pageBusy(pagination.currentPage <= 1)}
+                className={`flex-row items-center gap-1 h-9 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 ${
+                  pageBusy(pagination.currentPage <= 1) ? "opacity-50" : ""
+                }`}
+                accessibilityRole="button"
+              >
+                <Feather name="chevron-left" size={14} color={headerIcon} />
+                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  Previous
                 </Text>
-                <Pressable
-                  onPress={() =>
-                    setPage((current) =>
-                      Math.min(pagination.lastPage, current + 1),
-                    )
-                  }
-                  disabled={
-                    pagination.currentPage >= pagination.lastPage || listLoading
-                  }
-                  className={`flex-row items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 ${
-                    pagination.currentPage >= pagination.lastPage || listLoading
-                      ? "opacity-50"
-                      : ""
-                  }`}
-                  accessibilityRole="button"
-                >
-                  <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                    Next
-                  </Text>
-                  <Feather name="chevron-right" size={14} color={headerIcon} />
-                </Pressable>
-              </View>
-            )}
-          </View>
+              </Pressable>
+              <Text className="text-xs text-gray-500 dark:text-gray-400">
+                Page {pagination.currentPage} of {pagination.lastPage}
+              </Text>
+              <Pressable
+                onPress={() =>
+                  setPage((current) =>
+                    Math.min(pagination.lastPage, current + 1),
+                  )
+                }
+                disabled={pageBusy(pagination.currentPage >= pagination.lastPage)}
+                className={`flex-row items-center gap-1 h-9 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 ${
+                  pageBusy(pagination.currentPage >= pagination.lastPage)
+                    ? "opacity-50"
+                    : ""
+                }`}
+                accessibilityRole="button"
+              >
+                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  Next
+                </Text>
+                <Feather name="chevron-right" size={14} color={headerIcon} />
+              </Pressable>
+            </View>
+          )}
         </View>
       </ScrollView>
 
