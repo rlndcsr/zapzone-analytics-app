@@ -4,7 +4,9 @@ import { describe, it } from "node:test";
 import {
   fromMinutes,
   generateScheduleSlots,
+  packageDurationMinutes,
   scheduleIntervalMessage,
+  startCadenceLabel,
   toMinutes,
 } from "./scheduleSlots.ts";
 
@@ -187,5 +189,77 @@ describe("describing the interval below the schedule field", () => {
       msg?.text,
       "A start every 30 min. Once a booking is taken, that space stays closed for its turnaround of 20 min before it can take another.",
     );
+  });
+});
+
+describe("the Package Details cadence note (web startCadenceLabel)", () => {
+  it("says a start every N min when the window fits several starts", () => {
+    // The web screenshot's Friday schedule: 4:30 PM - 9:00 PM every 15 min, 2 h.
+    assert.equal(
+      startCadenceLabel({
+        start: "16:30:00",
+        end: "21:00:00",
+        intervalMinutes: 15,
+        durationMinutes: 120,
+      }),
+      "a start every 15 min",
+    );
+  });
+
+  it("says only one start fits when the duration leaves room for one", () => {
+    assert.equal(
+      startCadenceLabel({
+        start: "10:00",
+        end: "12:30",
+        intervalMinutes: 60,
+        durationMinutes: 120,
+      }),
+      "only one start fits this window",
+    );
+  });
+
+  it("says no start fits when the duration is longer than the window", () => {
+    assert.equal(
+      startCadenceLabel({
+        start: "10:00",
+        end: "11:00",
+        intervalMinutes: 30,
+        durationMinutes: 120,
+      }),
+      "no start times fit this window",
+    );
+  });
+
+  it("still counts every start when the package has no duration", () => {
+    assert.equal(
+      startCadenceLabel({
+        start: "10:00",
+        end: "12:00",
+        intervalMinutes: 30,
+        durationMinutes: 0,
+      }),
+      "a start every 30 min",
+    );
+  });
+
+  it("reads an end at or before the start as running past midnight", () => {
+    assert.equal(
+      startCadenceLabel({
+        start: "22:00",
+        end: "01:00",
+        intervalMinutes: 60,
+        durationMinutes: 60,
+      }),
+      "a start every 60 min",
+    );
+  });
+});
+
+describe("a package's duration in minutes", () => {
+  it("keeps minutes and converts every other unit from hours", () => {
+    assert.equal(packageDurationMinutes(90, "minutes"), 90);
+    assert.equal(packageDurationMinutes(2, "hours"), 120);
+    assert.equal(packageDurationMinutes(1.5, "hours and minutes"), 90);
+    assert.equal(packageDurationMinutes(null, "hours"), 0);
   });
 });

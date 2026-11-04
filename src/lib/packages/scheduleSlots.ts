@@ -135,3 +135,53 @@ export function scheduleIntervalMessage({
 
   return { text: `A start every ${interval} min.${spaceNote}`, overlapWarning: false };
 }
+
+/**
+ * The "(…)" note after a schedule's window on the Package Details page — a port
+ * of the web's `startCadenceLabel` (ScheduleStartTimes.tsx) over its
+ * `generateTimeSlots` (utils/timeSlots.ts). Unlike {@link generateScheduleSlots},
+ * a package with no duration still gets every start in the window, exactly as
+ * on the web; only the number of starts matters, so counting stops at two.
+ */
+export function startCadenceLabel({
+  start,
+  end,
+  intervalMinutes,
+  durationMinutes,
+}: {
+  start: string | null | undefined;
+  end: string | null | undefined;
+  intervalMinutes: number;
+  durationMinutes: number;
+}): string {
+  let starts = 0;
+  const startMin = toMinutes(start);
+  const endMinRaw = toMinutes(end);
+  if (startMin != null && endMinRaw != null && intervalMinutes > 0) {
+    const endMin = endMinRaw <= startMin ? endMinRaw + 1440 : endMinRaw;
+    for (
+      let cursor = startMin;
+      cursor < endMin && starts < 2;
+      cursor += intervalMinutes
+    ) {
+      // A start must finish before closing (the web's generateTimeSlots).
+      if (durationMinutes > 0 && cursor + durationMinutes > endMin) break;
+      starts++;
+    }
+  }
+
+  if (starts === 0) return "no start times fit this window";
+  if (starts === 1) return "only one start fits this window";
+  return `a start every ${intervalMinutes} min`;
+}
+
+/** A package's duration in minutes, as the web Package Details reckons it:
+ *  "minutes" is taken as-is, every other unit as hours. */
+export function packageDurationMinutes(
+  duration: number | null | undefined,
+  durationUnit: string | null | undefined,
+): number {
+  return durationUnit === "minutes"
+    ? Number(duration) || 0
+    : Math.round((Number(duration) || 0) * 60);
+}

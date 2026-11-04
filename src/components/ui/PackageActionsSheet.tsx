@@ -16,6 +16,10 @@ import {
   duplicateBackendOnlyNote,
 } from "../../lib/packages/onlineAvailability";
 import { monthlyPatternLabel } from "../../lib/packages/scheduleDays";
+import {
+  packageDurationMinutes,
+  startCadenceLabel,
+} from "../../lib/packages/scheduleSlots";
 import { requestErrorMessage } from "../../lib/requestError";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDuration, formatTimeRange } from "../../lib/time";
@@ -30,7 +34,6 @@ import {
 import { BackendOnlyBadge } from "./BackendOnly";
 import { BottomSheet } from "./BottomSheet";
 import { SelectField } from "./FormControls";
-import { StatusBadge } from "./StatusBadge";
 
 const PRIMARY = "#0644C7";
 
@@ -39,6 +42,10 @@ export type LocationOption = { id: number; name: string };
 
 const money = (n: number | null): string =>
   n == null ? "—" : `$${n.toFixed(2)}`;
+
+/** The web page's `capitalize` class: first letter upper-cased ("regular" → "Regular"). */
+const capitalize = (s: string): string =>
+  s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
 /* --- Local presentational helpers (mirrors the web PackageDetails page) ---- */
 
@@ -318,28 +325,74 @@ export function PackageActionsSheet({
           )}
           {!loading && !error && detail && (
             <>
-              {/* Header — name, category, status (the web page's title block). */}
+              {/* Header — the web page's title block: name, category, then the
+                  status / Backend only pills beside Edit and Delete. Duplicate
+                  is the app's own extra (the web page has no copy button). */}
               <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-2">
                 {detail.name}
               </Text>
-              <View className="flex-row flex-wrap items-center gap-2 mt-1.5">
-                <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  {normalizeCategory(detail.category) || "No category"}
-                </Text>
-                <StatusBadge status={detail.isActive ? "active" : "inactive"} />
+              <Text className="text-sm text-gray-600 dark:text-gray-400 mt-1.5">
+                {normalizeCategory(detail.category) || "No category"}
+              </Text>
+              <View className="flex-row flex-wrap items-center gap-2 mt-3">
+                <View
+                  className={`px-3 py-1.5 rounded-full ${
+                    detail.isActive
+                      ? "bg-green-100 dark:bg-green-900/40"
+                      : "bg-gray-100 dark:bg-neutral-800"
+                  }`}
+                >
+                  <Text
+                    className={`text-xs font-medium ${
+                      detail.isActive
+                        ? "text-green-800 dark:text-green-300"
+                        : "text-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    {detail.isActive ? "Active" : "Inactive"}
+                  </Text>
+                </View>
                 {detail.availableOnline === false && (
                   <BackendOnlyBadge isActive={detail.isActive} />
                 )}
               </View>
-
-              {!!detail.description && (
-                <>
-                  <SectionTitle>Description</SectionTitle>
-                  <Text className="text-sm text-gray-700 dark:text-gray-200 leading-6">
-                    {detail.description}
+              <View className="flex-row gap-2 mt-3">
+                <Pressable
+                  onPress={goEdit}
+                  className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl bg-[#0644C7] active:opacity-90"
+                  accessibilityRole="button"
+                >
+                  <Feather name="edit" size={15} color="#fff" />
+                  <Text className="text-sm font-semibold text-white">Edit</Text>
+                </Pressable>
+                <Pressable
+                  onPress={confirmDelete}
+                  disabled={busy}
+                  className={`flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl bg-red-600 ${
+                    busy ? "opacity-60" : "active:opacity-90"
+                  }`}
+                  accessibilityRole="button"
+                >
+                  <Feather name="trash-2" size={15} color="#fff" />
+                  <Text className="text-sm font-semibold text-white">
+                    Delete
                   </Text>
-                </>
-              )}
+                </Pressable>
+                <Pressable
+                  onPress={goDuplicate}
+                  className="flex-row items-center justify-center gap-2 px-4 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  accessibilityRole="button"
+                  accessibilityLabel="Duplicate package"
+                >
+                  <Feather name="copy" size={15} color="#374151" />
+                </Pressable>
+              </View>
+
+              {/* Description — always shown, with the web's fallback text. */}
+              <SectionTitle>Description</SectionTitle>
+              <Text className="text-sm text-gray-700 dark:text-gray-200 leading-6">
+                {detail.description || "No description provided"}
+              </Text>
 
               {detail.features.length > 0 && (
                 <>
@@ -358,7 +411,10 @@ export function PackageActionsSheet({
                 </>
               )}
 
-              {/* Package Details — two-column grid of icon + label + value. */}
+              {/* Package Details — the web page's grid, field for field and in
+                  its order. Visibility follows the web's truthiness checks:
+                  decimal fields arrive as strings ("0.00" still shows), while
+                  an integer 0 (max participants) hides. */}
               <SectionTitle>Package Details</SectionTitle>
               <View className="flex-row flex-wrap">
                 <DetailTile
@@ -370,7 +426,7 @@ export function PackageActionsSheet({
                   <DetailTile
                     icon="tag"
                     label="Package Type"
-                    value={detail.packageType}
+                    value={capitalize(detail.packageType)}
                   />
                 )}
                 <DetailTile
@@ -385,7 +441,7 @@ export function PackageActionsSheet({
                     value={money(detail.pricePerAdditional)}
                   />
                 )}
-                {detail.maxParticipants != null && (
+                {!!detail.maxParticipants && (
                   <DetailTile
                     icon="users"
                     label="Max Participants"
@@ -410,56 +466,10 @@ export function PackageActionsSheet({
                   <DetailTile
                     icon="calendar"
                     label="Created"
-                    value={new Date(detail.createdAt).toLocaleDateString()}
+                    // The web's toLocaleDateString(): "12/13/2025".
+                    value={new Date(detail.createdAt).toLocaleDateString("en-US")}
                   />
                 )}
-                {detail.partialPaymentPercentage != null &&
-                  detail.partialPaymentPercentage > 0 && (
-                    <DetailTile
-                      icon="percent"
-                      label="Deposit"
-                      value={`${detail.partialPaymentPercentage}%`}
-                    />
-                  )}
-                {detail.partialPaymentFixed != null &&
-                  detail.partialPaymentFixed > 0 && (
-                    <DetailTile
-                      icon="dollar-sign"
-                      label="Deposit (fixed)"
-                      value={money(detail.partialPaymentFixed)}
-                    />
-                  )}
-                {detail.minParticipants != null && (
-                  <DetailTile
-                    icon="user"
-                    label="Min Participants"
-                    value={`${detail.minParticipants} people`}
-                  />
-                )}
-                {detail.bookingWindowDays != null && (
-                  <DetailTile
-                    icon="calendar"
-                    label="Booking Window"
-                    value={`${detail.bookingWindowDays} days`}
-                  />
-                )}
-                {detail.minBookingNoticeHours != null && (
-                  <DetailTile
-                    icon="bell"
-                    label="Min. Notice"
-                    value={`${detail.minBookingNoticeHours} h`}
-                  />
-                )}
-                <DetailTile
-                  icon="gift"
-                  label="Guest of Honor"
-                  value={detail.hasGuestOfHonor ? "Yes" : "No"}
-                />
-                <DetailTile
-                  icon="list"
-                  label="Display Order"
-                  value={String(detail.displayOrder)}
-                />
               </View>
 
               {detail.schedules.length > 0 && (
@@ -513,9 +523,19 @@ export function PackageActionsSheet({
                             ? formatTimeRange(s.timeSlotStart, s.timeSlotEnd)
                             : s.availabilityType}
                         </Text>
-                        {s.timeSlotInterval != null && (
+                        {!!s.timeSlotInterval && (
                           <Text className="text-[11px] text-gray-500 dark:text-gray-400">
-                            ({s.timeSlotInterval} min intervals)
+                            (
+                            {startCadenceLabel({
+                              start: s.timeSlotStart,
+                              end: s.timeSlotEnd,
+                              intervalMinutes: s.timeSlotInterval,
+                              durationMinutes: packageDurationMinutes(
+                                detail.duration,
+                                detail.durationUnit,
+                              ),
+                            })}
+                            )
                           </Text>
                         )}
                       </View>
@@ -532,7 +552,7 @@ export function PackageActionsSheet({
                       key={r.id}
                       left={r.name}
                       right={
-                        r.capacity != null ? (
+                        r.capacity ? (
                           <View className="flex-row items-center gap-1">
                             <Feather name="users" size={13} color={PRIMARY} />
                             <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
@@ -585,64 +605,6 @@ export function PackageActionsSheet({
                 </>
               )}
 
-              {detail.promos.length > 0 && (
-                <>
-                  <SectionTitle>Active Promotions</SectionTitle>
-                  {detail.promos.map((p) => (
-                    <InfoCard key={p.id} left={p.name || p.code} />
-                  ))}
-                </>
-              )}
-
-              {detail.giftCards.length > 0 && (
-                <>
-                  <SectionTitle>Applicable Gift Cards</SectionTitle>
-                  {detail.giftCards.map((g) => (
-                    <InfoCard key={g.id} left={g.code} />
-                  ))}
-                </>
-              )}
-
-              {!!detail.customerNotes && (
-                <>
-                  <SectionTitle>Customer Notes</SectionTitle>
-                  <Text className="text-sm text-gray-700 dark:text-gray-200 leading-6">
-                    {detail.customerNotes}
-                  </Text>
-                </>
-              )}
-
-              {/* Footer actions */}
-              <View className="flex-row gap-3 mt-6">
-                <Pressable
-                  onPress={goEdit}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7]"
-                >
-                  <Feather name="edit-2" size={16} color="#fff" />
-                  <Text className="text-sm font-semibold text-white">Edit</Text>
-                </Pressable>
-                <Pressable
-                  onPress={goDuplicate}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
-                >
-                  <Feather name="copy" size={16} color="#374151" />
-                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                    Duplicate
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={confirmDelete}
-                  disabled={busy}
-                  className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-red-600 ${
-                    busy ? "opacity-60" : "active:opacity-90"
-                  }`}
-                >
-                  <Feather name="trash-2" size={16} color="#fff" />
-                  <Text className="text-sm font-semibold text-white">
-                    Delete
-                  </Text>
-                </Pressable>
-              </View>
             </>
           )}
         </ScrollView>
