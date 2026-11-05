@@ -1,8 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
-import { useColorScheme } from "nativewind";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,23 +10,36 @@ import {
   ScrollView,
   Share,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { GroupInviteRecipientsSheet } from "../../components/ui/GroupInviteRecipientsSheet";
-import { GroupInvitesTable } from "../../components/ui/GroupInvitesTable";
-import { StatusBadge } from "../../components/ui/StatusBadge";
+import {
+  formatInviteDate,
+  GroupInvitesTable,
+} from "../../components/ui/GroupInvitesTable";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
+import { Pagination } from "../../components/ui/Pagination";
+import {
+  AttractionsListSkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  ToneDotBadge,
+} from "../../components/ui/SummaryPanel";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
-import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
 import {
   consumeGroupInvitesStale,
   useGroupInvites,
 } from "../../lib/hooks/useGroupInvites";
 import { getCurrentUser, getToken } from "../../lib/session";
-import { buildGroupLink } from "../../lib/waivers/chaperoneLink";
+import { buildChaperoneLink, buildGroupLink } from "../../lib/waivers/chaperoneLink";
 import { groupLinkState } from "../../lib/waivers/groupInvites";
 import {
   resendGroupInvite,
@@ -36,24 +48,18 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  const d = new Date(`${dateStr.substring(0, 10)}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+/** Whether the chaperone's own invite went out (the invite's `status`). */
+const InviteStatusPill = ({ status }: { status: string }) =>
+  status === "sent" ? (
+    <ToneDotBadge tone="blue" label="Invite sent" />
+  ) : status === "not_sent" ? (
+    <ToneDotBadge tone="gray" label="Not sent yet" />
+  ) : (
+    <ToneDotBadge tone="gray" label={status.replace(/_/g, " ")} />
+  );
 
 const InviteCard = ({
   invite,
@@ -63,82 +69,116 @@ const InviteCard = ({
   onMore: () => void;
 }) => {
   const contact = invite.chaperoneEmail || invite.chaperonePhone;
+  const link = groupLinkState(invite);
   return (
     <Pressable
       onPress={onMore}
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
-      style={CARD_SHADOW}
+      className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
       accessibilityRole="button"
       accessibilityLabel={`Invite for ${invite.chaperoneName}`}
     >
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
-            numberOfLines={1}
-          >
-            {invite.chaperoneName}
-          </Text>
-          {!!contact && (
-            <Text
-              className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
-              numberOfLines={1}
-            >
-              {contact}
-            </Text>
-          )}
-        </View>
-        <StatusBadge status={invite.status} />
-      </View>
-
-      <View className="flex-row items-center gap-1.5">
-        <Feather name="file-text" size={12} color="#9CA3AF" />
+      <View className="flex-row items-start justify-between gap-3">
         <Text
-          className="text-sm font-medium text-gray-700 dark:text-gray-200 flex-1"
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {invite.chaperoneName}
+        </Text>
+        <InviteStatusPill status={invite.status} />
+      </View>
+      {!!contact && (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1" numberOfLines={1}>
+          {contact}
+        </Text>
+      )}
+
+      <View className="flex-row items-center gap-1.5 mt-2">
+        <Feather name="file-text" size={13} color="#9CA3AF" />
+        <Text
+          className="shrink text-[13px] font-medium text-gray-700 dark:text-gray-200"
           numberOfLines={1}
         >
           {invite.templateTitle ?? "—"}
         </Text>
       </View>
 
-      <View className="flex-row items-center gap-1.5 mt-1">
-        <Feather name="calendar" size={12} color="#9CA3AF" />
-        <Text className="text-xs text-gray-500 dark:text-gray-400">
-          {formatDate(invite.selectedDate)}
-        </Text>
+      {/* Signed / not delivered / group link — the web row's numbers */}
+      <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+        <View className="flex-1 px-3 py-2.5">
+          <Text className="text-[11px] text-gray-500 dark:text-gray-400">Signed</Text>
+          <Text className="text-sm font-semibold mt-0.5 text-gray-900 dark:text-white">
+            {invite.completeCount} of {invite.recipientsCount}
+          </Text>
+        </View>
+        <View className="flex-1 px-3 py-2.5 border-l border-gray-200 dark:border-neutral-800">
+          <Text className="text-[11px] text-gray-500 dark:text-gray-400">Not delivered</Text>
+          <Text
+            className={`text-sm font-semibold mt-0.5 ${
+              invite.failedCount > 0
+                ? "text-red-600 dark:text-red-400"
+                : "text-gray-900 dark:text-white"
+            }`}
+          >
+            {invite.failedCount}
+          </Text>
+        </View>
+        <View className="flex-1 px-3 py-2.5 border-l border-gray-200 dark:border-neutral-800">
+          <Text className="text-[11px] text-gray-500 dark:text-gray-400">Group link</Text>
+          <Text
+            className={`text-sm font-semibold mt-0.5 ${
+              link === "off" ? "text-gray-400 dark:text-gray-500" : "text-emerald-700 dark:text-emerald-400"
+            }`}
+          >
+            {link === "copy" ? "Ready" : link === "enabled" ? "Enabled" : "Off"}
+          </Text>
+        </View>
       </View>
 
-      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center gap-1.5 flex-1 mr-2">
-          <Feather name="users" size={12} color="#9CA3AF" />
-          <Text className="text-xs text-gray-500 dark:text-gray-400">
-            {invite.completeCount} of {invite.recipientsCount} signed
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        <View className="flex-row items-center gap-1.5 shrink">
+          <Feather name="calendar" size={12} color="#9CA3AF" />
+          <Text className="text-xs text-gray-400 dark:text-gray-500" numberOfLines={1}>
+            {formatInviteDate(invite.selectedDate)}
           </Text>
-          {invite.failedCount > 0 && (
-            <Text className="text-xs font-medium text-red-600 dark:text-red-400">
-              · {invite.failedCount} not delivered
-            </Text>
-          )}
         </View>
-        <View className="flex-row items-center gap-2">
-          {invite.allowShareableLink && (
-            <View className="bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
-              <Text className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                Shareable
-              </Text>
-            </View>
-          )}
-          <Feather name="more-vertical" size={18} color="#9CA3AF" />
+        <View className="flex-row items-center gap-0.5">
+          <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">Actions</Text>
+          <Feather name="chevron-right" size={14} color="#9CA3AF" />
         </View>
       </View>
     </Pressable>
   );
 };
 
+/** One row of the per-invite actions sheet. */
+const SheetAction = ({
+  icon,
+  label,
+  color = PRIMARY,
+  disabled = false,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  label: string;
+  color?: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    disabled={disabled}
+    onPress={onPress}
+    className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+    accessibilityRole="button"
+  >
+    <Feather name={icon} size={18} color={color} />
+    <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
+      {label}
+    </Text>
+  </Pressable>
+);
+
 const GroupInvites = () => {
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   const role = getCurrentUser()?.role;
   // Group-invite create/resend is admin/manager only (attendant blocked).
@@ -156,6 +196,8 @@ const GroupInvites = () => {
   // the web admin's Group Invites table (Chaperone / Template / Date / Signed
   // / Group link) and the same pattern used across the app's other list screens.
   const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
 
   const { invites, loading, error, refetch } = useGroupInvites();
 
@@ -168,6 +210,19 @@ const GroupInvites = () => {
         .includes(term),
     );
   }, [invites, search]);
+
+  const paged = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage],
+  );
+  useEffect(() => {
+    setPage(1);
+  }, [search, perPage]);
+  // A refetch that shrinks the list would otherwise leave an empty page.
+  useEffect(() => {
+    const last = Math.max(1, Math.ceil(filtered.length / perPage));
+    if (page > last) setPage(last);
+  }, [page, filtered.length, perPage]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -184,7 +239,7 @@ const GroupInvites = () => {
     }, [refetch]),
   );
 
-  const onResend = async (invite: GroupInvite) => {
+  const onResend = useCallback(async (invite: GroupInvite) => {
     if (resendLock.current) return;
     const token = getToken();
     if (!token) {
@@ -208,18 +263,21 @@ const GroupInvites = () => {
       resendLock.current = false;
       setBusy(false);
     }
-  };
+  }, []);
 
   // The actions sheet closes first; opening the list on top of it while it
   // animates out would stack two modals.
-  const onViewRecipients = (invite: GroupInvite) => {
-    if (actionsInvite) {
-      setActionsInvite(null);
-      setTimeout(() => setViewingInvite(invite), 280);
-    } else {
-      setViewingInvite(invite);
-    }
-  };
+  const onViewRecipients = useCallback(
+    (invite: GroupInvite) => {
+      if (actionsInvite) {
+        setActionsInvite(null);
+        setTimeout(() => setViewingInvite(invite), 280);
+      } else {
+        setViewingInvite(invite);
+      }
+    },
+    [actionsInvite],
+  );
 
   const onCopyGroupLink = async (invite: GroupInvite) => {
     if (!invite.shareableToken) return;
@@ -235,45 +293,57 @@ const GroupInvites = () => {
     }
   };
 
+  // The web row's "Copy chaperone link" — the table has it inline; the card
+  // view reaches it through this sheet.
+  const onCopyChaperoneLink = async (invite: GroupInvite) => {
+    setActionsInvite(null);
+    try {
+      await Clipboard.setStringAsync(buildChaperoneLink(invite.manageToken));
+      Alert.alert(
+        "Chaperone link copied",
+        "The chaperone opens it to add their group and track who has signed.",
+      );
+    } catch {
+      Alert.alert("Copy failed", "Could not copy the chaperone link.");
+    }
+  };
+
   const onShare = async (invite: GroupInvite) => {
     setActionsInvite(null);
     try {
-      // No public web origin is configured in the app, so we share the manage
-      // token. Primary distribution is "Resend", which emails/texts the full
-      // link server-side.
+      // The same public chaperone URL the web's copy button builds.
       await Share.share({
-        message: `ZapZone group waiver for ${invite.chaperoneName} (${formatDate(
+        message: `ZapZone group waiver for ${invite.chaperoneName} (${formatInviteDate(
           invite.selectedDate,
-        )}). Chaperone link code: ${invite.manageToken}`,
+        )}): ${buildChaperoneLink(invite.manageToken)}`,
       });
     } catch {
       /* user dismissed the share sheet */
     }
   };
 
+  const showError = !loading && !!error;
+
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Waiver Records", icon: "file-text", route: "/waivers/waivers" },
+    { label: "Templates", icon: "layout", route: "/waivers/templates" },
+    { label: "Refresh", icon: "refresh-cw", onPress: onRefresh },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Group Invites
-          </Text>
-          <View style={{ width: 36 }} />
-        </View>
-      </View>
+      <ModuleHeader
+        title="Group Invites"
+        action={{
+          onPress: () => router.push("/waivers/create-group-invite"),
+          accessibilityLabel: "New group invite",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -285,106 +355,96 @@ const GroupInvites = () => {
           />
         }
       >
-        <View className="px-5">
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Group Invites
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Send a chaperone one link to collect waivers for their whole group
-            </Text>
-          </View>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            {"Invite a chaperone or group leader to collect each parent's waiver."}
+          </Text>
 
-          <Pressable
-            onPress={() => router.push("/waivers/create-group-invite")}
-            className="flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              New Invite
-            </Text>
-          </Pressable>
+          {/* More — related Waivers screens as hub shortcuts. */}
+          <View>
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
+          </View>
 
           {/* Search */}
-          <View className="mt-5 flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
+          <View className="flex-row items-center gap-2 mt-4 mb-4">
+            <SearchField
               value={search}
               onChangeText={setSearch}
-              placeholder="Search by chaperone or template..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+              placeholder="Search by chaperone or template"
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
+          {showError && (
+            <ListErrorBanner
+              title="Could not load group invites"
+              message={error ?? ""}
+              onRetry={() => void refetch()}
+            />
           )}
 
           {!loading && !error && (
-            <View className="flex-row items-center justify-between gap-2 mb-4">
-              <View className="flex-row items-center gap-2 shrink">
-                <Text
-                  numberOfLines={1}
-                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
-                >
-                  All Invites
-                </Text>
-                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {filtered.length}
-                  </Text>
-                </View>
-              </View>
+            <ListHeader title="All Invites" count={filtered.length}>
               <ViewToggle mode={viewMode} onChange={setViewMode} />
-            </View>
+            </ListHeader>
           )}
 
+          {/* Each state is keyed so switching between them remounts cleanly. */}
           {loading ? (
-            <WaiversListSkeleton />
-          ) : !error && filtered.length === 0 ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="users" size={26} color="#9CA3AF" />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No group invites
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {canManage
-                  ? "Tap + to invite a chaperone for a group."
-                  : "No invites match your search."}
-              </Text>
+            <View key="s-loading">
+              {viewMode === "table" ? <AttractionsTableSkeleton /> : <AttractionsListSkeleton />}
             </View>
-          ) : (
-            !error &&
-            (viewMode === "table" ? (
-              <GroupInvitesTable
-                invites={filtered}
-                canManage={canManage}
-                onRowPress={(invite) => setActionsInvite(invite)}
-                onResend={onResend}
-                onViewRecipients={onViewRecipients}
-              />
-            ) : (
-              filtered.map((invite) => (
-                <InviteCard
-                  key={invite.id}
-                  invite={invite}
-                  onMore={() => setActionsInvite(invite)}
+          ) : showError ? null : filtered.length === 0 ? (
+            invites.length === 0 ? (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon="users"
+                  title="No group invites yet"
+                  message="Invite a chaperone to collect waivers for their whole group."
+                  actionLabel="New Invite"
+                  actionIcon="plus"
+                  primary
+                  onAction={() => router.push("/waivers/create-group-invite")}
                 />
-              ))
-            ))
+              </View>
+            ) : (
+              <View key="s-no-match">
+                <ListEmptyState
+                  icon="search"
+                  title="No invites found"
+                  message="No group invites match your search."
+                  actionLabel="Clear search"
+                  onAction={() => setSearch("")}
+                />
+              </View>
+            )
+          ) : (
+            <View key="s-list">
+              {viewMode === "table" ? (
+                <GroupInvitesTable
+                  invites={paged}
+                  canManage={canManage}
+                  onRowPress={setActionsInvite}
+                  onResend={onResend}
+                  onViewRecipients={onViewRecipients}
+                />
+              ) : (
+                paged.map((invite) => (
+                  <InviteCard
+                    key={invite.id}
+                    invite={invite}
+                    onMore={() => setActionsInvite(invite)}
+                  />
+                ))
+              )}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                options={[10, 25, 50]}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
+            </View>
           )}
         </View>
       </ScrollView>
@@ -394,6 +454,11 @@ const GroupInvites = () => {
         visible={actionsInvite !== null}
         onClose={() => (busy ? undefined : setActionsInvite(null))}
         title={actionsInvite?.chaperoneName ?? "Invite"}
+        subtitle={
+          actionsInvite
+            ? `${formatInviteDate(actionsInvite.selectedDate)} · ${actionsInvite.completeCount} of ${actionsInvite.recipientsCount} signed`
+            : undefined
+        }
       >
         <View className="px-4 pb-8">
           {busy && (
@@ -403,49 +468,40 @@ const GroupInvites = () => {
           )}
           {actionsInvite && (
             <>
-              <Pressable
+              <SheetAction
+                icon="list"
+                label="See who has signed"
                 disabled={busy}
                 onPress={() => onViewRecipients(actionsInvite)}
-                className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-              >
-                <Feather name="list" size={18} color={PRIMARY} />
-                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                  See who has signed
-                </Text>
-              </Pressable>
+              />
+              <SheetAction
+                icon="link-2"
+                label="Copy chaperone link"
+                disabled={busy}
+                onPress={() => onCopyChaperoneLink(actionsInvite)}
+              />
               {groupLinkState(actionsInvite) === "copy" && (
-                <Pressable
+                <SheetAction
+                  icon="copy"
+                  label="Copy group link"
                   disabled={busy}
                   onPress={() => onCopyGroupLink(actionsInvite)}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  <Feather name="copy" size={18} color={PRIMARY} />
-                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                    Copy group link
-                  </Text>
-                </Pressable>
+                />
               )}
               {canManage && (
-                <Pressable
+                <SheetAction
+                  icon="send"
+                  label="Resend to chaperone"
                   disabled={busy}
                   onPress={() => onResend(actionsInvite)}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  <Feather name="send" size={18} color={PRIMARY} />
-                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                    Resend to chaperone
-                  </Text>
-                </Pressable>
+                />
               )}
-              <Pressable
+              <SheetAction
+                icon="share-2"
+                label="Share chaperone link"
+                color="#6B7280"
                 onPress={() => onShare(actionsInvite)}
-                className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-              >
-                <Feather name="share-2" size={18} color="#6B7280" />
-                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                  Share chaperone link
-                </Text>
-              </Pressable>
+              />
             </>
           )}
         </View>

@@ -21,6 +21,7 @@ import { CONTROL_RADIUS, PrimaryButton } from "../../components/ui/PrimaryButton
 import { useAppUpdateNoticeInset } from "../../lib/hooks/useAppUpdateNotice";
 import { markGroupInvitesStale } from "../../lib/hooks/useGroupInvites";
 import { getToken } from "../../lib/session";
+import { standardTemplatesOnly } from "../../lib/waivers/templateDisplay";
 import {
   createGroupInvite,
   fetchTemplates,
@@ -102,8 +103,11 @@ const CreateGroupInvite = () => {
       return;
     }
     fetchTemplates(token, { status: "active" }, controller.signal)
-      .then((list) => {
+      .then((all) => {
         if (!active) return;
+        // Escape-room waivers are signed at the escape-room check-in, so the
+        // web's New Group Invite leaves them out of the template list.
+        const list = standardTemplatesOnly(all);
         setTemplates(list);
         if (list.length === 1) setTemplateId(list[0].id);
       })

@@ -1,6 +1,5 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -9,19 +8,34 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { LaunchKioskSheet } from "../../components/ui/LaunchKioskSheet";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
 import { Pagination } from "../../components/ui/Pagination";
-import { StatusBadge } from "../../components/ui/StatusBadge";
-import { TemplatesTable } from "../../components/ui/TemplatesTable";
+import {
+  AttractionsListSkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+} from "../../components/ui/SummaryPanel";
+import {
+  doorIcon,
+  EscapeRoomTag,
+  formatTemplateDate,
+  TemplatesTable,
+  TemplateStatusPill,
+} from "../../components/ui/TemplatesTable";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
-import { WaiversListSkeleton } from "../../components/ui/skeleton/WaiversSkeleton";
-import { formatDateET } from "../../lib/date/venueTime";
 import {
   consumeTemplatesStale,
   markTemplatesStale,
@@ -29,6 +43,11 @@ import {
 } from "../../lib/hooks/useWaiverTemplates";
 import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
 import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  isEscapeRoomTemplate,
+  templateAssignmentLabel,
+  templateDefaultLabel,
+} from "../../lib/waivers/templateDisplay";
 import {
   deleteTemplate,
   fetchTemplates,
@@ -41,109 +60,122 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
+// The web Templates page's status select, as chips.
 const STATUS_OPTIONS: { label: string; value: TemplateStatus | "all" }[] = [
-  { label: "All Statuses", value: "all" },
+  { label: "All", value: "all" },
   { label: "Active", value: "active" },
   { label: "Draft", value: "draft" },
   { label: "Inactive", value: "inactive" },
   { label: "Archived", value: "archived" },
 ];
 
-/** updated_at is an instant, so it's dated on the venue's calendar, not the
- *  device's — a late-evening edit in Michigan is still "today" here. */
-function formatDate(dateStr: string | null): string {
-  return formatDateET(dateStr, { month: "short", fallback: dateStr ?? "—" });
-}
-
 const TemplateCard = ({
   template,
-  deleted,
   onPress,
   onMore,
 }: {
   template: WaiverTemplate;
-  deleted: boolean;
   onPress: () => void;
   onMore: () => void;
-}) => (
-  <Pressable
-    onPress={onPress}
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm active:opacity-90"
-    style={CARD_SHADOW}
-    accessibilityRole="button"
-    accessibilityLabel={`Template ${template.title}`}
-  >
-    <View className="flex-row items-start justify-between mb-2">
-      <View className="flex-1 mr-3">
+}) => {
+  const defaultLabel = templateDefaultLabel(template);
+  return (
+    <Pressable
+      onPress={onPress}
+      className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
+      accessibilityRole="button"
+      accessibilityLabel={`Template ${template.title}`}
+    >
+      <View className="flex-row items-start justify-between gap-3">
         <Text
-          className="text-base font-bold text-gray-900 dark:text-white"
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
           numberOfLines={1}
         >
           {template.title}
         </Text>
-        {!!template.internalDescription && (
-          <Text
-            className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
-            numberOfLines={1}
-          >
-            {template.internalDescription}
+        <TemplateStatusPill status={template.status} />
+      </View>
+      {!!template.internalDescription && (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1" numberOfLines={1}>
+          {template.internalDescription}
+        </Text>
+      )}
+
+      <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1.5 mt-3">
+        {isEscapeRoomTemplate(template) && <EscapeRoomTag />}
+        <View className="flex-row items-center gap-1.5">
+          <Feather name="git-commit" size={12} color="#9CA3AF" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            v{template.currentVersion}
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-1.5">
+          <Feather name="link" size={12} color="#9CA3AF" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {templateAssignmentLabel(template)}
+          </Text>
+        </View>
+        {!!defaultLabel && (
+          <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+            {defaultLabel}
           </Text>
         )}
       </View>
-      <StatusBadge status={deleted ? "deleted" : template.status} />
-    </View>
 
-    <View className="flex-row items-center gap-3">
-      <View className="flex-row items-center gap-1.5">
-        <Feather name="git-commit" size={12} color="#9CA3AF" />
-        <Text className="text-xs text-gray-500 dark:text-gray-400">
-          v{template.currentVersion}
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        <Text className="shrink text-xs text-gray-400 dark:text-gray-500" numberOfLines={1}>
+          Updated {formatTemplateDate(template.updatedAt)}
         </Text>
+        <Pressable
+          onPress={onMore}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`Actions for ${template.title}`}
+          className="p-1.5 rounded-full active:bg-gray-100 dark:active:bg-neutral-800"
+        >
+          <Feather name="more-horizontal" size={18} color="#9CA3AF" />
+        </Pressable>
       </View>
-      {template.isDefault && (
-        <View className="bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
-          <Text className="text-[10px] font-medium text-blue-700 dark:text-blue-400">
-            Default
-          </Text>
-        </View>
-      )}
-      <View className="flex-row items-center gap-1.5">
-        <Feather name="link" size={12} color="#9CA3AF" />
-        <Text className="text-xs text-gray-500 dark:text-gray-400">
-          {template.assignmentCount} assigned
-        </Text>
-      </View>
-    </View>
+    </Pressable>
+  );
+};
 
-    <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-      <Text className="text-xs text-gray-400 dark:text-gray-500">
-        {deleted ? "Deleted" : "Updated"} {formatDate(template.updatedAt)}
-      </Text>
-      <Pressable
-        onPress={onMore}
-        hitSlop={10}
-        accessibilityRole="button"
-        accessibilityLabel={`Actions for ${template.title}`}
-        className="p-1.5 rounded-full active:bg-gray-100 dark:active:bg-neutral-800"
-      >
-        <Feather name="more-vertical" size={18} color="#9CA3AF" />
-      </Pressable>
-    </View>
+/** One row of the per-template actions sheet. */
+const SheetAction = ({
+  icon,
+  label,
+  danger = false,
+  disabled = false,
+  onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) => (
+  <Pressable
+    disabled={disabled}
+    onPress={onPress}
+    className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
+    accessibilityRole="button"
+  >
+    {icon}
+    <Text
+      className={`text-base font-medium ${
+        danger ? "text-red-600" : "text-gray-800 dark:text-gray-100"
+      }`}
+    >
+      {label}
+    </Text>
   </Pressable>
 );
 
 const Templates = () => {
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   const role = getCurrentUser()?.role;
   const isCompanyAdmin = role === "company_admin";
@@ -153,6 +185,8 @@ const Templates = () => {
     isCompanyAdmin ||
     (role === "location_manager" &&
       (settings?.managerCanBuildTemplates ?? false));
+  // Group Invites is an admin/manager screen, as on the web Manage menu.
+  const canOpenGroupInvites = isCompanyAdmin || role === "location_manager";
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -169,7 +203,6 @@ const Templates = () => {
   const [showTrashed, setShowTrashed] = useState(false);
   const [trashed, setTrashed] = useState<WaiverTemplate[]>([]);
   const [trashedLoading, setTrashedLoading] = useState(false);
-  const [sheet, setSheet] = useState<null | "status">(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actionsTemplate, setActionsTemplate] = useState<WaiverTemplate | null>(
     null,
@@ -327,47 +360,50 @@ const Templates = () => {
     } as never);
   };
 
+  const editTemplate = (t: WaiverTemplate) =>
+    router.push(`/waivers/create-template?id=${t.id}` as never);
+
+  // Escape-room waivers are signed from the escape-room check-in, not a staff
+  // kiosk — the web sends staff to Escape Rooms for the link instead.
+  const openEscapeRooms = () => router.push("/photos/escape-rooms" as never);
+
   // Card taps open the editor when the user can manage the template; otherwise
   // they open the actions sheet. Table rows are not tappable at all — there,
   // everything goes through the Actions cell.
   const openTemplate = (t: WaiverTemplate) => {
     if (canManage) {
-      router.push(`/waivers/create-template?id=${t.id}` as never);
+      editTemplate(t);
     } else {
       setActionsTemplate(t);
     }
   };
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ??
-    "All Statuses";
+  const statusFilterCount = statusFilter !== "all" ? 1 : 0;
+  const showInitialLoader = loading;
+  const showError = !loading && !!error;
+
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Waiver Records", icon: "file-text", route: "/waivers/waivers" },
+    ...(canOpenGroupInvites
+      ? [{ label: "Group Invites", icon: "users", route: "/waivers/group-invites" } as HubQuickLink]
+      : []),
+    { label: "Refresh", icon: "refresh-cw", onPress: onRefresh },
+  ];
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Templates
-          </Text>
-          {/* Deleted templates live in their own labelled section below the
-              list, so the header needs no control — this keeps the title
-              centred against the back button. */}
-          <View className="h-9 w-9" />
-        </View>
-      </View>
+      <ModuleHeader
+        title="Waiver Templates"
+        action={{
+          onPress: () => router.push("/waivers/create-template"),
+          accessibilityLabel: "New template",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -379,146 +415,138 @@ const Templates = () => {
           />
         }
       >
-        <View className="px-5">
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Waiver Templates
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Reusable legal text assigned to activities
-            </Text>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Build legal waivers and assign them to packages, attractions, and events.
+          </Text>
+
+          {/* More — related Waivers screens as hub shortcuts. */}
+          <View>
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
 
-          <Pressable
-            onPress={() => router.push("/waivers/create-template")}
-            className="flex-row mb-5 items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text
-              className="text-sm font-semibold text-white"
-              numberOfLines={1}
-            >
-              New Template
-            </Text>
-          </Pressable>
           {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
               value={search}
               onChangeText={setSearch}
-              placeholder="Search templates..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+              placeholder="Search templates"
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {/* Status filter */}
-          <Pressable
-            onPress={() => setSheet("status")}
-            className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800 mb-5"
+          <AppliedFiltersHint
+            count={statusFilterCount}
+            onClear={() => setStatusFilter("all")}
+          />
+
+          {/* Status chips — the web's status select. The list is filtered on
+              the server, so there are no per-status counts to show. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
           >
-            <Feather name="check-circle" size={16} color={PRIMARY} />
-            <Text
-              className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1"
-              numberOfLines={1}
-            >
-              {statusLabel}
-            </Text>
-            <Feather name="chevron-down" size={14} color="#9CA3AF" />
-          </Pressable>
+            {STATUS_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                selected={statusFilter === opt.value}
+                onPress={() => setStatusFilter(opt.value)}
+              />
+            ))}
+          </ScrollView>
 
-          {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
+          {showError && (
+            <ListErrorBanner
+              title="Could not load templates"
+              message={error ?? ""}
+              onRetry={() => void refetch()}
+            />
           )}
 
-          {!loading && !error && (
-            <View className="flex-row items-center justify-between gap-2 mb-4">
-              <View className="flex-row items-center gap-2 shrink">
-                <Text className="shrink text-lg font-bold text-gray-900 dark:text-white">
-                  All Templates
-                </Text>
-                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {templates.length}
-                  </Text>
-                </View>
-              </View>
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Templates" count={templates.length}>
               <ViewToggle mode={viewMode} onChange={setViewMode} />
-            </View>
+            </ListHeader>
           )}
 
-          {loading ? (
-            <WaiversListSkeleton />
-          ) : !error && templates.length === 0 ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="layout" size={26} color="#9CA3AF" />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No templates found
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {canManage
-                  ? "Tap + to create your first template."
-                  : "No templates match your search."}
-              </Text>
+          {/* Each state is keyed so switching between them remounts cleanly. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? <AttractionsTableSkeleton /> : <AttractionsListSkeleton />}
             </View>
-          ) : (
-            !error && (
-              <View>
-                {/* Table (default) and card layouts render from the same
-                    `paged` slice — switching is instant and never refetches. */}
-                {viewMode === "table" ? (
-                  <TemplatesTable
-                    templates={paged}
-                    deleted={false}
-                    canManage={canManage}
-                    isCompanyAdmin={isCompanyAdmin}
-                    busy={busy}
-                    onView={setActionsTemplate}
-                    onKiosk={setKioskTemplate}
-                    onEdit={(t) =>
-                      router.push(
-                        `/waivers/create-template?id=${t.id}` as never,
-                      )
-                    }
-                    onAds={openAds}
-                    onToggleStatus={onToggleStatus}
-                    onDelete={onDelete}
-                    onRestore={onRestore}
-                    onForceDelete={onForceDelete}
-                  />
-                ) : (
-                  paged.map((t) => (
-                    <TemplateCard
-                      key={t.id}
-                      template={t}
-                      deleted={false}
-                      onPress={() => openTemplate(t)}
-                      onMore={() => setActionsTemplate(t)}
-                    />
-                  ))
-                )}
-                <Pagination
-                  page={page}
-                  perPage={perPage}
-                  total={templates.length}
-                  onPageChange={setPage}
-                  onPerPageChange={setPerPage}
+          ) : showError ? null : templates.length === 0 ? (
+            debouncedSearch || statusFilter !== "all" ? (
+              <View key="s-no-match">
+                <ListEmptyState
+                  icon="search"
+                  title="No templates found"
+                  message="No templates match your search or status."
+                  actionLabel="Clear search & status"
+                  onAction={() => {
+                    setSearch("");
+                    setStatusFilter("all");
+                  }}
+                />
+              </View>
+            ) : (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon="layout"
+                  title="No templates yet"
+                  message={
+                    canManage
+                      ? "Create your first waiver template to start collecting signatures."
+                      : "No waiver templates have been created yet."
+                  }
+                  actionLabel={canManage ? "New Template" : undefined}
+                  actionIcon="plus"
+                  primary
+                  onAction={
+                    canManage ? () => router.push("/waivers/create-template") : undefined
+                  }
                 />
               </View>
             )
+          ) : (
+            <View key="s-list">
+              {/* Table (default) and card layouts render from the same
+                  `paged` slice — switching is instant and never refetches. */}
+              {viewMode === "table" ? (
+                <TemplatesTable
+                  templates={paged}
+                  deleted={false}
+                  canManage={canManage}
+                  isCompanyAdmin={isCompanyAdmin}
+                  busy={busy}
+                  onKiosk={setKioskTemplate}
+                  onEscapeRooms={openEscapeRooms}
+                  onEdit={editTemplate}
+                  onAds={openAds}
+                  onToggleStatus={onToggleStatus}
+                  onDelete={onDelete}
+                  onRestore={onRestore}
+                  onForceDelete={onForceDelete}
+                />
+              ) : (
+                paged.map((t) => (
+                  <TemplateCard
+                    key={t.id}
+                    template={t}
+                    onPress={() => openTemplate(t)}
+                    onMore={() => setActionsTemplate(t)}
+                  />
+                ))
+              )}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={templates.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
+            </View>
           )}
 
           {/* Deleted templates — a disclosure below the live list, matching the
@@ -542,138 +570,103 @@ const Templates = () => {
                 Deleted templates
               </Text>
               {showTrashed && trashed.length > 0 && (
-                <View className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-neutral-800">
-                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {trashed.length}
-                  </Text>
-                </View>
+                <Text className="text-sm text-gray-400 dark:text-gray-500">
+                  {trashed.length}
+                </Text>
               )}
             </Pressable>
 
             {showTrashed && (
               <View className="mt-2">
                 {trashedLoading ? (
-                  <View className="items-center rounded-2xl border border-gray-100 bg-white py-8 dark:border-neutral-800 dark:bg-neutral-900">
+                  <View
+                    key="t-loading"
+                    className="items-center rounded-2xl border border-gray-200 bg-white py-8 dark:border-neutral-800 dark:bg-neutral-900"
+                  >
                     <ActivityIndicator color="#9CA3AF" />
                   </View>
                 ) : trashed.length === 0 ? (
-                  <View className="items-center rounded-2xl border border-gray-100 bg-white py-8 dark:border-neutral-800 dark:bg-neutral-900">
+                  <View
+                    key="t-empty"
+                    className="items-center rounded-2xl border border-gray-200 bg-white py-8 dark:border-neutral-800 dark:bg-neutral-900"
+                  >
                     <Text className="text-sm text-gray-400 dark:text-gray-500">
                       No deleted templates.
                     </Text>
                   </View>
                 ) : (
-                  trashed.map((t) => (
-                    <View
-                      key={t.id}
-                      className="mb-2 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
-                    >
-                      <View className="flex-row items-start justify-between gap-3">
-                        <View className="flex-1">
-                          <Text
-                            className="text-sm font-semibold text-gray-600 dark:text-gray-300"
-                            numberOfLines={1}
-                          >
-                            {t.title}
-                          </Text>
-                          {t.internalDescription ? (
+                  <View key="t-list">
+                    {trashed.map((t) => (
+                      <View
+                        key={t.id}
+                        className="mb-2 rounded-2xl border border-gray-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+                      >
+                        <View className="flex-row items-start justify-between gap-3">
+                          <View className="flex-1">
                             <Text
-                              className="mt-0.5 text-xs text-gray-400 dark:text-gray-500"
+                              className="text-sm font-semibold text-gray-600 dark:text-gray-300"
                               numberOfLines={1}
                             >
-                              {t.internalDescription}
+                              {t.title}
                             </Text>
-                          ) : null}
+                            {t.internalDescription ? (
+                              <Text
+                                className="mt-0.5 text-xs text-gray-400 dark:text-gray-500"
+                                numberOfLines={1}
+                              >
+                                {t.internalDescription}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <TemplateStatusPill status={t.status} />
                         </View>
-                        <Text className="text-xs text-gray-400 dark:text-gray-500">
-                          v{t.currentVersion}
+
+                        <Text className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
+                          v{t.currentVersion} · Deleted{" "}
+                          {t.deletedAt ? formatTemplateDate(t.deletedAt) : "—"}
                         </Text>
-                      </View>
 
-                      <Text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                        Deleted {t.deletedAt ? formatDate(t.deletedAt) : "—"}
-                      </Text>
-
-                      <View className="mt-3 flex-row gap-2">
-                        {canManage && (
-                          <Pressable
-                            disabled={busy}
-                            onPress={() => onRestore(t)}
-                            className={`flex-row items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 active:opacity-80 dark:bg-emerald-900/25 ${
-                              busy ? "opacity-60" : ""
-                            }`}
-                            accessibilityRole="button"
-                          >
-                            <Feather name="rotate-ccw" size={13} color="#047857" />
-                            <Text className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                              Restore
-                            </Text>
-                          </Pressable>
-                        )}
-                        {isCompanyAdmin && (
-                          <Pressable
-                            disabled={busy}
-                            onPress={() => onForceDelete(t)}
-                            className={`flex-row items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 active:opacity-80 dark:bg-red-900/25 ${
-                              busy ? "opacity-60" : ""
-                            }`}
-                            accessibilityRole="button"
-                          >
-                            <Feather name="trash-2" size={13} color="#B91C1C" />
-                            <Text className="text-xs font-medium text-red-700 dark:text-red-300">
-                              Delete permanently
-                            </Text>
-                          </Pressable>
-                        )}
+                        <View className="mt-3 flex-row gap-2">
+                          {canManage && (
+                            <Pressable
+                              disabled={busy}
+                              onPress={() => onRestore(t)}
+                              className={`flex-row items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 active:opacity-70 dark:border-neutral-700 ${
+                                busy ? "opacity-60" : ""
+                              }`}
+                              accessibilityRole="button"
+                            >
+                              <Feather name="rotate-ccw" size={13} color="#059669" />
+                              <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                Restore
+                              </Text>
+                            </Pressable>
+                          )}
+                          {isCompanyAdmin && (
+                            <Pressable
+                              disabled={busy}
+                              onPress={() => onForceDelete(t)}
+                              className={`flex-row items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 active:opacity-70 dark:border-red-900/50 ${
+                                busy ? "opacity-60" : ""
+                              }`}
+                              accessibilityRole="button"
+                            >
+                              <Feather name="trash-2" size={13} color="#DC2626" />
+                              <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
+                                Delete permanently
+                              </Text>
+                            </Pressable>
+                          )}
+                        </View>
                       </View>
-                    </View>
-                  ))
+                    ))}
+                  </View>
                 )}
               </View>
             )}
           </View>
         </View>
       </ScrollView>
-
-      {/* Status filter sheet */}
-      <BottomSheet
-        visible={sheet === "status"}
-        onClose={() => setSheet(null)}
-        title="Filter by Status"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {STATUS_OPTIONS.map((option) => {
-            const isSelected = statusFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setStatusFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
 
       {/* Per-template actions */}
       <BottomSheet
@@ -690,76 +683,66 @@ const Templates = () => {
 
           {actionsTemplate && (
             <>
-              <Pressable
-                onPress={() => {
-                  const t = actionsTemplate;
-                  setActionsTemplate(null);
-                  setKioskTemplate(t);
-                }}
-                className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-              >
-                <Feather name="tablet" size={18} color={PRIMARY} />
-                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                  Launch kiosk
-                </Text>
-              </Pressable>
-              {canManage && (
-                <Pressable
+              {isEscapeRoomTemplate(actionsTemplate) ? (
+                <SheetAction
+                  icon={doorIcon(PRIMARY, 18)}
+                  label="Open Escape Rooms"
+                  onPress={() => {
+                    setActionsTemplate(null);
+                    openEscapeRooms();
+                  }}
+                />
+              ) : (
+                <SheetAction
+                  icon={<Feather name="tablet" size={18} color={PRIMARY} />}
+                  label={actionsTemplate.status === "active" ? "Launch kiosk" : "Test kiosk"}
                   onPress={() => {
                     const t = actionsTemplate;
                     setActionsTemplate(null);
-                    router.push(`/waivers/create-template?id=${t.id}` as never);
+                    setKioskTemplate(t);
                   }}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  <Feather name="edit-2" size={18} color={PRIMARY} />
-                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                    Edit template
-                  </Text>
-                </Pressable>
+                />
               )}
               {canManage && (
-                <Pressable
+                <SheetAction
+                  icon={<Feather name="edit-2" size={18} color={PRIMARY} />}
+                  label="Edit template"
+                  onPress={() => {
+                    const t = actionsTemplate;
+                    setActionsTemplate(null);
+                    editTemplate(t);
+                  }}
+                />
+              )}
+              {canManage && (
+                <SheetAction
+                  // Ionicons, not Feather: the web marks post-waiver ads with a
+                  // megaphone and Feather has no equivalent.
+                  icon={<Ionicons name="megaphone-outline" size={18} color={PRIMARY} />}
+                  label="Post-waiver ads"
                   onPress={() => {
                     const t = actionsTemplate;
                     setActionsTemplate(null);
                     openAds(t);
                   }}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  {/* Ionicons, not Feather: the web marks post-waiver ads
-                      with a megaphone and Feather has no equivalent. */}
-                  <Ionicons name="megaphone-outline" size={18} color={PRIMARY} />
-                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                    Post-waiver ads
-                  </Text>
-                </Pressable>
+                />
               )}
               {canManage && (
-                <Pressable
+                <SheetAction
+                  icon={<Feather name="power" size={18} color="#F59E0B" />}
+                  label={actionsTemplate.status === "active" ? "Set inactive" : "Set active"}
                   disabled={busy}
                   onPress={() => onToggleStatus(actionsTemplate)}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  <Feather name="power" size={18} color="#F59E0B" />
-                  <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                    {actionsTemplate.status === "active"
-                      ? "Set inactive"
-                      : "Set active"}
-                  </Text>
-                </Pressable>
+                />
               )}
               {canManage && (
-                <Pressable
+                <SheetAction
+                  icon={<Feather name="trash-2" size={18} color="#DC2626" />}
+                  label="Delete template"
+                  danger
                   disabled={busy}
                   onPress={() => onDelete(actionsTemplate)}
-                  className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-                >
-                  <Feather name="trash-2" size={18} color="#DC2626" />
-                  <Text className="text-base font-medium text-red-600">
-                    Delete template
-                  </Text>
-                </Pressable>
+                />
               )}
               {!canManage && (
                 <Text className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -768,7 +751,6 @@ const Templates = () => {
               )}
             </>
           )}
-
         </View>
       </BottomSheet>
 

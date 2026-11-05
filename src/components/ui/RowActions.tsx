@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
-import { Pressable, View } from "react-native";
+import type { ReactNode } from "react";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
 
@@ -9,6 +10,9 @@ export type RowAction = {
   color: string;
   label: string;
   onPress: () => void;
+  renderIcon?: (color: string, size: number) => ReactNode;
+  busy?: boolean;
+  disabled?: boolean;
 };
 
 export function RowActionGroup({
@@ -24,13 +28,21 @@ export function RowActionGroup({
         <Pressable
           key={a.key}
           onPress={a.onPress}
+          disabled={a.disabled || a.busy}
           accessibilityRole="button"
           accessibilityLabel={a.label}
+          accessibilityState={{ disabled: !!(a.disabled || a.busy), busy: !!a.busy }}
           className={`w-8 h-8 items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800 ${
             i > 0 ? "border-l border-gray-200 dark:border-neutral-700" : ""
-          }`}
+          } ${a.disabled ? "opacity-40" : ""}`}
         >
-          <Feather name={a.icon} size={15} color={a.color} />
+          {a.busy ? (
+            <ActivityIndicator size="small" color={a.color} />
+          ) : a.renderIcon ? (
+            a.renderIcon(a.color, 15)
+          ) : (
+            <Feather name={a.icon} size={15} color={a.color} />
+          )}
         </Pressable>
       ))}
     </View>

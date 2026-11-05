@@ -1,386 +1,296 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
-import { memo, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { DoorOpen } from "lucide-react-native";
+import { memo, useMemo } from "react";
+import { Text, View } from "react-native";
 
 import { formatDateET } from "../../lib/date/venueTime";
-import type { WaiverTemplate } from "../../services/waiversService";
-import { StatusBadge } from "./StatusBadge";
+import {
+  isEscapeRoomTemplate,
+  templateAssignmentLabel,
+  templateDefaultLabel,
+} from "../../lib/waivers/templateDisplay";
+import type { TemplateStatus, WaiverTemplate } from "../../services/waiversService";
+import { RowActionGroup } from "./RowActions";
+import { SelectableTable, type TableColumn } from "./SelectableTable";
+import { ToneDotBadge, type DotTone } from "./SummaryPanel";
 
 const PRIMARY = "#0644C7";
+const NEUTRAL = "#6B7280";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
-const HEADER_MIN_HEIGHT = 48;
-const ROW_MIN_HEIGHT = 64;
-
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
 
 /** Instant → the venue's calendar date (see lib/date/venueTime). */
-function formatDate(dateStr: string | null): string {
+export function formatTemplateDate(dateStr: string | null): string {
   return formatDateET(dateStr, { month: "short", fallback: dateStr ?? "—" });
 }
 
-type RowContext = {
-  deleted: boolean;
-  canManage: boolean;
-  isCompanyAdmin: boolean;
-  busy: boolean;
-  /** Opens the per-template actions sheet — the row itself isn't tappable. */
-  onView: () => void;
-  onKiosk: () => void;
-  onEdit: () => void;
-  onAds: () => void;
-  onToggleStatus: () => void;
-  onDelete: () => void;
-  onRestore: () => void;
-  onForceDelete: () => void;
+// Same colour families as the web admin's template status pills.
+const STATUS_TONE: Record<TemplateStatus | "deleted", DotTone> = {
+  active: "green",
+  draft: "amber",
+  inactive: "gray",
+  archived: "gray",
+  deleted: "red",
 };
 
-/**
- * Small square icon button used in the Actions cell.
- *
- * Feather covers every glyph here bar one: the web marks post-waiver ads with a
- * megaphone, which Feather has no equivalent for, so `ionicon` opts that one
- * button into Ionicons rather than settling for a different symbol.
- */
-const IconButton = ({
-  icon,
-  ionicon,
-  color,
-  bg,
-  label,
-  disabled,
-  onPress,
+export const TemplateStatusPill = ({
+  status,
 }: {
-  icon?: React.ComponentProps<typeof Feather>["name"];
-  ionicon?: React.ComponentProps<typeof Ionicons>["name"];
-  color: string;
-  bg: string;
-  label: string;
-  disabled?: boolean;
-  onPress: () => void;
+  status: TemplateStatus | "deleted";
 }) => (
-  <Pressable
-    onPress={onPress}
-    disabled={disabled}
-    hitSlop={6}
-    accessibilityRole="button"
-    accessibilityLabel={label}
-    className={`w-8 h-8 rounded-lg items-center justify-center ${bg} ${
-      disabled ? "opacity-40" : "active:opacity-70"
-    }`}
-  >
-    {ionicon ? (
-      <Ionicons name={ionicon} size={15} color={color} />
-    ) : icon ? (
-      <Feather name={icon} size={15} color={color} />
-    ) : null}
-  </Pressable>
+  <ToneDotBadge
+    tone={STATUS_TONE[status] ?? "gray"}
+    label={status.charAt(0).toUpperCase() + status.slice(1)}
+  />
 );
 
-type Column = {
-  key: string;
-  label: string;
-  width: number;
-  render: (t: WaiverTemplate, ctx: RowContext) => ReactNode;
-};
+/** The web's violet "Escape room" tag beside an escape-room template's title. */
+export const EscapeRoomTag = () => (
+  <View className="self-start px-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-900/30">
+    <Text className="text-[11px] font-medium text-violet-700 dark:text-violet-300">
+      Escape room
+    </Text>
+  </View>
+);
 
-const COLUMNS: Column[] = [
-  {
-    key: "title",
-    label: "Template",
-    width: 240,
-    render: (t) => (
-      <View>
-        <Text
-          numberOfLines={1}
-          className="text-sm font-semibold text-gray-900 dark:text-white"
-        >
-          {t.title}
-        </Text>
-        {!!t.internalDescription && (
-          <Text
-            numberOfLines={1}
-            className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
-          >
-            {t.internalDescription}
-          </Text>
-        )}
-      </View>
-    ),
-  },
-  {
-    key: "status",
-    label: "Status",
-    width: 120,
-    render: (t, ctx) => (
-      <View className="flex-row">
-        <StatusBadge status={ctx.deleted ? "deleted" : t.status} />
-      </View>
-    ),
-  },
-  {
-    key: "version",
-    label: "Version",
-    width: 100,
-    render: (t) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        v{t.currentVersion}
-      </Text>
-    ),
-  },
-  {
-    key: "default",
-    label: "Default",
-    width: 100,
-    render: (t) =>
-      t.isDefault ? (
-        <View className="flex-row">
-          <View className="bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
-            <Text className="text-[10px] font-medium text-blue-700 dark:text-blue-400">
-              Default
-            </Text>
-          </View>
-        </View>
-      ) : (
-        <Text className={CELL_TEXT}>—</Text>
-      ),
-  },
-  {
-    key: "assigned",
-    label: "Assigned",
-    width: 120,
-    render: (t) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {t.assignmentCount} assigned
-      </Text>
-    ),
-  },
-  {
-    key: "updated",
-    label: "Updated",
-    width: 140,
-    render: (t, ctx) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {ctx.deleted ? "Deleted " : ""}
-        {formatDate(t.updatedAt)}
-      </Text>
-    ),
-  },
-  {
-    key: "actions",
-    label: "Actions",
-    width: 250,
-    render: (_t, ctx) => {
-      // Rows themselves aren't tappable — everything a user can do to a
-      // template lives here. Active view: view · kiosk (all) · power · edit ·
-      // delete (manage only). Trash view: view · restore (manage) ·
-      // delete-forever (admin).
-      if (!ctx.deleted) {
-        return (
-          <View className="flex-row items-center gap-2">
-            <IconButton
-              icon="tablet"
-              color={PRIMARY}
-              bg="bg-blue-50 dark:bg-blue-900/20"
-              label="Launch kiosk"
-              disabled={ctx.busy}
-              onPress={ctx.onKiosk}
-            />
-            {ctx.canManage && (
-              <>
-                {/* Reports state as well as toggling it: green while the
-                    template is active, grey once it is not. */}
-                <IconButton
-                  icon="power"
-                  color={_t.status === "active" ? "#059669" : "#9CA3AF"}
-                  bg={
-                    _t.status === "active"
-                      ? "bg-emerald-50 dark:bg-emerald-900/25"
-                      : "bg-gray-100 dark:bg-neutral-800"
-                  }
-                  label={
-                    _t.status === "active"
-                      ? "Deactivate template"
-                      : "Activate template"
-                  }
-                  disabled={ctx.busy}
-                  onPress={ctx.onToggleStatus}
-                />
-                <IconButton
-                  icon="edit-2"
-                  color="#6B7280"
-                  bg="bg-gray-100 dark:bg-neutral-800"
-                  label="Edit template"
-                  disabled={ctx.busy}
-                  onPress={ctx.onEdit}
-                />
-                {/* Sits between edit and delete, as it does on the web row. */}
-                <IconButton
-                  ionicon="megaphone-outline"
-                  color="#6B7280"
-                  bg="bg-gray-100 dark:bg-neutral-800"
-                  label="Post-waiver ads"
-                  disabled={ctx.busy}
-                  onPress={ctx.onAds}
-                />
-                <IconButton
-                  icon="trash-2"
-                  color="#EF4444"
-                  bg="bg-red-50 dark:bg-red-900/30"
-                  label="Delete template"
-                  disabled={ctx.busy}
-                  onPress={ctx.onDelete}
-                />
-              </>
-            )}
-          </View>
-        );
-      }
-      return (
-        <View className="flex-row items-center gap-2">
-          {ctx.canManage && (
-            <IconButton
-              icon="rotate-ccw"
-              color="#10B981"
-              bg="bg-emerald-50 dark:bg-emerald-900/20"
-              label="Restore template"
-              disabled={ctx.busy}
-              onPress={ctx.onRestore}
-            />
-          )}
-          {ctx.isCompanyAdmin && (
-            <IconButton
-              icon="trash"
-              color="#EF4444"
-              bg="bg-red-50 dark:bg-red-900/30"
-              label="Delete template permanently"
-              disabled={ctx.busy}
-              onPress={ctx.onForceDelete}
-            />
-          )}
-        </View>
-      );
-    },
-  },
-];
+export const doorIcon = (color: string, size: number) => (
+  <DoorOpen size={size} color={color} />
+);
 
-const TABLE_WIDTH = COLUMNS.reduce((sum, c) => sum + c.width, 0);
+const megaphoneIcon = (color: string, size: number) => (
+  <Ionicons name="megaphone-outline" size={size} color={color} />
+);
 
-/**
- * Table layout for the Waiver Templates list. Horizontally scrollable with
- * fixed column widths. Rows are deliberately NOT tappable — a whole-row target
- * makes it too easy to open the editor while scrolling the table sideways, so
- * viewing and editing both happen through the trailing Actions cell.
- */
-export const TemplatesTable = memo(function TemplatesTable({
-  templates,
-  deleted,
-  canManage,
-  isCompanyAdmin,
-  busy,
-  onView,
-  onKiosk,
-  onEdit,
-  onAds,
-  onToggleStatus,
-  onDelete,
-  onRestore,
-  onForceDelete,
-}: {
-  templates: WaiverTemplate[];
+type Handlers = {
   deleted: boolean;
   canManage: boolean;
   isCompanyAdmin: boolean;
   busy: boolean;
-  onView: (t: WaiverTemplate) => void;
   onKiosk: (t: WaiverTemplate) => void;
+  onEscapeRooms: (t: WaiverTemplate) => void;
   onEdit: (t: WaiverTemplate) => void;
   onAds: (t: WaiverTemplate) => void;
   onToggleStatus: (t: WaiverTemplate) => void;
   onDelete: (t: WaiverTemplate) => void;
   onRestore: (t: WaiverTemplate) => void;
   onForceDelete: (t: WaiverTemplate) => void;
-}) {
-  return (
-    <View
-      className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-100 dark:border-neutral-800 mb-3"
-      style={CARD_SHADOW}
-    >
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        nestedScrollEnabled
-      >
-        <View style={{ width: TABLE_WIDTH }}>
-          {/* Header */}
-          <View
-            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
-            style={{ minHeight: HEADER_MIN_HEIGHT }}
-          >
-            {COLUMNS.map((col) => (
-              <View
-                key={col.key}
-                className="justify-center px-4 py-3"
-                style={{ width: col.width }}
-              >
-                <Text
-                  numberOfLines={1}
-                  className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
-                >
-                  {col.label}
-                </Text>
-              </View>
-            ))}
-          </View>
+};
 
-          {/* Rows */}
-          {templates.map((t, i) => {
-            const ctx: RowContext = {
-              deleted,
-              canManage,
-              isCompanyAdmin,
-              busy,
-              onView: () => onView(t),
-              onKiosk: () => onKiosk(t),
-              onEdit: () => onEdit(t),
-              onAds: () => onAds(t),
-              onToggleStatus: () => onToggleStatus(t),
-              onDelete: () => onDelete(t),
-              onRestore: () => onRestore(t),
-              onForceDelete: () => onForceDelete(t),
-            };
-            return (
-              <View
-                key={t.id}
-                accessibilityLabel={`Template ${t.title}`}
-                className={`flex-row items-center ${
-                  i < templates.length - 1
-                    ? "border-b border-gray-100 dark:border-neutral-800"
-                    : ""
-                }`}
-                style={{ minHeight: ROW_MIN_HEIGHT }}
-              >
-                {COLUMNS.map((col) => (
-                  <View
-                    key={col.key}
-                    className="justify-center px-4 py-3"
-                    style={{ width: col.width }}
-                  >
-                    {col.render(t, ctx)}
-                  </View>
-                ))}
-              </View>
-            );
-          })}
+// Columns mirror the web Templates table: Title · Status · Version · Default ·
+// Assignments · Updated, then the row actions.
+function buildColumns(h: Handlers): TableColumn<WaiverTemplate>[] {
+  return [
+    {
+      key: "title",
+      label: "Template",
+      width: 240,
+      render: (t) => (
+        <View className="gap-0.5">
+          <Text numberOfLines={1} className="text-sm font-semibold text-gray-900 dark:text-white">
+            {t.title}
+          </Text>
+          {isEscapeRoomTemplate(t) && <EscapeRoomTag />}
+          {!!t.internalDescription && (
+            <Text numberOfLines={1} className="text-xs text-gray-400 dark:text-gray-500">
+              {t.internalDescription}
+            </Text>
+          )}
         </View>
-      </ScrollView>
-    </View>
+      ),
+    },
+    {
+      key: "status",
+      label: "Status",
+      width: 120,
+      render: (t) => (
+        <View className="flex-row">
+          <TemplateStatusPill status={h.deleted ? "deleted" : t.status} />
+        </View>
+      ),
+    },
+    {
+      key: "version",
+      label: "Version",
+      width: 90,
+      render: (t) => <Text className={CELL_TEXT}>v{t.currentVersion}</Text>,
+    },
+    {
+      key: "default",
+      label: "Default",
+      width: 160,
+      render: (t) => {
+        const label = templateDefaultLabel(t);
+        return label ? (
+          <Text numberOfLines={1} className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+            {label}
+          </Text>
+        ) : (
+          <Text className="text-xs text-gray-300 dark:text-gray-600">—</Text>
+        );
+      },
+    },
+    {
+      key: "assigned",
+      label: "Assignments",
+      width: 140,
+      render: (t) => (
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {templateAssignmentLabel(t)}
+        </Text>
+      ),
+    },
+    {
+      key: "updated",
+      label: h.deleted ? "Deleted" : "Updated",
+      width: 130,
+      render: (t) => (
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {formatTemplateDate(h.deleted ? (t.deletedAt ?? null) : t.updatedAt)}
+        </Text>
+      ),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      width: 210,
+      render: (t) =>
+        h.deleted ? (
+          <RowActionGroup
+            actions={[
+              h.canManage && {
+                key: "restore",
+                icon: "rotate-ccw",
+                color: "#059669",
+                label: `Restore ${t.title}`,
+                disabled: h.busy,
+                onPress: () => h.onRestore(t),
+              },
+              h.isCompanyAdmin && {
+                key: "force-delete",
+                icon: "trash-2",
+                color: "#DC2626",
+                label: `Delete ${t.title} permanently`,
+                disabled: h.busy,
+                onPress: () => h.onForceDelete(t),
+              },
+            ]}
+          />
+        ) : (
+          <RowActionGroup
+            actions={[
+              // Escape-room waivers are signed from the escape-room check-in,
+              // so the web swaps the kiosk button for a link to Escape Rooms.
+              isEscapeRoomTemplate(t)
+                ? {
+                    key: "escape-rooms",
+                    icon: "log-in",
+                    renderIcon: doorIcon,
+                    color: NEUTRAL,
+                    label: `Open Escape Rooms for ${t.title}`,
+                    disabled: h.busy,
+                    onPress: () => h.onEscapeRooms(t),
+                  }
+                : {
+                    key: "kiosk",
+                    icon: "tablet",
+                    color: NEUTRAL,
+                    label: t.status === "active" ? `Launch kiosk for ${t.title}` : `Test kiosk for ${t.title}`,
+                    disabled: h.busy,
+                    onPress: () => h.onKiosk(t),
+                  },
+              h.canManage && {
+                key: "power",
+                icon: "power",
+                color: t.status === "active" ? "#059669" : "#9CA3AF",
+                label: t.status === "active" ? `Deactivate ${t.title}` : `Activate ${t.title}`,
+                disabled: h.busy,
+                onPress: () => h.onToggleStatus(t),
+              },
+              h.canManage && {
+                key: "edit",
+                icon: "edit-2",
+                color: PRIMARY,
+                label: `Edit ${t.title}`,
+                disabled: h.busy,
+                onPress: () => h.onEdit(t),
+              },
+              h.canManage && {
+                key: "ads",
+                icon: "volume-2",
+                renderIcon: megaphoneIcon,
+                color: NEUTRAL,
+                label: `Post-waiver ads for ${t.title}`,
+                disabled: h.busy,
+                onPress: () => h.onAds(t),
+              },
+              h.canManage && {
+                key: "delete",
+                icon: "trash-2",
+                color: "#DC2626",
+                label: `Delete ${t.title}`,
+                disabled: h.busy,
+                onPress: () => h.onDelete(t),
+              },
+            ]}
+          />
+        ),
+    },
+  ];
+}
+
+/**
+ * Table layout for the Waiver Templates list, on the shared flat table. Rows
+ * are deliberately not tappable — a whole-row target makes it too easy to open
+ * the editor while scrolling sideways — so everything goes through Actions.
+ */
+export const TemplatesTable = memo(function TemplatesTable({
+  templates,
+  ...handlers
+}: { templates: WaiverTemplate[] } & Handlers) {
+  const {
+    deleted,
+    canManage,
+    isCompanyAdmin,
+    busy,
+    onKiosk,
+    onEscapeRooms,
+    onEdit,
+    onAds,
+    onToggleStatus,
+    onDelete,
+    onRestore,
+    onForceDelete,
+  } = handlers;
+  const columns = useMemo(
+    () =>
+      buildColumns({
+        deleted,
+        canManage,
+        isCompanyAdmin,
+        busy,
+        onKiosk,
+        onEscapeRooms,
+        onEdit,
+        onAds,
+        onToggleStatus,
+        onDelete,
+        onRestore,
+        onForceDelete,
+      }),
+    [
+      deleted,
+      canManage,
+      isCompanyAdmin,
+      busy,
+      onKiosk,
+      onEscapeRooms,
+      onEdit,
+      onAds,
+      onToggleStatus,
+      onDelete,
+      onRestore,
+      onForceDelete,
+    ],
   );
+  return <SelectableTable columns={columns} rows={templates} rowId={(t) => t.id} flat />;
 });

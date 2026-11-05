@@ -1,21 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useColorScheme } from "nativewind";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentProps,
-} from "react";
-import {
-  ActivityIndicator,
   Alert,
   Pressable,
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,21 +17,38 @@ import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import {
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+  ToolbarIconButton,
+} from "../../components/ui/SummaryPanel";
 import {
   countActiveWaiverFilters,
   EMPTY_WAIVER_FILTERS,
   WaiverFiltersSheet,
   type WaiverFilterValues,
 } from "../../components/ui/WaiverFiltersSheet";
-import { WaiversTable } from "../../components/ui/WaiversTable";
+import {
+  DEFAULT_WAIVER_COLS,
+  WAIVER_COLUMN_META,
+  WaiversTable,
+  type WColKey,
+  type WCols,
+} from "../../components/ui/WaiversTable";
+import { WaiverDeleteSheet } from "../../components/ui/WaiverDeleteConfirm";
 import { WaiverDetailSheet } from "../../components/ui/WaiverDetailSheet";
 import { LaunchKioskSheet } from "../../components/ui/LaunchKioskSheet";
-import {
-  WaiversKpiSkeleton,
-  WaiversListSkeleton,
-} from "../../components/ui/skeleton/WaiversSkeleton";
 import {
   clearWaiverCache,
   consumeWaiversStale,
@@ -52,9 +61,10 @@ import { useWaiverSettings } from "../../lib/hooks/useWaiverSettings";
 import { apiUrl } from "../../lib/api";
 import { formatDateET, venueDateKey } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { isEscapeRoomTemplate, standardTemplatesOnly } from "../../lib/waivers/templateDisplay";
+import { canDeleteWaivers } from "../../lib/waivers/waiverDeletion";
 import {
   checkInWaiver,
-  deleteWaiver,
   fetchTemplates,
   SOURCE_LABELS,
   type WaiverTemplate,
@@ -70,20 +80,16 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
-type ComponentIconName = ComponentProps<typeof Feather>["name"];
+type StatusFilter = WaiverStatus | "all";
 
-// Statuses the backend supports on the Records filter (mirrors the web select;
-// there is no "all statuses" fetch, so one status is always active).
-const STATUS_OPTIONS: { label: string; value: WaiverStatus }[] = [
+// The web Records page's Status select: Completed is the default (the backend's
+// own default), "All statuses" sends status=all.
+const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "Completed", value: "completed" },
+  { label: "All statuses", value: "all" },
   { label: "Pending", value: "pending" },
   { label: "Expired", value: "expired" },
   { label: "Replaced", value: "replaced" },
@@ -94,44 +100,6 @@ type DateFilter = WaiverTimeframe;
 const DATE_OPTIONS = VISIT_PERIOD_OPTIONS;
 
 const PER_PAGE_OPTIONS = [5, 10, 25, 50];
-
-/** Toggleable card fields (mirrors the web "Columns" menu). */
-type WColKey =
-  | "linked"
-  | "minors"
-  | "template"
-  | "location"
-  | "source"
-  | "date"
-  | "submitted"
-  | "checkin"
-  | "status"
-  | "marketing";
-type WCols = Record<WColKey, boolean>;
-const DEFAULT_WCOLS: WCols = {
-  linked: true,
-  minors: true,
-  template: true,
-  location: true,
-  source: true,
-  date: true,
-  submitted: true,
-  checkin: true,
-  status: true,
-  marketing: true,
-};
-const WCOLUMN_META: { key: WColKey; label: string }[] = [
-  { key: "linked", label: "Linked to" },
-  { key: "minors", label: "Minors" },
-  { key: "template", label: "Template" },
-  { key: "location", label: "Location" },
-  { key: "source", label: "Source" },
-  { key: "date", label: "Date" },
-  { key: "submitted", label: "Submitted" },
-  { key: "checkin", label: "Check-in" },
-  { key: "status", label: "Status" },
-  { key: "marketing", label: "Marketing" },
-];
 
 function todayKey(): string {
   const now = new Date();
@@ -152,64 +120,24 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
-type KpiTone = { bg: string; tint: string };
-
-const KpiCard = ({
-  icon,
-  tone,
-  title,
-  value,
-  change,
-}: {
-  icon: ComponentIconName;
-  tone: KpiTone;
-  title: string;
-  value: string;
-  change: string;
-}) => (
-  <View
-    className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 m-1.5 shadow-sm"
-    style={CARD_SHADOW}
-  >
-    <View
-      className="w-9 h-9 rounded-xl items-center justify-center"
-      style={{ backgroundColor: tone.bg }}
-    >
-      <Feather name={icon} size={18} color={tone.tint} />
-    </View>
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
-      {title}
-    </Text>
-    <Text
-      className="text-2xl font-bold text-gray-900 dark:text-white mt-1"
-      numberOfLines={1}
-      adjustsFontSizeToFit
-    >
-      {value}
-    </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      {change}
-    </Text>
-  </View>
-);
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const Waivers = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   const currentUser = getCurrentUser();
   const role = currentUser?.role;
   const isCompanyAdmin = role === "company_admin";
   // assign is admin/manager only (attendant is read-only) — matches the backend
-  // guardManager on POST /waivers/assign.
+  // guardManager on POST /waivers/assign, and the web hides the button too.
   const canAssign = isCompanyAdmin || role === "location_manager";
   // Sub-module links: attendants only get Waiver Records on the web sidebar.
   const canManageSubModules = canAssign;
 
   const { settings } = useWaiverSettings();
   // Admin-only delete, honoring the company's admin_delete_enabled UI hint.
-  const canDelete = isCompanyAdmin && (settings?.adminDeleteEnabled ?? true);
+  const canDelete = canDeleteWaivers(role, settings?.adminDeleteEnabled);
   // Inline table actions mirror the web Records row: check-in follows the same
   // admin/manager rule as assign; print/export honors the company setting.
   const canCheckIn = canAssign;
@@ -217,7 +145,7 @@ const Waivers = () => {
     isCompanyAdmin ||
     (role === "location_manager" && (settings?.managerPrintExportEnabled ?? false));
 
-  const [statusFilter, setStatusFilter] = useState<WaiverStatus>("completed");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("completed");
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
   /** Endpoints for "Custom Range"; both default to today, as on the web. */
   const [customFrom, setCustomFrom] = useState(() => todayKey());
@@ -225,7 +153,7 @@ const Waivers = () => {
   const [showRangePicker, setShowRangePicker] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [sheet, setSheet] = useState<null | "status" | "date" | "manage">(null);
+  const [showPeriodSheet, setShowPeriodSheet] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [refreshing, setRefreshing] = useState(false);
@@ -253,12 +181,22 @@ const Waivers = () => {
     }
     setKioskLoading(true);
     try {
-      const list = await fetchTemplates(token);
+      const all = await fetchTemplates(token);
+      // Escape-room waivers are signed from the escape-room check-in, so the
+      // web leaves them out of this kiosk (and says where they live instead).
+      const list = standardTemplatesOnly(all);
       if (list.length === 0) {
-        Alert.alert(
-          "No waiver templates",
-          "No waiver templates exist yet — create one first.",
-        );
+        if (all.some(isEscapeRoomTemplate)) {
+          Alert.alert(
+            "No standard waiver templates",
+            "Escape-room waivers are signed from Photos › Escape Rooms › Guest check-in. Create a standard waiver to use this kiosk.",
+          );
+        } else {
+          Alert.alert(
+            "No waiver templates",
+            "No waiver templates exist yet — create one first.",
+          );
+        }
         return;
       }
       setKioskTemplates(list);
@@ -294,7 +232,7 @@ const Waivers = () => {
   const [filters, setFilters] = useState<WaiverFilterValues>(
     EMPTY_WAIVER_FILTERS,
   );
-  const [cols, setCols] = useState<WCols>(DEFAULT_WCOLS);
+  const [cols, setCols] = useState<WCols>(DEFAULT_WAIVER_COLS);
   const [exporting, setExporting] = useState(false);
   const toggleCol = (key: WColKey) =>
     setCols((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -306,7 +244,7 @@ const Waivers = () => {
   }, [search]);
 
   /**
-   * The date half of a request. Shared by the list and the summary line so the
+   * The date half of a request. Shared by the list and the summary panel so the
    * two always count the same period — they are shown side by side, and a
    * mismatch reads as a bug in the data rather than in the filter.
    */
@@ -324,7 +262,9 @@ const Waivers = () => {
     () => ({
       status: statusFilter,
       ...dateScope,
-      adultName: debouncedSearch || undefined,
+      // The backend's Records search — name, email, phone (any format),
+      // reference number and waiver id — the fields the web search box covers.
+      search: debouncedSearch || undefined,
       source:
         filters.source === "all" ? undefined : (filters.source as WaiverSource),
       marketingConsentStatus:
@@ -346,7 +286,7 @@ const Waivers = () => {
     page,
     perPage,
   });
-  const { stats } = useWaiverStats(statsNonce);
+  useWaiverStats(statsNonce);
   // Dashboard-shaped figures for the same period as the list request, fetched
   // separately because they must ignore the status filter — that filter is
   // exactly why the counts and the dashboard looked like they disagreed.
@@ -384,8 +324,6 @@ const Waivers = () => {
     }, [refetch]),
   );
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "Completed";
   // A custom range names its own dates — "Custom Range" alone would not tell
   // the user which period they are looking at.
   const dateLabel =
@@ -429,7 +367,7 @@ const Waivers = () => {
           return false;
         if (filters.submittedStart || filters.submittedEnd) {
           // submittedAt is an instant; compare on its venue calendar day so the
-          // range means the same day the Submitted column shows.
+          // range means the same day the Signed column shows.
           const day = venueDateKey(w.submittedAt);
           if (!day) return false;
           if (filters.submittedStart && day < filters.submittedStart)
@@ -447,6 +385,22 @@ const Waivers = () => {
   );
 
   const activeFilterCount = countActiveWaiverFilters(filters);
+  // Everything that narrows the list, for the hint: the sheet's filters plus a
+  // non-default status or period.
+  const appliedCount =
+    activeFilterCount +
+    (statusFilter !== "completed" ? 1 : 0) +
+    (dateFilter !== "today" ? 1 : 0);
+
+  /** The web page's Reset: status, period, custom dates, filters and search. */
+  const resetAll = useCallback(() => {
+    setStatusFilter("completed");
+    setDateFilter("today");
+    setCustomFrom(todayKey());
+    setCustomTo(todayKey());
+    setFilters(EMPTY_WAIVER_FILTERS);
+    setSearch("");
+  }, []);
 
   // The calendar and the filter sheet are both native sheets, so close one fully
   // before opening the other (two stacked sheets crash Android).
@@ -579,81 +533,85 @@ const Waivers = () => {
     }
   }, []);
 
+  // Row Delete opens the same confirmation the detail sheet uses (optional
+  // reason included); the sheet runs the request and reports the result.
+  const [deleteTarget, setDeleteTarget] = useState<Waiver | null>(null);
   const handleDelete = useCallback(
     (w: Waiver) => {
-      Alert.alert(
-        "Delete waiver",
-        `Delete the waiver for ${w.adultName}? This is recorded in the deletion log and can't be undone.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              const token = getToken();
-              if (!token) {
-                Alert.alert("Not signed in", "Please sign in again to delete.");
-                return;
-              }
-              setBusyRowId(w.id);
-              try {
-                await deleteWaiver(token, w.id);
-                clearWaiverCache();
-                await refetch();
-                setStatsNonce((n) => n + 1);
-              } catch (err) {
-                Alert.alert(
-                  "Delete failed",
-                  err instanceof Error
-                    ? err.message
-                    : "Could not delete this waiver.",
-                );
-              } finally {
-                setBusyRowId(null);
-              }
-            },
-          },
-        ],
-      );
+      if (canDelete) setDeleteTarget(w);
     },
-    [refetch],
+    [canDelete],
   );
+  const onWaiverDeleted = useCallback(() => {
+    clearWaiverCache();
+    void refetch();
+    setStatsNonce((n) => n + 1);
+  }, [refetch]);
+
+  // The web page's Launch Kiosk and Manage menu (Templates, Group Invites,
+  // Returning Customers, Reports, Deletion Log, Settings) plus Export and
+  // Refresh, as module-hub shortcuts. Role rules are the ones this screen's
+  // Manage sheet already applied; Group Invites and Reports follow the web's.
+  const moreShortcuts: HubQuickLink[] = [
+    {
+      label: kioskLoading ? "Loading…" : "Launch Kiosk",
+      icon: "tablet",
+      onPress: () => {
+        if (!kioskLoading) void openKiosk();
+      },
+    },
+    ...(canManageSubModules
+      ? ([
+          { label: "Templates", icon: "layout", route: "/waivers/templates" },
+          { label: "Group Invites", icon: "users", route: "/waivers/group-invites" },
+          { label: "Returning Customers", icon: "user-check", route: "/waivers/returning-customers" },
+        ] as HubQuickLink[])
+      : []),
+    { label: "Reports", icon: "bar-chart-2", route: "/waivers/reports" },
+    { label: "Deletion Log", icon: "trash-2", route: "/waivers/deletion-log" },
+    ...(isCompanyAdmin
+      ? ([{ label: "Settings", icon: "settings", route: "/waivers/waiver-settings" }] as HubQuickLink[])
+      : []),
+    {
+      label: exporting ? "Exporting…" : "Export CSV",
+      icon: "download",
+      onPress: () => {
+        if (!exporting) void exportCsv();
+      },
+    },
+    { label: "Refresh", icon: "refresh-cw", onPress: onRefresh },
+  ];
+
+  const listTitle =
+    statusFilter === "all"
+      ? "All Waivers"
+      : `${STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "Completed"} Waivers`;
+  const periodActive = dateFilter !== "today";
+  const periodIcon = periodActive
+    ? colorScheme === "dark"
+      ? "#111827"
+      : "#FFFFFF"
+    : "#6B7280";
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Waiver Records
-          </Text>
-          {/* Always shown — the sheet carries Export, which every role has. */}
-          <Pressable
-            onPress={() => setSheet("manage")}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="More waiver options"
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="more-horizontal" size={20} color={headerIcon} />
-            )}
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Waiver Records"
+        action={
+          canAssign
+            ? {
+                onPress: () => router.push("/waivers/create-waiver"),
+                accessibilityLabel: "Assign waiver",
+                label: "Assign",
+              }
+            : undefined
+        }
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -665,232 +623,188 @@ const Waivers = () => {
           />
         }
       >
-        <View className="px-5 mt-5">
-          {/* The web page's Launch Kiosk (secondary) beside Assign Waiver. */}
-          <View className="mb-5 flex-row gap-3">
-            <Pressable
-              onPress={() => void openKiosk()}
-              disabled={kioskLoading}
-              accessibilityRole="button"
-              accessibilityLabel="Launch waiver kiosk"
-              className={`flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white py-3.5 active:opacity-70 dark:border-neutral-700 dark:bg-neutral-900 ${
-                kioskLoading ? "opacity-60" : ""
-              }`}
-            >
-              {kioskLoading ? (
-                <ActivityIndicator size="small" color="#0644C7" />
-              ) : (
-                <Feather name="tablet" size={16} color={headerIcon} />
-              )}
-              <Text
-                className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-                numberOfLines={1}
-              >
-                {kioskLoading ? "Loading…" : "Launch Kiosk"}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/waivers/create-waiver")}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-            >
-              <Feather name="plus" size={16} color="#FFFFFF" />
-              <Text
-                className="text-sm font-semibold text-white"
-                numberOfLines={1}
-              >
-                Assign Waiver
-              </Text>
-            </Pressable>
-          </View>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Look up signed waivers, assign new ones, and manage records.
+          </Text>
 
-          {/* Error state */}
-          {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
+          {/* This period, all statuses — counted the way the company dashboard
+              counts, so Total reconciles with its waiver card. Hidden when the
+              request fails, as on the web. */}
+          {periodSummary && (
+            <View className="mb-5">
+              <SummaryPanel
+                figures={[
+                  {
+                    icon: "file-text",
+                    title: "Total",
+                    value: String(periodSummary.total),
+                    hint: "This period, all statuses",
+                  },
+                  {
+                    icon: "check-circle",
+                    title: "Signed",
+                    value: String(periodSummary.completed),
+                    hint: plural(periodSummary.completed, "Waiver form", "Waiver forms"),
+                  },
+                  {
+                    icon: "users",
+                    title: "Participants",
+                    value: String(periodSummary.peopleCovered),
+                    hint: "Covered",
+                  },
+                  {
+                    icon: "clock",
+                    title: "Pending",
+                    value: String(periodSummary.pending),
+                    hint: "Awaiting signature",
+                  },
+                  {
+                    icon: "user-check",
+                    title: "Checked In",
+                    value: String(periodSummary.checkedIn),
+                    hint: plural(periodSummary.checkedIn, "Form", "Forms"),
+                  },
+                  {
+                    icon: "smile",
+                    title: "Minors",
+                    value: String(periodSummary.minorsCovered),
+                    hint: "Covered",
+                  },
+                ]}
+              />
+              {periodSummary.minorAgeBrackets.length > 0 && (
+                <Text className="mt-2 text-xs leading-4 text-gray-500 dark:text-gray-400">
+                  Minors by age (at signing):{" "}
+                  {periodSummary.minorAgeBrackets
+                    .map((b) => `${b.bracket}: ${b.count}`)
+                    .join(" · ")}
+                </Text>
+              )}
+              <Text className="mt-1 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
+                Counted the same way the company dashboard counts, for the same
+                period and location — so Total should equal the dashboard&apos;s
+                waiver card.
               </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
             </View>
           )}
 
-          
+          {/* More — kiosk, related Waivers screens and export as shortcuts. */}
+          <View>
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
+          </View>
 
-          {/* Status · Date pill */}
-          <FilterPill>
-            <PillSegment
-              label={statusLabel}
-              active={sheet === "status"}
-              onPress={() => setSheet("status")}
-              renderIcon={(c) => <Feather name="check-circle" size={15} color={c} />}
-            />
-            <PillSegment
-              label={dateLabel}
-              active={sheet === "date"}
-              onPress={() => setSheet("date")}
-              renderIcon={(c) => <Feather name="calendar" size={15} color={c} />}
-            />
-          </FilterPill>
-
-          {/* Filters · Columns pill (Export lives in the header's ⋯ sheet) */}
-          <FilterPill>
-            <PillSegment
-              label={
-                activeFilterCount > 0
-                  ? `Filters (${activeFilterCount})`
-                  : "Filters"
-              }
-              active={showFilters || activeFilterCount > 0}
-              onPress={() => setShowFilters(true)}
-              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Columns"
-              active={showColumns}
-              onPress={() => setShowColumns(true)}
-              renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
-            />
-          </FilterPill>
-
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mb-3">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
               value={search}
               onChangeText={setSearch}
-              placeholder="Search by guardian name..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+              placeholder="Name, email, phone or reference"
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
+            <FiltersButton count={activeFilterCount} onPress={() => setShowFilters(true)} />
           </View>
 
-          {/* List header + top pagination (below the title, same state as bottom) */}
-          {!loading && !error && (
-            <View className="mb-4">
-              <View className="flex-row items-center gap-2 shrink">
-                <Text
-                  numberOfLines={1}
-                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
-                >
-                  Waivers
-                </Text>
-                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {total}
-                  </Text>
-                </View>
-              </View>
+          <AppliedFiltersHint count={appliedCount} onClear={resetAll} />
 
-              {/* Counts line, as on the web Records page. The first line is the
-                  list's own count for the current status + period; the second
-                  is the period counted across every status, so it reconciles
-                  with the company dashboard's waiver card. */}
-              <View className="mt-3 bg-white dark:bg-neutral-900 rounded-2xl px-4 py-3 border border-gray-100 dark:border-neutral-800">
-                <Text className="text-sm text-gray-600 dark:text-gray-300">
-                  <Text className="font-semibold text-gray-900 dark:text-white">
-                    {total}
-                  </Text>{" "}
-                  {statusLabel.toLowerCase()} waiver{total === 1 ? "" : "s"}
-                </Text>
+          {/* Visit period + status — the web page's two server-side selects. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            <Pressable
+              key={periodActive ? "period-on" : "period-off"}
+              onPress={() => setShowPeriodSheet(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Visit period: ${dateLabel}`}
+              className={`flex-row items-center gap-1.5 rounded-full border px-3.5 py-1.5 active:opacity-70 ${
+                periodActive
+                  ? "bg-gray-900 border-gray-900 dark:bg-white dark:border-white"
+                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
+              }`}
+            >
+              <Feather name="calendar" size={13} color={periodIcon} />
+              <Text
+                className={`text-sm font-medium ${
+                  periodActive ? "text-white dark:text-gray-900" : "text-gray-700 dark:text-gray-200"
+                }`}
+              >
+                {dateLabel}
+              </Text>
+              <Feather name="chevron-down" size={13} color={periodIcon} />
+            </Pressable>
+            <View className="w-px bg-gray-200 dark:bg-neutral-800 my-1" />
+            {STATUS_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                selected={statusFilter === opt.value}
+                onPress={() => setStatusFilter(opt.value)}
+              />
+            ))}
+          </ScrollView>
 
-                {periodSummary && (
-                  <View className="mt-2.5 pt-2.5 border-t border-gray-100 dark:border-neutral-800">
-                    <Text className="text-sm text-gray-600 dark:text-gray-300">
-                      <Text className="font-medium text-gray-700 dark:text-gray-200">
-                        This period, all statuses:
-                      </Text>{" "}
-                      <Text className="font-semibold text-gray-900 dark:text-white">
-                        {periodSummary.total}
-                      </Text>{" "}
-                      total ·{" "}
-                      <Text className="font-semibold text-gray-900 dark:text-white">
-                        {periodSummary.completed}
-                      </Text>{" "}
-                      waiver {periodSummary.completed === 1 ? "form" : "forms"} signed ·{" "}
-                      <Text className="font-semibold text-gray-900 dark:text-white">
-                        {periodSummary.peopleCovered}
-                      </Text>{" "}
-                      {periodSummary.peopleCovered === 1 ? "participant" : "participants"} covered ·{" "}
-                      <Text className="font-semibold text-gray-900 dark:text-white">
-                        {periodSummary.pending}
-                      </Text>{" "}
-                      pending ·{" "}
-                      <Text className="font-semibold text-gray-900 dark:text-white">
-                        {periodSummary.checkedIn}
-                      </Text>{" "}
-                      {periodSummary.checkedIn === 1 ? "form" : "forms"} checked in ·{" "}
-                      <Text className="font-semibold text-gray-900 dark:text-white">
-                        {periodSummary.minorsCovered}
-                      </Text>{" "}
-                      minors
-                    </Text>
-                    {periodSummary.minorAgeBrackets.length > 0 && (
-                      <Text className="mt-1 text-xs leading-4 text-gray-500 dark:text-gray-400">
-                        Minors by age (at signing):{" "}
-                        {periodSummary.minorAgeBrackets
-                          .map((b) => `${b.bracket}: ${b.count}`)
-                          .join(" · ")}
-                      </Text>
-                    )}
-                    <Text className="mt-1 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
-                      Counted the same way the company dashboard counts, for the
-                      same period and location — so{" "}
-                      <Text className="font-medium">total</Text> should equal the
-                      dashboard&apos;s waiver card.
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </View>
+          {!loading && error && (
+            <ListErrorBanner
+              title="Could not load waivers"
+              message={error}
+              onRetry={onRefresh}
+            />
           )}
 
-          {/* List / states */}
+          {!loading && !error && (
+            <ListHeader title={listTitle} count={total}>
+              <ToolbarIconButton
+                icon="columns"
+                label="Toggle columns"
+                active={showColumns}
+                onPress={() => setShowColumns(true)}
+              />
+            </ListHeader>
+          )}
+
+          {/* List / states — each keyed so switching remounts cleanly. */}
           {loading ? (
-            <WaiversListSkeleton />
-          ) : !error && displayed.length === 0 ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="file-text" size={26} color="#9CA3AF" />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No waivers found
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                Try a different status, date, or search term.
-              </Text>
+            <View key="s-loading">
+              <AttractionsTableSkeleton />
+            </View>
+          ) : error ? null : displayed.length === 0 ? (
+            <View key="s-empty">
+              <ListEmptyState
+                icon="file-text"
+                title="No waivers found"
+                message="No waivers found for this filter."
+                actionLabel={appliedCount > 0 || search ? "Reset filters" : undefined}
+                onAction={appliedCount > 0 || search ? resetAll : undefined}
+              />
             </View>
           ) : (
-            !error && (
-              <>
-                <WaiversTable
-                  waivers={displayed}
-                  cols={cols}
-                  showLocation={isCompanyAdmin}
-                  canCheckIn={canCheckIn}
-                  canPrint={canPrint}
-                  canDelete={canDelete}
-                  busyId={busyRowId}
-                  onRowPress={(w) => setSelectedId(w.id)}
-                  onCheckIn={handleCheckIn}
-                  onPrint={handlePrint}
-                  onDelete={handleDelete}
-                />
+            <View key="s-list">
+              <WaiversTable
+                waivers={displayed}
+                cols={cols}
+                showLocation={isCompanyAdmin}
+                canCheckIn={canCheckIn}
+                canPrint={canPrint}
+                canDelete={canDelete}
+                busyId={busyRowId}
+                onRowPress={(w) => setSelectedId(w.id)}
+                onCheckIn={handleCheckIn}
+                onPrint={handlePrint}
+                onDelete={handleDelete}
+              />
 
-                {/* Pagination (bottom, server-side) — same state as the top */}
-                <PaginationControls
-                  page={page}
-                  lastPage={lastPage}
-                  perPage={perPage}
-                  perPageOptions={PER_PAGE_OPTIONS}
-                  onPageChange={setPage}
-                  onPerPageChange={setPerPage}
-                />
-              </>
-            )
+              {/* Pagination (server-side) */}
+              <PaginationControls
+                page={page}
+                lastPage={lastPage}
+                perPage={perPage}
+                perPageOptions={PER_PAGE_OPTIONS}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
+            </View>
           )}
         </View>
       </ScrollView>
@@ -920,51 +834,11 @@ const Waivers = () => {
         onApply={applySubmittedRange}
       />
 
-      {/* Status filter */}
+      {/* Visit period */}
       <BottomSheet
-        visible={sheet === "status"}
-        onClose={() => setSheet(null)}
-        title="Filter by Status"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {STATUS_OPTIONS.map((option) => {
-            const isSelected = statusFilter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setStatusFilter(option.value);
-                  setSheet(null);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Date filter */}
-      <BottomSheet
-        visible={sheet === "date"}
-        onClose={() => setSheet(null)}
-        title="Filter by Date"
+        visible={showPeriodSheet}
+        onClose={() => setShowPeriodSheet(false)}
+        title="Visit Period"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           {DATE_OPTIONS.map((option) => {
@@ -973,10 +847,10 @@ const Waivers = () => {
               <Pressable
                 key={option.value}
                 onPress={() => {
-                  setSheet(null);
+                  setShowPeriodSheet(false);
                   // A custom range is not a period until both ends are picked,
                   // so the calendar opens before the filter is applied.
-                  if (option.value === "custom") setShowRangePicker(true);
+                  if (option.value === "custom") setTimeout(() => setShowRangePicker(true), 280);
                   else setDateFilter(option.value);
                 }}
                 accessibilityRole="button"
@@ -1021,123 +895,22 @@ const Waivers = () => {
         }}
       />
 
-      {/* Manage — sub-module navigation (Templates, Returning Customers,
-          Deletion Log, Settings) plus Export. Group Invites isn't listed here;
-          it has its own card on the Waivers hub. */}
-      <BottomSheet
-        visible={sheet === "manage"}
-        onClose={() => setSheet(null)}
-        title="Manage Waivers"
-      >
-        <View className="px-4 pb-8">
-          {canManageSubModules && (
-            <Pressable
-              onPress={() => {
-                setSheet(null);
-                router.push("/waivers/templates" as never);
-              }}
-              className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-            >
-              <Feather name="layout" size={18} color={PRIMARY} />
-              <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
-                Waiver Templates
-              </Text>
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            </Pressable>
-          )}
-          {/* Web: Manage → Returning Customers, admins and managers only (the
-              API refuses everyone else). */}
-          {canManageSubModules && (
-            <Pressable
-              onPress={() => {
-                setSheet(null);
-                router.push("/waivers/returning-customers" as never);
-              }}
-              className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-              accessibilityRole="button"
-              accessibilityLabel="Returning Customers"
-            >
-              <Feather name="user-check" size={18} color={PRIMARY} />
-              <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
-                Returning Customers
-              </Text>
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            </Pressable>
-          )}
-          {/* Deletion Log — every role, as its hub card was. */}
-          <Pressable
-            onPress={() => {
-              setSheet(null);
-              router.push("/waivers/deletion-log" as never);
-            }}
-            className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-            accessibilityRole="button"
-            accessibilityLabel="Deletion Log"
-          >
-            <Feather name="trash-2" size={18} color={PRIMARY} />
-            <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
-              Deletion Log
-            </Text>
-            <Feather name="chevron-right" size={16} color="#9CA3AF" />
-          </Pressable>
-          {/* Settings — company-wide defaults, company admins only. */}
-          {isCompanyAdmin && (
-            <Pressable
-              onPress={() => {
-                setSheet(null);
-                router.push("/waivers/waiver-settings" as never);
-              }}
-              className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-              accessibilityRole="button"
-              accessibilityLabel="Waiver Settings"
-            >
-              <Feather name="settings" size={18} color={PRIMARY} />
-              <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
-                Settings
-              </Text>
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            </Pressable>
-          )}
-          {/* The sheet is a native Modal, so it closes fully before the share
-              sheet opens — two stacked native Modals crash Android's new
-              architecture (same guard the filter → calendar hop uses). */}
-          <Pressable
-            onPress={() => {
-              setSheet(null);
-              setTimeout(exportCsv, 280);
-            }}
-            disabled={exporting}
-            className="flex-row items-center gap-3 px-4 py-4 rounded-xl active:bg-gray-50 dark:active:bg-neutral-800"
-            accessibilityRole="button"
-            accessibilityLabel="Export waivers as CSV"
-          >
-            <Feather name="download" size={18} color={PRIMARY} />
-            <Text className="text-base font-medium text-gray-800 dark:text-gray-100 flex-1">
-              Export CSV
-            </Text>
-            {exporting ? (
-              <ActivityIndicator size="small" color={PRIMARY} />
-            ) : (
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            )}
-          </Pressable>
-        </View>
-      </BottomSheet>
-
-      {/* Toggle Columns */}
+      {/* Toggle Columns — the web Columns menu, Show All and Reset included. */}
       <BottomSheet
         visible={showColumns}
         onClose={() => setShowColumns(false)}
         title="Toggle Columns"
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {WCOLUMN_META.map((col) => {
+          {WAIVER_COLUMN_META.map((col) => {
             const on = cols[col.key];
             return (
               <Pressable
                 key={col.key}
                 onPress={() => toggleCol(col.key)}
                 className="flex-row items-center gap-3 px-2 py-3.5"
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: on }}
               >
                 <View
                   className={`w-6 h-6 rounded-md items-center justify-center border ${
@@ -1156,14 +929,27 @@ const Waivers = () => {
               </Pressable>
             );
           })}
-          <Pressable
-            onPress={() => setCols(DEFAULT_WCOLS)}
-            className="mt-2 pt-4 border-t border-gray-100 dark:border-neutral-800 px-2"
-          >
-            <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-              Show All
-            </Text>
-          </Pressable>
+          <View className="flex-row items-center gap-6 mt-2 pt-4 border-t border-gray-100 dark:border-neutral-800 px-2">
+            <Pressable
+              onPress={() =>
+                setCols(
+                  Object.fromEntries(
+                    WAIVER_COLUMN_META.map((c) => [c.key, true]),
+                  ) as WCols,
+                )
+              }
+              accessibilityRole="button"
+            >
+              <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                Show All
+              </Text>
+            </Pressable>
+            <Pressable onPress={() => setCols(DEFAULT_WAIVER_COLS)} accessibilityRole="button">
+              <Text className="text-sm font-semibold text-gray-500 dark:text-gray-400">
+                Reset
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </BottomSheet>
 
@@ -1173,11 +959,23 @@ const Waivers = () => {
         visible={selectedId !== null}
         onClose={() => setSelectedId(null)}
         canDelete={canDelete}
+        canCheckIn={canCheckIn}
+        // The web modal hides Print from attendants only (the server still
+        // refuses anyone it should); managers keep it whatever the setting.
+        canPrint={role !== "attendant"}
         onChanged={() => {
           clearWaiverCache();
           refetch();
           setStatsNonce((n) => n + 1);
         }}
+      />
+
+      {/* Table-row delete — the detail sheet's confirmation, in its own sheet. */}
+      <WaiverDeleteSheet
+        waiver={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onDeleted={onWaiverDeleted}
+        onBusyChange={setBusyRowId}
       />
 
       {/* No template in hand here, so the sheet asks which waiver it is. */}

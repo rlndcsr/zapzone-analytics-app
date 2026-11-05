@@ -1,26 +1,29 @@
 import { Feather } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
 import {
+  checkInWaiver,
   deleteWaiver,
   fetchWaiverDetail,
   SOURCE_LABELS,
+  undoWaiverCheckIn,
   type WaiverDetail,
 } from "../../services/waiversService";
 import { apiUrl } from "../../lib/api";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getToken } from "../../lib/session";
+import { submitWaiverDeletion } from "../../lib/waivers/waiverDeletion";
 import { BottomSheet } from "./BottomSheet";
-import { StatusBadge } from "./StatusBadge";
+import { announceWaiverDeleteResult, WaiverDeleteConfirm } from "./WaiverDeleteConfirm";
+import { CheckinPill, WaiverStatusPill } from "./WaiversTable";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
@@ -109,6 +112,10 @@ type Props = {
   onChanged: () => void;
   /** Whether the current role may delete (company admin, per settings). */
   canDelete: boolean;
+  /** Check In / Undo Check-In in the footer, as the web detail modal offers. */
+  canCheckIn?: boolean;
+  /** Print in the footer — the web hides it from attendants. */
+  canPrint?: boolean;
 };
 
 /**
@@ -124,15 +131,19 @@ export function WaiverDetailSheet({
   onClose,
   onChanged,
   canDelete,
+  canCheckIn = false,
+  canPrint = true,
 }: Props) {
   const [detail, setDetail] = useState<WaiverDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
+  const [checking, setChecking] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [reason, setReason] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const deleteLock = useRef(false);
 
   useEffect(() => {
     if (!visible || waiverId == null) return;
@@ -166,25 +177,53 @@ export function WaiverDetailSheet({
     };
   }, [visible, waiverId]);
 
+  // The same submission the table row uses (one request at a time, the reason
+  // sent as DELETE /waivers/{id} `reason`), then the same feedback.
   const runDelete = async () => {
-    if (waiverId == null) return;
+    if (waiverId == null || deleteLock.current) return;
+    setDeleting(true);
+    const result = await submitWaiverDeletion({
+      token: getToken(),
+      waiverId,
+      reason,
+      lock: deleteLock,
+      remove: deleteWaiver,
+    });
+    setDeleting(false);
+    if (result.status === "busy") return;
+    if (result.status === "deleted") {
+      onChanged();
+      onClose();
+    }
+    announceWaiverDeleteResult(result, detail?.adultName);
+  };
+
+  // Check In / Undo Check-In, then reload the record in place (the sheet stays
+  // open, as the web modal does) and let the list refresh behind it.
+  const runCheckIn = async (undo: boolean) => {
+    if (!detail || checking) return;
     const token = getToken();
     if (!token) {
       Alert.alert("Not authenticated");
       return;
     }
-    setDeleting(true);
+    setChecking(true);
     try {
-      await deleteWaiver(token, waiverId, reason.trim());
+      if (undo) await undoWaiverCheckIn(token, detail.id);
+      else await checkInWaiver(token, detail.id);
       onChanged();
-      onClose();
+      setDetail(await fetchWaiverDetail(token, detail.id));
     } catch (e) {
       Alert.alert(
-        "Delete failed",
-        e instanceof Error ? e.message : "Could not delete this waiver.",
+        undo ? "Undo check-in failed" : "Check-in failed",
+        e instanceof Error
+          ? e.message
+          : undo
+            ? "Failed to undo check-in"
+            : "Failed to check in waiver",
       );
     } finally {
-      setDeleting(false);
+      setChecking(false);
     }
   };
 
@@ -262,23 +301,10 @@ export function WaiverDetailSheet({
               <Text className="text-xl font-bold text-gray-900 dark:text-white">
                 {detail.adultName}
               </Text>
-              <StatusBadge status={detail.status} />
+              <WaiverStatusPill status={detail.status} />
               {/* Check-in badge — mirrors the web admin: driven purely by the
                   truthiness of checked_in_at (no separate boolean field). */}
-              {detail.checkedInAt ? (
-                <View className="flex-row items-center gap-1 px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30">
-                  <Feather name="user-check" size={11} color="#047857" />
-                  <Text className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                    Checked In
-                  </Text>
-                </View>
-              ) : (
-                <View className="px-2 py-1 rounded-full bg-gray-100 dark:bg-neutral-800">
-                  <Text className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">
-                    Not Checked In
-                  </Text>
-                </View>
-              )}
+              <CheckinPill waiver={detail} />
             </View>
             <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-1">
               {detail.templateTitle ?? "Waiver"} · Waiver #{detail.id}
@@ -418,72 +444,102 @@ export function WaiverDetailSheet({
                     </Text>
                   </Pressable>
                 ) : (
-                  <View className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-2xl p-4">
-                    <Text className="text-sm font-semibold text-red-700 dark:text-red-400 mb-2">
-                      Delete this waiver?
-                    </Text>
-                    <TextInput
-                      value={reason}
-                      onChangeText={setReason}
-                      placeholder="Reason (recorded in the deletion log)"
-                      placeholderTextColor="#9CA3AF"
-                      multiline
-                      className="bg-white dark:bg-neutral-900 rounded-xl px-3 py-2 text-sm text-gray-900 dark:text-white border border-red-100 dark:border-red-900/30 min-h-[64px]"
-                    />
-                    <View className="flex-row gap-3 mt-3">
-                      <Pressable
-                        onPress={() => setConfirmingDelete(false)}
-                        disabled={deleting}
-                        className="flex-1 h-11 items-center justify-center rounded-full border border-gray-200 dark:border-neutral-700"
-                      >
-                        <Text className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                          Cancel
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={runDelete}
-                        disabled={deleting}
-                        className="flex-1 h-11 flex-row items-center justify-center rounded-full bg-red-600 active:opacity-90"
-                      >
-                        {deleting ? (
-                          <ActivityIndicator color="#FFFFFF" />
-                        ) : (
-                          <Text className="text-sm font-semibold text-white">
-                            Delete
-                          </Text>
-                        )}
-                      </Pressable>
-                    </View>
-                  </View>
+                  <WaiverDeleteConfirm
+                    adultName={detail.adultName}
+                    reason={reason}
+                    onReasonChange={setReason}
+                    deleting={deleting}
+                    onCancel={() => setConfirmingDelete(false)}
+                    onConfirm={() => void runDelete()}
+                  />
                 )}
               </View>
             )}
 
-            {/* Footer: Close · Print */}
-            <View className="flex-row gap-3 mt-5 mb-8">
+            {/* Undo Check-In — the web modal's footer offers it once checked in. */}
+            {canCheckIn && !!detail.checkedInAt && (
               <Pressable
-                onPress={onClose}
-                className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
+                onPress={() => runCheckIn(true)}
+                disabled={checking}
+                className={`mt-5 flex-row items-center justify-center gap-2 py-3 rounded-xl border border-gray-200 dark:border-neutral-700 ${
+                  checking ? "opacity-60" : "active:opacity-70"
+                }`}
+                accessibilityRole="button"
               >
+                {checking ? (
+                  <ActivityIndicator size="small" color="#6B7280" />
+                ) : (
+                  <Feather name="rotate-ccw" size={15} color="#6B7280" />
+                )}
                 <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                  Close
+                  Undo Check-In
                 </Text>
               </Pressable>
-              <Pressable
-                onPress={runPrint}
-                disabled={printing}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-              >
-                {printing ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Feather name="printer" size={16} color="#FFFFFF" />
-                    <Text className="text-sm font-semibold text-white">Print</Text>
-                  </>
-                )}
-              </Pressable>
-            </View>
+            )}
+
+            {/* Footer: Close · Print · Check In (web modal order) */}
+            {(() => {
+              const showCheckIn =
+                canCheckIn && detail.status === "completed" && !detail.checkedInAt;
+              return (
+                <View className="flex-row gap-3 mt-5 mb-8">
+                  <Pressable
+                    onPress={onClose}
+                    className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
+                  >
+                    <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      Close
+                    </Text>
+                  </Pressable>
+                  {canPrint && (
+                    <Pressable
+                      key={showCheckIn ? "print-secondary" : "print-primary"}
+                      onPress={runPrint}
+                      disabled={printing}
+                      className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl ${
+                        showCheckIn
+                          ? "border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                          : "bg-[#0644C7] active:opacity-90"
+                      }`}
+                    >
+                      {printing ? (
+                        <ActivityIndicator size="small" color={showCheckIn ? "#6B7280" : "#FFFFFF"} />
+                      ) : (
+                        <>
+                          <Feather name="printer" size={16} color={showCheckIn ? "#374151" : "#FFFFFF"} />
+                          <Text
+                            className={`text-sm font-semibold ${
+                              showCheckIn ? "text-gray-700 dark:text-gray-200" : "text-white"
+                            }`}
+                          >
+                            Print
+                          </Text>
+                        </>
+                      )}
+                    </Pressable>
+                  )}
+                  {showCheckIn && (
+                    <Pressable
+                      key="footer-check-in"
+                      onPress={() => runCheckIn(false)}
+                      disabled={checking}
+                      className={`flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl ${
+                        checking ? "opacity-60" : "active:opacity-90"
+                      }`}
+                    >
+                      {checking ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Feather name="user-check" size={16} color="#FFFFFF" />
+                          <Text className="text-sm font-semibold text-white">Check In</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })()}
           </>
         )}
       </ScrollView>
