@@ -7,8 +7,6 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
-  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,10 +15,32 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DetailActionButton } from "../../components/ui/DetailKit";
 import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
 import { EmailPreviewSheet } from "../../components/ui/EmailPreviewSheet";
-import { EmailTemplatesTable } from "../../components/ui/EmailTemplatesTable";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import {
+  EmailTemplatesTable,
+  fmtTemplateDate,
+  TemplateCategoryTag,
+  TemplateStatusBadge,
+} from "../../components/ui/EmailTemplatesTable";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
 import { Pagination } from "../../components/ui/Pagination";
-import { StatTile } from "../../components/ui/StatTile";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FilterChipGroup,
+  FiltersButton,
+  FilterSheetFooter,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+  ToolbarIconButton,
+} from "../../components/ui/SummaryPanel";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { canDuplicateTemplate, templateLocationSummary } from "../../lib/email/emailTemplateOptions";
 import { consumeEmailTemplatesStale } from "../../lib/emailStale";
@@ -36,61 +56,14 @@ import {
   type EmailTemplateStatus,
 } from "../../services/emailService";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PRIMARY = "#0644C7";
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-}
-
-const STATUS_PILL: Record<
-  EmailTemplateStatus,
-  { label: string; pill: string; text: string }
-> = {
-  active: {
-    label: "Active",
-    pill: "bg-green-100 dark:bg-green-900/40",
-    text: "text-green-700 dark:text-green-300",
-  },
-  draft: {
-    label: "Draft",
-    pill: "bg-amber-100 dark:bg-amber-900/40",
-    text: "text-amber-700 dark:text-amber-300",
-  },
-  archived: {
-    label: "Archived",
-    pill: "bg-gray-200 dark:bg-neutral-700",
-    text: "text-gray-600 dark:text-gray-300",
-  },
-};
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 type StatusFilter = "all" | EmailTemplateStatus;
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Statuses", value: "all" },
+  { label: "All", value: "all" },
   { label: "Active", value: "active" },
   { label: "Draft", value: "draft" },
   { label: "Archived", value: "archived" },
@@ -120,56 +93,63 @@ const TCOLUMN_META: { key: TColKey; label: string }[] = [
   { key: "status", label: "Status" },
 ];
 
-/** A row of chip choices used inside the Filters panel. */
-function ChipRow<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
+/**
+ * Card layout for one template, matching the flat module cards. Which lines
+ * show still follows the Columns sheet, exactly as before.
+ */
+const TemplateCard = ({
+  template: t,
+  cols,
+  onPress,
 }: {
-  label: string;
-  options: { label: string; value: T }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <View className="mb-3">
-      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-        {label}
+  template: EmailTemplateRow;
+  cols: TCols;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
+    accessibilityRole="button"
+    accessibilityLabel={`View template ${t.name}`}
+  >
+    <View className="flex-row items-start justify-between gap-3">
+      <Text
+        className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+        numberOfLines={1}
+      >
+        {t.name}
       </Text>
-      <View className="flex-row flex-wrap gap-2">
-        {options.map((opt) => {
-          const on = value === opt.value;
-          return (
-            <Pressable
-              key={opt.value}
-              onPress={() => onChange(opt.value)}
-              className={`px-3.5 py-2 rounded-lg border ${
-                on
-                  ? "bg-[#0644C7] border-[#0644C7]"
-                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-              }`}
-            >
-              <Text
-                className={`text-xs font-medium ${
-                  on ? "text-white" : "text-gray-600 dark:text-gray-300"
-                }`}
-              >
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {cols.status && <TemplateStatusBadge status={t.status} />}
     </View>
-  );
-}
+    {cols.subject && !!t.subject && (
+      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1" numberOfLines={1}>
+        {t.subject}
+      </Text>
+    )}
+    {cols.locations && (
+      <View className="flex-row items-center gap-1.5 mt-2">
+        <Feather name="map-pin" size={12} color="#9CA3AF" />
+        <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+          {templateLocationSummary(t)}
+        </Text>
+      </View>
+    )}
+    {(cols.category || cols.date) && (
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        {cols.category ? <TemplateCategoryTag category={t.category} /> : <View />}
+        {cols.date && (
+          <Text className="text-xs text-gray-400 dark:text-gray-500">
+            {fmtTemplateDate(t.createdAt)}
+          </Text>
+        )}
+      </View>
+    )}
+  </Pressable>
+);
 
 const EmailTemplates = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const [templates, setTemplates] = useState<EmailTemplateRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -451,187 +431,153 @@ const EmailTemplates = () => {
     [selectedIds, bulkBusy, load],
   );
 
-  const filtersActive = statusFilter !== "all" || categoryFilter !== "all";
+  // Status lives in the chips on the page; the Filters sheet holds Category.
+  const sheetFilterCount = categoryFilter !== "all" ? 1 : 0;
+  const appliedFilterCount = (statusFilter !== "all" ? 1 : 0) + sheetFilterCount;
+  const clearFilters = () => {
+    setStatusFilter("all");
+    setCategoryFilter("all");
+  };
+
+  const statusCount = (value: StatusFilter) =>
+    value === "all" ? templates.length : counts[value];
+
+  const showInitialLoader = loading && templates.length === 0;
+  const showError = !!error && templates.length === 0;
+
+  const goCreate = useCallback(
+    () => router.push("/email-campaign/create-template"),
+    [router],
+  );
+
+  // The old Campaigns · Email Notifications nav plus the header's former
+  // Refresh button, as module-hub shortcuts.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Campaigns", icon: "send", route: "/email-campaign/campaigns" },
+    { label: "Email Notifications", icon: "bell", route: "/email-campaign/email-notification" },
+    { label: "SMS Notifications", icon: "message-square", route: "/email-campaign/sms-notifications" },
+    { label: "Refresh", icon: "refresh-cw", onPress: onRefresh },
+  ];
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Email Templates
-          </Text>
-          <Pressable
-            onPress={onRefresh}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Refresh"
-          >
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Email Templates"
+        action={{ onPress: goCreate, accessibilityLabel: "Create template" }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="px-5 gap-4">
-          {/* Intro */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Email Templates
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Create and manage reusable email templates
-            </Text>
-          </View>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Create and manage reusable email templates
+          </Text>
 
-          {/* Nav: Campaigns · Email Notifications pill */}
-          <FilterPill>
-            <PillSegment
-              label="Campaigns"
-              onPress={() => router.push("/email-campaign/campaigns")}
-              renderIcon={(c) => <Feather name="send" size={15} color={c} />}
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load templates"
+              message={error ?? ""}
+              onRetry={load}
             />
-            <PillSegment
-              label="Email Notifications"
-              onPress={() => router.push("/email-campaign/email-notification")}
-              renderIcon={(c) => <Feather name="bell" size={15} color={c} />}
-            />
-          </FilterPill>
-
-          <Pressable
-            onPress={() => router.push("/email-campaign/create-template")}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create Template
-            </Text>
-          </Pressable>
-
-          {/* Stats */}
-          <View className="flex-row flex-wrap gap-3">
-            <StatTile
-              icon="layout"
-              iconBg="bg-blue-50 dark:bg-blue-900/30"
-              iconColor={PRIMARY}
-              label="Total Templates"
-              value={String(counts.total)}
-              hint="All templates in system"
-            />
-            <StatTile
-              icon="check-circle"
-              iconBg="bg-blue-50 dark:bg-blue-900/30"
-              iconColor={PRIMARY}
-              label="Active"
-              value={String(counts.active)}
-              hint="Ready to use in campaigns"
-            />
-            <StatTile
-              icon="clock"
-              iconBg="bg-amber-50 dark:bg-amber-900/30"
-              iconColor="#D97706"
-              label="Draft"
-              value={String(counts.draft)}
-              hint="Work in progress"
-            />
-            <StatTile
-              icon="archive"
-              iconBg="bg-gray-100 dark:bg-neutral-800"
-              iconColor="#6B7280"
-              label="Archived"
-              value={String(counts.archived)}
-              hint="No longer in use"
-            />
-          </View>
-
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-            <Feather name="search" size={18} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search templates by name or subject..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              style={{ paddingVertical: 0 }}
-            />
-          </View>
-
-          {/* Filters · Columns pill */}
-          <FilterPill>
-            <PillSegment
-              label="Filters"
-              active={showFilters || filtersActive}
-              onPress={() => setShowFilters((v) => !v)}
-              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Columns"
-              active={showColumns}
-              onPress={() => setShowColumns(true)}
-              renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
-            />
-          </FilterPill>
-
-          {/* Filters panel */}
-          {showFilters && (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
-            >
-              <ChipRow
-                label="Status"
-                options={STATUS_OPTIONS}
-                value={statusFilter}
-                onChange={setStatusFilter}
-              />
-              <ChipRow
-                label="Category"
-                options={categoryOptions}
-                value={categoryFilter}
-                onChange={setCategoryFilter}
-              />
-              {filtersActive && (
-                <Pressable
-                  onPress={() => {
-                    setStatusFilter("all");
-                    setCategoryFilter("all");
-                  }}
-                  className="self-end"
-                >
-                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Clear Filters
-                  </Text>
-                </Pressable>
-              )}
-            </View>
           )}
 
-          {/* View toggle — Table is the default, Cards optional */}
-          <View className="flex-row items-center justify-between">
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              {filtered.length} template{filtered.length === 1 ? "" : "s"}
-            </Text>
-            <ViewToggle mode={viewMode} onChange={setViewMode} />
+          {/* Summary — one panel, four figures. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            <SummaryPanel
+              figures={[
+                {
+                  icon: "layout",
+                  title: "Total Templates",
+                  value: String(counts.total),
+                  hint: "All templates in system",
+                },
+                {
+                  icon: "check-circle",
+                  title: "Active",
+                  value: String(counts.active),
+                  hint: "Ready to use in campaigns",
+                },
+                {
+                  icon: "clock",
+                  title: "Draft",
+                  value: String(counts.draft),
+                  hint: "Work in progress",
+                },
+                {
+                  icon: "archive",
+                  title: "Archived",
+                  value: String(counts.archived),
+                  hint: "No longer in use",
+                },
+              ]}
+            />
+          )}
+
+          {/* More — sibling email screens as hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
+
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search name, subject or location"
+            />
+            <FiltersButton count={sheetFilterCount} onPress={() => setShowFilters(true)} />
+          </View>
+
+          <AppliedFiltersHint count={appliedFilterCount} onClear={clearFilters} />
+
+          {/* Status chips */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                count={showInitialLoader ? undefined : statusCount(opt.value)}
+                selected={statusFilter === opt.value}
+                onPress={() => setStatusFilter(opt.value)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* List header — title + count, Columns, layout toggle. */}
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Templates" count={filtered.length}>
+              <View className="flex-row items-center gap-2">
+                <ToolbarIconButton
+                  icon="columns"
+                  label="Toggle columns"
+                  active={showColumns}
+                  onPress={() => setShowColumns(true)}
+                />
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </View>
+            </ListHeader>
+          )}
 
           {viewMode === "table" && selectedIds.size > 0 && (
             <EmailBulkBar
@@ -643,125 +589,100 @@ const EmailTemplates = () => {
             />
           )}
 
-          {/* States */}
-          {loading && templates.length === 0 && (
-            <Text className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
-              Loading templates…
-            </Text>
-          )}
-          {error && templates.length === 0 && (
-            <View className="items-center py-10">
-              <Feather name="alert-circle" size={36} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable
-                onPress={load}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]"
-              >
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
+          {/* List — Table (default) or Cards over the same paged slice. Each
+              state is keyed so switching between them remounts cleanly. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? <AttractionsTableSkeleton /> : <AttractionsListSkeleton />}
             </View>
-          )}
-
-          {/* List — Table (default) or Cards over the same paged slice */}
-          {filtered.length > 0 &&
-            (viewMode === "table" ? (
-              <EmailTemplatesTable
-                templates={paged}
-                selectedIds={selectedIds}
-                onToggleRow={toggleRow}
-                onToggleAll={toggleAllVisible}
-                onRowPress={(t) => openDetails(t.id)}
-                onPreview={loadPreview}
-                onEdit={(t) => editTemplate(t.id)}
-                onDelete={confirmDelete}
-                onDuplicate={duplicateTemplate}
-                canDuplicate={canDuplicate}
-              />
+          ) : showError ? null : filtered.length === 0 ? (
+            templates.length === 0 ? (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon="mail"
+                  title="No templates yet"
+                  message="Create a reusable template to start your first campaign."
+                  actionLabel="Create Template"
+                  actionIcon="plus"
+                  primary
+                  onAction={goCreate}
+                />
+              </View>
             ) : (
-              paged.map((t) => {
-                const pill = STATUS_PILL[t.status] ?? STATUS_PILL.draft;
-            return (
-              <Pressable
-                key={t.id}
-                onPress={() => openDetails(t.id)}
-                className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-80"
-                style={CARD_SHADOW}
-              >
-                <View className="flex-row items-start justify-between">
-                  <View className="flex-1 mr-2">
-                    <Text className="text-base font-bold text-gray-900 dark:text-white">
-                      {t.name}
-                    </Text>
-                    {cols.subject && !!t.subject && (
-                      <Text
-                        className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-                        numberOfLines={1}
-                      >
-                        {t.subject}
-                      </Text>
-                    )}
-                  </View>
-                  {cols.status && (
-                    <View className={`px-3 py-1 rounded-full ${pill.pill}`}>
-                      <Text className={`text-xs font-semibold ${pill.text}`}>
-                        {pill.label}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                {cols.locations && (
-                  <View className="flex-row items-center gap-1.5 mt-2">
-                    <Feather name="map-pin" size={12} color="#9CA3AF" />
-                    <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
-                      {templateLocationSummary(t)}
-                    </Text>
-                  </View>
-                )}
-                {(cols.category || cols.date) && (
-                  <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-                    {cols.category ? (
-                      <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-md">
-                        <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                          {t.category}
-                        </Text>
-                      </View>
-                    ) : (
-                      <View />
-                    )}
-                    {cols.date && (
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        {fmtDate(t.createdAt)}
-                      </Text>
-                    )}
-                  </View>
-                )}
-              </Pressable>
-                );
-              })
-            ))}
-
-          <Pagination
-            page={page}
-            perPage={perPage}
-            total={filtered.length}
-            onPageChange={setPage}
-            onPerPageChange={setPerPage}
-          />
-
-          {!loading && !error && filtered.length === 0 && (
-            <View className="items-center py-10">
-              <Feather name="mail" size={36} color="#D1D5DB" />
-              <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-                {templates.length === 0
-                  ? "No templates yet"
-                  : "No templates match your search"}
-              </Text>
+              <View key="s-no-match">
+                <ListEmptyState
+                  icon="search"
+                  title="No templates found"
+                  message="No templates match your search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={() => {
+                    setSearch("");
+                    clearFilters();
+                  }}
+                />
+              </View>
+            )
+          ) : (
+            <View key="s-list">
+              {viewMode === "table" ? (
+                <EmailTemplatesTable
+                  templates={paged}
+                  selectedIds={selectedIds}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAllVisible}
+                  onRowPress={(t) => openDetails(t.id)}
+                  onPreview={loadPreview}
+                  onEdit={(t) => editTemplate(t.id)}
+                  onDelete={confirmDelete}
+                  onDuplicate={duplicateTemplate}
+                  canDuplicate={canDuplicate}
+                />
+              ) : (
+                paged.map((t) => (
+                  <TemplateCard
+                    key={t.id}
+                    template={t}
+                    cols={cols}
+                    onPress={() => openDetails(t.id)}
+                  />
+                ))
+              )}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
             </View>
           )}
         </View>
       </ScrollView>
+
+      {/* Filters — Category (status lives in the chips). */}
+      <BottomSheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
+      >
+        <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
+          <FilterChipGroup
+            label="Category"
+            options={categoryOptions.map((o) => ({
+              ...o,
+              label: o.value === "all" ? "All" : o.label,
+            }))}
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+          />
+          <FilterSheetFooter
+            canReset={sheetFilterCount > 0}
+            onReset={() => setCategoryFilter("all")}
+            onDone={() => setShowFilters(false)}
+            doneLabel={`Show ${filtered.length} template${filtered.length === 1 ? "" : "s"}`}
+          />
+        </ScrollView>
+      </BottomSheet>
 
       {/* Template Preview — the web list's Preview modal */}
       <EmailPreviewSheet

@@ -1,57 +1,50 @@
-import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { templateLocationSummary } from "../../lib/email/emailTemplateOptions";
 import type {
   EmailTemplateRow,
   EmailTemplateStatus,
 } from "../../services/emailService";
+import { RowActionGroup } from "./RowActions";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
+import { ToneDotBadge, type DotTone } from "./SummaryPanel";
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-function fmtDate(iso: string | null): string {
+export function fmtTemplateDate(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
-// Same status colors as the Templates card view.
-const STATUS_PILL: Record<
-  EmailTemplateStatus,
-  { label: string; pill: string; text: string }
-> = {
-  active: { label: "Active", pill: "bg-green-100 dark:bg-green-900/40", text: "text-green-700 dark:text-green-300" },
-  draft: { label: "Draft", pill: "bg-amber-100 dark:bg-amber-900/40", text: "text-amber-700 dark:text-amber-300" },
-  archived: { label: "Archived", pill: "bg-gray-200 dark:bg-neutral-700", text: "text-gray-600 dark:text-gray-300" },
+/** Shared secondary-cell text style so every column reads consistently. */
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
+
+// Same status colours the template pills have always used.
+const TEMPLATE_STATUS: Record<EmailTemplateStatus, { label: string; tone: DotTone }> = {
+  active: { label: "Active", tone: "green" },
+  draft: { label: "Draft", tone: "amber" },
+  archived: { label: "Archived", tone: "gray" },
 };
 
-/** Small circular icon button for the Actions column (matches the other tables). */
-const IconAction = ({
-  icon,
-  tint,
-  label,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  tint: string;
-  label: string;
-  onPress: () => void;
-}) => (
-  <Pressable
-    onPress={onPress}
-    hitSlop={6}
-    accessibilityRole="button"
-    accessibilityLabel={label}
-    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
-  >
-    <Feather name={icon} size={16} color={tint} />
-  </Pressable>
+/** Template status pill with a dot — used by the table and the card list. */
+export const TemplateStatusBadge = ({ status }: { status: EmailTemplateStatus }) => {
+  const s = TEMPLATE_STATUS[status] ?? TEMPLATE_STATUS.draft;
+  return <ToneDotBadge tone={s.tone} label={s.label} />;
+};
+
+/** Quiet neutral tag (category) — the flat tables' method/type tag look. */
+export const TemplateCategoryTag = ({ category }: { category: string }) => (
+  <View className="self-start max-w-full px-2 py-1 rounded-md bg-gray-100 dark:bg-neutral-800">
+    <Text numberOfLines={1} className="text-xs font-medium text-gray-700 dark:text-gray-300">
+      {category}
+    </Text>
+  </View>
 );
 
 type RowHandlers = {
@@ -88,22 +81,14 @@ function buildColumns(h: RowHandlers): TableColumn<EmailTemplateRow>[] {
     key: "category",
     label: "Category",
     width: 150,
-    render: (t) => (
-      <View className="flex-row">
-        <View className="bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-md">
-          <Text numberOfLines={1} className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-            {t.category}
-          </Text>
-        </View>
-      </View>
-    ),
+    render: (t) => <TemplateCategoryTag category={t.category} />,
   },
   {
     key: "locations",
     label: "Locations",
     width: 170,
     render: (t) => (
-      <Text numberOfLines={1} className="text-sm text-gray-900 dark:text-gray-100">
+      <Text numberOfLines={1} className={CELL_TEXT}>
         {templateLocationSummary(t)}
       </Text>
     ),
@@ -112,49 +97,55 @@ function buildColumns(h: RowHandlers): TableColumn<EmailTemplateRow>[] {
     key: "status",
     label: "Status",
     width: 120,
-    render: (t) => {
-      const p = STATUS_PILL[t.status] ?? STATUS_PILL.draft;
-      return (
-        <View className="flex-row">
-          <View className={`px-2.5 py-1 rounded-full ${p.pill}`}>
-            <Text className={`text-xs font-semibold ${p.text}`}>{p.label}</Text>
-          </View>
-        </View>
-      );
-    },
+    render: (t) => (
+      <View className="flex-row">
+        <TemplateStatusBadge status={t.status} />
+      </View>
+    ),
   },
   {
     key: "created",
     label: "Created",
     width: 140,
     render: (t) => (
-      <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
-        {fmtDate(t.createdAt)}
+      <Text numberOfLines={1} className={CELL_TEXT}>
+        {fmtTemplateDate(t.createdAt)}
       </Text>
     ),
   },
   {
-    // Web parity: Preview (blue) · Edit/View (green) · Duplicate (gray) · Delete (red, only
-    // on a template this user may change).
+    // Web parity: Preview · Edit/View · Duplicate · Delete (only on a template
+    // this user may change). Neutral icons; only edit and delete are tinted.
     key: "actions",
     label: "Actions",
     width: 170,
     render: (t) => (
-      <View className="flex-row items-center gap-0.5">
-        <IconAction icon="eye" tint="#2563EB" label={`Preview ${t.name}`} onPress={() => h.onPreview(t)} />
-        <IconAction
-          icon="edit"
-          tint="#16A34A"
-          label={`${t.canManage ? "Edit" : "View"} ${t.name}`}
-          onPress={() => h.onEdit(t)}
-        />
-        {h.canDuplicate(t) && (
-          <IconAction icon="copy" tint="#4B5563" label={`Duplicate ${t.name}`} onPress={() => h.onDuplicate(t)} />
-        )}
-        {t.canManage && (
-          <IconAction icon="trash-2" tint="#DC2626" label={`Delete ${t.name}`} onPress={() => h.onDelete(t)} />
-        )}
-      </View>
+      <RowActionGroup
+        actions={[
+          { key: "preview", icon: "eye", color: "#6B7280", label: `Preview ${t.name}`, onPress: () => h.onPreview(t) },
+          {
+            key: "edit",
+            icon: "edit-2",
+            color: "#0644C7",
+            label: `${t.canManage ? "Edit" : "View"} ${t.name}`,
+            onPress: () => h.onEdit(t),
+          },
+          h.canDuplicate(t) && {
+            key: "duplicate",
+            icon: "copy",
+            color: "#6B7280",
+            label: `Duplicate ${t.name}`,
+            onPress: () => h.onDuplicate(t),
+          },
+          t.canManage && {
+            key: "delete",
+            icon: "trash-2",
+            color: "#DC2626",
+            label: `Delete ${t.name}`,
+            onPress: () => h.onDelete(t),
+          },
+        ]}
+      />
     ),
   },
   ];
@@ -192,6 +183,8 @@ export function EmailTemplatesTable({
       selectedIds={selectedIds}
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}
+      rowLabel={(t) => t.name}
+      flat
     />
   );
 }

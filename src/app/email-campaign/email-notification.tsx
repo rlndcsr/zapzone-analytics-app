@@ -7,18 +7,37 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
-  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BottomSheet } from "../../components/ui/BottomSheet";
 import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
-import { EmailNotificationsTable } from "../../components/ui/EmailNotificationsTable";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import {
+  DefaultNotificationBadge,
+  EmailNotificationsTable,
+} from "../../components/ui/EmailNotificationsTable";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
 import { Pagination } from "../../components/ui/Pagination";
 import { SendTestEmailSheet } from "../../components/ui/SendTestEmailSheet";
-import { StatTile } from "../../components/ui/StatTile";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FilterChipGroup,
+  FiltersButton,
+  FilterSheetFooter,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  StatusDotBadge,
+  SummaryPanel,
+} from "../../components/ui/SummaryPanel";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { VisitPromoBadge } from "../../components/ui/VisitEmailSettings";
 import {
@@ -45,21 +64,78 @@ const NOTIFICATION_BULK_CHIPS: EmailBulkChip[] = [
   { key: "deactivate", label: "Deactivate", icon: "slash", tint: "#6B7280" },
 ];
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PRIMARY = "#0644C7";
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
+
+type StatusFilter = "all" | "active" | "inactive";
+const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
+  { label: "All", value: "all" },
+  { label: "Active", value: "active" },
+  { label: "Inactive", value: "inactive" },
+];
+
+/** Card layout for one notification, matching the flat module cards. */
+const NotificationCard = ({
+  notification: n,
+  onPress,
+}: {
+  notification: EmailNotificationRow;
+  onPress: () => void;
+}) => (
+  <Pressable
+    onPress={onPress}
+    className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
+    accessibilityRole="button"
+    accessibilityLabel={`View notification ${n.name}`}
+  >
+    <View className="flex-row items-start justify-between gap-3">
+      <View className="flex-1 flex-row items-center gap-2 flex-wrap">
+        <Text className="shrink text-base font-semibold text-gray-900 dark:text-white">
+          {n.name}
+        </Text>
+        {n.isDefault && <DefaultNotificationBadge />}
+        {n.triggerType === "visit_completed" && <VisitPromoBadge summary={n.promoSummary} />}
+      </View>
+      <StatusDotBadge on={n.isActive} label={n.isActive ? "Active" : "Inactive"} />
+    </View>
+
+    {/* Trigger */}
+    {!!n.triggerLabel && (
+      <View className="flex-row items-center gap-1.5 mt-2">
+        <Feather name="bell" size={13} color="#9CA3AF" />
+        <Text className="shrink text-[13px] font-medium text-gray-700 dark:text-gray-200" numberOfLines={1}>
+          {n.triggerLabel}
+        </Text>
+      </View>
+    )}
+
+    {/* Entity + recipients */}
+    <View className="flex-row items-center justify-between gap-3 mt-3">
+      <View className="flex-row items-center gap-4 shrink">
+        <View className="flex-row items-center gap-1.5">
+          <Feather name="box" size={12} color="#9CA3AF" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">{n.entityLabel}</Text>
+        </View>
+        <View className="flex-row items-center gap-1.5">
+          <Feather name="users" size={12} color="#9CA3AF" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {n.recipientCount} type{n.recipientCount === 1 ? "" : "s"}
+          </Text>
+        </View>
+      </View>
+      <View className="flex-row items-center gap-0.5">
+        <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">Details</Text>
+        <Feather name="chevron-right" size={14} color="#9CA3AF" />
+      </View>
+    </View>
+  </Pressable>
+);
 
 const EmailNotifications = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const [rows, setRows] = useState<EmailNotificationRow[]>([]);
   const [stats, setStats] = useState<EmailNotificationStats | null>(null);
@@ -70,9 +146,7 @@ const EmailNotifications = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [showFilters, setShowFilters] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
-    "all",
-  );
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [triggerFilter, setTriggerFilter] = useState("all");
 
   const load = useCallback(async () => {
@@ -132,7 +206,22 @@ const EmailNotifications = () => {
     });
   }, [rows, search, statusFilter, triggerFilter]);
 
-  const filtersActive = statusFilter !== "all" || triggerFilter !== "all";
+  // Status lives in the chips on the page; the Filters sheet holds Trigger.
+  const sheetFilterCount = triggerFilter !== "all" ? 1 : 0;
+  const appliedFilterCount = (statusFilter !== "all" ? 1 : 0) + sheetFilterCount;
+  const clearFilters = () => {
+    setStatusFilter("all");
+    setTriggerFilter("all");
+  };
+
+  // Per-status chip counts over every loaded notification.
+  const activeCount = useMemo(() => rows.filter((n) => n.isActive).length, [rows]);
+  const statusCount = (value: StatusFilter) =>
+    value === "all"
+      ? rows.length
+      : value === "active"
+        ? activeCount
+        : rows.length - activeCount;
 
   // Reset to page 1 when the result set changes.
   useEffect(() => {
@@ -287,190 +376,134 @@ const EmailNotifications = () => {
     [selectedIds, rows, load],
   );
 
+  const showInitialLoader = loading && rows.length === 0;
+  const showError = !!error && rows.length === 0;
+
+  const goCreate = useCallback(
+    () => router.push("/email-campaign/create-notification"),
+    [router],
+  );
+
+  // The old Templates · Campaigns nav plus the header's former Refresh
+  // button, as module-hub shortcuts.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Email Templates", icon: "mail", route: "/email-campaign/email-templates" },
+    { label: "Campaigns", icon: "send", route: "/email-campaign/campaigns" },
+    { label: "SMS Notifications", icon: "message-square", route: "/email-campaign/sms-notifications" },
+    { label: "Refresh", icon: "refresh-cw", onPress: onRefresh },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Email Notifications
-          </Text>
-          <Pressable
-            onPress={onRefresh}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Refresh"
-          >
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Email Notifications"
+        action={{ onPress: goCreate, accessibilityLabel: "Create notification" }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
+        }
       >
-        <View className="px-5 gap-4">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6" style={CARD_SHADOW}>
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Email Notifications
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Automated email notifications for bookings, purchases, payments and the follow-up after each visit
-            </Text>
-          </View>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Automated email notifications for bookings, purchases, payments and the follow-up after each visit
+          </Text>
 
-          {/* Nav: Templates · Campaigns pill */}
-          <FilterPill>
-            <PillSegment
-              label="Templates"
-              onPress={() => router.push("/email-campaign/email-templates")}
-              renderIcon={(c) => <Feather name="mail" size={15} color={c} />}
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load notifications"
+              message={error ?? ""}
+              onRetry={load}
             />
-            <PillSegment
-              label="Campaigns"
-              onPress={() => router.push("/email-campaign/campaigns")}
-              renderIcon={(c) => <Feather name="send" size={15} color={c} />}
-            />
-          </FilterPill>
-
-          <Pressable
-            onPress={() => router.push("/email-campaign/create-notification")}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create Notification
-            </Text>
-          </Pressable>
-
-          {/* Stats */}
-          <View className="flex-row flex-wrap gap-3">
-            <StatTile icon="bell" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Total Notifications" value={String(stats?.total ?? 0)} hint="All configured notifications" />
-            <StatTile icon="check-circle" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Active" value={String(stats?.active ?? 0)} hint="Currently sending emails" />
-            <StatTile icon="calendar" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Booking Triggers" value={String(stats?.bookingTriggers ?? 0)} hint="Booking event notifications" />
-            <StatTile icon="tag" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Purchase Triggers" value={String(stats?.purchaseTriggers ?? 0)} hint="Purchase event notifications" />
-          </View>
-
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-            <Feather name="search" size={18} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search notifications by name..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              style={{ paddingVertical: 0 }}
-            />
-          </View>
-
-          {/* Filters pill */}
-          <FilterPill>
-            <PillSegment
-              label="Filters"
-              active={showFilters || filtersActive}
-              onPress={() => setShowFilters((v) => !v)}
-              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
-            />
-          </FilterPill>
-          {showFilters && (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
-            >
-              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-                Status
-              </Text>
-              <View className="flex-row flex-wrap gap-2 mb-3">
-                {[
-                  { label: "All Statuses", value: "all" as const },
-                  { label: "Active", value: "active" as const },
-                  { label: "Inactive", value: "inactive" as const },
-                ].map((opt) => {
-                  const on = statusFilter === opt.value;
-                  return (
-                    <Pressable
-                      key={opt.value}
-                      onPress={() => setStatusFilter(opt.value)}
-                      className={`px-3.5 py-2 rounded-lg border ${
-                        on
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-medium ${
-                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
-                        }`}
-                      >
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-                Trigger
-              </Text>
-              <View className="flex-row flex-wrap gap-2">
-                {triggerOptions.map((opt) => {
-                  const on = triggerFilter === opt.value;
-                  return (
-                    <Pressable
-                      key={opt.value}
-                      onPress={() => setTriggerFilter(opt.value)}
-                      className={`px-3.5 py-2 rounded-lg border ${
-                        on
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-medium ${
-                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
-                        }`}
-                      >
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {filtersActive && (
-                <Pressable
-                  onPress={() => {
-                    setStatusFilter("all");
-                    setTriggerFilter("all");
-                  }}
-                  className="self-end mt-3"
-                >
-                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Clear Filters
-                  </Text>
-                </Pressable>
-              )}
-            </View>
           )}
 
-          {/* View toggle — Table is the default, Cards optional */}
-          <View className="flex-row items-center justify-between">
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              {filtered.length} notification{filtered.length === 1 ? "" : "s"}
-            </Text>
-            <ViewToggle mode={viewMode} onChange={setViewMode} />
+          {/* Summary — one panel, four figures. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            <SummaryPanel
+              figures={[
+                {
+                  icon: "bell",
+                  title: "Total Notifications",
+                  value: String(stats?.total ?? 0),
+                  hint: "All configured notifications",
+                },
+                {
+                  icon: "check-circle",
+                  title: "Active",
+                  value: String(stats?.active ?? 0),
+                  hint: "Currently sending emails",
+                },
+                {
+                  icon: "calendar",
+                  title: "Booking Triggers",
+                  value: String(stats?.bookingTriggers ?? 0),
+                  hint: "Booking event notifications",
+                },
+                {
+                  icon: "tag",
+                  title: "Purchase Triggers",
+                  value: String(stats?.purchaseTriggers ?? 0),
+                  hint: "Purchase event notifications",
+                },
+              ]}
+            />
+          )}
+
+          {/* More — sibling email screens as hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
+
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search notifications by name"
+            />
+            <FiltersButton count={sheetFilterCount} onPress={() => setShowFilters(true)} />
+          </View>
+
+          <AppliedFiltersHint count={appliedFilterCount} onClear={clearFilters} />
+
+          {/* Status chips */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                count={showInitialLoader ? undefined : statusCount(opt.value)}
+                selected={statusFilter === opt.value}
+                onPress={() => setStatusFilter(opt.value)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* List header — title + count, layout toggle. */}
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Notifications" count={filtered.length}>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+            </ListHeader>
+          )}
 
           {viewMode === "table" && selectedIds.size > 0 && (
             <EmailBulkBar
@@ -482,140 +515,102 @@ const EmailNotifications = () => {
             />
           )}
 
-          {/* States */}
-          {loading && rows.length === 0 && (
-            <Text className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
-              Loading notifications…
-            </Text>
-          )}
-          {error && rows.length === 0 && (
-            <View className="items-center py-10">
-              <Feather name="alert-circle" size={36} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable onPress={load} className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]">
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
+          {/* List — Table (default) or Cards over the same visible slice. Each
+              state is keyed so switching between them remounts cleanly. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? <AttractionsTableSkeleton /> : <AttractionsListSkeleton />}
             </View>
-          )}
-
-          {/* List — Table (default) or Cards over the same visible slice */}
-          {filtered.length > 0 &&
-            (viewMode === "table" ? (
-              <EmailNotificationsTable
-                notifications={visible}
-                selectedIds={selectedIds}
-                onToggleRow={toggleRow}
-                onToggleAll={toggleAllVisible}
-                onRowPress={(n) => openDetails(n.id)}
-                onTest={onTest}
-                onDuplicate={onDuplicate}
-                onEdit={onEdit}
-                onReset={onReset}
-                onDelete={onDeleteRow}
-              />
+          ) : showError ? null : filtered.length === 0 ? (
+            rows.length === 0 ? (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon="bell"
+                  title="No notifications yet"
+                  message="Create an automated email for bookings, purchases or payments."
+                  actionLabel="Create Notification"
+                  actionIcon="plus"
+                  primary
+                  onAction={goCreate}
+                />
+              </View>
             ) : (
-              visible.map((n) => (
-            <Pressable
-              key={n.id}
-              onPress={() => openDetails(n.id)}
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-80"
-              style={CARD_SHADOW}
-            >
-              <View className="flex-row items-start justify-between">
-                <View className="flex-1 mr-2 flex-row items-center gap-2 flex-wrap">
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">
-                    {n.name}
-                  </Text>
-                  {n.isDefault && (
-                    <View className="flex-row items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">
-                      <Feather name="shield" size={10} color={PRIMARY} />
-                      <Text className="text-[10px] font-semibold text-[#0644C7] dark:text-blue-300">
-                        Default
-                      </Text>
-                    </View>
-                  )}
-                  {n.triggerType === "visit_completed" && (
-                    <VisitPromoBadge summary={n.promoSummary} />
-                  )}
-                </View>
-                <View
-                  className={`flex-row items-center gap-1 px-3 py-1 rounded-full ${
-                    n.isActive
-                      ? "bg-green-100 dark:bg-green-900/40"
-                      : "bg-gray-200 dark:bg-neutral-700"
-                  }`}
-                >
-                  <Feather
-                    name={n.isActive ? "check-circle" : "slash"}
-                    size={11}
-                    color={n.isActive ? "#16A34A" : "#6B7280"}
+              <View key="s-no-match">
+                <ListEmptyState
+                  icon="search"
+                  title="No notifications found"
+                  message="No notifications match your search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={() => {
+                    setSearch("");
+                    clearFilters();
+                  }}
+                />
+              </View>
+            )
+          ) : (
+            <View key="s-list">
+              {viewMode === "table" ? (
+                <EmailNotificationsTable
+                  notifications={visible}
+                  selectedIds={selectedIds}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAllVisible}
+                  onRowPress={(n) => openDetails(n.id)}
+                  onTest={onTest}
+                  onDuplicate={onDuplicate}
+                  onEdit={onEdit}
+                  onReset={onReset}
+                  onDelete={onDeleteRow}
+                />
+              ) : (
+                visible.map((n) => (
+                  <NotificationCard
+                    key={n.id}
+                    notification={n}
+                    onPress={() => openDetails(n.id)}
                   />
-                  <Text
-                    className={`text-xs font-semibold ${
-                      n.isActive
-                        ? "text-green-700 dark:text-green-300"
-                        : "text-gray-600 dark:text-gray-300"
-                    }`}
-                  >
-                    {n.isActive ? "Active" : "Inactive"}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Trigger */}
-              {!!n.triggerLabel && (
-                <View className="flex-row items-center gap-1.5 mt-3">
-                  <Feather name="bell" size={13} color={PRIMARY} />
-                  <Text className="text-xs font-medium text-[#0644C7] dark:text-blue-300">
-                    {n.triggerLabel}
-                  </Text>
-                </View>
+                ))
               )}
-
-              {/* Entity + recipients */}
-              <View className="flex-row items-center gap-4 mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800">
-                <View className="flex-row items-center gap-1.5">
-                  <Feather name="box" size={13} color="#9CA3AF" />
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {n.entityLabel}
-                  </Text>
-                </View>
-                <View className="flex-row items-center gap-1.5">
-                  <Feather name="users" size={13} color="#9CA3AF" />
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {n.recipientCount} type{n.recipientCount === 1 ? "" : "s"}
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-              ))
-            ))}
-
-          {!loading && !error && filtered.length === 0 && (
-            <View className="items-center py-10">
-              <Feather name="bell" size={36} color="#D1D5DB" />
-              <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-                {rows.length === 0 ? "No notifications yet" : "No notifications match your search"}
-              </Text>
+              <Pagination
+                page={currentPage}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={(pp) => {
+                  setPerPage(pp);
+                  setPage(1);
+                }}
+              />
             </View>
-          )}
-
-          {!loading && !error && (
-            <Pagination
-              page={currentPage}
-              perPage={perPage}
-              total={filtered.length}
-              onPageChange={setPage}
-              onPerPageChange={(pp) => {
-                setPerPage(pp);
-                setPage(1);
-              }}
-            />
           )}
         </View>
       </ScrollView>
+
+      {/* Filters — Trigger (status lives in the chips). */}
+      <BottomSheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
+      >
+        <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
+          <FilterChipGroup
+            label="Trigger"
+            options={triggerOptions.map((o) => ({
+              ...o,
+              label: o.value === "all" ? "All" : o.label,
+            }))}
+            value={triggerFilter}
+            onChange={setTriggerFilter}
+          />
+          <FilterSheetFooter
+            canReset={sheetFilterCount > 0}
+            onReset={() => setTriggerFilter("all")}
+            onDone={() => setShowFilters(false)}
+            doneLabel={`Show ${filtered.length} notification${filtered.length === 1 ? "" : "s"}`}
+          />
+        </ScrollView>
+      </BottomSheet>
 
       <SendTestEmailSheet
         visible={showTest}

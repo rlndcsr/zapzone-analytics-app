@@ -1,6 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +12,16 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ModuleHeader } from "../../components/ui/ModuleHeader";
+import { AttractionsListSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  ToneDotBadge,
+  type DotTone,
+} from "../../components/ui/SummaryPanel";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -28,14 +36,6 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 type Tab = LocationChangeRequestStatus | "all";
 
 const TABS: { key: Tab; label: string }[] = [
@@ -45,15 +45,23 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "all", label: "All" },
 ];
 
-const STATUS_PILL: Record<LocationChangeRequestStatus, string> = {
-  pending: "bg-amber-100 dark:bg-amber-900/40",
-  approved: "bg-green-100 dark:bg-green-900/40",
-  rejected: "bg-red-100 dark:bg-red-900/40",
+// Same status colours the request pills have always used.
+const STATUS_TONE: Record<LocationChangeRequestStatus, DotTone> = {
+  pending: "amber",
+  approved: "green",
+  rejected: "red",
 };
-const STATUS_TEXT: Record<LocationChangeRequestStatus, string> = {
-  pending: "text-amber-700 dark:text-amber-300",
-  approved: "text-green-700 dark:text-green-300",
-  rejected: "text-red-700 dark:text-red-300",
+const STATUS_LABEL: Record<LocationChangeRequestStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
+const LIST_TITLE: Record<Tab, string> = {
+  pending: "Pending Requests",
+  approved: "Approved Requests",
+  rejected: "Rejected Requests",
+  all: "All Requests",
 };
 
 /** "2026-07-24" -> "Friday, July 24, 2026". */
@@ -77,8 +85,6 @@ function formatDateTime(raw: string | null): string {
 
 export default function LocationRequestsScreen() {
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   const user = getCurrentUser();
   const isCompanyAdmin = user?.role === "company_admin";
@@ -202,105 +208,78 @@ export default function LocationRequestsScreen() {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="w-full border-b border-gray-100 bg-white px-5 pb-4 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
-        <View className="flex-row items-center gap-3">
-          <Pressable
-            onPress={() => router.back()}
-            className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <View className="flex-1 flex-row items-center gap-2">
-            <Feather name="map-pin" size={16} color={PRIMARY} />
-            <Text
-              numberOfLines={1}
-              className="flex-1 text-lg font-bold text-gray-900 dark:text-white"
-            >
-              Location Change Requests
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Status tabs — underlined, like the web */}
-      <View className="flex-row border-b border-gray-200 bg-white px-3 dark:border-neutral-800 dark:bg-neutral-900">
-        {TABS.map((t) => {
-          const active = tab === t.key;
-          return (
-            <Pressable
-              key={t.key}
-              onPress={() => setTab(t.key)}
-              className={`px-4 py-3 ${
-                active ? "border-b-2 border-[#0644C7]" : "border-b-2 border-transparent"
-              }`}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-            >
-              <Text
-                className={`text-sm font-medium ${
-                  active
-                    ? "text-[#0644C7] dark:text-blue-300"
-                    : "text-gray-500 dark:text-gray-400"
-                }`}
-              >
-                {t.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <ModuleHeader title="Location Change Requests" />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
+        <View className="px-4 mt-4">
         {/* Page description — lives on the screen, not in the header bar. */}
         <Text className="mb-4 text-sm leading-5 text-gray-500 dark:text-gray-400">
           Review requests to move bookings between locations. Approving validates
           scheduling conflicts at the destination.
         </Text>
 
+        {/* Status chips — one status is fetched at a time, so no counts. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+          className="mb-4 -mx-1 px-1"
+        >
+          {TABS.map((t) => (
+            <FilterChip
+              key={t.key}
+              label={t.label}
+              selected={tab === t.key}
+              onPress={() => setTab(t.key)}
+            />
+          ))}
+        </ScrollView>
+
+        {!loading && !error && <ListHeader title={LIST_TITLE[tab]} count={requests.length} />}
+
+        {/* Each state is keyed so switching between them remounts cleanly. */}
         {loading ? (
-          <View className="py-16 items-center">
-            <ActivityIndicator color={PRIMARY} />
+          <View key="s-loading">
+            <AttractionsListSkeleton />
           </View>
         ) : error ? (
-          <View className="rounded-2xl border border-red-100 bg-red-50 p-5 dark:border-red-900/40 dark:bg-red-900/20">
-            <Text className="font-semibold text-red-600 dark:text-red-300">
-              Something went wrong
-            </Text>
-            <Text className="mt-1 text-sm text-red-500 dark:text-red-400">
-              {error}
-            </Text>
+          <View key="s-error">
+            <ListErrorBanner
+              title="Could not load requests"
+              message={error}
+              onRetry={load}
+            />
           </View>
         ) : requests.length === 0 ? (
-          <View className="py-16 items-center">
-            <Feather name="inbox" size={40} color="#9CA3AF" />
-            <Text className="mt-3 text-sm text-gray-400 dark:text-gray-500">
-              No {tab === "all" ? "" : `${tab} `}location change requests.
-            </Text>
+          <View key="s-empty">
+            <ListEmptyState
+              icon="inbox"
+              title="No requests"
+              message={`No ${tab === "all" ? "" : `${tab} `}location change requests.`}
+            />
           </View>
         ) : (
-          requests.map((r) => {
+          <View key="s-list">
+          {requests.map((r) => {
             const rowConflicts = conflicts[r.id] ?? [];
             const busy = busyId === r.id;
             return (
               <View
                 key={r.id}
-                className="mb-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
-                style={CARD_SHADOW}
+                className="mb-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
               >
                 {/* Booking + status */}
                 <View className="flex-row items-start justify-between gap-3">
@@ -312,13 +291,7 @@ export default function LocationRequestsScreen() {
                       >
                         {r.bookingLabel}
                       </Text>
-                      <View className={`rounded-full px-2 py-0.5 ${STATUS_PILL[r.status]}`}>
-                        <Text
-                          className={`text-xs font-semibold capitalize ${STATUS_TEXT[r.status]}`}
-                        >
-                          {r.status}
-                        </Text>
-                      </View>
+                      <ToneDotBadge tone={STATUS_TONE[r.status]} label={STATUS_LABEL[r.status]} />
                     </View>
                     {!!r.bookingPackageName && (
                       <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -506,8 +479,10 @@ export default function LocationRequestsScreen() {
                 )}
               </View>
             );
-          })
+          })}
+          </View>
         )}
+        </View>
       </ScrollView>
     </View>
   );

@@ -120,24 +120,127 @@ export const FilterChip = ({
   </Pressable>
 );
 
+/** A labelled group of single-choice FilterChips, for a Filters sheet. */
+export function FilterChipGroup<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { label: string; value: T; count?: number }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <View className="mb-5">
+      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+        {label}
+      </Text>
+      <View className="flex-row flex-wrap gap-2">
+        {options.map((opt) => (
+          <FilterChip
+            key={opt.value}
+            label={opt.label}
+            count={opt.count}
+            selected={value === opt.value}
+            onPress={() => onChange(opt.value)}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** A Filters sheet's footer: Reset (enabled only when something is set) + Show N. */
+export const FilterSheetFooter = ({
+  canReset,
+  onReset,
+  onDone,
+  doneLabel,
+}: {
+  canReset: boolean;
+  onReset: () => void;
+  onDone: () => void;
+  doneLabel: string;
+}) => (
+  <View className="flex-row gap-3 mt-1">
+    <Pressable
+      onPress={onReset}
+      disabled={!canReset}
+      className={`flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 ${
+        canReset ? "active:opacity-70" : "opacity-50"
+      }`}
+      accessibilityRole="button"
+    >
+      <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">Reset</Text>
+    </Pressable>
+    <Pressable
+      onPress={onDone}
+      className="flex-1 items-center justify-center py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+      accessibilityRole="button"
+    >
+      <Text className="text-sm font-semibold text-white">{doneLabel}</Text>
+    </Pressable>
+  </View>
+);
+
+/** Colour family of a dot status pill. */
+export type DotTone = "green" | "blue" | "amber" | "red" | "purple" | "gray";
+
+// Same soft palette as the purchase / order status badges (purchaseDisplay).
+const DOT_TONE: Record<DotTone, { bg: string; dot: string; text: string }> = {
+  green: {
+    bg: "bg-green-50 dark:bg-green-900/30",
+    dot: "bg-green-500",
+    text: "text-green-700 dark:text-green-400",
+  },
+  blue: {
+    bg: "bg-blue-50 dark:bg-blue-900/30",
+    dot: "bg-blue-500",
+    text: "text-blue-700 dark:text-blue-400",
+  },
+  amber: {
+    bg: "bg-amber-50 dark:bg-amber-900/30",
+    dot: "bg-amber-500",
+    text: "text-amber-700 dark:text-amber-400",
+  },
+  red: {
+    bg: "bg-red-50 dark:bg-red-900/30",
+    dot: "bg-red-500",
+    text: "text-red-700 dark:text-red-400",
+  },
+  purple: {
+    bg: "bg-purple-50 dark:bg-purple-900/30",
+    dot: "bg-purple-500",
+    text: "text-purple-700 dark:text-purple-400",
+  },
+  gray: {
+    bg: "bg-gray-100 dark:bg-neutral-800",
+    dot: "bg-gray-400",
+    text: "text-gray-600 dark:text-gray-400",
+  },
+};
+
+/**
+ * Status pill with a leading dot in one of the shared tones — for statuses
+ * with more than two states (draft / scheduled / sent / failed …).
+ */
+export const ToneDotBadge = ({ tone, label }: { tone: DotTone; label: string }) => {
+  const t = DOT_TONE[tone];
+  return (
+    <View className={`flex-row items-center gap-1.5 px-2 py-0.5 rounded-full ${t.bg}`}>
+      <View className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />
+      <Text className={`text-xs font-medium ${t.text}`}>
+        {label}
+      </Text>
+    </View>
+  );
+};
+
 /** Status pill with a dot — green when on, gray when off. */
 export const StatusDotBadge = ({ on, label }: { on: boolean; label: string }) => (
-  <View
-    className={`flex-row items-center gap-1.5 px-2 py-0.5 rounded-full ${
-      on ? "bg-green-50 dark:bg-green-900/30" : "bg-gray-100 dark:bg-neutral-800"
-    }`}
-  >
-    <View
-      className={`w-1.5 h-1.5 rounded-full ${on ? "bg-green-500" : "bg-gray-400"}`}
-    />
-    <Text
-      className={`text-xs font-medium ${
-        on ? "text-green-700 dark:text-green-400" : "text-gray-600 dark:text-gray-400"
-      }`}
-    >
-      {label}
-    </Text>
-  </View>
+  <ToneDotBadge tone={on ? "green" : "gray"} label={label} />
 );
 
 /** One labelled cell of a card's spec strip (e.g. Value / Balance / Usage). */

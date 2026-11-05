@@ -57,9 +57,10 @@ const Chip = ({
 
 /**
  * Bulk-action toolbar for the Email tables, shown only while a selection exists.
- * Same layout/behavior as the other modules' bulk bars; `busyKey` locks the bar
- * and spins the in-flight chip. Chips are parameterized so each Email screen
- * passes its own web-parity actions.
+ * The flat bulk-bar look (white bordered panel, count badge) shared with
+ * Bookings / Purchases; `busyKey` locks the bar and spins the in-flight chip.
+ * Chips are parameterized so each Email screen passes its own web-parity
+ * actions.
  */
 export function EmailBulkBar({
   count,
@@ -76,11 +77,16 @@ export function EmailBulkBar({
 }) {
   const locked = busyKey !== null;
   return (
-    <View className="rounded-2xl border border-[#0644C7]/30 bg-blue-50 dark:bg-blue-900/20 p-3 mb-4">
+    <View className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 mb-3">
       <View className="flex-row items-center justify-between mb-3">
-        <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
-          {count} selected
-        </Text>
+        <View className="flex-row items-center gap-2">
+          <View className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-[#0644C7] items-center justify-center">
+            <Text className="text-xs font-bold text-white">{count}</Text>
+          </View>
+          <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+            selected
+          </Text>
+        </View>
         <Pressable
           onPress={onClear}
           disabled={locked}

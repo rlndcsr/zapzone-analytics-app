@@ -1,6 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +14,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { ModuleHeader } from "../../components/ui/ModuleHeader";
+import { AttractionsListSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+} from "../../components/ui/SummaryPanel";
 import { globalNotePayload } from "../../lib/packages/globalNotePayload";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
@@ -30,13 +36,8 @@ import { fetchPackages, type PackageRow } from "../../services/packagesService";
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 const inputClass =
   "border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-neutral-900";
@@ -61,8 +62,6 @@ const emptyForm = (): FormState => ({
 
 const GlobalNotesScreen = () => {
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   const [notes, setNotes] = useState<GlobalNote[]>([]);
   const [packages, setPackages] = useState<PackageRow[]>([]);
@@ -234,78 +233,83 @@ const GlobalNotesScreen = () => {
         ? note.packageNames.join(", ")
         : `${note.packageIds.length} package(s)`;
 
+  // Related Packages screens as hub shortcuts (the same set Promo Codes offers).
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Manage Packages", icon: "package", route: "/packages/packages" },
+    { label: "Promo Codes", icon: "tag", route: "/packages/promos" },
+    { label: "Gift Cards", icon: "gift", route: "/packages/gift-cards" },
+    { label: "Add-ons", icon: "coffee", route: "/packages/add-ons" },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View
-        className="bg-white dark:bg-neutral-900 px-5 pb-4 border-b border-gray-100 dark:border-neutral-800"
-        style={{ paddingTop: insets.top + 12 }}
-      >
-        <View className="flex-row items-center gap-3">
-          <Pressable
-            onPress={() => router.back()}
-            className="rounded-full bg-gray-100 dark:bg-neutral-800 p-2"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <View className="flex-1">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Global Notes
-            </Text>
-            <Text className="text-xs text-gray-500 dark:text-gray-400">
-              Customer-facing notes shown during booking
-            </Text>
-          </View>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Global Notes"
+        action={{ onPress: openCreate, accessibilityLabel: "Add note" }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <Pressable
-          onPress={openCreate}
-          className="flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 mb-4"
-        >
-          <Feather name="plus" size={16} color="#FFFFFF" />
-          <Text className="text-sm font-semibold text-white">Add Note</Text>
-        </Pressable>
+        <View className="px-4 mt-4">
+        <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          Customer-facing notes shown during booking
+        </Text>
 
+        {/* More — related Packages screens as hub shortcuts. */}
+        <View className="mb-4">
+          <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
+        </View>
+
+        {!loading && !error && <ListHeader title="All Notes" count={notes.length} />}
+
+        {/* Each state is keyed so switching between them remounts cleanly. */}
         {loading ? (
-          <View className="py-16 items-center">
-            <ActivityIndicator color={PRIMARY} />
+          <View key="s-loading">
+            <AttractionsListSkeleton />
           </View>
         ) : error ? (
-          <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
-            <Text className="text-red-600 font-semibold">
-              Something went wrong
-            </Text>
-            <Text className="text-red-500 text-sm mt-1">{error}</Text>
+          <View key="s-error">
+            <ListErrorBanner
+              title="Could not load global notes"
+              message={error}
+              onRetry={onRefresh}
+            />
           </View>
         ) : notes.length === 0 ? (
-          <View className="items-center py-16">
-            <Feather name="file-text" size={40} color="#D1D5DB" />
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-              No global notes yet
-            </Text>
+          <View key="s-empty">
+            <ListEmptyState
+              icon="file-text"
+              title="No global notes yet"
+              message="Add a note to show customers while they book."
+              actionLabel="Add Note"
+              actionIcon="plus"
+              primary
+              onAction={openCreate}
+            />
           </View>
         ) : (
-          notes.map((note) => (
+          <View key="s-list">
+          {notes.map((note) => (
             <View
               key={note.id}
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
+              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-200 dark:border-neutral-800"
             >
               <View className="flex-row items-start justify-between">
                 <View className="flex-1 mr-2">
                   {!!note.title && (
-                    <Text className="text-base font-bold text-gray-900 dark:text-white">
+                    <Text className="text-base font-semibold text-gray-900 dark:text-white">
                       {note.title}
                     </Text>
                   )}
@@ -366,26 +370,32 @@ const GlobalNotesScreen = () => {
               <View className="flex-row items-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
                 <Pressable
                   onPress={() => openEdit(note)}
-                  className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 dark:bg-neutral-800 active:opacity-70"
+                  className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-70"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${note.title || "note"}`}
                 >
-                  <Feather name="edit-2" size={14} color="#6B7280" />
+                  <Feather name="edit-2" size={14} color={PRIMARY} />
                   <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
                     Edit
                   </Text>
                 </Pressable>
                 <Pressable
                   onPress={() => confirmDelete(note)}
-                  className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/30 active:opacity-70"
+                  className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 active:opacity-70"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${note.title || "note"}`}
                 >
-                  <Feather name="trash-2" size={14} color="#EF4444" />
-                  <Text className="text-xs font-semibold text-red-600">
+                  <Feather name="trash-2" size={14} color="#DC2626" />
+                  <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
                     Delete
                   </Text>
                 </Pressable>
               </View>
             </View>
-          ))
+          ))}
+          </View>
         )}
+        </View>
       </ScrollView>
 
       {/* Create / edit form */}

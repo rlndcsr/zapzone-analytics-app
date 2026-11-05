@@ -7,17 +7,31 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
-  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmailBulkBar, type EmailBulkChip } from "../../components/ui/EmailBulkBar";
-import { EmailCampaignsTable } from "../../components/ui/EmailCampaignsTable";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import {
+  CampaignStatusBadge,
+  EmailCampaignsTable,
+  fmtCampaignDateTime,
+} from "../../components/ui/EmailCampaignsTable";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
 import { Pagination } from "../../components/ui/Pagination";
-import { StatTile } from "../../components/ui/StatTile";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+} from "../../components/ui/SummaryPanel";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { campaignDisplayStatus, isScheduledCampaign } from "../../lib/email/campaignSchedule";
@@ -37,56 +51,82 @@ const CAMPAIGN_BULK_CHIPS: EmailBulkChip[] = [
   { key: "export", label: "Export Selected", icon: "download", tint: "#0644C7" },
 ];
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PRIMARY = "#0644C7";
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
 
-/** ISO -> "Jan 3, 2026, 8:22 AM". */
-function fmtDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  let h = d.getHours();
-  const mer = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  const min = `${d.getMinutes()}`.padStart(2, "0");
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${h}:${min} ${mer}`;
-}
-
-/** Pill classes for a campaign status. */
-function statusPill(status: string): { pill: string; text: string } {
-  switch (status) {
-    case "completed":
-      return { pill: "bg-green-100 dark:bg-green-900/40", text: "text-green-700 dark:text-green-300" };
-    case "sending":
-      return { pill: "bg-blue-100 dark:bg-blue-900/40", text: "text-blue-700 dark:text-blue-300" };
-    case "scheduled":
-      return { pill: "bg-amber-100 dark:bg-amber-900/40", text: "text-amber-700 dark:text-amber-300" };
-    case "failed":
-      return { pill: "bg-red-100 dark:bg-red-900/40", text: "text-red-700 dark:text-red-300" };
-    default:
-      return { pill: "bg-gray-200 dark:bg-neutral-700", text: "text-gray-600 dark:text-gray-300" };
-  }
-}
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 // Scheduled campaigns (pending with a send time) show and filter apart from other pending ones.
 const shownStatus = (c: EmailCampaignRow) => campaignDisplayStatus(c.status, c.scheduledAt);
 
+/**
+ * Card layout for one campaign, matching the flat module cards: name + status,
+ * the subject, recipients with send progress, and a quiet sent/scheduled footer.
+ */
+const CampaignCard = ({
+  campaign: c,
+  onPress,
+}: {
+  campaign: EmailCampaignRow;
+  onPress: () => void;
+}) => {
+  const scheduled = isScheduledCampaign(c.status, c.scheduledAt);
+  const pct = c.recipients > 0 ? Math.round((c.sentCount / c.recipients) * 100) : 0;
+  return (
+    <Pressable
+      onPress={onPress}
+      className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:bg-gray-50 dark:active:bg-neutral-800"
+      accessibilityRole="button"
+      accessibilityLabel={`View campaign ${c.name}`}
+    >
+      <View className="flex-row items-start justify-between gap-3">
+        <Text
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+          numberOfLines={1}
+        >
+          {c.name}
+        </Text>
+        <CampaignStatusBadge campaign={c} />
+      </View>
+      {!!c.subject && (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1" numberOfLines={1}>
+          {c.subject}
+        </Text>
+      )}
+
+      {/* Recipients + progress */}
+      <View className="flex-row items-center gap-4 mt-3">
+        <View className="flex-row items-center gap-1.5">
+          <Feather name="users" size={13} color="#9CA3AF" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {c.recipients} recipient{c.recipients === 1 ? "" : "s"}
+          </Text>
+        </View>
+        <Text className="text-xs text-gray-500 dark:text-gray-400">
+          {c.sentCount}/{c.recipients} sent
+        </Text>
+      </View>
+      <View className="h-1.5 rounded-full bg-gray-100 dark:bg-neutral-800 mt-2 overflow-hidden">
+        <View className="h-full rounded-full bg-[#0644C7]" style={{ width: `${pct}%` }} />
+      </View>
+
+      <View className="flex-row items-center justify-between gap-3 mt-3">
+        <Text numberOfLines={1} className="shrink text-xs text-gray-400 dark:text-gray-500">
+          {scheduled ? "Scheduled for" : "Sent at"}{" "}
+          {fmtCampaignDateTime(scheduled ? c.scheduledAt : c.sentAt)}
+        </Text>
+        <View className="flex-row items-center gap-0.5">
+          <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">Details</Text>
+          <Feather name="chevron-right" size={14} color="#9CA3AF" />
+        </View>
+      </View>
+    </Pressable>
+  );
+};
+
 const EmailCampaigns = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const [campaigns, setCampaigns] = useState<EmailCampaignRow[]>([]);
   const [stats, setStats] = useState<EmailCampaignStats | null>(null);
@@ -94,7 +134,6 @@ const EmailCampaigns = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
 
   const load = useCallback(async () => {
@@ -302,132 +341,147 @@ const EmailCampaigns = () => {
     }
   }, [selectedIds, campaigns]);
 
+  // Per-status chip counts over every loaded campaign (same buckets as the filter).
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of campaigns) {
+      const s = shownStatus(c);
+      counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    return counts;
+  }, [campaigns]);
+
+  const showInitialLoader = loading && campaigns.length === 0;
+  const showError = !!error && campaigns.length === 0;
+
+  const goCreate = useCallback(
+    () => router.push("/email-campaign/create-campaign"),
+    [router],
+  );
+
+  // Sibling email screens (the old Templates · Notifications nav) plus the
+  // header's former Refresh button, as module-hub shortcuts.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Email Templates", icon: "mail", route: "/email-campaign/email-templates" },
+    { label: "Email Notifications", icon: "bell", route: "/email-campaign/email-notification" },
+    { label: "SMS Notifications", icon: "message-square", route: "/email-campaign/sms-notifications" },
+    { label: "Refresh", icon: "refresh-cw", onPress: onRefresh },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Manage Campaigns
-          </Text>
-          <Pressable
-            onPress={onRefresh}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Refresh"
-          >
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Manage Campaigns"
+        action={{ onPress: goCreate, accessibilityLabel: "Create campaign" }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
+        }
       >
-        <View className="px-5 gap-4">
-          <Pressable
-            onPress={() => router.push("/email-campaign/create-campaign")}
-            className="mt-6 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create Campaign
-            </Text>
-          </Pressable>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Bulk emails to customers and staff, with delivery stats at a glance
+          </Text>
 
-          {/* Stats */}
-          <View className="flex-row flex-wrap gap-3">
-            <StatTile icon="send" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Total Campaigns" value={String(stats?.totalCampaigns ?? 0)} hint="All time campaigns created" />
-            <StatTile icon="check-circle" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Emails Sent" value={String(stats?.emailsSent ?? 0)} hint="Successfully delivered emails" />
-            <StatTile icon="x-circle" iconBg="bg-red-50 dark:bg-red-900/30" iconColor="#DC2626" label="Failed Emails" value={String(stats?.failedEmails ?? 0)} hint="Delivery failures" />
-            <StatTile icon="bar-chart-2" iconBg="bg-green-50 dark:bg-green-900/30" iconColor="#16A34A" label="Success Rate" value={`${stats?.successRate ?? 0}%`} hint="Email delivery success rate" />
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load campaigns"
+              message={error ?? ""}
+              onRetry={load}
+            />
+          )}
+
+          {/* Summary — one panel, four figures. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            <SummaryPanel
+              figures={[
+                {
+                  icon: "send",
+                  title: "Total Campaigns",
+                  value: String(stats?.totalCampaigns ?? 0),
+                  hint: "All time campaigns created",
+                },
+                {
+                  icon: "check-circle",
+                  title: "Emails Sent",
+                  value: String(stats?.emailsSent ?? 0),
+                  hint: "Successfully delivered emails",
+                },
+                {
+                  icon: "x-circle",
+                  title: "Failed Emails",
+                  value: String(stats?.failedEmails ?? 0),
+                  hint: "Delivery failures",
+                },
+                {
+                  icon: "bar-chart-2",
+                  title: "Success Rate",
+                  value: `${stats?.successRate ?? 0}%`,
+                  hint: "Email delivery success rate",
+                },
+              ]}
+            />
+          )}
+
+          {/* More — sibling email screens as hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
 
           {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-            <Feather name="search" size={18} color="#9CA3AF" />
-            <TextInput
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
               value={search}
               onChangeText={setSearch}
-              placeholder="Search campaigns by name or subject..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              style={{ paddingVertical: 0 }}
+              placeholder="Search by name or subject"
             />
           </View>
 
-          {/* Filters pill */}
-          <FilterPill>
-            <PillSegment
-              label="Filters"
-              active={showFilters || statusFilter !== "all"}
-              onPress={() => setShowFilters((v) => !v)}
-              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
-            />
-          </FilterPill>
-          {showFilters && (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
-            >
-              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-                Status
-              </Text>
-              <View className="flex-row flex-wrap gap-2">
-                {statusOptions.map((opt) => {
-                  const on = statusFilter === opt.value;
-                  return (
-                    <Pressable
-                      key={opt.value}
-                      onPress={() => setStatusFilter(opt.value)}
-                      className={`px-3.5 py-2 rounded-lg border ${
-                        on
-                          ? "bg-[#0644C7] border-[#0644C7]"
-                          : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-medium ${
-                          on ? "text-white" : "text-gray-600 dark:text-gray-300"
-                        }`}
-                      >
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {statusFilter !== "all" && (
-                <Pressable
-                  onPress={() => setStatusFilter("all")}
-                  className="self-end mt-3"
-                >
-                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Clear Filters
-                  </Text>
-                </Pressable>
-              )}
-            </View>
+          {/* Status chips — the screen's only filter. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {statusOptions.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.value === "all" ? "All" : opt.label}
+                count={
+                  showInitialLoader
+                    ? undefined
+                    : opt.value === "all"
+                      ? campaigns.length
+                      : (statusCounts.get(opt.value) ?? 0)
+                }
+                selected={statusFilter === opt.value}
+                onPress={() => setStatusFilter(opt.value)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* List header — title + count, layout toggle. */}
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Campaigns" count={filtered.length}>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+            </ListHeader>
           )}
-
-          {/* View toggle — Table is the default, Cards optional */}
-          <View className="flex-row items-center justify-between">
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              {filtered.length} campaign{filtered.length === 1 ? "" : "s"}
-            </Text>
-            <ViewToggle mode={viewMode} onChange={setViewMode} />
-          </View>
 
           {viewMode === "table" && selectedIds.size > 0 && (
             <EmailBulkBar
@@ -439,112 +493,63 @@ const EmailCampaigns = () => {
             />
           )}
 
-          {/* States */}
-          {loading && campaigns.length === 0 && (
-            <Text className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
-              Loading campaigns…
-            </Text>
-          )}
-          {error && campaigns.length === 0 && (
-            <View className="items-center py-10">
-              <Feather name="alert-circle" size={36} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable onPress={load} className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]">
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
+          {/* List — Table (default) or Cards over the same paged slice. Each
+              state is keyed so switching between them remounts cleanly. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? <AttractionsTableSkeleton /> : <AttractionsListSkeleton />}
             </View>
-          )}
-
-          {/* List — Table (default) or Cards over the same paged slice */}
-          {filtered.length > 0 &&
-            (viewMode === "table" ? (
-              <EmailCampaignsTable
-                campaigns={paged}
-                selectedIds={selectedIds}
-                onToggleRow={toggleRow}
-                onToggleAll={toggleAllVisible}
-                onRowPress={(c) => openDetails(c.id)}
-                onCancel={confirmRowCancel}
-                onDelete={confirmRowDelete}
+          ) : showError ? null : filtered.length === 0 ? (
+            campaigns.length === 0 ? (
+              <View key="s-empty">
+              <ListEmptyState
+                icon="send"
+                title="No campaigns yet"
+                message="Create your first campaign to email your guests."
+                actionLabel="Create Campaign"
+                actionIcon="plus"
+                primary
+                onAction={goCreate}
               />
+              </View>
             ) : (
-              paged.map((c) => {
-                const pill = statusPill(shownStatus(c));
-                const scheduled = isScheduledCampaign(c.status, c.scheduledAt);
-                const pct = c.recipients > 0 ? Math.round((c.sentCount / c.recipients) * 100) : 0;
-            return (
-              <Pressable
-                key={c.id}
-                onPress={() => openDetails(c.id)}
-                className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-80"
-                style={CARD_SHADOW}
-              >
-                <View className="flex-row items-start justify-between">
-                  <View className="flex-1 mr-2">
-                    <Text className="text-base font-bold text-gray-900 dark:text-white">
-                      {c.name}
-                    </Text>
-                    {!!c.subject && (
-                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5" numberOfLines={1}>
-                        {c.subject}
-                      </Text>
-                    )}
-                  </View>
-                  <View className={`px-3 py-1 rounded-full ${pill.pill}`}>
-                    <Text className={`text-xs font-semibold ${pill.text}`}>
-                      {c.statusLabel}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Recipients + progress */}
-                <View className="flex-row items-center gap-4 mt-3">
-                  <View className="flex-row items-center gap-1.5">
-                    <Feather name="users" size={13} color="#9CA3AF" />
-                    <Text className="text-xs text-gray-500 dark:text-gray-400">
-                      {c.recipients} recipient{c.recipients === 1 ? "" : "s"}
-                    </Text>
-                  </View>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {c.sentCount}/{c.recipients} sent
-                  </Text>
-                </View>
-                <View className="h-1.5 rounded-full bg-gray-100 dark:bg-neutral-800 mt-2 overflow-hidden">
-                  <View
-                    className="h-full rounded-full bg-[#0644C7]"
-                    style={{ width: `${pct}%` }}
-                  />
-                </View>
-
-                <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
-                  <Text className="text-xs text-gray-400 dark:text-gray-500">
-                    {scheduled ? "Scheduled for" : "Sent at"}
-                  </Text>
-                  <Text className="text-xs text-gray-500 dark:text-gray-400">
-                    {fmtDateTime(scheduled ? c.scheduledAt : c.sentAt)}
-                  </Text>
-                </View>
-              </Pressable>
-                );
-              })
-            ))}
-
-          <Pagination
-            page={page}
-            perPage={perPage}
-            total={filtered.length}
-            onPageChange={setPage}
-            onPerPageChange={setPerPage}
-          />
-
-          {!loading && !error && filtered.length === 0 && (
-            <View className="items-center py-10">
-              <Feather name="send" size={36} color="#D1D5DB" />
-              <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-                {campaigns.length === 0 ? "No campaigns yet" : "No campaigns match your search"}
-              </Text>
+              <View key="s-no-match">
+              <ListEmptyState
+                icon="search"
+                title="No campaigns found"
+                message="No campaigns match your search or status."
+                actionLabel="Clear search & filters"
+                onAction={() => {
+                  setSearch("");
+                  setStatusFilter("all");
+                }}
+              />
+              </View>
+            )
+          ) : (
+            <View key="s-list">
+              {viewMode === "table" ? (
+                <EmailCampaignsTable
+                  campaigns={paged}
+                  selectedIds={selectedIds}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAllVisible}
+                  onRowPress={(c) => openDetails(c.id)}
+                  onCancel={confirmRowCancel}
+                  onDelete={confirmRowDelete}
+                />
+              ) : (
+                paged.map((c) => (
+                  <CampaignCard key={c.id} campaign={c} onPress={() => openDetails(c.id)} />
+                ))
+              )}
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
             </View>
           )}
         </View>

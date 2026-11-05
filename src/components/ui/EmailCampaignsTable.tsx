@@ -1,34 +1,30 @@
 import { Feather } from "@expo/vector-icons";
 import { useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { campaignDisplayStatus, isScheduledCampaign } from "../../lib/email/campaignSchedule";
 import type { EmailCampaignRow } from "../../services/emailService";
+import { RowActionGroup } from "./RowActions";
 import { SelectableTable, type TableColumn } from "./SelectableTable";
+import { ToneDotBadge, type DotTone } from "./SummaryPanel";
 
-const PRIMARY = "#0644C7";
+/** Shared secondary-cell text style so every column reads consistently. */
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
 
-/** Small circular icon button for the Actions column (matches the other tables). */
-const IconAction = ({
-  icon,
-  tint,
-  label,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  tint: string;
-  label: string;
-  onPress: () => void;
-}) => (
-  <Pressable
-    onPress={onPress}
-    hitSlop={6}
-    accessibilityRole="button"
-    accessibilityLabel={label}
-    className="w-8 h-8 rounded-full items-center justify-center active:bg-gray-100 dark:active:bg-neutral-800"
-  >
-    <Feather name={icon} size={16} color={tint} />
-  </Pressable>
+// Same status colours the campaign pills have always used.
+const CAMPAIGN_TONE: Record<string, DotTone> = {
+  completed: "green",
+  sending: "blue",
+  scheduled: "amber",
+  failed: "red",
+};
+
+/** Campaign status pill with a dot — used by the table and the card list. */
+export const CampaignStatusBadge = ({ campaign }: { campaign: EmailCampaignRow }) => (
+  <ToneDotBadge
+    tone={CAMPAIGN_TONE[campaignDisplayStatus(campaign.status, campaign.scheduledAt)] ?? "gray"}
+    label={campaign.statusLabel}
+  />
 );
 
 const MONTHS = [
@@ -37,7 +33,7 @@ const MONTHS = [
 ];
 
 /** ISO -> "Jan 3, 2026, 8:22 AM". */
-function fmtDateTime(iso: string | null): string {
+export function fmtCampaignDateTime(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
@@ -46,22 +42,6 @@ function fmtDateTime(iso: string | null): string {
   h = h % 12 || 12;
   const min = `${d.getMinutes()}`.padStart(2, "0");
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${h}:${min} ${mer}`;
-}
-
-// Same status colors as the Campaigns card view.
-function statusPill(status: string): { pill: string; text: string } {
-  switch (status) {
-    case "completed":
-      return { pill: "bg-green-100 dark:bg-green-900/40", text: "text-green-700 dark:text-green-300" };
-    case "sending":
-      return { pill: "bg-blue-100 dark:bg-blue-900/40", text: "text-blue-700 dark:text-blue-300" };
-    case "scheduled":
-      return { pill: "bg-amber-100 dark:bg-amber-900/40", text: "text-amber-700 dark:text-amber-300" };
-    case "failed":
-      return { pill: "bg-red-100 dark:bg-red-900/40", text: "text-red-700 dark:text-red-300" };
-    default:
-      return { pill: "bg-gray-200 dark:bg-neutral-700", text: "text-gray-600 dark:text-gray-300" };
-  }
 }
 
 type Handlers = {
@@ -98,7 +78,7 @@ function buildColumns(h: Handlers): TableColumn<EmailCampaignRow>[] {
     render: (c) => (
       <View className="flex-row items-center gap-1.5">
         <Feather name="users" size={13} color="#9CA3AF" />
-        <Text className="text-sm text-gray-600 dark:text-gray-300">{c.recipients}</Text>
+        <Text className={CELL_TEXT}>{c.recipients}</Text>
       </View>
     ),
   },
@@ -106,16 +86,11 @@ function buildColumns(h: Handlers): TableColumn<EmailCampaignRow>[] {
     key: "status",
     label: "Status",
     width: 130,
-    render: (c) => {
-      const p = statusPill(campaignDisplayStatus(c.status, c.scheduledAt));
-      return (
-        <View className="flex-row">
-          <View className={`px-2.5 py-1 rounded-full ${p.pill}`}>
-            <Text className={`text-xs font-semibold ${p.text}`}>{c.statusLabel}</Text>
-          </View>
-        </View>
-      );
-    },
+    render: (c) => (
+      <View className="flex-row">
+        <CampaignStatusBadge campaign={c} />
+      </View>
+    ),
   },
   {
     key: "progress",
@@ -148,11 +123,11 @@ function buildColumns(h: Handlers): TableColumn<EmailCampaignRow>[] {
     render: (c) =>
       isScheduledCampaign(c.status, c.scheduledAt) ? (
         <Text numberOfLines={2} className="text-sm text-amber-700 dark:text-amber-300">
-          {`Scheduled for ${fmtDateTime(c.scheduledAt)}`}
+          {`Scheduled for ${fmtCampaignDateTime(c.scheduledAt)}`}
         </Text>
       ) : (
-        <Text numberOfLines={1} className="text-sm text-gray-500 dark:text-gray-400">
-          {fmtDateTime(c.sentAt)}
+        <Text numberOfLines={1} className={CELL_TEXT}>
+          {fmtCampaignDateTime(c.sentAt)}
         </Text>
       ),
   },
@@ -165,15 +140,25 @@ function buildColumns(h: Handlers): TableColumn<EmailCampaignRow>[] {
       const canDelete =
         c.status === "completed" || c.status === "cancelled" || c.status === "failed";
       return (
-        <View className="flex-row items-center gap-0.5">
-          <IconAction icon="eye" tint={PRIMARY} label={`View ${c.name}`} onPress={() => h.onView(c)} />
-          {canCancel && (
-            <IconAction icon="slash" tint="#D97706" label={`Cancel ${c.name}`} onPress={() => h.onCancel(c)} />
-          )}
-          {canDelete && (
-            <IconAction icon="trash-2" tint="#EF4444" label={`Delete ${c.name}`} onPress={() => h.onDelete(c)} />
-          )}
-        </View>
+        <RowActionGroup
+          actions={[
+            { key: "view", icon: "eye", color: "#6B7280", label: `View ${c.name}`, onPress: () => h.onView(c) },
+            canCancel && {
+              key: "cancel",
+              icon: "slash",
+              color: "#D97706",
+              label: `Cancel ${c.name}`,
+              onPress: () => h.onCancel(c),
+            },
+            canDelete && {
+              key: "delete",
+              icon: "trash-2",
+              color: "#DC2626",
+              label: `Delete ${c.name}`,
+              onPress: () => h.onDelete(c),
+            },
+          ]}
+        />
       );
     },
   },
@@ -211,6 +196,8 @@ export function EmailCampaignsTable({
       selectedIds={selectedIds}
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}
+      rowLabel={(c) => c.name}
+      flat
     />
   );
 }
