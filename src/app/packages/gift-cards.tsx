@@ -16,8 +16,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
+import { AttractionsListSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SpecCell,
+  StatusDotBadge,
+} from "../../components/ui/SummaryPanel";
 import {
   EMPTY_TARGETING,
   TargetingSelector,
@@ -50,19 +59,14 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 type StatusFilter = "all" | "active" | "inactive";
 type GiftCardType = "fixed" | "percentage";
 
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Statuses", value: "all" },
+  { label: "All", value: "all" },
   { label: "Active", value: "active" },
   { label: "Inactive", value: "inactive" },
 ];
@@ -91,88 +95,76 @@ const GiftCardCard = ({
 }: {
   card: GiftCardRow;
   onDelete: () => void;
-}) => (
-  <View
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
-    style={CARD_SHADOW}
-  >
-    <View className="flex-row items-start justify-between mb-2">
-      <View className="flex-1 mr-3">
-        <View className="flex-row items-center gap-2">
-          <Feather name="gift" size={14} color={PRIMARY} />
+}) => {
+  const expires = formatDate(card.expiresAt);
+  return (
+    <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3">
+      {/* Code + status */}
+      <View className="flex-row items-start justify-between gap-3">
+        <View className="flex-1 flex-row items-center gap-2">
+          <View className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-900/20 items-center justify-center">
+            <Feather name="gift" size={14} color="#D97706" />
+          </View>
           <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
+            className="shrink text-base font-semibold text-gray-900 dark:text-white"
             numberOfLines={1}
           >
             {card.code}
           </Text>
         </View>
-        {!!formatDate(card.expiresAt) && (
-          <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Expires {formatDate(card.expiresAt)}
-          </Text>
-        )}
+        <StatusDotBadge on={card.isActive} label={card.isActive ? "Active" : "Inactive"} />
       </View>
-      <View className="flex-row items-center gap-2">
-        <View
-          className={`px-2.5 py-1 rounded-full ${
-            card.isActive
-              ? "bg-green-50 dark:bg-green-900/30"
-              : "bg-gray-100 dark:bg-neutral-800"
-          }`}
+
+      {!!card.description && (
+        <Text
+          className="text-[13px] text-gray-500 dark:text-gray-400 leading-5 mt-2"
+          numberOfLines={2}
         >
-          <Text
-            className={`text-[11px] font-semibold ${
-              card.isActive
-                ? "text-green-600 dark:text-green-400"
-                : "text-gray-500 dark:text-gray-400"
-            }`}
-          >
-            {card.isActive ? "Active" : "Inactive"}
-          </Text>
-        </View>
+          {card.description}
+        </Text>
+      )}
+
+      {/* Value / Balance / Usage */}
+      <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+        <SpecCell label="Value" value={valueLabel(card)} />
+        <SpecCell
+          divider
+          label="Balance"
+          value={card.balance != null ? `$${card.balance.toFixed(2)}` : "—"}
+          valueClassName={
+            card.balance != null
+              ? "text-green-700 dark:text-green-400"
+              : "text-gray-900 dark:text-white"
+          }
+        />
+        <SpecCell
+          divider
+          label="Usage"
+          value={`${card.usedCount}${card.maxUsage != null ? ` / ${card.maxUsage}` : ""}`}
+        />
+      </View>
+
+      {/* Expiry + delete */}
+      <View className="flex-row items-center justify-between mt-3">
+        <Text className="text-xs text-gray-400 dark:text-gray-500">
+          {expires ? `Expires ${expires}` : "Never expires"}
+        </Text>
         <Pressable
           onPress={onDelete}
           hitSlop={6}
-          className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-900/20 items-center justify-center"
+          className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/50 active:opacity-70"
+          accessibilityRole="button"
           accessibilityLabel={`Delete ${card.code}`}
         >
-          <Feather name="trash-2" size={14} color="#E11D48" />
+          <Feather name="trash-2" size={13} color="#DC2626" />
+          <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
+            Delete
+          </Text>
         </Pressable>
       </View>
     </View>
-
-    <View className="flex-row items-center justify-between pt-3 border-t border-gray-100 dark:border-neutral-800">
-      <View>
-        <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-          Value
-        </Text>
-        <Text className="text-lg font-bold text-gray-900 dark:text-white">
-          {valueLabel(card)}
-        </Text>
-      </View>
-      {card.balance != null && (
-        <View className="items-center">
-          <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-            Balance
-          </Text>
-          <Text className="text-sm font-bold text-green-600 dark:text-green-400">
-            ${card.balance.toFixed(2)}
-          </Text>
-        </View>
-      )}
-      <View className="items-end">
-        <Text className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-          Usage
-        </Text>
-        <Text className="text-sm font-bold text-gray-700 dark:text-gray-200">
-          {card.usedCount}
-          {card.maxUsage != null ? `/${card.maxUsage}` : ""}
-        </Text>
-      </View>
-    </View>
-  </View>
-);
+  );
+};
 
 /** A labelled text field used in the create modal. */
 function Field({
@@ -241,7 +233,6 @@ const GiftCards = () => {
 
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [showStatusSheet, setShowStatusSheet] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
@@ -285,8 +276,17 @@ const GiftCards = () => {
     setPage(1);
   }, [search, statusFilter, perPage]);
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Statuses";
+  // Per-status chip counts over every loaded card.
+  const activeCount = useMemo(() => cards.filter((c) => c.isActive).length, [cards]);
+  const statusCount = (value: StatusFilter) =>
+    value === "all"
+      ? cards.length
+      : value === "active"
+        ? activeCount
+        : cards.length - activeCount;
+
+  const showInitialLoader = loading && cards.length === 0;
+  const showError = !loading && !!error && cards.length === 0;
 
   // --- Create ---
   const [showCreate, setShowCreate] = useState(false);
@@ -516,29 +516,49 @@ const GiftCards = () => {
     ]);
   };
 
+  // Secondary actions as hub shortcuts; Sell stays the header's primary action.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Create Gift Card", icon: "plus", onPress: openCreate },
+    { label: "Promo Codes", icon: "tag", route: "/packages/promos" },
+    { label: "Manage Packages", icon: "package", route: "/packages/packages" },
+    { label: "Add-ons", icon: "coffee", route: "/packages/add-ons" },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
+      {/* Header — back, title, and the primary Sell action (as on the web). */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Gift Cards
           </Text>
-          <View style={{ width: 36 }} />
+          <Pressable
+            onPress={openSell}
+            className="flex-row items-center gap-1.5 h-9 pl-3 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Sell gift card"
+          >
+            <Feather name="shopping-cart" size={15} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">Sell</Text>
+          </Pressable>
         </View>
       </View>
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -546,115 +566,106 @@ const GiftCards = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-4 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Gift Cards
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Create and manage gift cards for your customers
-            </Text>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Create and manage gift cards for your customers
+          </Text>
+
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load gift cards"
+              message={error ?? ""}
+              onRetry={onRefresh}
+            />
+          )}
+
+          {/* More — Create plus related modules as hub shortcuts. */}
+          <View>
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
 
-          {/* Sell (primary) + Create (secondary) — two adjacent primary
-              buttons read badly, so Sell takes the emphasis, matching the
-              web admin's header once Sell Gift Card was added there. */}
-          <Pressable
-            onPress={openSell}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-3"
-          >
-            <Feather name="shopping-cart" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Sell Gift Card
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={openCreate}
-            className="flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 px-4 py-3.5 rounded-xl active:opacity-80 mb-4"
-          >
-            <Feather name="plus" size={16} color={PRIMARY} />
-            <Text className="text-sm font-semibold text-[#0644C7]">
-              Create Gift Card
-            </Text>
-          </Pressable>
-
           {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 mb-3">
-            <Feather name="search" size={18} color="#9CA3AF" />
+          <View className="flex-row items-center gap-2 h-11 px-3.5 mt-4 mb-3 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+            <Feather name="search" size={16} color="#9CA3AF" />
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search gift cards by code..."
+              placeholder="Search gift cards by code"
               placeholderTextColor="#9CA3AF"
+              returnKeyType="search"
+              autoCapitalize="characters"
               className="flex-1 text-sm text-gray-900 dark:text-white"
               style={{ paddingVertical: 0 }}
             />
             {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
+              <Pressable
+                onPress={() => setSearch("")}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Feather name="x-circle" size={16} color="#9CA3AF" />
               </Pressable>
             )}
           </View>
 
-          {/* Filter pill — Status */}
-          <FilterPill>
-            <PillSegment
-              label={statusLabel}
-              active={showStatusSheet}
-              onPress={() => setShowStatusSheet(true)}
-              renderIcon={(c) => (
-                <Feather name="check-circle" size={15} color={c} />
-              )}
-            />
-          </FilterPill>
+          {/* Status chips */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                count={showInitialLoader ? undefined : statusCount(opt.value)}
+                selected={statusFilter === opt.value}
+                onPress={() => setStatusFilter(opt.value)}
+              />
+            ))}
+          </ScrollView>
 
-          {!loading && !error ? (
-            <Text
-              key="gc-count"
-              className="text-sm text-gray-500 dark:text-gray-400 mb-3"
-            >
-              Showing {filtered.length}{" "}
-              {filtered.length === 1 ? "gift card" : "gift cards"}
-            </Text>
-          ) : null}
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Gift Cards" count={filtered.length} />
+          )}
 
           {/* States (distinct keys so css-interop never re-upgrades one fiber) */}
           <View key="gc-listblock">
-            {loading ? (
-              <View key="s-loading" className="py-16 items-center">
-                <ActivityIndicator color={PRIMARY} />
+            {showInitialLoader ? (
+              <View key="s-loading">
+                <AttractionsListSkeleton />
               </View>
-            ) : error ? (
-              <View key="s-error" className="bg-red-50 border border-red-100 rounded-2xl p-5">
-                <Text className="text-red-600 font-semibold">
-                  Something went wrong
-                </Text>
-                <Text className="text-red-500 text-sm mt-1">{error}</Text>
-              </View>
-            ) : filtered.length === 0 ? (
-              <View key="s-empty" className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-                <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
-                  <Feather name="plus" size={26} color={PRIMARY} />
-                </View>
-                <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                  No gift cards found
-                </Text>
-                <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 mb-4">
-                  Create your first gift card to get started
-                </Text>
-                <Pressable
-                  onPress={openCreate}
-                  className="flex-row items-center gap-2 bg-[#0644C7] px-4 py-3 rounded-xl active:opacity-90"
-                >
-                  <Feather name="plus" size={16} color="#FFFFFF" />
-                  <Text className="text-sm font-semibold text-white">
-                    Create Gift Card
-                  </Text>
-                </Pressable>
+            ) : showError ? null : filtered.length === 0 ? (
+              <View key="s-empty">
+                {cards.length === 0 ? (
+                  <ListEmptyState
+                    icon="gift"
+                    title="No gift cards yet"
+                    message="Create your first gift card to get started."
+                    actionLabel="Create Gift Card"
+                    actionIcon="plus"
+                    primary
+                    onAction={openCreate}
+                  />
+                ) : (
+                  <ListEmptyState
+                    icon="search"
+                    title="No gift cards found"
+                    message="No gift cards match your search or status."
+                    actionLabel="Clear search & filters"
+                    onAction={() => {
+                      setSearch("");
+                      setStatusFilter("all");
+                    }}
+                  />
+                )}
               </View>
             ) : (
               <View key="s-list">
@@ -677,46 +688,6 @@ const GiftCards = () => {
           </View>
         </View>
       </ScrollView>
-
-      {/* Status filter picker */}
-      <BottomSheet
-        visible={showStatusSheet}
-        onClose={() => setShowStatusSheet(false)}
-        title="Filter by Status"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {STATUS_OPTIONS.map((opt) => {
-            const active = statusFilter === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => {
-                  setStatusFilter(opt.value);
-                  setShowStatusSheet(false);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  active ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    active
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {opt.label}
-                </Text>
-                {active && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
 
       {/* Create Gift Card */}
       <BottomSheet

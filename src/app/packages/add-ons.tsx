@@ -17,8 +17,15 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
+import { AttractionsListSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+} from "../../components/ui/SummaryPanel";
 import {
   createAddOn,
   deleteAddOn,
@@ -32,9 +39,13 @@ import {
   type LocationOption,
 } from "../../services/locationsService";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 const CARD_SHADOW = {
   shadowColor: "#000",
@@ -147,9 +158,10 @@ const AddOns = () => {
 
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
+  // Location comes from the global workspace selector (shown at the top of the
+  // screen, company-admin only), as on Manage Attractions / Packages.
+  const activeLocation = useActiveLocation();
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
 
@@ -207,12 +219,12 @@ const AddOns = () => {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return addOns.filter((a) => {
-      if (locationFilter !== "all" && a.locationId !== locationFilter)
+      if (activeLocation.id !== "all" && a.locationId !== activeLocation.id)
         return false;
       if (term && !a.name.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [addOns, search, locationFilter]);
+  }, [addOns, search, activeLocation.id]);
 
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
@@ -226,15 +238,15 @@ const AddOns = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, locationFilter, perPage]);
-
-  const locationLabel =
-    locationFilter === "all"
-      ? "All Locations"
-      : (locations.find((l) => l.id === locationFilter)?.name ?? "All Locations");
+  }, [search, activeLocation.id, perPage]);
 
   const openCreate = () => {
-    setFLocationId(getCurrentUser()?.location_id ?? null);
+    // A new add-on starts at the workspace location, else the user's own.
+    setFLocationId(
+      typeof activeLocation.id === "number"
+        ? activeLocation.id
+        : (getCurrentUser()?.location_id ?? null),
+    );
     setFImage(null);
     setFImageChanged(false);
     setFName("");
@@ -421,29 +433,59 @@ const AddOns = () => {
 
   const isEditing = formTarget !== null && formTarget !== "new";
 
+  const showInitialLoader = loading && addOns.length === 0;
+  const showError = !loading && !!error && addOns.length === 0;
+
+  // Import / Export (and related modules) as hub shortcuts; Create is the
+  // header's New action. Export ignores taps while one is already running.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Import Add-ons", icon: "upload", onPress: onImport },
+    {
+      label: exporting ? "Exporting…" : "Export CSV",
+      icon: "download",
+      onPress: () => {
+        if (!exporting) void exportCsv();
+      },
+    },
+    { label: "Manage Packages", icon: "package", route: "/packages/packages" },
+    { label: "Promo Codes", icon: "tag", route: "/packages/promos" },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Add-ons
           </Text>
-          <View style={{ width: 36 }} />
+          <Pressable
+            onPress={openCreate}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Create add-on"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
+          </Pressable>
         </View>
       </View>
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -451,111 +493,93 @@ const AddOns = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-4 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Add-ons
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Food, beverage and other items for your attractions
-            </Text>
+        <View className="px-4 mt-4">
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
           </View>
 
-          {/* Create */}
-          <Pressable
-            onPress={openCreate}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-4"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Create Add-on
-            </Text>
-          </Pressable>
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Food, beverage and other items for your attractions
+          </Text>
+
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load add-ons"
+              message={error ?? ""}
+              onRetry={onRefresh}
+            />
+          )}
+
+          {/* More — Import / Export plus related modules as hub shortcuts. */}
+          <View>
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
+          </View>
 
           {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 mb-3">
-            <Feather name="search" size={18} color="#9CA3AF" />
+          <View className="flex-row items-center gap-2 h-11 px-3.5 mt-4 mb-3 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+            <Feather name="search" size={16} color="#9CA3AF" />
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search add-ons by name..."
+              placeholder="Search add-ons"
               placeholderTextColor="#9CA3AF"
+              returnKeyType="search"
               className="flex-1 text-sm text-gray-900 dark:text-white"
               style={{ paddingVertical: 0 }}
             />
             {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
+              <Pressable
+                onPress={() => setSearch("")}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Feather name="x-circle" size={16} color="#9CA3AF" />
               </Pressable>
             )}
           </View>
 
-          {/* Controls — segmented pill. Location is company-admin only; managers
-              are scoped to their own location by the backend (like the web). */}
-          <FilterPill>
-            {isCompanyAdmin && (
-              <PillSegment
-                label={locationLabel}
-                active={showLocationSheet}
-                onPress={() => setShowLocationSheet(true)}
-                renderIcon={(c) => <Feather name="map-pin" size={15} color={c} />}
-              />
-            )}
-            <PillSegment
-              label="Import"
-              onPress={onImport}
-              renderIcon={(c) => <Feather name="upload" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Export"
-              onPress={exportCsv}
-              renderIcon={(c) =>
-                exporting ? (
-                  <ActivityIndicator size="small" color={c} />
-                ) : (
-                  <Feather name="download" size={15} color={c} />
-                )
-              }
-            />
-          </FilterPill>
-
-          {!loading && !error && (
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-              Showing {filtered.length}{" "}
-              {filtered.length === 1 ? "add-on" : "add-ons"}
-              {locationFilter !== "all" ? ` · ${locationLabel}` : ""}
-            </Text>
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Add-ons" count={filtered.length} />
           )}
 
           {/* States */}
-          {loading ? (
-            <View key="s-loading" className="py-16 items-center">
-              <ActivityIndicator color={PRIMARY} />
+          {showInitialLoader ? (
+            <View key="s-loading">
+              <AttractionsListSkeleton />
             </View>
-          ) : error ? (
-            <View key="s-error" className="bg-red-50 border border-red-100 rounded-2xl p-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
-          ) : filtered.length === 0 ? (
-            <View key="s-empty" className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="coffee" size={26} color="#9CA3AF" />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No add-ons found
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
-                {addOns.length === 0
-                  ? "There are no add-ons for this account yet."
-                  : "Try a different search or filters."}
-              </Text>
+          ) : showError ? null : filtered.length === 0 ? (
+            <View key="s-empty">
+              {addOns.length === 0 ? (
+                <ListEmptyState
+                  icon="coffee"
+                  title="No add-ons yet"
+                  message="There are no add-ons for this account yet."
+                  actionLabel="Create Add-on"
+                  actionIcon="plus"
+                  primary
+                  onAction={openCreate}
+                />
+              ) : (
+                <ListEmptyState
+                  icon="search"
+                  title="No add-ons found"
+                  message={
+                    search.trim()
+                      ? "No add-ons match your search."
+                      : `There are no add-ons at ${activeLocation.name}.`
+                  }
+                  {...(search.trim()
+                    ? { actionLabel: "Clear search", onAction: () => setSearch("") }
+                    : {})}
+                />
+              )}
             </View>
           ) : (
             <View key="s-list">
@@ -789,93 +813,6 @@ const AddOns = () => {
               )}
             </Pressable>
           </View>
-        </ScrollView>
-      </BottomSheet>
-
-      {/* Location filter picker */}
-      <BottomSheet
-        visible={showLocationSheet}
-        onClose={() => setShowLocationSheet(false)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          <Pressable
-            onPress={() => {
-              setLocationFilter("all");
-              setShowLocationSheet(false);
-            }}
-            className={`flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1 ${
-              locationFilter === "all" ? "bg-blue-50 dark:bg-blue-900/20" : ""
-            }`}
-          >
-            <View className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-              <Feather name="grid" size={15} color={PRIMARY} />
-            </View>
-            <View className="flex-1">
-              <Text
-                className={`text-base font-medium ${
-                  locationFilter === "all"
-                    ? "text-blue-600 dark:text-blue-400"
-                    : "text-gray-700 dark:text-gray-200"
-                }`}
-              >
-                All Locations
-              </Text>
-              <Text className="text-xs text-gray-400 dark:text-gray-500">
-                View all locations
-              </Text>
-            </View>
-            {locationFilter === "all" && (
-              <Feather name="check" size={18} color={PRIMARY} />
-            )}
-          </Pressable>
-
-          {locationsLoading && locations.length === 0 && (
-            <View className="py-6 items-center">
-              <ActivityIndicator color={PRIMARY} />
-            </View>
-          )}
-
-          {locations.map((loc) => {
-            const active = locationFilter === loc.id;
-            return (
-              <Pressable
-                key={loc.id}
-                onPress={() => {
-                  setLocationFilter(loc.id);
-                  setShowLocationSheet(false);
-                }}
-                className={`flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1 ${
-                  active ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <View className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-                  <Feather name="map-pin" size={15} color={PRIMARY} />
-                </View>
-                <View className="flex-1">
-                  <Text
-                    className={`text-base font-medium ${
-                      active
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-700 dark:text-gray-200"
-                    }`}
-                    numberOfLines={1}
-                  >
-                    {loc.name}
-                  </Text>
-                  {!!loc.address && (
-                    <Text
-                      className="text-xs text-gray-400 dark:text-gray-500"
-                      numberOfLines={1}
-                    >
-                      {loc.address}
-                    </Text>
-                  )}
-                </View>
-                {active && <Feather name="check" size={18} color={PRIMARY} />}
-              </Pressable>
-            );
-          })}
         </ScrollView>
       </BottomSheet>
     </View>

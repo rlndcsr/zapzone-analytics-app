@@ -22,7 +22,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { Pagination } from "../../components/ui/Pagination";
+import {
+  AppliedFiltersHint,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+  ToolbarIconButton,
+} from "../../components/ui/SummaryPanel";
 import {
   EMPTY_SPECIAL_PRICING_FILTERS,
   SpecialPricingFiltersSheet,
@@ -34,9 +44,10 @@ import { SpecialPricingDetailSheet } from "../../components/ui/SpecialPricingDet
 import { SpecialPricingTable } from "../../components/ui/SpecialPricingTable";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import {
-  SpecialPricingKpiSkeleton,
-  SpecialPricingListSkeleton,
-} from "../../components/ui/skeleton/SpecialPricingSkeleton";
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
 import {
   consumeSpecialPricingsStale,
   markSpecialPricingsStale,
@@ -56,13 +67,8 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
 
@@ -195,15 +201,12 @@ const SpecialPricingCard = ({
   const entity = ENTITY_META[row.entityType];
   const isPercent = row.discountType === "percentage";
   return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 shadow-sm"
-      style={CARD_SHADOW}
-    >
+    <View className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-200 dark:border-neutral-800">
       {/* Name + description (left), status (right) */}
       <View className="flex-row items-start justify-between mb-2">
         <View className="flex-1 mr-3">
           <Text
-            className="text-base font-bold text-gray-900 dark:text-white"
+            className="text-base font-semibold text-gray-900 dark:text-white"
             numberOfLines={1}
           >
             {row.name}
@@ -269,43 +272,6 @@ const SpecialPricingCard = ({
     </View>
   );
 };
-
-type KpiTone = { bg: string; tint: string };
-
-const KpiCard = ({
-  icon,
-  tone,
-  title,
-  value,
-  change,
-}: {
-  icon: ComponentIconName;
-  tone: KpiTone;
-  title: string;
-  value: string;
-  change: string;
-}) => (
-  <View
-    className="flex-1 bg-white dark:bg-neutral-900 rounded-2xl p-4 m-1.5 shadow-sm"
-    style={CARD_SHADOW}
-  >
-    <View
-      className="w-9 h-9 rounded-xl items-center justify-center"
-      style={{ backgroundColor: tone.bg }}
-    >
-      <Feather name={icon} size={18} color={tone.tint} />
-    </View>
-    <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-3">
-      {title}
-    </Text>
-    <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-      {value}
-    </Text>
-    <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      {change}
-    </Text>
-  </View>
-);
 
 const Pricing = () => {
   const insets = useSafeAreaInsets();
@@ -536,7 +502,6 @@ const Pricing = () => {
     }
   }, [filtered]);
 
-  const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page, perPage],
@@ -632,36 +597,51 @@ const Pricing = () => {
     );
   };
 
+  // The page's secondary actions as module-hub shortcuts; Create is the
+  // header's New action.
+  const moreShortcuts: HubQuickLink[] = [
+    {
+      label: exporting ? "Exporting…" : "Export CSV",
+      icon: "download",
+      onPress: () => {
+        if (!exporting) void exportCsv();
+      },
+    },
+    { label: "Fee Supports", icon: "dollar-sign", route: "/pricing/fee-support" },
+    { label: "Manage Packages", icon: "package", route: "/packages/packages" },
+    { label: "Attractions", icon: "star", route: "/attractions/attractions" },
+  ];
+
+  const showInitialLoader = loading && specialPricings.length === 0;
+  const showError = !loading && !!error && specialPricings.length === 0;
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Special Pricing
           </Text>
-          {/* Export CSV — icon-only in the header, so the action below is just
-              the primary "Special Pricing" CTA. */}
           <Pressable
-            onPress={exportCsv}
-            disabled={exporting}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            onPress={() => router.push("/pricing/create-special-pricing")}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
             accessibilityRole="button"
-            accessibilityLabel="Export CSV"
+            accessibilityLabel="Create special pricing"
           >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
           </Pressable>
         </View>
       </View>
@@ -669,7 +649,8 @@ const Pricing = () => {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -682,251 +663,175 @@ const Pricing = () => {
           />
         }
       >
-        <View className="px-5">
-          {/* Special Pricing — the primary filled CTA, full width. Export CSV
-              lives in the header. Fee Supports moved to the Pricing hub. */}
-          <Pressable
-            onPress={() => router.push("/pricing/create-special-pricing")}
-            className="mt-5 flex-row items-center justify-center gap-2 bg-[#0644C7] py-3.5 rounded-xl active:opacity-90 mb-5"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">
-              Special Pricing
-            </Text>
-          </Pressable>
-
-          {/* Error state */}
-          {!loading && error && (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5 mb-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
-          )}
-
-          {/* KPI cards */}
-          {loading ? (
-            <SpecialPricingKpiSkeleton />
-          ) : (
-            <View className="flex-row flex-wrap -mx-1.5 mb-3">
-              <View className="w-1/2">
-                <KpiCard
-                  icon="tag"
-                  tone={{ bg: "#0644C720", tint: PRIMARY }}
-                  title="Total Special Pricings"
-                  value={String(kpis.total)}
-                  change={`${kpis.active} active`}
-                />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="repeat"
-                  tone={{ bg: "#F59E0B20", tint: "#F59E0B" }}
-                  title="Weekly Recurring"
-                  value={String(kpis.weekly)}
-                  change="Every week discounts"
-                />
-              </View>
-              <View className="w-1/2">
-                <KpiCard
-                  icon="calendar"
-                  tone={{ bg: "#A78BFA20", tint: "#A78BFA" }}
-                  title="One-Time Events"
-                  value={String(kpis.oneTime)}
-                  change="Specific date sales"
-                />
-              </View>
-            </View>
-          )}
-
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3 rounded-xl border border-gray-100 dark:border-neutral-800 mt-2 mb-3">
-            <Feather name="search" size={16} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search special pricings..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
+        <View className="px-4 mt-4">
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load special pricing"
+              message={error ?? ""}
+              onRetry={onRefresh}
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
+          )}
+
+          {/* Summary — one panel, four figures, divided by hairlines. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            !showError && (
+              <SummaryPanel
+                figures={[
+                  {
+                    icon: "tag",
+                    title: "Total Rules",
+                    value: String(kpis.total),
+                    hint: `${kpis.active} active`,
+                  },
+                  {
+                    icon: "repeat",
+                    title: "Weekly",
+                    value: String(kpis.weekly),
+                    hint: "Every week discounts",
+                  },
+                  {
+                    icon: "calendar",
+                    title: "Monthly",
+                    value: String(kpis.monthly),
+                    hint: "Every month discounts",
+                  },
+                  {
+                    icon: "star",
+                    title: "One-Time",
+                    value: String(kpis.oneTime),
+                    hint: "Specific date sales",
+                  },
+                ]}
+              />
+            )
+          )}
+
+          {/* More — the page's secondary actions as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
 
-          {/* Controls — segmented pill (Filters · Columns) */}
-          <FilterPill>
-            <PillSegment
-              label={
-                activeFilterCount > 0
-                  ? `Filters (${activeFilterCount})`
-                  : "Filters"
-              }
-              active={showFilterSheet || activeFilterCount > 0}
-              onPress={() => setShowFilterSheet(true)}
-              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Columns"
-              active={showColumns}
-              onPress={() => setShowColumns(true)}
-              renderIcon={(c) => <Feather name="columns" size={15} color={c} />}
-            />
-          </FilterPill>
-
-          {/* List header + layout toggle (Table default / Cards) */}
-          {!loading && !error && (
-            <View className="flex-row items-center justify-between gap-2 mb-4 mt-2">
-              <View className="flex-row items-center gap-2 shrink">
-                <Text
-                  numberOfLines={1}
-                  className="shrink text-lg font-bold text-gray-900 dark:text-white"
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <View className="flex-1 flex-row items-center gap-2 h-11 px-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="search" size={16} color="#9CA3AF" />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search special pricing"
+                placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+                style={{ paddingVertical: 0 }}
+              />
+              {search.length > 0 && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
                 >
-                  All Special Pricings
-                </Text>
-                <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                  <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {filtered.length}
-                  </Text>
-                </View>
-              </View>
-              <ViewToggle mode={viewMode} onChange={setViewMode} />
+                  <Feather name="x-circle" size={16} color="#9CA3AF" />
+                </Pressable>
+              )}
             </View>
+            <FiltersButton
+              count={activeFilterCount}
+              onPress={() => setShowFilterSheet(true)}
+            />
+          </View>
+
+          {/* Applied-filters hint with a one-tap reset. */}
+          <AppliedFiltersHint
+            count={activeFilterCount}
+            onClear={() => setFilters(EMPTY_SPECIAL_PRICING_FILTERS)}
+          />
+
+          {/* List header — title + count, Columns, layout toggle. */}
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Special Pricing" count={filtered.length}>
+              <View className="flex-row items-center gap-2">
+                <ToolbarIconButton
+                  icon="columns"
+                  label="Toggle columns"
+                  active={showColumns}
+                  onPress={() => setShowColumns(true)}
+                />
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </View>
+            </ListHeader>
           )}
 
           {/* List / states */}
-          {loading ? (
-            <SpecialPricingListSkeleton />
-          ) : !error && !hasResults ? (
-            <View className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="tag" size={26} color="#9CA3AF" />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No special pricing found
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 max-w-xs">
-                {specialPricings.length === 0
-                  ? "Create a special pricing to offer automatic discounts."
-                  : "Try adjusting your search."}
-              </Text>
-            </View>
-          ) : (
-            !error && (
-              <>
-                {/* Table (default) and card layouts render from the same
-                    `paged` slice — switching is instant and never refetches. */}
-                {viewMode === "table" ? (
-                  <SpecialPricingTable
-                    rows={paged}
-                    cols={cols}
-                    busyId={busyId}
-                    onView={setDetailRow}
-                    onToggle={handleToggle}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                  />
-                ) : (
-                  paged.map((row) => (
-                    <SpecialPricingCard
-                      key={row.id}
-                      row={row}
-                      busy={busyId === row.id}
-                      cols={cols}
-                      onToggle={() => handleToggle(row)}
-                      onEdit={() => handleEdit(row)}
-                      onDelete={() => handleDelete(row)}
-                    />
-                  ))
-                )}
-
-                {/* Pagination */}
-                <View className="mt-1 mb-4">
-                  <View className="bg-white dark:bg-neutral-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800">
-                    <View className="flex-row items-center justify-between mb-4">
-                      <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                        Items per page
-                      </Text>
-                      <View className="flex-row gap-1.5">
-                        {PER_PAGE_OPTIONS.map((option) => {
-                          const isActive = perPage === option;
-                          return (
-                            <Pressable
-                              key={option}
-                              onPress={() => setPerPage(option)}
-                              className={`px-3 py-1.5 rounded-lg border ${
-                                isActive
-                                  ? "bg-[#0644C7] border-[#0644C7]"
-                                  : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                              }`}
-                            >
-                              <Text
-                                className={`text-xs font-medium ${
-                                  isActive
-                                    ? "text-white"
-                                    : "text-gray-600 dark:text-gray-300"
-                                }`}
-                              >
-                                {option}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
-
-                    <View className="flex-row items-center justify-between pt-4 border-t border-gray-100 dark:border-neutral-800">
-                      <Pressable
-                        onPress={() => setPage(page - 1)}
-                        disabled={page === 1}
-                        className={`px-4 py-2 rounded-lg border ${
-                          page === 1
-                            ? "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 opacity-50"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                        }`}
-                      >
-                        <Text
-                          className={`text-sm font-medium ${
-                            page === 1
-                              ? "text-gray-400 dark:text-gray-500"
-                              : "text-gray-700 dark:text-gray-200"
-                          }`}
-                        >
-                          Previous
-                        </Text>
-                      </Pressable>
-
-                      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        Page {page} of {lastPage}
-                      </Text>
-
-                      <Pressable
-                        onPress={() => setPage(page + 1)}
-                        disabled={page >= lastPage}
-                        className={`px-4 py-2 rounded-lg border ${
-                          page >= lastPage
-                            ? "bg-gray-50 dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 opacity-50"
-                            : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                        }`}
-                      >
-                        <Text
-                          className={`text-sm font-medium ${
-                            page >= lastPage
-                              ? "text-gray-400 dark:text-gray-500"
-                              : "text-gray-700 dark:text-gray-200"
-                          }`}
-                        >
-                          Next
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              </>
+          {showInitialLoader ? (
+            viewMode === "table" ? (
+              <AttractionsTableSkeleton />
+            ) : (
+              <AttractionsListSkeleton />
             )
+          ) : showError ? null : !hasResults ? (
+            specialPricings.length === 0 ? (
+              <ListEmptyState
+                icon="tag"
+                title="No special pricing yet"
+                message="Create a special pricing to offer automatic discounts."
+                actionLabel="New Special Pricing"
+                actionIcon="plus"
+                primary
+                onAction={() => router.push("/pricing/create-special-pricing")}
+              />
+            ) : (
+              <ListEmptyState
+                icon="search"
+                title="No special pricing found"
+                message="Try adjusting your search or filters."
+                actionLabel="Clear search & filters"
+                onAction={() => {
+                  setSearch("");
+                  setFilters(EMPTY_SPECIAL_PRICING_FILTERS);
+                }}
+              />
+            )
+          ) : (
+            <>
+              {/* Table (default) and card layouts render from the same
+                  `paged` slice — switching is instant and never refetches. */}
+              {viewMode === "table" ? (
+                <SpecialPricingTable
+                  rows={paged}
+                  cols={cols}
+                  busyId={busyId}
+                  onView={setDetailRow}
+                  onToggle={handleToggle}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                />
+              ) : (
+                paged.map((row) => (
+                  <SpecialPricingCard
+                    key={row.id}
+                    row={row}
+                    busy={busyId === row.id}
+                    cols={cols}
+                    onToggle={() => handleToggle(row)}
+                    onEdit={() => handleEdit(row)}
+                    onDelete={() => handleDelete(row)}
+                  />
+                ))
+              )}
+
+              <Pagination
+                page={page}
+                perPage={perPage}
+                total={filtered.length}
+                options={PER_PAGE_OPTIONS}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
+            </>
           )}
         </View>
       </ScrollView>

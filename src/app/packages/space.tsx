@@ -16,7 +16,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
+import { AttractionsListSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SpecCell,
+  StatusDotBadge,
+} from "../../components/ui/SummaryPanel";
 import {
   breaksToPayload,
   createRoom,
@@ -38,13 +48,8 @@ import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 /** The gap a space keeps between bookings when the field is left blank. */
 const DEFAULT_BOOKING_INTERVAL = 15;
@@ -97,7 +102,7 @@ function buildRoomNames(
 }
 
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Statuses", value: "all" },
+  { label: "All", value: "all" },
   { label: "Available", value: "available" },
   { label: "Unavailable", value: "inactive" },
 ];
@@ -309,94 +314,101 @@ const SpaceCard = ({
   space: SpaceRow;
   onEdit: () => void;
   onDelete: () => void;
-}) => (
-  <View
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
-    style={CARD_SHADOW}
-  >
-    <View className="flex-row items-start justify-between mb-2">
-      <Text
-        className="text-base font-bold text-gray-900 dark:text-white flex-1 mr-3"
-        numberOfLines={1}
-      >
-        {space.name}
-      </Text>
-      <View className="flex-row items-center gap-2">
-        <Pressable
-          onPress={onEdit}
-          hitSlop={6}
-          className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 items-center justify-center"
-          accessibilityLabel={`Edit ${space.name}`}
+}) => {
+  const created = formatDate(space.createdAt);
+  return (
+    <View className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3">
+      {/* Name + status */}
+      <View className="flex-row items-start justify-between gap-3">
+        <Text
+          className="flex-1 text-base font-semibold text-gray-900 dark:text-white"
+          numberOfLines={1}
         >
-          <Feather name="edit-2" size={14} color={PRIMARY} />
-        </Pressable>
-        <Pressable
-          onPress={onDelete}
-          hitSlop={6}
-          className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-900/20 items-center justify-center"
-          accessibilityLabel={`Delete ${space.name}`}
-        >
-          <Feather name="trash-2" size={14} color="#E11D48" />
-        </Pressable>
+          {space.name}
+        </Text>
+        <StatusDotBadge
+          on={space.isActive}
+          label={space.isActive ? "Available" : "Inactive"}
+        />
+      </View>
+
+      {/* Location · breaks */}
+      {(!!space.locationName || space.breaks.length > 0) && (
+        <View className="flex-row items-center gap-1.5 mt-1">
+          {!!space.locationName && (
+            <Text
+              numberOfLines={1}
+              className="shrink text-xs text-gray-500 dark:text-gray-400"
+            >
+              {space.locationName}
+            </Text>
+          )}
+          {!!space.locationName && space.breaks.length > 0 && (
+            <Text className="text-xs text-gray-300 dark:text-neutral-600">•</Text>
+          )}
+          {space.breaks.length > 0 && (
+            <Text className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+              {space.breaks.length} break{space.breaks.length === 1 ? "" : "s"}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* Capacity / Area group / Turnaround */}
+      <View className="flex-row mt-3 rounded-xl bg-gray-50 dark:bg-neutral-800/60 border border-gray-100 dark:border-neutral-800">
+        <SpecCell
+          label="Capacity"
+          value={space.capacity != null ? `${space.capacity} people` : "—"}
+        />
+        <SpecCell divider label="Area Group" value={space.areaGroup || "—"} />
+        <SpecCell
+          divider
+          label="Turnaround"
+          value={
+            space.bookingInterval == null
+              ? "—"
+              : space.bookingInterval > 0
+                ? `${space.bookingInterval} min`
+                : "None"
+          }
+        />
+      </View>
+
+      {/* Created + actions */}
+      <View className="flex-row items-center justify-between gap-2 mt-3">
+        <Text className="shrink text-xs text-gray-400 dark:text-gray-500">
+          {created ? `Created ${created}` : ""}
+        </Text>
+        <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={onEdit}
+            hitSlop={4}
+            className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-neutral-700 active:opacity-70"
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${space.name}`}
+          >
+            <Feather name="edit-2" size={13} color={PRIMARY} />
+            <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+              Edit
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={onDelete}
+            hitSlop={4}
+            className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/50 active:opacity-70"
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${space.name}`}
+          >
+            <Feather name="trash-2" size={13} color="#DC2626" />
+            <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
+              Delete
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </View>
-
-    <View
-      className={`self-start px-2.5 py-1 rounded-full mb-2 ${
-        space.isActive
-          ? "bg-green-50 dark:bg-green-900/30"
-          : "bg-gray-100 dark:bg-neutral-800"
-      }`}
-    >
-      <Text
-        className={`text-[11px] font-semibold ${
-          space.isActive
-            ? "text-green-600 dark:text-green-400"
-            : "text-gray-500 dark:text-gray-400"
-        }`}
-      >
-        {space.isActive ? "Available" : "Inactive"}
-      </Text>
-    </View>
-
-    <View className="flex-row items-center gap-1.5 mb-1.5">
-      <Feather name="users" size={14} color="#9CA3AF" />
-      <Text className="text-sm text-gray-600 dark:text-gray-300">
-        {space.capacity != null ? `${space.capacity} people` : "—"}
-      </Text>
-    </View>
-
-    {(!!space.areaGroup || space.bookingInterval != null) && (
-      <View className="flex-row items-center gap-1.5 mb-1.5">
-        <Feather name="layers" size={14} color="#9CA3AF" />
-        {!!space.areaGroup && (
-          <Text
-            className="text-sm font-medium text-gray-600 dark:text-gray-300"
-            numberOfLines={1}
-          >
-            {space.areaGroup}
-          </Text>
-        )}
-        {space.bookingInterval != null && (
-          <Text
-            className="text-xs text-gray-400 dark:text-gray-500 flex-1"
-            numberOfLines={1}
-          >
-            {space.bookingInterval > 0
-              ? `${space.bookingInterval} min turnaround`
-              : "No turnaround"}
-          </Text>
-        )}
-      </View>
-    )}
-
-    {!!formatDate(space.createdAt) && (
-      <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-        {formatDate(space.createdAt)}
-      </Text>
-    )}
-  </View>
-);
+  );
+};
 
 const Space = () => {
   const router = useRouter();
@@ -530,6 +542,25 @@ const Space = () => {
     sortBy !== "name" ||
     sortOrder !== "asc" ||
     locationFilter !== "all";
+
+  // What the Filters sheet holds (status has its own chips on the page).
+  const sheetFiltersActive =
+    sortBy !== "name" || sortOrder !== "asc" || locationFilter !== "all";
+
+  // Per-status chip counts over every loaded space.
+  const availableCount = useMemo(
+    () => spaces.filter((s) => s.isActive).length,
+    [spaces],
+  );
+  const statusCount = (value: StatusFilter) =>
+    value === "all"
+      ? spaces.length
+      : value === "available"
+        ? availableCount
+        : spaces.length - availableCount;
+
+  const showInitialLoader = loading && spaces.length === 0;
+  const showError = !loading && !!error && spaces.length === 0;
 
   const clearFilters = () => {
     setStatusFilter("all");
@@ -770,29 +801,59 @@ const Space = () => {
       : (locations.find((l) => l.id === locationFilter)?.name ??
         "All Locations");
 
+  // Secondary actions as hub shortcuts; New Space is the header's primary action.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Area Groups", icon: "layers", onPress: openAreaGroup },
+    { label: "Space Schedule", icon: "grid", route: "/bookings/space-schedule" },
+    { label: "Calendar", icon: "calendar", route: "/bookings/calendar" },
+    { label: "Manage Packages", icon: "package", route: "/packages/packages" },
+  ];
+
+  // "Sorted by Capacity ↓ · Location" — what the Filters sheet currently applies.
+  const appliedFilters = [
+    sortBy !== "name" || sortOrder !== "asc"
+      ? `Sorted by ${SORT_BY_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Name"} ${
+          sortOrder === "asc" ? "↑" : "↓"
+        }`
+      : null,
+    locationFilter !== "all" ? locationLabel : null,
+  ].filter(Boolean) as string[];
+
   return (
-    <View className="flex-1 bg-white dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
+    <View className="flex-1 bg-gray-50 dark:bg-black">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Spaces
           </Text>
-          <View style={{ width: 36 }} />
+          <Pressable
+            onPress={openCreate}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="Create space"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
+          </Pressable>
         </View>
       </View>
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -800,214 +861,159 @@ const Space = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-4 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Spaces
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Manage your facility spaces and their availability
-            </Text>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Manage your facility spaces and their availability
+          </Text>
+
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load spaces"
+              message={error ?? ""}
+              onRetry={onRefresh}
+            />
+          )}
+
+          {/* More — Area Groups plus related screens as hub shortcuts. */}
+          <View>
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
 
-          {/* Header actions */}
-          <View className="flex-row gap-2 mb-4">
-            <Pressable
-              onPress={openAreaGroup}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-white dark:bg-neutral-900 px-3 py-3 rounded-xl border border-gray-200 dark:border-neutral-800"
-            >
-              <Feather name="layers" size={15} color="#374151" />
-              <Text
-                className="text-xs font-semibold text-gray-700 dark:text-gray-200"
-                numberOfLines={1}
-              >
-                Area Groups
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={openCreate}
-              className="flex-1 flex-row items-center justify-center gap-2 bg-[#0644C7] px-3 py-3 rounded-xl active:opacity-90"
-            >
-              <Feather name="plus" size={15} color="#FFFFFF" />
-              <Text className="text-xs font-semibold text-white">Create Space</Text>
-            </Pressable>
-          </View>
-
-          {/* Search + filters toggle */}
-          <View className="flex-row items-center gap-2 mb-3">
-            <View className="flex-1 flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-              <Feather name="search" size={18} color="#9CA3AF" />
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <View className="flex-1 flex-row items-center gap-2 h-11 px-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+              <Feather name="search" size={16} color="#9CA3AF" />
               <TextInput
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Search spaces by name..."
+                placeholder="Search spaces or area groups"
                 placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
                 className="flex-1 text-sm text-gray-900 dark:text-white"
                 style={{ paddingVertical: 0 }}
               />
               {search.length > 0 && (
-                <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                  <Feather name="x" size={16} color="#9CA3AF" />
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Feather name="x-circle" size={16} color="#9CA3AF" />
                 </Pressable>
               )}
             </View>
             <Pressable
-              onPress={() => setShowFilters((v) => !v)}
-              className={`flex-row items-center gap-1.5 px-3.5 py-3 rounded-xl border ${
-                showFilters || filtersActive
-                  ? "bg-blue-50 dark:bg-blue-900/20 border-[#0644C7]"
+              onPress={() => setShowFilters(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Filters"
+              className={`flex-row items-center gap-1.5 h-11 px-3.5 rounded-xl border active:opacity-70 ${
+                sheetFiltersActive
+                  ? "bg-gray-900 border-gray-900 dark:bg-white dark:border-white"
                   : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
               }`}
             >
-              <Feather name="filter" size={15} color={PRIMARY} />
-              <Text className="text-xs font-semibold text-[#0644C7]">Filters</Text>
+              <Feather
+                name="sliders"
+                size={15}
+                color={
+                  sheetFiltersActive
+                    ? colorScheme === "dark"
+                      ? "#111827"
+                      : "#FFFFFF"
+                    : "#6B7280"
+                }
+              />
+              <Text
+                className={`text-sm font-medium ${
+                  sheetFiltersActive
+                    ? "text-white dark:text-gray-900"
+                    : "text-gray-700 dark:text-gray-200"
+                }`}
+              >
+                Filters
+              </Text>
             </Pressable>
           </View>
 
-          {/* Filters panel */}
-          {showFilters && (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-4 mb-3 border border-gray-100 dark:border-neutral-800"
-              style={CARD_SHADOW}
-            >
-              <ChipRow
-                label="Status"
-                options={STATUS_OPTIONS}
-                value={statusFilter}
-                onChange={setStatusFilter}
+          {/* Status chips */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-3 -mx-1 px-1"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                count={showInitialLoader ? undefined : statusCount(opt.value)}
+                selected={statusFilter === opt.value}
+                onPress={() => setStatusFilter(opt.value)}
               />
-              <ChipRow
-                label="Sort By"
-                options={SORT_BY_OPTIONS}
-                value={sortBy}
-                onChange={setSortBy}
-              />
-              <ChipRow
-                label="Sort Order"
-                options={SORT_ORDER_OPTIONS}
-                value={sortOrder}
-                onChange={setSortOrder}
-              />
-              {isCompanyAdmin && (
-                <View className="mb-3">
-                  <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
-                    Location
-                  </Text>
-                  <View className="rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
-                    <Pressable
-                      onPress={() => setLocationFilter("all")}
-                      className={`flex-row items-center gap-2.5 px-3 py-2.5 ${
-                        locationFilter === "all" ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                      }`}
-                    >
-                      <View className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-                        <Feather name="grid" size={14} color={PRIMARY} />
-                      </View>
-                      <View className="flex-1">
-                        <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                          All Locations
-                        </Text>
-                        <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-                          View all locations
-                        </Text>
-                      </View>
-                      {locationFilter === "all" && (
-                        <Feather name="check" size={16} color={PRIMARY} />
-                      )}
-                    </Pressable>
+            ))}
+          </ScrollView>
 
-                    {locationsLoading && locations.length === 0 && (
-                      <View className="py-4 items-center border-t border-gray-100 dark:border-neutral-800">
-                        <ActivityIndicator color={PRIMARY} />
-                      </View>
-                    )}
-
-                    {locations.map((loc) => {
-                      const active = locationFilter === loc.id;
-                      return (
-                        <Pressable
-                          key={loc.id}
-                          onPress={() => setLocationFilter(loc.id)}
-                          className={`flex-row items-center gap-2.5 px-3 py-2.5 border-t border-gray-100 dark:border-neutral-800 ${
-                            active ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                          }`}
-                        >
-                          <View className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
-                            <Feather name="map-pin" size={14} color={PRIMARY} />
-                          </View>
-                          <View className="flex-1">
-                            <Text
-                              className="text-sm font-semibold text-gray-800 dark:text-gray-100"
-                              numberOfLines={1}
-                            >
-                              {loc.name}
-                            </Text>
-                            {!!loc.address && (
-                              <Text
-                                className="text-[11px] text-gray-400 dark:text-gray-500"
-                                numberOfLines={1}
-                              >
-                                {loc.address}
-                              </Text>
-                            )}
-                          </View>
-                          {active && (
-                            <Feather name="check" size={16} color={PRIMARY} />
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
-
-              {filtersActive && (
-                <Pressable onPress={clearFilters} className="self-end mt-1">
-                  <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Clear Filters
-                  </Text>
-                </Pressable>
-              )}
+          {/* Applied-filters hint + Clear all */}
+          {filtersActive && (
+            <View className="flex-row items-center justify-between gap-3 mb-3">
+              <Text
+                numberOfLines={1}
+                className="shrink text-xs text-gray-500 dark:text-gray-400"
+              >
+                {appliedFilters.length > 0 ? appliedFilters.join(" · ") : "Filtered by status"}
+              </Text>
+              <Pressable
+                onPress={clearFilters}
+                hitSlop={8}
+                accessibilityRole="button"
+                className="active:opacity-70"
+              >
+                <Text className="text-xs font-semibold text-[#0644C7] dark:text-blue-300">
+                  Clear all
+                </Text>
+              </Pressable>
             </View>
           )}
 
-          {!loading && !error && (
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-              Showing {filtered.length}{" "}
-              {filtered.length === 1 ? "room" : "rooms"}
-              {locationFilter !== "all" ? ` · ${locationLabel}` : ""}
-            </Text>
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Spaces" count={filtered.length} />
           )}
 
           {/* States */}
-          {loading ? (
-            <View key="s-loading" className="py-16 items-center">
-              <ActivityIndicator color={PRIMARY} />
+          {showInitialLoader ? (
+            <View key="s-loading">
+              <AttractionsListSkeleton />
             </View>
-          ) : error ? (
-            <View key="s-error" className="bg-red-50 border border-red-100 rounded-2xl p-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
-          ) : filtered.length === 0 ? (
-            <View key="s-empty" className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-              <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 items-center justify-center mb-3">
-                <Feather name="home" size={26} color="#9CA3AF" />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                No spaces found
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
-                {spaces.length === 0
-                  ? "There are no spaces for this account yet."
-                  : "Try a different search or filters."}
-              </Text>
+          ) : showError ? null : filtered.length === 0 ? (
+            <View key="s-empty">
+              {spaces.length === 0 ? (
+                <ListEmptyState
+                  icon="home"
+                  title="No spaces yet"
+                  message="There are no spaces for this account yet."
+                  actionLabel="Create Space"
+                  actionIcon="plus"
+                  primary
+                  onAction={openCreate}
+                />
+              ) : (
+                <ListEmptyState
+                  icon="search"
+                  title="No spaces found"
+                  message="Try a different search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={() => {
+                    setSearch("");
+                    clearFilters();
+                  }}
+                />
+              )}
             </View>
           ) : (
             <View key="s-list">
@@ -1030,6 +1036,128 @@ const Space = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Filters — sort and location (status lives in the chips). */}
+      <BottomSheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
+      >
+        <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
+          <ChipRow
+            label="Sort By"
+            options={SORT_BY_OPTIONS}
+            value={sortBy}
+            onChange={setSortBy}
+          />
+          <ChipRow
+            label="Sort Order"
+            options={SORT_ORDER_OPTIONS}
+            value={sortOrder}
+            onChange={setSortOrder}
+          />
+          {isCompanyAdmin && (
+            <View className="mb-3">
+              <Text className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">
+                Location
+              </Text>
+              <View className="rounded-xl border border-gray-200 dark:border-neutral-700 overflow-hidden">
+                <Pressable
+                  onPress={() => setLocationFilter("all")}
+                  className={`flex-row items-center gap-2.5 px-3 py-2.5 ${
+                    locationFilter === "all" ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                  }`}
+                >
+                  <View className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
+                    <Feather name="grid" size={14} color={PRIMARY} />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                      All Locations
+                    </Text>
+                    <Text className="text-[11px] text-gray-400 dark:text-gray-500">
+                      View all locations
+                    </Text>
+                  </View>
+                  {locationFilter === "all" && (
+                    <Feather name="check" size={16} color={PRIMARY} />
+                  )}
+                </Pressable>
+
+                {locationsLoading && locations.length === 0 && (
+                  <View className="py-4 items-center border-t border-gray-100 dark:border-neutral-800">
+                    <ActivityIndicator color={PRIMARY} />
+                  </View>
+                )}
+
+                {locations.map((loc) => {
+                  const active = locationFilter === loc.id;
+                  return (
+                    <Pressable
+                      key={loc.id}
+                      onPress={() => setLocationFilter(loc.id)}
+                      className={`flex-row items-center gap-2.5 px-3 py-2.5 border-t border-gray-100 dark:border-neutral-800 ${
+                        active ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                      }`}
+                    >
+                      <View className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 items-center justify-center">
+                        <Feather name="map-pin" size={14} color={PRIMARY} />
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          className="text-sm font-semibold text-gray-800 dark:text-gray-100"
+                          numberOfLines={1}
+                        >
+                          {loc.name}
+                        </Text>
+                        {!!loc.address && (
+                          <Text
+                            className="text-[11px] text-gray-400 dark:text-gray-500"
+                            numberOfLines={1}
+                          >
+                            {loc.address}
+                          </Text>
+                        )}
+                      </View>
+                      {active && (
+                        <Feather name="check" size={16} color={PRIMARY} />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          <View className="flex-row gap-3 mt-2">
+            <Pressable
+              onPress={() => {
+                setSortBy("name");
+                setSortOrder("asc");
+                setLocationFilter("all");
+              }}
+              disabled={!sheetFiltersActive}
+              className={`flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 ${
+                sheetFiltersActive ? "active:opacity-70" : "opacity-50"
+              }`}
+              accessibilityRole="button"
+            >
+              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Reset
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowFilters(false)}
+              className="flex-1 items-center justify-center py-3.5 rounded-xl bg-[#0644C7] active:opacity-90"
+              accessibilityRole="button"
+            >
+              <Text className="text-sm font-semibold text-white">
+                Show {filtered.length} space{filtered.length === 1 ? "" : "s"}
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </BottomSheet>
 
       {/* Edit Space */}
       <BottomSheet

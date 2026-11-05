@@ -15,9 +15,16 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { SelectField, type SelectOption } from "../../components/ui/FormControls";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
+import { AttractionsListSkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import {
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+} from "../../components/ui/SummaryPanel";
 import {
   EMPTY_TARGETING,
   TargetingSelector,
@@ -43,6 +50,9 @@ import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
 
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
+
 const CARD_SHADOW = {
   shadowColor: "#000",
   shadowOffset: { width: 0, height: 2 },
@@ -55,7 +65,7 @@ type StatusFilter = "all" | "active" | "inactive";
 type DiscountType = "fixed" | "percentage";
 
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: "All Statuses", value: "all" },
+  { label: "All", value: "all" },
   { label: "Active", value: "active" },
   { label: "Inactive", value: "inactive" },
 ];
@@ -331,7 +341,6 @@ const Promos = () => {
   const [tab, setTab] = useState<"single" | "bulk">("single");
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [showStatusSheet, setShowStatusSheet] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
@@ -390,8 +399,19 @@ const Promos = () => {
     setPage(1);
   }, [search, statusFilter, perPage]);
 
-  const statusLabel =
-    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? "All Statuses";
+  // Per-status chip counts over every loaded promo code.
+  const activeCount = useMemo(() => promos.filter((p) => p.isActive).length, [promos]);
+  const statusCount = (value: StatusFilter) =>
+    value === "all"
+      ? promos.length
+      : value === "active"
+        ? activeCount
+        : promos.length - activeCount;
+
+  const showInitialLoader = loading && promos.length === 0;
+  const showError = !loading && !!error && promos.length === 0;
+  const showBatchesLoader = batchesLoading && batches.length === 0;
+  const showBatchesError = !batchesLoading && !!batchesError && batches.length === 0;
 
   // --- Create single ---
   const [showCreate, setShowCreate] = useState(false);
@@ -666,29 +686,52 @@ const Promos = () => {
     }
   };
 
+  // Generate Bulk plus related modules as hub shortcuts; the header's New
+  // action creates whatever the open tab lists.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Generate Bulk Codes", icon: "layers", onPress: openBulk },
+    { label: "Gift Cards", icon: "gift", route: "/packages/gift-cards" },
+    { label: "Manage Packages", icon: "package", route: "/packages/packages" },
+    { label: "Add-ons", icon: "coffee", route: "/packages/add-ons" },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
+      {/* Header — back, title, and the primary New action. */}
+      <View className="bg-white dark:bg-neutral-900 pt-12 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
             Promo Codes
           </Text>
-          <View style={{ width: 36 }} />
+          <Pressable
+            onPress={tab === "single" ? openCreate : openBulk}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel={
+              tab === "single" ? "Create promo code" : "Generate bulk codes"
+            }
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
+          </Pressable>
         </View>
       </View>
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -696,22 +739,22 @@ const Promos = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-4 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Promo Codes
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Create and manage promotional codes
-            </Text>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Create and manage promotional codes
+          </Text>
+
+          {/* More — Generate Bulk plus related modules as hub shortcuts. */}
+          <View>
+            <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
           </View>
 
-          {/* Tabs */}
-          <View className="flex-row bg-gray-100 dark:bg-neutral-800 rounded-xl p-1 mb-4">
+          {/* Tabs — flat segmented control. */}
+          <View className="flex-row bg-gray-100 dark:bg-neutral-800 rounded-xl p-1 mt-4 mb-3">
             {[
               { key: "single" as const, label: "Single Codes" },
               { key: "bulk" as const, label: "Bulk Codes" },
@@ -721,13 +764,17 @@ const Promos = () => {
                 <Pressable
                   key={t.key}
                   onPress={() => setTab(t.key)}
-                  className={`flex-1 items-center py-2.5 rounded-lg ${
-                    active ? "bg-[#0644C7]" : "bg-transparent"
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  className={`flex-1 items-center py-2 rounded-lg ${
+                    active ? "bg-white dark:bg-neutral-900" : "bg-transparent"
                   }`}
                 >
                   <Text
                     className={`text-sm font-semibold ${
-                      active ? "text-white" : "text-gray-600 dark:text-gray-300"
+                      active
+                        ? "text-gray-900 dark:text-white"
+                        : "text-gray-500 dark:text-gray-400"
                     }`}
                   >
                     {t.label}
@@ -739,88 +786,90 @@ const Promos = () => {
 
           {tab === "single" ? (
             <View key="tab-single">
-              <Pressable
-                onPress={openCreate}
-                className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-4"
-              >
-                <Feather name="plus" size={16} color="#FFFFFF" />
-                <Text className="text-sm font-semibold text-white">
-                  Create Promo Code
-                </Text>
-              </Pressable>
+              {/* Error state (nothing cached to show) */}
+              {showError && (
+                <ListErrorBanner
+                  title="Could not load promo codes"
+                  message={error ?? ""}
+                  onRetry={onRefresh}
+                />
+              )}
 
               {/* Search */}
-              <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 mb-3">
-                <Feather name="search" size={18} color="#9CA3AF" />
+              <View className="flex-row items-center gap-2 h-11 px-3.5 mb-3 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+                <Feather name="search" size={16} color="#9CA3AF" />
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
-                  placeholder="Search promo codes..."
+                  placeholder="Search by name or code"
                   placeholderTextColor="#9CA3AF"
+                  returnKeyType="search"
                   className="flex-1 text-sm text-gray-900 dark:text-white"
                   style={{ paddingVertical: 0 }}
                 />
                 {search.length > 0 && (
-                  <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                    <Feather name="x" size={16} color="#9CA3AF" />
+                  <Pressable
+                    onPress={() => setSearch("")}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear search"
+                  >
+                    <Feather name="x-circle" size={16} color="#9CA3AF" />
                   </Pressable>
                 )}
               </View>
 
-              {/* Filter pill — Status */}
-              <FilterPill>
-                <PillSegment
-                  label={statusLabel}
-                  active={showStatusSheet}
-                  onPress={() => setShowStatusSheet(true)}
-                  renderIcon={(c) => (
-                    <Feather name="check-circle" size={15} color={c} />
-                  )}
-                />
-              </FilterPill>
+              {/* Status chips */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+                className="mb-4 -mx-1 px-1"
+              >
+                {STATUS_OPTIONS.map((opt) => (
+                  <FilterChip
+                    key={opt.value}
+                    label={opt.label}
+                    count={showInitialLoader ? undefined : statusCount(opt.value)}
+                    selected={statusFilter === opt.value}
+                    onPress={() => setStatusFilter(opt.value)}
+                  />
+                ))}
+              </ScrollView>
 
-              {!loading && !error ? (
-                <Text
-                  key="promo-count"
-                  className="text-sm text-gray-500 dark:text-gray-400 mb-3"
-                >
-                  Showing {filtered.length}{" "}
-                  {filtered.length === 1 ? "promo code" : "promo codes"}
-                </Text>
-              ) : null}
+              {!showInitialLoader && !showError && (
+                <ListHeader title="All Promo Codes" count={filtered.length} />
+              )}
 
               <View key="promo-listblock">
-              {loading ? (
-                <View key="s-loading" className="py-16 items-center">
-                  <ActivityIndicator color={PRIMARY} />
+              {showInitialLoader ? (
+                <View key="s-loading">
+                  <AttractionsListSkeleton />
                 </View>
-              ) : error ? (
-                <View key="s-error" className="bg-red-50 border border-red-100 rounded-2xl p-5">
-                  <Text className="text-red-600 font-semibold">
-                    Something went wrong
-                  </Text>
-                  <Text className="text-red-500 text-sm mt-1">{error}</Text>
-                </View>
-              ) : filtered.length === 0 ? (
-                <View key="s-empty" className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-                  <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
-                    <Feather name="plus" size={26} color={PRIMARY} />
-                  </View>
-                  <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                    No promo codes found
-                  </Text>
-                  <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 mb-4">
-                    Create your first promo code to get started
-                  </Text>
-                  <Pressable
-                    onPress={openCreate}
-                    className="flex-row items-center gap-2 bg-[#0644C7] px-4 py-3 rounded-xl active:opacity-90"
-                  >
-                    <Feather name="plus" size={16} color="#FFFFFF" />
-                    <Text className="text-sm font-semibold text-white">
-                      Create Promo Code
-                    </Text>
-                  </Pressable>
+              ) : showError ? null : filtered.length === 0 ? (
+                <View key="s-empty">
+                  {promos.length === 0 ? (
+                    <ListEmptyState
+                      icon="tag"
+                      title="No promo codes yet"
+                      message="Create your first promo code to get started."
+                      actionLabel="Create Promo Code"
+                      actionIcon="plus"
+                      primary
+                      onAction={openCreate}
+                    />
+                  ) : (
+                    <ListEmptyState
+                      icon="search"
+                      title="No promo codes found"
+                      message="No promo codes match your search or status."
+                      actionLabel="Clear search & filters"
+                      onAction={() => {
+                        setSearch("");
+                        setStatusFilter("all");
+                      }}
+                    />
+                  )}
                 </View>
               ) : (
                 <View key="s-list">
@@ -845,54 +894,35 @@ const Promos = () => {
             </View>
           ) : (
             <View key="tab-bulk">
-              <View className="flex-row items-center justify-between mb-4">
-                <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  {batches.length} {batches.length === 1 ? "batch" : "batches"}
-                </Text>
-                <Pressable
-                  onPress={openBulk}
-                  className="flex-row items-center gap-2 bg-[#0644C7] px-4 py-2.5 rounded-xl active:opacity-90"
-                >
-                  <Feather name="plus" size={15} color="#FFFFFF" />
-                  <Text className="text-sm font-semibold text-white">
-                    Generate Bulk
-                  </Text>
-                </Pressable>
-              </View>
+              {/* Error state (nothing cached to show) */}
+              {showBatchesError && (
+                <ListErrorBanner
+                  title="Could not load bulk batches"
+                  message={batchesError ?? ""}
+                  onRetry={onRefresh}
+                />
+              )}
+
+              {!showBatchesLoader && !showBatchesError && (
+                <ListHeader title="Bulk Batches" count={batches.length} />
+              )}
 
               <View key="batch-listblock">
-              {batchesLoading ? (
-                <View key="b-loading" className="py-16 items-center">
-                  <ActivityIndicator color={PRIMARY} />
+              {showBatchesLoader ? (
+                <View key="b-loading">
+                  <AttractionsListSkeleton />
                 </View>
-              ) : batchesError ? (
-                <View key="b-error" className="bg-red-50 border border-red-100 rounded-2xl p-5">
-                  <Text className="text-red-600 font-semibold">
-                    Something went wrong
-                  </Text>
-                  <Text className="text-red-500 text-sm mt-1">{batchesError}</Text>
-                </View>
-              ) : batches.length === 0 ? (
-                <View key="b-empty" className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center shadow-sm">
-                  <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
-                    <Feather name="plus" size={26} color={PRIMARY} />
-                  </View>
-                  <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                    No bulk code batches yet
-                  </Text>
-                  <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1 mb-4">
-                    Generate unique promo codes in bulk for flyers, mailers, and
-                    campaigns
-                  </Text>
-                  <Pressable
-                    onPress={openBulk}
-                    className="flex-row items-center gap-2 bg-[#0644C7] px-4 py-3 rounded-xl active:opacity-90"
-                  >
-                    <Feather name="plus" size={16} color="#FFFFFF" />
-                    <Text className="text-sm font-semibold text-white">
-                      Generate Bulk Codes
-                    </Text>
-                  </Pressable>
+              ) : showBatchesError ? null : batches.length === 0 ? (
+                <View key="b-empty">
+                  <ListEmptyState
+                    icon="layers"
+                    title="No bulk code batches yet"
+                    message="Generate unique promo codes in bulk for flyers, mailers, and campaigns."
+                    actionLabel="Generate Bulk Codes"
+                    actionIcon="plus"
+                    primary
+                    onAction={openBulk}
+                  />
                 </View>
               ) : (
                 batches.map((batch) => (
@@ -934,46 +964,6 @@ const Promos = () => {
           )}
         </View>
       </ScrollView>
-
-      {/* Status filter picker */}
-      <BottomSheet
-        visible={showStatusSheet}
-        onClose={() => setShowStatusSheet(false)}
-        title="Filter by Status"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {STATUS_OPTIONS.map((opt) => {
-            const active = statusFilter === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => {
-                  setStatusFilter(opt.value);
-                  setShowStatusSheet(false);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  active ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium ${
-                    active
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {opt.label}
-                </Text>
-                {active && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
 
       {/* Create Promo Code */}
       <BottomSheet

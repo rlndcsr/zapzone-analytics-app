@@ -1,11 +1,12 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useColorScheme } from "nativewind";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
@@ -14,8 +15,18 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BackendOnlyBadge } from "../../components/ui/BackendOnly";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { PackageActionsSheet } from "../../components/ui/PackageActionsSheet";
 import { Pagination } from "../../components/ui/Pagination";
+import { AttractionsSummarySkeleton } from "../../components/ui/skeleton/AttractionsSkeleton";
+import { PackagesListSkeleton } from "../../components/ui/skeleton/PackagesSkeleton";
+import {
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+} from "../../components/ui/SummaryPanel";
 import {
   consumePackagesStale,
   markPackagesStale,
@@ -46,6 +57,20 @@ const CARD_SHADOW = {
 } as const;
 
 const PRIMARY = "#0644C7";
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
+
+const ALL_TYPES = "All Types";
+
+/** The More row: the custom-package screen's related modules. */
+const MORE_SHORTCUTS: HubQuickLink[] = [
+  { label: "Manage Packages", icon: "package", route: "/packages/packages" },
+  { label: "Global Notes", icon: "file-text", route: "/packages/global-notes" },
+  { label: "Special Pricing", icon: "percent", route: "/pricing/pricing" },
+  { label: "Fee Supports", icon: "dollar-sign", route: "/pricing/fee-support" },
+  { label: "Add-ons", icon: "coffee", route: "/packages/add-ons" },
+];
 
 /** "2025-12-13T…" -> "Dec 13, 2025". */
 function shortDate(iso: string | null): string {
@@ -110,27 +135,70 @@ const CustomPackages = () => {
   const [onlineTogglingId, setOnlineTogglingId] = useState<number | null>(null);
 
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState(ALL_TYPES);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [detailPkg, setDetailPkg] = useState<PackageRow | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Pick up changes made on the edit screen when this one regains focus.
+  useFocusEffect(
+    useCallback(() => {
+      if (consumePackagesStale()) refetch();
+    }, [refetch]),
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };
+
+  // One chip per package type present (holiday, seasonal, …), with its count.
+  const typeOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    packages.forEach((p) => {
+      if (p.packageType) counts.set(p.packageType, (counts.get(p.packageType) ?? 0) + 1);
+    });
+    return Array.from(counts, ([type, count]) => ({ type, count })).sort((a, b) =>
+      a.type.localeCompare(b.type),
+    );
+  }, [packages]);
+
+  // A type that no longer has packages drops back to all of them.
   useEffect(() => {
-    if (consumePackagesStale()) refetch();
-  }, [refetch]);
+    if (typeFilter !== ALL_TYPES && !typeOptions.some((t) => t.type === typeFilter)) {
+      setTypeFilter(ALL_TYPES);
+    }
+  }, [typeFilter, typeOptions]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return packages;
     return packages.filter(
       (p) =>
-        p.name.toLowerCase().includes(term) ||
-        normalizeCategory(p.category).toLowerCase().includes(term) ||
-        p.locationName.toLowerCase().includes(term),
+        (typeFilter === ALL_TYPES || p.packageType === typeFilter) &&
+        (!term ||
+          p.name.toLowerCase().includes(term) ||
+          normalizeCategory(p.category).toLowerCase().includes(term) ||
+          p.locationName.toLowerCase().includes(term)),
     );
-  }, [packages, search]);
+  }, [packages, search, typeFilter]);
+
+  const kpis = useMemo(() => {
+    const total = packages.length;
+    const active = packages.filter((p) => p.status === "active").length;
+    const avgPrice =
+      total > 0
+        ? packages.reduce((sum, p) => sum + (Number(p.price) || 0), 0) / total
+        : 0;
+    const backendOnly = packages.filter((p) => p.availableOnline === false).length;
+    return { total, active, inactive: total - active, avgPrice, backendOnly };
+  }, [packages]);
+
+  const showInitialLoader = loading && packages.length === 0;
+  const showError = !loading && !!error && packages.length === 0;
 
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
@@ -145,7 +213,7 @@ const CustomPackages = () => {
   // A shrinking result set can leave the current page empty.
   useEffect(() => {
     setPage(1);
-  }, [perPage, search]);
+  }, [perPage, search, typeFilter]);
 
   /** Active <-> inactive, applied optimistically and reverted if the API says no. */
   const toggleStatus = useCallback(
@@ -256,106 +324,194 @@ const CustomPackages = () => {
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
+      {/* Header — back, title, and the primary New action. */}
       <View
-        className="bg-white dark:bg-neutral-900 px-5 pb-4 border-b border-gray-100 dark:border-neutral-800"
+        className="bg-white dark:bg-neutral-900 pb-3 px-4 w-full z-10 border-b border-gray-100 dark:border-neutral-800"
         style={{ paddingTop: insets.top + 8 }}
       >
         <View className="flex-row items-center gap-3">
           <Pressable
             onPress={() => router.back()}
-            className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
+            className="w-9 h-9 items-center justify-center bg-gray-100 dark:bg-neutral-800 rounded-full active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Feather name="chevron-left" size={20} color={headerIcon} />
           </Pressable>
-          <View className="flex-1">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Custom Packages
-            </Text>
-            <Text className="text-xs text-gray-500 dark:text-gray-400">
-              Holiday, special, seasonal, and promotional packages
-            </Text>
-          </View>
+          <Text
+            numberOfLines={1}
+            className="flex-1 text-gray-900 dark:text-white text-lg font-semibold"
+          >
+            Custom Packages
+          </Text>
+          <Pressable
+            onPress={() => router.push("/packages/create-packages?type=custom")}
+            className="flex-row items-center gap-1 h-9 pl-2.5 pr-3.5 rounded-full bg-[#0644C7] active:opacity-90"
+            accessibilityRole="button"
+            accessibilityLabel="New custom package"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+            <Text className="text-sm font-semibold text-white">New</Text>
+          </Pressable>
         </View>
       </View>
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-      >
-        <Pressable
-          onPress={() => router.push("/packages/create-packages?type=custom")}
-          className="mb-4 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] py-3.5 active:opacity-90"
-          accessibilityRole="button"
-        >
-          <Feather name="plus" size={16} color="#FFFFFF" />
-          <Text className="text-sm font-semibold text-white">
-            New Custom Package
-          </Text>
-        </Pressable>
-
-        <View className="mb-4 flex-row items-center rounded-xl border border-gray-200 bg-white px-3 dark:border-neutral-700 dark:bg-neutral-900">
-          <Feather name="search" size={18} color="#9CA3AF" />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search packages..."
-            placeholderTextColor="#9CA3AF"
-            className="ml-2 flex-1 py-2.5 text-sm text-gray-900 dark:text-white"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
-          {!!search && (
-            <Pressable
-              onPress={() => setSearch("")}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search"
-            >
-              <Feather name="x" size={16} color="#9CA3AF" />
-            </Pressable>
+        }
+      >
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Holiday, special, seasonal, and promotional packages
+          </Text>
+
+          {/* Error state (nothing cached to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load custom packages"
+              message={error ?? ""}
+              onRetry={onRefresh}
+            />
           )}
-        </View>
 
-        {loading ? (
-          <View className="items-center py-16">
-            <ActivityIndicator color={PRIMARY} />
+          {/* Summary — one panel, four figures, divided by hairlines. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            !showError && (
+              <SummaryPanel
+                figures={[
+                  {
+                    icon: "box",
+                    title: "Custom Packages",
+                    value: String(kpis.total),
+                    hint: `${kpis.active} active`,
+                  },
+                  {
+                    icon: "zap",
+                    title: "Active",
+                    value: String(kpis.active),
+                    hint: `${kpis.inactive} inactive`,
+                  },
+                  {
+                    icon: "dollar-sign",
+                    title: "Avg. Price",
+                    value: `$${kpis.avgPrice.toFixed(2)}`,
+                    hint: "Per package",
+                  },
+                  {
+                    icon: "eye-off",
+                    title: "Backend Only",
+                    value: String(kpis.backendOnly),
+                    hint: "Hidden from the booking site",
+                  },
+                ]}
+              />
+            )
+          )}
+
+          {/* More — related modules as hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts title="More" links={MORE_SHORTCUTS} gutter={SCREEN_GUTTER} />
           </View>
-        ) : error ? (
-          <View className="items-center rounded-2xl bg-white p-8 dark:bg-neutral-900">
-            <Feather name="alert-circle" size={28} color="#EF4444" />
-            <Text className="mt-3 text-center text-sm text-gray-600 dark:text-gray-300">
-              {error}
-            </Text>
-            <Pressable
-              onPress={() => refetch()}
-              className="mt-4 rounded-xl bg-[#0644C7] px-5 py-2.5"
-              accessibilityRole="button"
+
+          {/* Search */}
+          <View className="flex-row items-center gap-2 h-11 px-3.5 mt-4 mb-3 rounded-xl bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800">
+            <Feather name="search" size={16} color="#9CA3AF" />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search custom packages"
+              placeholderTextColor="#9CA3AF"
+              returnKeyType="search"
+              className="flex-1 text-sm text-gray-900 dark:text-white"
+              style={{ paddingVertical: 0 }}
+            />
+            {search.length > 0 && (
+              <Pressable
+                onPress={() => setSearch("")}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Feather name="x-circle" size={16} color="#9CA3AF" />
+              </Pressable>
+            )}
+          </View>
+
+          {/* Package type chips (holiday, seasonal, …). */}
+          {typeOptions.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+              className="mb-4 -mx-1 px-1"
             >
-              <Text className="text-sm font-semibold text-white">Try again</Text>
-            </Pressable>
-          </View>
-        ) : filtered.length === 0 ? (
-          <View className="items-center rounded-2xl bg-white p-10 dark:bg-neutral-900">
-            <Feather name="package" size={28} color="#9CA3AF" />
-            <Text className="mt-3 font-semibold text-gray-700 dark:text-gray-200">
-              {search.trim() ? "No matches" : "No custom packages"}
-            </Text>
-            <Text className="mt-1 text-center text-sm text-gray-400 dark:text-gray-500">
-              {search.trim()
-                ? "Try a different search term."
-                : "Holiday, seasonal and promotional packages appear here."}
-            </Text>
-          </View>
-        ) : (
-          <>
-            <Text className="mb-3 text-sm text-gray-500 dark:text-gray-400">
-              Showing {paged.length} of {filtered.length} custom package
-              {filtered.length === 1 ? "" : "s"}
-            </Text>
+              <FilterChip
+                label={ALL_TYPES}
+                selected={typeFilter === ALL_TYPES}
+                onPress={() => setTypeFilter(ALL_TYPES)}
+              />
+              {typeOptions.map(({ type, count }) => (
+                <FilterChip
+                  key={type}
+                  label={type.charAt(0).toUpperCase() + type.slice(1)}
+                  count={count}
+                  selected={typeFilter === type}
+                  onPress={() => setTypeFilter(type)}
+                />
+              ))}
+            </ScrollView>
+          )}
 
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Custom Packages" count={filtered.length} />
+          )}
+
+          {/* Loading (first load) */}
+          {showInitialLoader && <PackagesListSkeleton />}
+
+          {/* Empty state */}
+          {!showInitialLoader && !showError && filtered.length === 0 && (
+            <ListEmptyState
+              icon={packages.length === 0 ? "package" : "search"}
+              title={packages.length === 0 ? "No custom packages yet" : "No packages found"}
+              message={
+                packages.length === 0
+                  ? "Holiday, seasonal and promotional packages appear here."
+                  : "No custom packages match your search or type."
+              }
+              {...(packages.length === 0
+                ? {
+                    actionLabel: "New Custom Package",
+                    actionIcon: "plus" as const,
+                    primary: true,
+                    onAction: () => router.push("/packages/create-packages?type=custom"),
+                  }
+                : {
+                    actionLabel: "Clear search & filters",
+                    onAction: () => {
+                      setSearch("");
+                      setTypeFilter(ALL_TYPES);
+                    },
+                  })}
+            />
+          )}
+
+          {/* Cards — kept exactly as they were. */}
+          {!showInitialLoader && !showError && filtered.length > 0 && (
+          <>
             {paged.map((pkg) => {
               const active = pkg.status === "active";
               return (
@@ -507,11 +663,6 @@ const CustomPackages = () => {
               );
             })}
 
-            <Text className="mb-3 mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Showing {paged.length} of {filtered.length} custom package
-              {filtered.length === 1 ? "" : "s"}
-            </Text>
-
             <Pagination
               page={page}
               perPage={perPage}
@@ -520,7 +671,8 @@ const CustomPackages = () => {
               onPerPageChange={setPerPage}
             />
           </>
-        )}
+          )}
+        </View>
       </ScrollView>
 
       {/* Details (eye) — the same sheet the /packages catalog opens. */}

@@ -8,16 +8,9 @@ import {
   type FeeSupportRow,
 } from "../../services/feeSupportService";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
 
 // Comfortable, SaaS-style row rhythm (matches AttractionsTable).
-const HEADER_MIN_HEIGHT = 48;
+const HEADER_MIN_HEIGHT = 44;
 const ROW_MIN_HEIGHT = 64;
 
 type ComponentIconName = ComponentProps<typeof Feather>["name"];
@@ -307,14 +300,13 @@ export const FeeSupportTable = memo(function FeeSupportTable({
 
   return (
     <View
-      className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-100 dark:border-neutral-800 mb-3"
-      style={CARD_SHADOW}
+      className="rounded-2xl bg-white dark:bg-neutral-900 overflow-hidden border border-gray-200 dark:border-neutral-800 mb-3"
     >
       <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
         <View style={{ width: tableWidth }}>
           {/* Header */}
           <View
-            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/60 border-b border-gray-100 dark:border-neutral-800"
+            className="flex-row items-center bg-gray-50 dark:bg-neutral-800/50 border-b border-gray-200 dark:border-neutral-800"
             style={{ minHeight: HEADER_MIN_HEIGHT }}
           >
             {visible.map((col) => (
@@ -325,7 +317,7 @@ export const FeeSupportTable = memo(function FeeSupportTable({
               >
                 <Text
                   numberOfLines={1}
-                  className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
+                  className="text-xs font-medium text-gray-500 dark:text-gray-400"
                 >
                   {col.label}
                 </Text>
