@@ -67,8 +67,9 @@ export type MonthPoint = { month: string; customers: number; growth: number };
 export type RevenueTrendPoint = { month: string; revenue: number; bookings: number };
 export type LabelCount = { label: string; count: number };
 export type NameValue = { name: string; value: number };
-export type StatusSlice = { status: string; count: number };
-export type SegmentSlice = { segment: string; value: number };
+/** `color` is the server's own hex for the slice, when it sends one. */
+export type StatusSlice = { status: string; count: number; color?: string };
+export type SegmentSlice = { segment: string; value: number; color?: string };
 export type RepeatPoint = { month: string; repeatRate: number };
 
 export type TopCustomerRow = { customer: string; item: string; count: number };
@@ -179,6 +180,7 @@ export async function fetchCustomerAnalytics({
     statusDistribution: rows(a.statusDistribution).map((r) => ({
       status: str(r.status, "—"),
       count: num(r.count),
+      color: str(r.color) || undefined,
     })),
     activityHours: rows(a.activityHours).map((r) => ({
       label: str(r.hour),
@@ -187,6 +189,7 @@ export async function fetchCustomerAnalytics({
     lifetimeValue: rows(a.customerLifetimeValue).map((r) => ({
       segment: str(r.segment, "—"),
       value: num(r.value),
+      color: str(r.color) || undefined,
     })),
     repeatCustomers: rows(a.repeatCustomers).map((r) => ({
       month: str(r.month),

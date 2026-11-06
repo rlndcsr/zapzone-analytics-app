@@ -1,14 +1,33 @@
 import { Feather } from "@expo/vector-icons";
 import type { ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
 
 import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
+
+/** Direction of a figure's change: green up, red down, grey when it means neither. */
+export type SummaryDeltaTone = "up" | "down" | "neutral";
 
 export type SummaryFigure = {
   icon: FeatherIconName;
   title: string;
   value: string;
   hint: string;
+  /**
+   * Optional change line under the value (e.g. "+12.5%"), coloured by tone.
+   * The hint then reads as what the change is measured against.
+   */
+  delta?: { text: string; tone: SummaryDeltaTone };
+  /** Optional explanation, opened from an info icon beside the title. */
+  info?: string;
+};
+
+const DELTA_STYLE: Record<
+  SummaryDeltaTone,
+  { text: string; icon?: FeatherIconName; iconColor: string }
+> = {
+  up: { text: "text-green-600 dark:text-green-400", icon: "trending-up", iconColor: "#16A34A" },
+  down: { text: "text-red-600 dark:text-red-400", icon: "trending-down", iconColor: "#DC2626" },
+  neutral: { text: "text-gray-500 dark:text-gray-400", iconColor: "#9CA3AF" },
 };
 
 /**
@@ -21,14 +40,12 @@ const SummaryCell = ({
   title,
   value,
   hint,
+  delta,
+  info,
   divideLeft = false,
   divideTop = false,
-}: SummaryFigure & { divideLeft?: boolean; divideTop?: boolean }) => (
-  <View
-    className={`flex-1 p-4 ${
-      divideLeft ? "border-l border-gray-100 dark:border-neutral-800" : ""
-    } ${divideTop ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
-  >
+}: SummaryFigure & { divideLeft?: boolean; divideTop?: boolean }) => {
+  const titleRow = (
     <View className="flex-row items-center gap-1.5">
       <Feather name={icon} size={13} color="#9CA3AF" />
       <Text
@@ -37,22 +54,57 @@ const SummaryCell = ({
       >
         {title}
       </Text>
+      {!!info && <Feather name="info" size={12} color="#9CA3AF" />}
     </View>
-    <Text
-      numberOfLines={1}
-      adjustsFontSizeToFit
-      className="text-2xl font-semibold text-gray-900 dark:text-white mt-1.5"
+  );
+  const deltaStyle = delta ? DELTA_STYLE[delta.tone] : null;
+
+  return (
+    <View
+      className={`flex-1 p-4 ${
+        divideLeft ? "border-l border-gray-100 dark:border-neutral-800" : ""
+      } ${divideTop ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
     >
-      {value}
-    </Text>
-    <Text
-      numberOfLines={1}
-      className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
-    >
-      {hint}
-    </Text>
-  </View>
-);
+      {info ? (
+        <Pressable
+          onPress={() => Alert.alert(title, info)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`${title}, what this means`}
+        >
+          {titleRow}
+        </Pressable>
+      ) : (
+        titleRow
+      )}
+      <Text
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        className="text-2xl font-semibold text-gray-900 dark:text-white mt-1.5"
+      >
+        {value}
+      </Text>
+      {delta && deltaStyle && !!delta.text && (
+        // Keyed by tone: a change of colour remounts the line instead of
+        // swapping classes on a live element (see the css-interop upgrade note).
+        <View key={delta.tone} className="flex-row items-center gap-1 mt-0.5">
+          {deltaStyle.icon && (
+            <Feather name={deltaStyle.icon} size={12} color={deltaStyle.iconColor} />
+          )}
+          <Text numberOfLines={1} className={`text-xs font-semibold ${deltaStyle.text}`}>
+            {delta.text}
+          </Text>
+        </View>
+      )}
+      <Text
+        numberOfLines={1}
+        className="text-xs text-gray-400 dark:text-gray-500 mt-0.5"
+      >
+        {hint}
+      </Text>
+    </View>
+  );
+};
 
 /**
  * Figures in one bordered panel, two per row (pairs with

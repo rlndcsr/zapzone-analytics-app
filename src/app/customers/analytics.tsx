@@ -1,16 +1,8 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   RefreshControl,
   ScrollView,
   Text,
@@ -20,155 +12,107 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  AnalyticsPanel,
+  PanelEmpty,
+  RankedList,
+  RecentCustomerList,
+  SectionLabel,
+  StatusCounts,
+  TopTable,
+  ValueSegments,
+} from "../../components/analytics/CustomerAnalyticsBlocks";
+import {
   AnalyticsExportSheet,
   DEFAULT_ANALYTICS_EXPORT,
   type AnalyticsExportValues,
 } from "../../components/ui/AnalyticsExportSheet";
 import { AreaChart } from "../../components/ui/AreaChart";
 import { BarChart } from "../../components/ui/BarChart";
+import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
+import { ModuleHeader } from "../../components/ui/ModuleHeader";
 import {
-  DateRangeSheet,
-  formatShortDate,
-} from "../../components/ui/DateRangeSheet";
-import { PieChart } from "../../components/ui/PieChart";
-import { SheetSelect } from "../../components/ui/SheetSelect";
-import { StatTile } from "../../components/ui/StatTile";
-import { StatusBadge } from "../../components/ui/StatusBadge";
+  FilterChip,
+  ListErrorBanner,
+  SummaryPanel,
+  type SummaryFigure,
+} from "../../components/ui/SummaryPanel";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
-import { getCurrentUser, getToken } from "../../lib/session";
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
+import {
+  analyticsViewState,
+  exportBlockReason,
+  formatClockTime,
+  formatMoney,
+  formatNumber,
+  kpiDisplay,
+  PERIOD_PRESETS,
+  periodLabel,
+  queryKey,
+  rankedRows,
+  segmentRows,
+  statusRows,
+  type AnalyticsQuery,
+} from "../../lib/customers/customerAnalyticsDisplay";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { getCurrentUser, getToken, useCurrentUserRole } from "../../lib/session";
 import {
   exportCustomerAnalytics,
   fetchCustomerAnalytics,
   type CustomerAnalytics,
   type CustomerDateRange,
-  type TopCustomerRow,
 } from "../../services/customersService";
-import { useActiveLocation } from "../../lib/location/activeLocationStore";
 
 const PRIMARY = "#0644C7";
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
 
-type FeatherName = ComponentProps<typeof Feather>["name"];
-
-const PERIOD_OPTIONS = [
-  { label: "Last 7 days", value: "7d" },
-  { label: "Last 30 days", value: "30d" },
-  { label: "Last 90 days", value: "90d" },
-  { label: "Last year", value: "1y" },
-  { label: "Custom range", value: "custom" },
-];
-
-const KPI_STYLE: Record<string, { icon: FeatherName; bg: string; color: string }> = {
-  "Total Customers": { icon: "users", bg: "bg-blue-50 dark:bg-blue-900/30", color: PRIMARY },
-  "Active Customers": { icon: "activity", bg: "bg-green-50 dark:bg-green-900/30", color: "#16A34A" },
-  "Total Revenue": { icon: "dollar-sign", bg: "bg-emerald-50 dark:bg-emerald-900/30", color: "#059669" },
-  "Repeat Rate": { icon: "repeat", bg: "bg-purple-50 dark:bg-purple-900/30", color: "#8B5CF6" },
-  "Avg. Revenue/Customer": { icon: "dollar-sign", bg: "bg-amber-50 dark:bg-amber-900/30", color: "#F59E0B" },
-  "New Customers (30d)": { icon: "trending-up", bg: "bg-blue-50 dark:bg-blue-900/30", color: PRIMARY },
-};
-const DEFAULT_KPI = { icon: "bar-chart-2" as FeatherName, bg: "bg-gray-100 dark:bg-neutral-800", color: "#6B7280" };
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const formatDate = (iso: string | null): string => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+/** Icon per KPI label; an unknown label falls back to a chart glyph. */
+const KPI_ICON: Record<string, FeatherIconName> = {
+  "Total Customers": "users",
+  "Active Customers": "activity",
+  "Total Revenue": "dollar-sign",
+  "Repeat Rate": "repeat",
+  "Avg. Revenue/Customer": "credit-card",
+  "New Customers (30d)": "user-plus",
 };
 
-/** A titled white panel wrapping a chart or table section. */
-const Panel = ({
-  icon,
-  title,
-  children,
-}: {
-  icon: FeatherName;
-  title: string;
-  children: React.ReactNode;
-}) => (
-  <View
-    className="bg-white dark:bg-neutral-900 rounded-2xl p-5 border border-gray-100 dark:border-neutral-800"
-    style={CARD_SHADOW}
-  >
-    <View className="flex-row items-center gap-2 mb-4">
-      <Feather name={icon} size={16} color={PRIMARY} />
-      <Text className="text-base font-bold text-gray-900 dark:text-white">
-        {title}
-      </Text>
-    </View>
-    {children}
-  </View>
-);
+/** What a successful load was for, so the screen can label its figures truthfully. */
+type Loaded = { key: string; period: string; location?: string; at: Date };
 
-/** A "top N by customer" table (activities / packages / events). */
-const TopTable = ({
-  rows,
-  itemHeader,
-  countHeader,
-}: {
-  rows: TopCustomerRow[];
-  itemHeader: string;
-  countHeader: string;
-}) => (
-  <View>
-    <View className="flex-row pb-2 border-b border-gray-100 dark:border-neutral-800">
-      <Text className="flex-1 text-xs font-semibold text-gray-400 dark:text-gray-500">
-        Customer
-      </Text>
-      <Text className="flex-1 text-xs font-semibold text-gray-400 dark:text-gray-500">
-        {itemHeader}
-      </Text>
-      <Text className="w-16 text-right text-xs font-semibold text-gray-400 dark:text-gray-500">
-        {countHeader}
-      </Text>
-    </View>
-    {rows.length === 0 ? (
-      <Text className="text-sm text-gray-400 dark:text-gray-500 py-3">
-        No data available.
-      </Text>
-    ) : (
-      // Names and item titles wrap onto as many lines as they need — nothing is
-      // cut off with "...".
-      rows.map((r, i) => (
-        <View
-          key={i}
-          className="flex-row py-2.5 border-b border-gray-50 dark:border-neutral-800/50"
-        >
-          <Text className="flex-1 pr-2 text-sm text-gray-900 dark:text-white">
-            {r.customer}
-          </Text>
-          <Text className="flex-1 pr-2 text-sm text-gray-600 dark:text-gray-300">
-            {r.item}
-          </Text>
-          <Text className="w-16 text-right text-sm font-semibold text-gray-900 dark:text-white">
-            {r.count}
-          </Text>
-        </View>
-      ))
-    )}
-  </View>
-);
+// The web admin's explanations of each chart.
+const INFO = {
+  growth: "Tracks your customer count month by month. Shows how your customer base is growing.",
+  revenue: "Monthly revenue and total bookings. Helps correlate booking volume with revenue.",
+  repeat: "Percentage of each month's customers who had booked before. Higher means better loyalty.",
+  bookingTime: "Which hours of the day customers' bookings are for. Helps identify peak times.",
+  activity: "When customers make their bookings. Helps plan staffing and promotions.",
+  status: "Customers by activity: Active (booked in the last 30 days), Inactive (booked more than 30 days ago) and New (new in the last 30 days).",
+  segments: "Customers by total spend: High Value ($1,000+), Medium Value ($500–$999) and Low Value (under $500).",
+  bookers: "Your most frequent customers by number of bookings.",
+  activities: "The attractions your customers buy most, by customer.",
+  packages: "The packages your customers book most, by customer.",
+  events: "The events your customers buy most, by customer.",
+  recent: "Recent customers with join date, spend, booking count and last activity.",
+};
 
 const CustomersAnalytics = () => {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const dark = scheme === "dark";
-  const headerIcon = dark ? "#fff" : "#111";
+  const dark = useColorScheme() === "dark";
 
   const user = getCurrentUser();
+  const role = useCurrentUserRole();
+  const isCompanyAdmin = role === "company_admin";
 
   // Scope to the global workspace location (company_admin); managers stay
   // backend-scoped. Reactive so switching location refetches server-side.
   const activeLocation = useActiveLocation();
-  const activeLocationId =
-    activeLocation.id === "all" ? undefined : activeLocation.id;
+  const activeLocationId = activeLocation.id === "all" ? undefined : activeLocation.id;
+
+  // What the figures and the export cover. Company admins follow the
+  // workspace location; everyone else is held to their own by the server.
+  const scopeLabel = isCompanyAdmin
+    ? activeLocation.id === "all"
+      ? "All locations"
+      : activeLocation.name
+    : "Your current location";
 
   const [dateRange, setDateRange] = useState<CustomerDateRange>("30d");
   const [customStart, setCustomStart] = useState<string | undefined>();
@@ -176,6 +120,7 @@ const CustomersAnalytics = () => {
   const [showDateSheet, setShowDateSheet] = useState(false);
 
   const [data, setData] = useState<CustomerAnalytics | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -187,6 +132,12 @@ const CustomersAnalytics = () => {
     DEFAULT_ANALYTICS_EXPORT,
   );
   const [exporting, setExporting] = useState(false);
+
+  const query: AnalyticsQuery = useMemo(
+    () => ({ dateRange, start: customStart, end: customEnd, locationId: activeLocationId }),
+    [dateRange, customStart, customEnd, activeLocationId],
+  );
+  const currentKey = queryKey(query);
 
   // Bumped per load, so changing the range quickly shows the last choice's
   // figures, not whichever reply arrived last.
@@ -202,7 +153,7 @@ const CustomersAnalytics = () => {
       return;
     }
     // Custom range needs both endpoints before we query.
-    if (dateRange === "custom" && (!customStart || !customEnd)) {
+    if (query.dateRange === "custom" && (!query.start || !query.end)) {
       setLoading(false);
       return;
     }
@@ -212,12 +163,20 @@ const CustomersAnalytics = () => {
       const res = await fetchCustomerAnalytics({
         token,
         userId: user?.id,
-        dateRange,
-        startDate: customStart,
-        endDate: customEnd,
-        locationId: activeLocationId,
+        dateRange: query.dateRange,
+        startDate: query.start,
+        endDate: query.end,
+        locationId: query.locationId,
       });
-      if (isCurrent()) setData(res);
+      if (isCurrent()) {
+        setData(res);
+        setLoaded({
+          key: queryKey(query),
+          period: periodLabel(query),
+          location: isCompanyAdmin ? scopeLabel : undefined,
+          at: new Date(),
+        });
+      }
     } catch (err) {
       if (isCurrent()) {
         setError(err instanceof Error ? err.message : "Failed to load analytics");
@@ -225,7 +184,7 @@ const CustomersAnalytics = () => {
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [dateRange, customStart, customEnd, activeLocationId, user?.id]);
+  }, [query, user?.id, isCompanyAdmin, scopeLabel]);
 
   useEffect(() => {
     load();
@@ -236,6 +195,14 @@ const CustomersAnalytics = () => {
     await load();
     setRefreshing(false);
   };
+
+  const view = analyticsViewState({
+    loading,
+    error,
+    hasData: !!data,
+    loadedKey: loaded?.key ?? null,
+    currentKey,
+  });
 
   // The calendar is a native sheet too, so close the export sheet first.
   const openExportRange = useCallback(() => {
@@ -259,14 +226,10 @@ const CustomersAnalytics = () => {
       Alert.alert("Not signed in", "Please sign in again to export.");
       return;
     }
-    if (
-      exportValues.dateRange === "custom" &&
-      (!exportValues.start || !exportValues.end)
-    ) {
-      Alert.alert(
-        "Pick a date range",
-        "Please select both start and end dates for custom range.",
-      );
+    // The sheet already disables Export in these cases; this is a backstop.
+    const blocked = exportBlockReason(exportValues);
+    if (blocked) {
+      Alert.alert("Can't export yet", blocked);
       return;
     }
     setExporting(true);
@@ -291,151 +254,148 @@ const CustomersAnalytics = () => {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { dialogTitle: "Export Analytics" });
       } else {
-        Alert.alert(
-          "Sharing unavailable",
-          "Sharing isn't available on this device.",
-        );
+        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
       }
       setShowExportSheet(false);
     } catch (err) {
       Alert.alert(
         "Export failed",
-        err instanceof Error
-          ? err.message
-          : "Failed to export analytics. Please try again.",
+        err instanceof Error ? err.message : "Failed to export analytics. Please try again.",
       );
     } finally {
       setExporting(false);
     }
   }, [exportValues, user?.id, activeLocationId]);
 
-  const growthLabels = data?.customerGrowth.map((p) => p.month) ?? [];
-  const revenueLabels = data?.revenueTrend.map((p) => p.month) ?? [];
-  const repeatLabels = data?.repeatCustomers.map((p) => p.month) ?? [];
+  const figures: SummaryFigure[] = (data?.kpis ?? []).map((k) => {
+    const d = kpiDisplay(k);
+    return {
+      icon: KPI_ICON[k.label] ?? "bar-chart-2",
+      title: k.label,
+      value: k.value,
+      hint: d.comparison,
+      delta: d.delta ? { text: d.delta, tone: d.tone } : undefined,
+      info: d.info,
+    };
+  });
 
-  const showInitialLoader = loading && !data;
-  const showError = !loading && !!error && !data;
+  const customChipLabel =
+    customStart && customEnd
+      ? `${formatShortDate(customStart)} – ${formatShortDate(customEnd)}`
+      : "Custom";
+  const loadedPeriod = loaded?.period ?? periodLabel(query);
+  const monthsSpan = (n: number) => (n > 0 ? `Last ${n} ${n === 1 ? "month" : "months"}` : undefined);
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Customer Analytics
-          </Text>
-          {/* Export — icon-only in the header. Refreshing stays on
-              pull-to-refresh. */}
-          <Pressable
-            onPress={() => setShowExportSheet(true)}
-            disabled={exporting}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Export analytics"
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Customer Analytics"
+        action={{
+          onPress: () => {
+            if (!exporting) setShowExportSheet(true);
+          },
+          accessibilityLabel: "Export analytics",
+          label: "Export",
+          icon: "download",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="px-5 gap-4">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 shadow-sm">
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Customer Analytics
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Customer metrics, trends, and top customers for the selected period
-            </Text>
+        <View className="px-4 mt-4 gap-4">
+          {/* Period — presets as chips; Custom opens the calendar and only
+              takes effect once both dates are picked. */}
+          <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+              className="-mx-1 px-1"
+            >
+              {PERIOD_PRESETS.map((p) => (
+                <FilterChip
+                  key={p.value}
+                  label={p.label}
+                  selected={dateRange === p.value}
+                  onPress={() => setDateRange(p.value)}
+                />
+              ))}
+              <FilterChip
+                label={customChipLabel}
+                selected={dateRange === "custom"}
+                onPress={() => setShowDateSheet(true)}
+              />
+            </ScrollView>
+
+            {view.body === "content" && loaded && (
+              <PeriodCaption
+                stale={view.stale}
+                updating={view.updating && !refreshing}
+                shownPeriod={loadedPeriod}
+                requestedPeriod={periodLabel(query)}
+                location={loaded.location}
+                updatedAt={formatClockTime(loaded.at)}
+              />
+            )}
           </View>
 
-          {/* Period picker — full width now that Export sits in the header. */}
-          <SheetSelect
-            icon="calendar"
-            title="Period"
-            value={dateRange}
-            options={PERIOD_OPTIONS}
-            onSelect={(v) => setDateRange(v as CustomerDateRange)}
-          />
+          {view.body === "skeleton" && <AnalyticsSkeleton tiles={6} panels={4} />}
 
-          {/* Custom range trigger */}
-          {dateRange === "custom" && (
-            <Pressable
-              onPress={() => setShowDateSheet(true)}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-100 dark:border-neutral-800"
+          {view.body === "error" && (
+            <ListErrorBanner
+              title="Couldn't load customer analytics"
+              message={error ?? "Something went wrong."}
+              onRetry={load}
+            />
+          )}
+
+          {view.banner && (
+            <ListErrorBanner
+              title={view.stale ? `Couldn't load ${periodLabel(query)}` : "Couldn't refresh analytics"}
+              message={
+                view.stale
+                  ? `${error} The figures below are still for ${loadedPeriod}.`
+                  : `${error} Showing the figures from ${loaded ? formatClockTime(loaded.at) : "earlier"}.`
+              }
+              onRetry={load}
+            />
+          )}
+
+          {view.body === "content" && data && (
+            // Figures for another period or location are dimmed and can't be
+            // tapped, so they can't pass for the selection above.
+            <View
+              style={{ opacity: view.stale ? 0.45 : 1 }}
+              pointerEvents={view.stale ? "none" : "auto"}
+              className="gap-4"
             >
-              <Feather name="calendar" size={16} color={PRIMARY} />
-              <Text className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1">
-                {customStart && customEnd
-                  ? `${formatShortDate(customStart)} – ${formatShortDate(customEnd)}`
-                  : "Pick a date range"}
-              </Text>
-              <Feather name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-          )}
+              {figures.length > 0 && <SummaryPanel figures={figures} />}
 
-          {showInitialLoader && <AnalyticsSkeleton tiles={6} panels={4} />}
-
-          {showError && (
-            <View className="items-center py-14">
-              <Feather name="alert-circle" size={40} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable
-                onPress={load}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]"
+              <SectionLabel title="Trends" />
+              <AnalyticsPanel
+                icon="trending-up"
+                title="Customer Growth"
+                subtitle={monthsSpan(data.customerGrowth.length)}
+                info={INFO.growth}
               >
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {!showInitialLoader && !showError && data && (
-            <>
-              {/* KPI cards */}
-              <View className="flex-row flex-wrap gap-3">
-                {data.kpis.map((k) => {
-                  const s = KPI_STYLE[k.label] ?? DEFAULT_KPI;
-                  return (
-                    <StatTile
-                      key={k.label}
-                      icon={s.icon}
-                      iconBg={s.bg}
-                      iconColor={s.color}
-                      label={k.label}
-                      value={k.value}
-                      hint={k.change ? `${k.change} vs prev. period` : undefined}
-                    />
-                  );
-                })}
-              </View>
-
-              {/* Customer growth */}
-              <Panel icon="trending-up" title="Customer Growth">
                 <AreaChart
                   dark={dark}
-                  labels={growthLabels}
+                  interactive
+                  xLabelMode="spaced"
+                  formatValue={(v) => formatNumber(v)}
+                  labels={data.customerGrowth.map((p) => p.month)}
                   series={[
                     {
                       label: "Total Customers",
@@ -444,17 +404,24 @@ const CustomersAnalytics = () => {
                     },
                   ]}
                 />
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Revenue & bookings trend (dual axis) */}
-              <Panel icon="dollar-sign" title="Revenue & Bookings Trend">
+              <AnalyticsPanel
+                icon="dollar-sign"
+                title="Revenue & Bookings Trend"
+                subtitle={monthsSpan(data.revenueTrend.length)}
+                info={INFO.revenue}
+              >
                 <AreaChart
                   dark={dark}
-                  labels={revenueLabels}
+                  interactive
+                  xLabelMode="spaced"
+                  formatValue={(v, s) => (s.axis === "right" ? formatNumber(v) : formatMoney(v))}
+                  labels={data.revenueTrend.map((p) => p.month)}
                   series={[
                     {
                       label: "Revenue ($)",
-                      color: "#0644C7",
+                      color: PRIMARY,
                       data: data.revenueTrend.map((p) => p.revenue),
                       axis: "left",
                       area: false,
@@ -468,13 +435,20 @@ const CustomersAnalytics = () => {
                     },
                   ]}
                 />
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Repeat rate */}
-              <Panel icon="repeat" title="Repeat Customer Rate">
+              <AnalyticsPanel
+                icon="repeat"
+                title="Repeat Customer Rate"
+                subtitle={monthsSpan(data.repeatCustomers.length)}
+                info={INFO.repeat}
+              >
                 <AreaChart
                   dark={dark}
-                  labels={repeatLabels}
+                  interactive
+                  xLabelMode="spaced"
+                  formatValue={(v) => `${formatNumber(v)}%`}
+                  labels={data.repeatCustomers.map((p) => p.month)}
                   series={[
                     {
                       label: "Repeat Rate %",
@@ -484,125 +458,91 @@ const CustomersAnalytics = () => {
                     },
                   ]}
                 />
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Booking time distribution */}
-              <Panel icon="clock" title="Booking Time Distribution">
-                <BarChart
-                  data={data.bookingTimeDistribution.map((d) => ({
-                    label: d.label,
-                    value: d.count,
-                  }))}
+              <SectionLabel title="When customers book" detail={loadedPeriod} />
+              <AnalyticsPanel icon="clock" title="Booking Time Distribution" info={INFO.bookingTime}>
+                {data.bookingTimeDistribution.length === 0 ? (
+                  <PanelEmpty message="No bookings in this period." />
+                ) : (
+                  <BarChart
+                    interactive
+                    maxXLabels={6}
+                    color={PRIMARY}
+                    formatValue={(v) => `${formatNumber(v)} ${v === 1 ? "booking" : "bookings"}`}
+                    data={data.bookingTimeDistribution.map((d) => ({ label: d.label, value: d.count }))}
+                  />
+                )}
+              </AnalyticsPanel>
+
+              <AnalyticsPanel icon="activity" title="Customer Activity by Hour" info={INFO.activity}>
+                {data.activityHours.length === 0 ? (
+                  <PanelEmpty message="No bookings in this period." />
+                ) : (
+                  <BarChart
+                    interactive
+                    maxXLabels={6}
+                    color="#16A34A"
+                    formatValue={(v) => `${formatNumber(v)} ${v === 1 ? "booking" : "bookings"}`}
+                    data={data.activityHours.map((d) => ({ label: d.label, value: d.count }))}
+                  />
+                )}
+              </AnalyticsPanel>
+
+              <SectionLabel title="Customers" />
+              <AnalyticsPanel icon="users" title="Customer Status" info={INFO.status}>
+                <StatusCounts rows={statusRows(data.statusDistribution)} />
+              </AnalyticsPanel>
+
+              <AnalyticsPanel icon="award" title="Customer Value Segments" info={INFO.segments}>
+                <ValueSegments rows={segmentRows(data.lifetimeValue)} />
+              </AnalyticsPanel>
+
+              <AnalyticsPanel
+                icon="bar-chart-2"
+                title="Bookings per Customer"
+                subtitle={`Most bookings · ${loadedPeriod}`}
+                info={INFO.bookers}
+              >
+                <RankedList
+                  rows={rankedRows(data.bookingsPerCustomer)}
+                  unit={["booking", "bookings"]}
+                  emptyMessage="No bookings in this period."
                 />
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Activity by hour */}
-              <Panel icon="activity" title="Customer Activity by Hour">
-                <BarChart
-                  color="#16A34A"
-                  data={data.activityHours.map((d) => ({
-                    label: d.label,
-                    value: d.count,
-                  }))}
-                />
-              </Panel>
+              <AnalyticsPanel icon="user-plus" title="Recent Customers" info={INFO.recent}>
+                <RecentCustomerList customers={data.recentCustomers} />
+              </AnalyticsPanel>
 
-              {/* Bookings per customer */}
-              <Panel icon="users" title="Bookings per Customer">
-                <BarChart
-                  color="#F59E0B"
-                  data={data.bookingsPerCustomer.map((d) => ({
-                    label: d.name,
-                    value: d.value,
-                  }))}
-                />
-              </Panel>
-
-              {/* Status distribution */}
-              <Panel icon="pie-chart" title="Customer Status Distribution">
-                <PieChart
-                  data={data.statusDistribution.map((s) => ({
-                    label: s.status,
-                    value: s.count,
-                  }))}
-                />
-              </Panel>
-
-              {/* Lifetime value segments */}
-              <Panel icon="award" title="Customer Value Segments">
-                <PieChart
-                  data={data.lifetimeValue.map((s) => ({
-                    label: s.segment,
-                    value: s.value,
-                  }))}
-                />
-              </Panel>
-
-              {/* Top activities / packages / events */}
-              <Panel icon="target" title="Top Activities by Customer">
+              <SectionLabel title="Top purchases" detail={loadedPeriod} />
+              <AnalyticsPanel icon="target" title="Top 5 Activities by Customer" info={INFO.activities}>
                 <TopTable
                   rows={data.topActivities}
                   itemHeader="Activity"
-                  countHeader="Qty"
+                  countHeader="Purchases"
+                  emptyMessage="No activity data available."
                 />
-              </Panel>
-              <Panel icon="package" title="Top Packages by Customer">
+              </AnalyticsPanel>
+              <AnalyticsPanel icon="package" title="Top 5 Packages by Customer" info={INFO.packages}>
                 <TopTable
                   rows={data.topPackages}
                   itemHeader="Package"
                   countHeader="Bookings"
+                  emptyMessage="No package data available."
                 />
-              </Panel>
+              </AnalyticsPanel>
               {data.topEvents.length > 0 && (
-                <Panel icon="calendar" title="Top Events by Customer">
+                <AnalyticsPanel icon="calendar" title="Top 5 Events by Customer" info={INFO.events}>
                   <TopTable
                     rows={data.topEvents}
                     itemHeader="Event"
-                    countHeader="Qty"
+                    countHeader="Purchases"
+                    emptyMessage="No event data available."
                   />
-                </Panel>
+                </AnalyticsPanel>
               )}
-
-              {/* Recent customers */}
-              <Panel icon="user-plus" title="Recent Customers">
-                {data.recentCustomers.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 py-3">
-                    No customer data available.
-                  </Text>
-                ) : (
-                  data.recentCustomers.map((c) => (
-                    <View
-                      key={c.id}
-                      className="py-3 border-b border-gray-50 dark:border-neutral-800/50"
-                    >
-                      {/* Full name and email, wrapped instead of cut short. */}
-                      <View className="flex-row items-start justify-between">
-                        <Text className="text-sm font-semibold text-gray-900 dark:text-white flex-1 mr-2">
-                          {c.name}
-                        </Text>
-                        <StatusBadge status={c.status} />
-                      </View>
-                      {!!c.email && (
-                        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          {c.email}
-                        </Text>
-                      )}
-                      <View className="flex-row flex-wrap items-center gap-x-4 gap-y-1 mt-1.5">
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          ${c.totalSpent.toFixed(2)}
-                        </Text>
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          {c.bookings} bookings
-                        </Text>
-                        <Text className="text-xs text-gray-400 dark:text-gray-500">
-                          Joined {formatDate(c.joinDate)}
-                        </Text>
-                      </View>
-                    </View>
-                  ))
-                )}
-              </Panel>
-            </>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -615,6 +555,7 @@ const CustomersAnalytics = () => {
         onApply={(start, end) => {
           setCustomStart(start);
           setCustomEnd(end);
+          setDateRange("custom");
           setShowDateSheet(false);
         }}
       />
@@ -627,6 +568,7 @@ const CustomersAnalytics = () => {
         onClose={() => setShowExportSheet(false)}
         onExport={runExport}
         onOpenCustomRange={openExportRange}
+        scopeLabel={scopeLabel}
       />
 
       {/* Calendar for the export's own custom range. */}
@@ -640,5 +582,63 @@ const CustomersAnalytics = () => {
     </View>
   );
 };
+
+/**
+ * Under the period chips: which period (and, for admins, location) the figures
+ * below really cover, and when they loaded. While another period loads, or if
+ * it failed, it says the figures are still the old ones.
+ */
+function PeriodCaption({
+  stale,
+  updating,
+  shownPeriod,
+  requestedPeriod,
+  location,
+  updatedAt,
+}: {
+  stale: boolean;
+  updating: boolean;
+  shownPeriod: string;
+  requestedPeriod: string;
+  location?: string;
+  updatedAt: string;
+}) {
+  if (stale) {
+    return (
+      // Its own element (not a restyled caption), so no classes change after mount.
+      <View
+        key="stale"
+        className="flex-row items-center gap-2 mt-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2"
+        accessibilityLiveRegion="polite"
+      >
+        {updating ? (
+          <ActivityIndicator size="small" color="#D97706" />
+        ) : (
+          <Feather name="clock" size={14} color="#D97706" />
+        )}
+        <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+          {updating ? `Loading ${requestedPeriod}… ` : ""}
+          Still showing {shownPeriod}
+          {location ? ` · ${location}` : ""}.
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View key="current" className="flex-row items-center gap-2 mt-3">
+      <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+        {shownPeriod}
+        {location ? ` · ${location}` : ""}
+        {` · Updated ${updatedAt}`}
+      </Text>
+      {updating && (
+        <View className="flex-row items-center gap-1.5">
+          <ActivityIndicator size="small" color={PRIMARY} />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">Updating</Text>
+        </View>
+      )}
+    </View>
+  );
+}
 
 export default CustomersAnalytics;

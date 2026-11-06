@@ -10,6 +10,7 @@ import {
 import { BottomSheet } from "./BottomSheet";
 import { formatShortDate } from "./DateRangeSheet";
 import { CheckboxRow, SelectField, type SelectOption } from "./FormControls";
+import { exportBlockReason } from "../../lib/customers/customerAnalyticsDisplay";
 import type {
   AnalyticsExportFormat,
   AnalyticsExportSection,
@@ -73,6 +74,11 @@ type Props = {
   onExport: () => void;
   /** Ask the parent to open the shared calendar for the custom range. */
   onOpenCustomRange: () => void;
+  /**
+   * Which locations the export covers, stated read-only (the export follows the
+   * workspace location; this sheet doesn't choose one).
+   */
+  scopeLabel?: string;
 };
 
 /**
@@ -87,9 +93,12 @@ export function AnalyticsExportSheet({
   onClose,
   onExport,
   onOpenCustomRange,
+  scopeLabel,
 }: Props) {
   const set = (patch: Partial<AnalyticsExportValues>) =>
     onChange({ ...values, ...patch });
+  const blockReason = exportBlockReason(values);
+  const exportDisabled = exporting || blockReason !== null;
 
   const rangePicked = values.start !== "" && values.end !== "";
   const rangeLabel = rangePicked
@@ -169,6 +178,18 @@ export function AnalyticsExportSheet({
             </View>
           )}
 
+          {!!scopeLabel && (
+            <View className="mb-5">
+              <FieldLabel>Location</FieldLabel>
+              <View className="flex-row items-center gap-2 rounded-lg bg-gray-50 dark:bg-neutral-800/60 px-4 py-3">
+                <Feather name="map-pin" size={15} color="#9CA3AF" />
+                <Text className="flex-1 text-sm text-gray-700 dark:text-gray-200">
+                  {scopeLabel}
+                </Text>
+              </View>
+            </View>
+          )}
+
           <FieldLabel>Include Sections</FieldLabel>
           <View className="gap-3 mb-5">
             {SECTION_OPTS.map((s) => (
@@ -187,8 +208,23 @@ export function AnalyticsExportSheet({
             ))}
           </View>
 
+          {blockReason !== null && (
+            <View
+              className="flex-row items-center gap-2 mb-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5"
+              accessibilityLiveRegion="polite"
+            >
+              <Feather name="alert-circle" size={15} color="#D97706" />
+              <Text className="flex-1 text-sm text-amber-800 dark:text-amber-300">
+                {blockReason}
+              </Text>
+            </View>
+          )}
+
           <View className="flex-row gap-3">
+            {/* Both buttons are keyed by their enabled state, so switching it
+                remounts them instead of swapping a pseudo class on a live element. */}
             <Pressable
+              key={`cancel-${exporting}`}
               onPress={onClose}
               disabled={exporting}
               className={`flex-1 h-14 items-center justify-center rounded-full border border-gray-300 dark:border-neutral-700 ${
@@ -200,10 +236,14 @@ export function AnalyticsExportSheet({
               </Text>
             </Pressable>
             <Pressable
+              key={`export-${exportDisabled}`}
               onPress={onExport}
-              disabled={exporting}
+              disabled={exportDisabled}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: exportDisabled }}
+              accessibilityHint={blockReason ?? undefined}
               className={`flex-1 h-14 flex-row items-center justify-center gap-2 rounded-full bg-[#0644C7] ${
-                exporting ? "opacity-50" : "active:opacity-90"
+                exportDisabled ? "opacity-50" : "active:opacity-90"
               }`}
             >
               {exporting ? (
