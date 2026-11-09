@@ -1,6 +1,4 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useColorScheme } from "nativewind";
+import { Feather } from "@expo/vector-icons";
 import {
   useCallback,
   useEffect,
@@ -17,17 +15,35 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
-import { SheetSelect, type SheetSelectOption } from "../../components/ui/SheetSelect";
-import { StatTile } from "../../components/ui/StatTile";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FilterChipGroup,
+  FilterSheetFooter,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SpecCell,
+  SummaryPanel,
+  ToneDotBadge,
+} from "../../components/ui/SummaryPanel";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { VisitorSessionsTable } from "../../components/ui/VisitorSessionsTable";
-import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
 import { venueDateKey } from "../../lib/date/venueTime";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
@@ -52,13 +68,8 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 /** The web page's TIME FRAME buttons, in the same order. */
 type Timeframe = "all" | "today" | "yesterday" | "last7" | "last30" | "month";
@@ -76,20 +87,27 @@ type IdentityFilter = VisitorIdentityFilter | "all";
 type DeviceFilter = VisitorDeviceType | "all";
 type ActivityFilter = VisitorActivityFilter | "all";
 
-const IDENTITY_OPTIONS: SheetSelectOption[] = [
+const IDENTITY_OPTIONS: { label: string; value: IdentityFilter }[] = [
   { label: "All visitors", value: "all" },
   { label: "Known customers", value: "known" },
   { label: "Anonymous", value: "anonymous" },
 ];
 
-const DEVICE_OPTIONS: SheetSelectOption[] = [
+/** The list header's title for each Visitor Type. */
+const IDENTITY_TITLE: Record<IdentityFilter, string> = {
+  all: "All Sessions",
+  known: "Known Customers",
+  anonymous: "Anonymous Visitors",
+};
+
+const DEVICE_OPTIONS: { label: string; value: DeviceFilter }[] = [
   { label: "All devices", value: "all" },
   { label: "Mobile", value: "mobile" },
   { label: "Desktop", value: "desktop" },
   { label: "Tablet", value: "tablet" },
 ];
 
-const ACTIVITY_OPTIONS: SheetSelectOption[] = [
+const ACTIVITY_OPTIONS: { label: string; value: ActivityFilter }[] = [
   { label: "Any activity", value: "all" },
   { label: "Made a purchase", value: "purchased" },
   { label: "Reached a checkout page", value: "reached_checkout" },
@@ -251,6 +269,97 @@ const TimelineRow = ({ event }: { event: VisitorTimelineEvent }) => {
 };
 
 /**
+ * One session in the Cards layout — the Manage Attractions card: who and when,
+ * how to reach them, the entry page, and a Pages / Clicks / Purchases / Time
+ * strip. Tapping it opens the same timeline as the table's eye action.
+ */
+const SessionCard = ({
+  session,
+  onPress,
+}: {
+  session: VisitorSessionRow;
+  onPress: () => void;
+}) => {
+  const known = isKnownVisitor(session);
+  const contact = [session.guestPhone, session.guestEmail]
+    .filter(Boolean)
+    .join(" · ");
+  const sms = smsConsentLabel(session);
+  const device = [session.deviceType, session.browser]
+    .filter(Boolean)
+    .join(" · ");
+  const entry = session.entryTitle || session.entryPage;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Session for ${session.guestName || "anonymous visitor"}`}
+      className="mb-3 overflow-hidden rounded-2xl border border-gray-200 bg-white active:opacity-80 dark:border-neutral-800 dark:bg-neutral-900"
+    >
+      <View className="p-4">
+        <View className="flex-row items-start justify-between gap-2">
+          <View className="flex-1">
+            <Text
+              numberOfLines={1}
+              className="text-base font-semibold text-gray-900 dark:text-white"
+            >
+              {session.guestName || "Anonymous visitor"}
+            </Text>
+            <Text
+              numberOfLines={1}
+              className="mt-0.5 text-xs text-gray-500 dark:text-gray-400"
+            >
+              {session.dateLabel} · {session.firstSeenLabel} –{" "}
+              {session.lastSeenLabel} ET
+            </Text>
+          </View>
+          <ToneDotBadge
+            tone={known ? "green" : "gray"}
+            label={known ? "Known" : "Anonymous"}
+          />
+        </View>
+        {!!contact && (
+          <Text
+            numberOfLines={1}
+            className="mt-2 text-xs text-gray-600 dark:text-gray-300"
+          >
+            {contact}
+            {sms ? ` · SMS: ${sms}` : ""}
+          </Text>
+        )}
+        {(!!entry || !!device) && (
+          <Text
+            numberOfLines={1}
+            className="mt-1 text-[11px] text-gray-400 dark:text-gray-500"
+          >
+            {[entry ? `Entry: ${entry}` : "", device].filter(Boolean).join(" · ")}
+          </Text>
+        )}
+      </View>
+      <View className="flex-row border-t border-gray-200 dark:border-neutral-800">
+        <SpecCell label="Pages" value={String(session.pageViews)} />
+        <SpecCell divider label="Clicks" value={String(session.clicks)} />
+        <SpecCell
+          divider
+          label="Purchases"
+          value={String(session.conversions)}
+          valueClassName={
+            session.conversions > 0
+              ? "text-green-600 dark:text-green-400"
+              : undefined
+          }
+        />
+        <SpecCell
+          divider
+          label="Time"
+          value={formatSessionDuration(session.durationMs)}
+        />
+      </View>
+    </Pressable>
+  );
+};
+
+/**
  * Visitor Tracking — every customer visit as its own session (one visitor, one
  * day, Michigan time). Reads the same `/api/visitor-sessions` endpoints as the
  * web admin page: the grouped list (loaded in one request so the filters below
@@ -259,8 +368,6 @@ const TimelineRow = ({ event }: { event: VisitorTimelineEvent }) => {
  */
 const VisitorTracking = () => {
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   const activeLocation = useActiveLocation();
   const activeLocationId =
@@ -284,7 +391,9 @@ const VisitorTracking = () => {
   const [activity, setActivity] = useState<ActivityFilter>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [showFilters, setShowFilters] = useState(false);
 
   // Only the newest load of each may write state — a location switch or a
   // refresh can leave an older request in flight behind it.
@@ -440,6 +549,19 @@ const VisitorTracking = () => {
     activity !== "all" ||
     !!search.trim();
 
+  // The Filters sheet's applied count — Visitor Type starts on "Known
+  // customers", so the badge honestly shows 1 on open, like the web default.
+  const activeFilterCount =
+    (identity !== "all" ? 1 : 0) +
+    (device !== "all" ? 1 : 0) +
+    (activity !== "all" ? 1 : 0);
+
+  const clearFilters = useCallback(() => {
+    setIdentity("all");
+    setDevice("all");
+    setActivity("all");
+  }, []);
+
   const openDetail = useCallback(async (session: VisitorSessionRow) => {
     const token = getToken();
     if (!token) {
@@ -578,41 +700,39 @@ const VisitorTracking = () => {
     }
   }, [activeLocationId, identity, device, activity, timeframe, search]);
 
+  // Sibling customer screens plus Export CSV (the old header icon), as
+  // module-hub shortcuts.
+  const moreShortcuts: HubQuickLink[] = [
+    {
+      label: exporting ? "Exporting…" : "Export CSV",
+      icon: "download",
+      onPress: () => {
+        if (!exporting) void exportCsv();
+      },
+    },
+    { label: "Manage Customers", icon: "users", route: "/customers/customers" },
+    {
+      label: "Customer Analytics",
+      icon: "pie-chart",
+      route: "/customers/analytics",
+    },
+    {
+      label: "Customer Concerns",
+      icon: "message-circle",
+      route: "/customers/customer-concerns",
+    },
+  ];
+
+  const showInitialLoader = loading && sessions.length === 0;
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header — Export CSV is icon-only here, as on the other list screens. */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Visitor Tracking
-          </Text>
-          <Pressable
-            onPress={exportCsv}
-            disabled={exporting}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Export CSV"
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader title="Visitor Tracking" />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -620,252 +740,202 @@ const VisitorTracking = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5 gap-4">
-          {/* Intro — same heading and copy as the web page. */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Visitor Tracking
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Every customer visit as its own session — one visitor, one day,
-              Michigan time
-            </Text>
+        <View className="mt-4 px-4">
+          {/* Same copy as the web page's intro. */}
+          <Text className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+            Every customer visit as its own session — one visitor, one day,
+            Michigan time
+          </Text>
+
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
           </View>
+
+          {/* Error state (nothing cached to show). */}
+          {!showInitialLoader && !!error && (
+            <ListErrorBanner
+              title="Could not load visitor sessions"
+              message={error}
+              onRetry={() => void loadSessions({ force: true })}
+            />
+          )}
 
           {/* Counters — gated on their own request, not the table's. Skeleton
               only while there is nothing to show, so a refresh updates the
               figures in place instead of dropping back to the skeleton. */}
           {statsLoading && !stats ? (
-            <AnalyticsSkeleton tiles={4} panels={0} />
+            <AttractionsSummarySkeleton />
           ) : (
-            <View className="flex-row flex-wrap gap-3">
-              <StatTile
-                icon="activity"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Sessions Today"
-                value={String(stats?.sessionsToday ?? 0)}
-                hint="One row per visitor per day"
-              />
-              <StatTile
-                icon="calendar"
-                iconBg="bg-indigo-50 dark:bg-indigo-900/30"
-                iconColor="#4F46E5"
-                label="Sessions This Week"
-                value={String(stats?.sessionsWeek ?? 0)}
-                hint="Last 7 days"
-              />
-              <StatTile
-                icon="user-check"
-                iconBg="bg-green-50 dark:bg-green-900/30"
-                iconColor="#16A34A"
-                label="Identified Today"
-                value={String(stats?.identifiedToday ?? 0)}
-                hint="Gave a name and number"
-              />
-              <StatTile
-                // Footprints on the web too; Feather has no footprint glyph.
-                icon="users"
-                renderIcon={(color, size) => (
-                  <Ionicons name="footsteps-outline" size={size} color={color} />
-                )}
-                iconBg="bg-amber-50 dark:bg-amber-900/30"
-                iconColor="#D97706"
-                label="Known Visitors"
-                value={String(stats?.identifiedTotal ?? 0)}
-                hint="All-time identified"
-              />
-            </View>
+            <SummaryPanel
+              figures={[
+                {
+                  icon: "activity",
+                  title: "Sessions Today",
+                  value: String(stats?.sessionsToday ?? 0),
+                  hint: "One row per visitor per day",
+                },
+                {
+                  icon: "calendar",
+                  title: "Sessions This Week",
+                  value: String(stats?.sessionsWeek ?? 0),
+                  hint: "Last 7 days",
+                },
+                {
+                  icon: "user-check",
+                  title: "Identified Today",
+                  value: String(stats?.identifiedToday ?? 0),
+                  hint: "Gave a name and number",
+                },
+                {
+                  icon: "users",
+                  title: "Known Visitors",
+                  value: String(stats?.identifiedTotal ?? 0),
+                  hint: "All-time identified",
+                },
+              ]}
+            />
           )}
 
-          {/* Time frame — the web's button row, scrolled sideways. */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-100 dark:border-neutral-800 p-3"
-            style={CARD_SHADOW}
-          >
-            <View className="flex-row items-center gap-1.5 mb-2.5">
-              <Feather name="calendar" size={13} color="#9CA3AF" />
-              <Text className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                Time frame
-              </Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8 }}
-            >
-              {TIMEFRAMES.map((option) => {
-                const active = timeframe === option.value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    onPress={() => setTimeframe(option.value)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    className={`px-3.5 py-2 rounded-xl border ${
-                      active
-                        ? "bg-blue-50 dark:bg-blue-900/20 border-[#0644C7]"
-                        : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                    }`}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      className={`shrink-0 text-xs font-semibold ${
-                        active
-                          ? "text-[#0644C7] dark:text-blue-400"
-                          : "text-gray-600 dark:text-gray-300"
-                      }`}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+          {/* More — Export CSV and the sibling customer screens. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
+            />
           </View>
 
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-            <Feather name="search" size={18} color="#9CA3AF" />
-            <TextInput
+          {/* Search + Filters (Visitor Type · Device · Activity). */}
+          <View className="mb-3 mt-4 flex-row items-center gap-2">
+            <SearchField
               value={search}
               onChangeText={setSearch}
-              placeholder="Search by name, phone, email or page..."
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="none"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              style={{ paddingVertical: 0 }}
+              placeholder="Search name, phone, email or page"
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
+            <FiltersButton
+              count={activeFilterCount}
+              onPress={() => setShowFilters(true)}
+            />
           </View>
 
-          {/* Visitor Type · Device · Activity */}
-          <View className="gap-3">
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <SheetSelect
-                  icon="user-check"
-                  title="Visitor Type"
-                  value={identity}
-                  options={IDENTITY_OPTIONS}
-                  onSelect={(v) => setIdentity(v as IdentityFilter)}
-                />
-              </View>
-              <View className="flex-1">
-                <SheetSelect
-                  icon="smartphone"
-                  title="Device"
-                  value={device}
-                  options={DEVICE_OPTIONS}
-                  onSelect={(v) => setDevice(v as DeviceFilter)}
-                />
-              </View>
-            </View>
-            <SheetSelect
-              icon="mouse-pointer"
-              title="Activity"
-              value={activity}
-              options={ACTIVITY_OPTIONS}
-              onSelect={(v) => setActivity(v as ActivityFilter)}
-            />
-          </View>
+          <AppliedFiltersHint count={activeFilterCount} onClear={clearFilters} />
+
+          {/* Time frame chips — the web's TIME FRAME button row. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="-mx-1 mb-4 px-1"
+          >
+            {TIMEFRAMES.map((option) => (
+              <FilterChip
+                key={option.value}
+                label={option.label}
+                selected={timeframe === option.value}
+                onPress={() => setTimeframe(option.value)}
+              />
+            ))}
+          </ScrollView>
 
           {/* Load cap notice, same wording as the web banner. */}
           {capped && (
-            <View className="rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5">
-              <Text className="text-sm text-amber-800 dark:text-amber-200">
+            <View className="mb-4 flex-row gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 dark:border-amber-900/40 dark:bg-amber-900/20">
+              <Feather name="info" size={16} color="#D97706" />
+              <Text className="flex-1 text-sm text-amber-800 dark:text-amber-200">
                 Showing the {MAX_LOADED_SESSIONS.toLocaleString()} most recent
                 sessions — use Export CSV or the time frame for older activity.
               </Text>
             </View>
           )}
 
-          {!loading && !error && (
-            <Text className="text-sm text-gray-500 dark:text-gray-400">
-              Showing {filtered.length}{" "}
-              {filtered.length === 1 ? "session" : "sessions"}
-              {sessions.length !== filtered.length
-                ? ` of ${sessions.length} loaded`
-                : ""}
-            </Text>
+          {/* List header — title + count, layout toggle. */}
+          {!showInitialLoader && !error && (
+            <>
+              <ListHeader title={IDENTITY_TITLE[identity]} count={filtered.length}>
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </ListHeader>
+              {sessions.length !== filtered.length && (
+                <Text className="-mt-1.5 mb-3 text-xs text-gray-400 dark:text-gray-500">
+                  {filtered.length} of {sessions.length} loaded{" "}
+                  {sessions.length === 1 ? "session" : "sessions"}
+                </Text>
+              )}
+            </>
           )}
 
-          {/* List / states */}
-          {loading && sessions.length === 0 ? (
-            <View className="py-16 items-center">
-              <ActivityIndicator color={PRIMARY} />
-            </View>
-          ) : error ? (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
-          ) : filtered.length === 0 ? (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center"
-              style={CARD_SHADOW}
-            >
-              <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
-                <Feather
-                  name={identity === "known" ? "user-check" : "users"}
-                  size={26}
-                  color={PRIMARY}
-                />
-              </View>
-              {identity === "known" && sessions.length > 0 ? (
-                <>
-                  <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                    No known customers yet
-                  </Text>
-                  <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
-                    Guests appear here once they enter their name and number in
-                    the welcome popup. There{" "}
-                    {sessions.length === 1 ? "is" : "are"} {sessions.length}{" "}
-                    anonymous session{sessions.length === 1 ? "" : "s"} behind
-                    this filter.
-                  </Text>
-                  <Pressable
-                    onPress={() => setIdentity("all")}
-                    className="mt-4 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-700 active:opacity-70"
-                    accessibilityRole="button"
-                    accessibilityLabel="Show all visitors"
-                  >
-                    <Text
-                      numberOfLines={1}
-                      className="text-sm font-semibold text-gray-700 dark:text-gray-200"
-                    >
-                      Show all visitors
-                    </Text>
-                  </Pressable>
-                </>
+          {/* List / states — each keyed so switching remounts cleanly. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? (
+                <AttractionsTableSkeleton />
               ) : (
-                <>
-                  <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                    No visits recorded
-                  </Text>
-                  <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
-                    {filtersActive
-                      ? "Try adjusting your search or filters"
-                      : "Customer visits will appear here as they browse the booking site"}
-                  </Text>
-                </>
+                <AttractionsListSkeleton />
               )}
             </View>
+          ) : error ? null : filtered.length === 0 ? (
+            identity === "known" && sessions.length > 0 ? (
+              <View key="s-no-known">
+                <ListEmptyState
+                  icon="user-check"
+                  title="No known customers yet"
+                  message={`Guests appear here once they enter their name and number in the welcome popup. There ${
+                    sessions.length === 1 ? "is" : "are"
+                  } ${sessions.length} anonymous session${
+                    sessions.length === 1 ? "" : "s"
+                  } behind this filter.`}
+                  actionLabel="Show all visitors"
+                  actionIcon="users"
+                  onAction={() => setIdentity("all")}
+                />
+              </View>
+            ) : (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon={filtersActive ? "search" : "users"}
+                  title="No visits recorded"
+                  message={
+                    filtersActive
+                      ? "Try adjusting your search or filters."
+                      : "Customer visits will appear here as they browse the booking site."
+                  }
+                  actionLabel={
+                    filtersActive ? "Clear search & filters" : undefined
+                  }
+                  onAction={
+                    filtersActive
+                      ? () => {
+                          setSearch("");
+                          setTimeframe("all");
+                          clearFilters();
+                        }
+                      : undefined
+                  }
+                />
+              </View>
+            )
           ) : (
-            <View>
-              <VisitorSessionsTable sessions={paged} onViewSession={openDetail} />
+            <View key="s-list">
+              {/* Table (default) and Cards render from the same `paged`
+                  slice — switching is instant and keeps the page. */}
+              {viewMode === "table" ? (
+                <VisitorSessionsTable
+                  sessions={paged}
+                  onViewSession={openDetail}
+                />
+              ) : (
+                paged.map((session) => (
+                  <SessionCard
+                    key={`${session.visitorId}-${session.sessionDate}`}
+                    session={session}
+                    onPress={() => void openDetail(session)}
+                  />
+                ))
+              )}
               <Pagination
                 page={page}
                 perPage={perPage}
@@ -877,6 +947,46 @@ const VisitorTracking = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Filters — Visitor Type · Device · Activity, applied as tapped. */}
+      <BottomSheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
+      >
+        <ScrollView
+          className="px-5 pb-6"
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+        >
+          <FilterChipGroup
+            label="Visitor Type"
+            options={IDENTITY_OPTIONS}
+            value={identity}
+            onChange={setIdentity}
+          />
+          <FilterChipGroup
+            label="Device"
+            options={DEVICE_OPTIONS}
+            value={device}
+            onChange={setDevice}
+          />
+          <FilterChipGroup
+            label="Activity"
+            options={ACTIVITY_OPTIONS}
+            value={activity}
+            onChange={setActivity}
+          />
+          <FilterSheetFooter
+            canReset={activeFilterCount > 0}
+            onReset={clearFilters}
+            onDone={() => setShowFilters(false)}
+            doneLabel={`Show ${filtered.length} ${
+              filtered.length === 1 ? "session" : "sessions"
+            }`}
+          />
+        </ScrollView>
+      </BottomSheet>
 
       {/* Session timeline */}
       <BottomSheet

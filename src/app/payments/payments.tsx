@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -9,8 +9,6 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
-  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,12 +16,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
-import {
-  FilterPill,
-  PillDivider,
-  PillSegment,
-} from "../../components/ui/FilterPill";
-import { SelectField } from "../../components/ui/FormControls";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import {
   EMPTY_PAYMENT_FILTERS,
   PaymentFiltersSheet,
@@ -36,15 +31,28 @@ import {
   PAYMENT_COLUMN_META,
   PaymentsTable,
 } from "../../components/ui/PaymentsTable";
-import { StatTile } from "../../components/ui/StatTile";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+  ToolbarIconButton,
+} from "../../components/ui/SummaryPanel";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
-import { PaymentsListSkeleton } from "../../components/ui/skeleton/PaymentsSkeleton";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
 import { mediaUrl } from "../../lib/api";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { payableRoute } from "../../lib/payments/payableRoute";
-import { getCurrentUser, getToken } from "../../lib/session";
+import { consumePaymentsStale } from "../../lib/paymentsStale";
+import { getToken } from "../../lib/session";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
-import { fetchPackages } from "../../services/packagesService";
 import {
   bulkInvoicesUrl,
   canManualRefund,
@@ -52,28 +60,29 @@ import {
   canVoid,
   deletePayment,
   fetchPayments,
-  fetchTrashedPayments,
-  forceDeletePayment,
   invoiceUrl,
   manualRefundPayment,
-  packageInvoicesUrl,
   refundPayment,
   isRefundRecord,
   isVoidRecord,
-  restorePayment,
   voidPayment,
   type PaymentRow,
 } from "../../services/paymentsService";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PRIMARY = "#0644C7";
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
+
+/** Status chips above the list — the Filters sheet's Status options. */
+const STATUS_CHIPS = [
+  { label: "All", value: "all" },
+  { label: "Completed", value: "completed" },
+  { label: "Pending", value: "pending" },
+  { label: "Failed", value: "failed" },
+  { label: "Refunded", value: "refunded" },
+  { label: "Voided", value: "voided" },
+];
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -136,14 +145,11 @@ function statusPill(status: string): { pill: string; text: string } {
   }
 }
 
-/** One payment card (shared by the main list and the deleted-payments sheet). */
+/** One payment card in the main list (Deleted Payments has its own screen). */
 function PaymentCard({ p, deleted }: { p: PaymentRow; deleted?: boolean }) {
   const pill = statusPill(p.status);
   return (
-    <View
-      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-      style={CARD_SHADOW}
-    >
+    <View className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-200 dark:border-neutral-800">
       <View className="flex-row items-start justify-between">
         <View className="flex-1 mr-2">
           <Text className="text-sm font-bold text-gray-900 dark:text-white">
@@ -219,8 +225,6 @@ function PaymentCard({ p, deleted }: { p: PaymentRow; deleted?: boolean }) {
 const Payments = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -250,10 +254,6 @@ const Payments = () => {
   // The payment-date range lives in a second sheet: this one is a native Modal,
   // and two stacked native Modals crash Android's new architecture.
   const [showDateSheet, setShowDateSheet] = useState(false);
-  const [showInvoices, setShowInvoices] = useState(false);
-  const [showDeleted, setShowDeleted] = useState(false);
-  // Header "more" menu (mirrors the Attractions header ActionMenu).
-  const [showMoreSheet, setShowMoreSheet] = useState(false);
 
   // Table selection (checkbox column) — ids, so it survives re-sorts and paging.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -345,14 +345,22 @@ const Payments = () => {
     router.setParams({ openId: undefined });
   }, [openId, loading, payments, router]);
 
-  // From the Payments hub (?sheet=invoices / ?sheet=deleted): open that sheet
-  // once, as the matching button used to.
+  // Package Invoices and Deleted Payments are their own screens now. An old
+  // ?sheet=invoices / ?sheet=deleted link still lands on the right one.
   useEffect(() => {
-    if (sheet === "invoices") setShowInvoices(true);
-    else if (sheet === "deleted") setShowDeleted(true);
+    if (sheet === "invoices") router.push("/payments/package-invoices");
+    else if (sheet === "deleted") router.push("/payments/deleted-payments");
     else return;
     router.setParams({ sheet: undefined });
   }, [sheet, router]);
+
+  // A restore / permanent delete on Deleted Payments changes this list; refetch
+  // when coming back so the restored payment shows without a manual refresh.
+  useFocusEffect(
+    useCallback(() => {
+      if (consumePaymentsStale()) void load();
+    }, [load]),
+  );
 
   // Stat cards — counts + revenue over the full fetched set.
   const stats = useMemo(() => {
@@ -722,263 +730,317 @@ const Payments = () => {
     setTimeout(() => setShowFilterSheet(true), 280);
   }, []);
 
-  // Header "more" menu entries — the module's two exports. Package Invoices and
-  // View Deleted are square shortcut cards above the list instead.
-  const moreActions: {
-    label: string;
-    icon: React.ComponentProps<typeof Feather>["name"];
-    hint: string;
-    onPress: () => void;
-  }[] = [
+  // Status chips — a visible surface over the sheet's Status filter, not a
+  // second one: both write `filters.status`. Counts are over the
+  // location-scoped list, so each chip says how many it would show.
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    payments.forEach((p) => {
+      if (activeLocationId != null && p.locationId !== activeLocationId) return;
+      counts.set(p.status, (counts.get(p.status) ?? 0) + 1);
+    });
+    return counts;
+  }, [payments, activeLocationId]);
+  const scopedCount = useMemo(
+    () =>
+      activeLocationId == null
+        ? payments.length
+        : payments.filter((p) => p.locationId === activeLocationId).length,
+    [payments, activeLocationId],
+  );
+
+  // More — the page's exports and the two sibling sheets (the hub's quick
+  // links), as module-hub shortcuts. Exports read "Exporting…" while running.
+  const moreShortcuts: HubQuickLink[] = [
     {
-      label: "Export CSV",
+      label: exporting === "csv" ? "Exporting…" : "Export CSV",
       icon: "download",
-      hint:
-        filtered.length === 0
-          ? "Nothing to export"
-          : `All ${filtered.length} filtered ${filtered.length === 1 ? "row" : "rows"} as a spreadsheet`,
       onPress: () => {
-        setShowMoreSheet(false);
-        exportCsv();
+        if (exporting == null) exportCsv();
       },
     },
     {
-      label: "Export Invoices",
-      icon: "file-text",
-      hint:
-        selectedIds.size > 0
-          ? `One PDF of the ${selectedIds.size} selected ${selectedIds.size === 1 ? "invoice" : "invoices"}`
-          : filtered.length === 0
-            ? "Nothing to export"
-            : `One PDF of all ${filtered.length} filtered ${filtered.length === 1 ? "invoice" : "invoices"}`,
+      label: exporting === "invoices" ? "Exporting…" : "Export Invoices",
+      icon: "printer",
       onPress: () => {
-        setShowMoreSheet(false);
-        exportInvoices();
+        if (exporting == null) exportInvoices();
       },
+    },
+    {
+      label: "Package Invoices",
+      icon: "file-text",
+      route: "/payments/package-invoices",
+    },
+    {
+      label: "Deleted Payments",
+      icon: "trash-2",
+      route: "/payments/deleted-payments",
     },
   ];
 
   const showInitialLoader = loading && payments.length === 0;
   const showError = !loading && !!error && payments.length === 0;
 
+  const clearSearchAndFilters = () => {
+    setSearch("");
+    setFilters(EMPTY_PAYMENT_FILTERS);
+  };
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">Manage Payments</Text>
-          {/* Page-level "More" menu (mirrors the Attractions header menu):
-              hosts Export CSV / Export Invoices, and spins in place while one
-              of them runs. Refreshing stays on pull-to-refresh. */}
-          <Pressable
-            onPress={() => setShowMoreSheet(true)}
-            disabled={exporting != null}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="More actions"
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="more-horizontal" size={20} color={headerIcon} />
-            )}
-          </Pressable>
-        </View>
-      </View>
+      {/* Header — back and title; nothing to create here. */}
+      <ModuleHeader title="Manage Payments" />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
+        }
       >
-        <View className="px-5 pt-6 gap-4">
-          {/* Skeleton (first load) */}
-          {showInitialLoader && <PaymentsListSkeleton />}
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Every payment transaction, with status, refunds and invoices at a
+            glance
+          </Text>
 
-          {/* Error */}
+          {/* Global workspace location selector (company-admin only). The
+              list is already scoped to it client-side. */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
+          </View>
+
+          {/* Error state (nothing loaded to show) */}
           {showError && (
-            <View className="items-center py-10">
-              <Feather name="alert-circle" size={36} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
+            <ListErrorBanner
+              title="Could not load payments"
+              message={error ?? ""}
+              onRetry={load}
+            />
+          )}
+
+          {/* Summary — one panel, four figures over the full fetched set. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            !showError && (
+              <SummaryPanel
+                figures={[
+                  {
+                    icon: "credit-card",
+                    title: "Total Payments",
+                    value: String(stats.total),
+                    hint: `${money(stats.totalRevenue)} total revenue`,
+                  },
+                  {
+                    icon: "check-circle",
+                    title: "Completed",
+                    value: String(stats.completedCount),
+                    hint: `${money(stats.collected)} collected`,
+                  },
+                  {
+                    icon: "clock",
+                    title: "Pending",
+                    value: String(stats.pendingCount),
+                    hint: `${money(stats.awaiting)} awaiting`,
+                  },
+                  {
+                    icon: "rotate-ccw",
+                    title: "Refunded / Voided",
+                    value: String(stats.returnedCount),
+                    hint: `${money(stats.returned)} returned`,
+                  },
+                ]}
+              />
+            )
+          )}
+
+          {/* More — exports and sibling sheets as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
+            />
+          </View>
+
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search payments"
+            />
+            <FiltersButton
+              count={activeFilterCount}
+              onPress={() => setShowFilterSheet(true)}
+            />
+          </View>
+
+          <AppliedFiltersHint
+            count={activeFilterCount}
+            onClear={() => setFilters(EMPTY_PAYMENT_FILTERS)}
+          />
+
+          {/* Status chips — same `filters.status` as the Filters sheet. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {STATUS_CHIPS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                count={
+                  showInitialLoader
+                    ? undefined
+                    : opt.value === "all"
+                      ? scopedCount
+                      : (statusCounts.get(opt.value) ?? 0)
+                }
+                selected={filters.status === opt.value}
+                onPress={() =>
+                  setFilters((f) => ({ ...f, status: opt.value }))
+                }
+              />
+            ))}
+          </ScrollView>
+
+          {/* List header — title + count, Columns (table only), layout toggle. */}
+          {!showInitialLoader && !showError && (
+            <ListHeader title="All Payments" count={filtered.length}>
+              <View className="flex-row items-center gap-2">
+                {viewMode === "table" && (
+                  <ToolbarIconButton
+                    icon="columns"
+                    label="Toggle columns"
+                    active={showColumns}
+                    onPress={() => setShowColumns(true)}
+                  />
+                )}
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </View>
+            </ListHeader>
+          )}
+
+          {/* Bulk actions — appears the moment a row is checked, as on the
+              web (BulkActionsBar): count, View Selected, Download Selected. */}
+          {viewMode === "table" && selectedIds.size > 0 && (
+            <View className="flex-row items-center gap-3 flex-wrap rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 mb-3">
+              <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                {selectedIds.size} payment{selectedIds.size === 1 ? "" : "s"}{" "}
+                selected
               </Text>
-              <Pressable onPress={load} className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]">
-                <Text className="text-sm font-semibold text-white">Retry</Text>
+              <View className="flex-1" />
+              <Pressable
+                onPress={() => exportSelectedInvoices(true)}
+                disabled={bulkBusy != null}
+                accessibilityRole="button"
+                accessibilityLabel="View selected invoices"
+                className={`flex-row items-center gap-2 h-9 px-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70 ${
+                  bulkBusy != null ? "opacity-60" : ""
+                }`}
+              >
+                {bulkBusy === "view" ? (
+                  <ActivityIndicator size="small" color={PRIMARY} />
+                ) : (
+                  <Feather name="eye" size={14} color="#374151" />
+                )}
+                <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  View Selected
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => exportSelectedInvoices(false)}
+                disabled={bulkBusy != null}
+                accessibilityRole="button"
+                accessibilityLabel="Download selected invoices"
+                className={`flex-row items-center gap-2 h-9 px-3 rounded-lg bg-[#0644C7] active:opacity-90 ${
+                  bulkBusy != null ? "opacity-60" : ""
+                }`}
+              >
+                {bulkBusy === "download" ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Feather name="printer" size={14} color="#FFFFFF" />
+                )}
+                <Text className="text-xs font-semibold text-white">
+                  Download Selected
+                </Text>
               </Pressable>
             </View>
           )}
 
-          {!showInitialLoader && !showError && (
-            <>
-              {/* Stats */}
-              <View className="flex-row flex-wrap gap-3">
-                <StatTile icon="credit-card" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Total Payments" value={String(stats.total)} hint={`${money(stats.totalRevenue)} total revenue`} />
-                <StatTile icon="check-circle" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Completed" value={String(stats.completedCount)} hint={`${money(stats.collected)} collected`} />
-                <StatTile icon="clock" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Pending" value={String(stats.pendingCount)} hint={`${money(stats.awaiting)} awaiting`} />
-                <StatTile icon="rotate-ccw" iconBg="bg-orange-50 dark:bg-orange-900/30" iconColor="#EA580C" label="Refunded / Voided" value={String(stats.returnedCount)} hint={`${money(stats.returned)} returned`} />
-              </View>
-
-              {/* Search */}
-              <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-                <Feather name="search" size={18} color="#9CA3AF" />
-                <TextInput
-                  value={search}
-                  onChangeText={setSearch}
-                  placeholder="Search payments..."
-                  placeholderTextColor="#9CA3AF"
-                  className="flex-1 text-sm text-gray-900 dark:text-white"
-                  style={{ paddingVertical: 0 }}
+          {/* List — table (default) and card layouts render from the same
+              `visible` slice, so switching is instant and never refetches.
+              Table rows are inert: everything is reached from the Actions
+              cell, so a stray tap while scrolling can't open a payment. Each
+              state is keyed so switching between them remounts cleanly. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? (
+                <AttractionsTableSkeleton />
+              ) : (
+                <AttractionsListSkeleton />
+              )}
+            </View>
+          ) : showError ? null : filtered.length === 0 ? (
+            payments.length === 0 ? (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon="credit-card"
+                  title="No payments yet"
+                  message="Payments taken on bookings, attractions, events and gift cards show up here."
                 />
-                {search.length > 0 && (
-                  <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                    <Feather name="x" size={16} color="#9CA3AF" />
-                  </Pressable>
-                )}
               </View>
-
-              {/* Filters + Columns — one toolbar pill, mirroring the web
-                  table toolbar's button pair. Every list filter lives behind
-                  the Filters sheet; Columns only applies to the table layout,
-                  so it's hidden in Cards. */}
-              <FilterPill>
-                <PillSegment
-                  label={
-                    activeFilterCount > 0
-                      ? `Filters (${activeFilterCount})`
-                      : "Filters"
-                  }
-                  active={showFilterSheet || activeFilterCount > 0}
-                  onPress={() => setShowFilterSheet(true)}
-                  renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
+            ) : (
+              <View key="s-no-match">
+                <ListEmptyState
+                  icon="search"
+                  title="No payments found"
+                  message="No payments match your search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={clearSearchAndFilters}
                 />
-                {viewMode === "table" && (
-                  <>
-                    <PillDivider />
-                    <PillSegment
-                      label="Columns"
-                      active={showColumns}
-                      onPress={() => setShowColumns(true)}
-                      renderIcon={(c) => (
-                        <Feather name="columns" size={15} color={c} />
-                      )}
-                    />
-                  </>
-                )}
-              </FilterPill>
-
-              {/* List header + layout toggle (Table default / Cards) */}
-              <View className="flex-row items-center justify-between gap-2">
-                <View className="flex-row items-center gap-2 shrink">
-                  <Text
-                    numberOfLines={1}
-                    className="shrink text-lg font-bold text-gray-900 dark:text-white"
-                  >
-                    All Payments
-                  </Text>
-                  <View className="shrink-0 bg-gray-100 dark:bg-neutral-800 px-2.5 py-0.5 rounded-full">
-                    <Text className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                      {filtered.length}
-                    </Text>
-                  </View>
-                </View>
-                <ViewToggle mode={viewMode} onChange={setViewMode} />
               </View>
-
-              {/* Bulk actions — appears the moment a row is checked, as on the
-                  web (BulkActionsBar): count, View Selected, Download Selected. */}
-              {viewMode === "table" && selectedIds.size > 0 && (
-                <View className="flex-row items-center gap-3 flex-wrap rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
-                  <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
-                    {selectedIds.size} payment{selectedIds.size === 1 ? "" : "s"}{" "}
-                    selected
-                  </Text>
-                  <View className="flex-1" />
+            )
+          ) : (
+            <View key="s-list">
+              {viewMode === "table" ? (
+                <PaymentsTable
+                  payments={visible}
+                  selectedIds={selectedIds}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAllOnPage}
+                  visibleKeys={visibleColumns}
+                  actions={tableActions}
+                  invoiceBusyId={invoiceBusyId}
+                  flat
+                />
+              ) : (
+                visible.map((p) => (
                   <Pressable
-                    onPress={() => exportSelectedInvoices(true)}
-                    disabled={bulkBusy != null}
+                    key={p.id}
+                    onPress={() => setSelectedPaymentId(p.id)}
                     accessibilityRole="button"
-                    accessibilityLabel="View selected invoices"
-                    className={`flex-row items-center gap-2 h-9 px-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:opacity-70 ${
-                      bulkBusy != null ? "opacity-60" : ""
-                    }`}
+                    accessibilityLabel={`View payment ${p.reference}`}
+                    className="mb-3"
                   >
-                    {bulkBusy === "view" ? (
-                      <ActivityIndicator size="small" color={PRIMARY} />
-                    ) : (
-                      <Feather name="eye" size={14} color="#374151" />
-                    )}
-                    <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                      View Selected
-                    </Text>
+                    <PaymentCard p={p} />
                   </Pressable>
-                  <Pressable
-                    onPress={() => exportSelectedInvoices(false)}
-                    disabled={bulkBusy != null}
-                    accessibilityRole="button"
-                    accessibilityLabel="Download selected invoices"
-                    className={`flex-row items-center gap-2 h-9 px-3 rounded-lg bg-[#0644C7] active:opacity-90 ${
-                      bulkBusy != null ? "opacity-60" : ""
-                    }`}
-                  >
-                    {bulkBusy === "download" ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Feather name="printer" size={14} color="#FFFFFF" />
-                    )}
-                    <Text className="text-xs font-semibold text-white">
-                      Download Selected
-                    </Text>
-                  </Pressable>
-                </View>
+                ))
               )}
 
-              {/* List — table (default) and card layouts render from the same
-                  `visible` slice, so switching is instant and never refetches.
-                  Table rows are inert: everything is reached from the Actions
-                  cell, so a stray tap while scrolling can't open a payment. */}
-              {visible.length > 0 &&
-                (viewMode === "table" ? (
-                  <PaymentsTable
-                    payments={visible}
-                    selectedIds={selectedIds}
-                    onToggleRow={toggleRow}
-                    onToggleAll={toggleAllOnPage}
-                    visibleKeys={visibleColumns}
-                    actions={tableActions}
-                    invoiceBusyId={invoiceBusyId}
-                  />
-                ) : (
-                  visible.map((p) => (
-                    <Pressable
-                      key={p.id}
-                      onPress={() => setSelectedPaymentId(p.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`View payment ${p.reference}`}
-                    >
-                      <PaymentCard p={p} />
-                    </Pressable>
-                  ))
-                ))}
-
-              {filtered.length === 0 && (
-                <View className="items-center py-10">
-                  <Feather name="credit-card" size={36} color="#D1D5DB" />
-                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-                    {payments.length === 0 ? "No payments yet" : "No payments match your filters"}
-                  </Text>
-                </View>
-              )}
-
-              {/* Pagination */}
               <Pagination
                 page={currentPage}
                 perPage={perPage}
@@ -989,42 +1051,10 @@ const Payments = () => {
                   setPage(1);
                 }}
               />
-            </>
+            </View>
           )}
         </View>
       </ScrollView>
-
-      {/* Header "more" menu — page-level actions (mirrors the Attractions
-          header menu's list style). */}
-      <BottomSheet
-        visible={showMoreSheet}
-        onClose={() => setShowMoreSheet(false)}
-        title="More"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {moreActions.map((action) => (
-            <Pressable
-              key={action.label}
-              onPress={action.onPress}
-              style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
-              className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
-            >
-              <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
-                <Feather name={action.icon} size={18} color="#374151" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                  {action.label}
-                </Text>
-                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                  {action.hint}
-                </Text>
-              </View>
-              <Feather name="chevron-right" size={18} color="#9CA3AF" />
-            </Pressable>
-          ))}
-        </ScrollView>
-      </BottomSheet>
 
       {/* Full filter panel — every list filter in one sheet. */}
       <PaymentFiltersSheet
@@ -1115,12 +1145,6 @@ const Payments = () => {
         payment={selectedPayment}
         visible={selectedPaymentId != null}
         onClose={() => setSelectedPaymentId(null)}
-      />
-      <PackageInvoicesSheet visible={showInvoices} onClose={() => setShowInvoices(false)} />
-      <DeletedPaymentsSheet
-        visible={showDeleted}
-        onClose={() => setShowDeleted(false)}
-        onChanged={load}
       />
     </View>
   );
@@ -1451,338 +1475,6 @@ function PaymentDetailSheet({
             </Text>
           </View>
         )}
-      </ScrollView>
-    </BottomSheet>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Package Invoices sheet                                              */
-/* ------------------------------------------------------------------ */
-
-const INVOICE_STATUSES = [
-  { label: "All Statuses", value: "all" },
-  { label: "Pending", value: "pending" },
-  { label: "Completed", value: "completed" },
-  { label: "Failed", value: "failed" },
-  { label: "Refunded", value: "refunded" },
-  { label: "Voided", value: "voided" },
-];
-
-function PackageInvoicesSheet({
-  visible,
-  onClose,
-}: {
-  visible: boolean;
-  onClose: () => void;
-}) {
-  const [packages, setPackages] = useState<{ id: number; name: string }[]>([]);
-  const [packageId, setPackageId] = useState<number | null>(null);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [status, setStatus] = useState("all");
-  const [busy, setBusy] = useState<"view" | "download" | null>(null);
-
-  useEffect(() => {
-    if (!visible) return;
-    const token = getToken();
-    if (!token) return;
-    fetchPackages({ token, userId: getCurrentUser()?.id })
-      .then((rows) => setPackages(rows.map((p) => ({ id: p.id, name: p.name }))))
-      .catch(() => setPackages([]));
-  }, [visible]);
-
-  useEffect(() => {
-    if (!visible) {
-      setPackageId(null);
-      setStartDate("");
-      setEndDate("");
-      setStatus("all");
-      setBusy(null);
-    }
-  }, [visible]);
-
-  const exportPdf = async (mode: "view" | "download") => {
-    const token = getToken();
-    if (!token || packageId == null) return;
-    setBusy(mode);
-    try {
-      const url = packageInvoicesUrl({
-        packageId,
-        startDate: startDate.trim() || undefined,
-        endDate: endDate.trim() || undefined,
-        status,
-        stream: mode === "view",
-      });
-      const FileSystem = await import("expo-file-system/legacy");
-      const Sharing = await import("expo-sharing");
-      const dest = `${FileSystem.cacheDirectory}package-invoices-${packageId}.pdf`;
-      const { status: httpStatus, uri } = await FileSystem.downloadAsync(url, dest, {
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/pdf" },
-      });
-      if (httpStatus !== 200) {
-        let message = "No invoices found for the selected criteria.";
-        try {
-          const parsed = JSON.parse(await FileSystem.readAsStringAsync(uri));
-          if (parsed?.message) message = parsed.message;
-        } catch {
-          message = "Failed to generate invoices. Please try again.";
-        }
-        Alert.alert("Invoices not generated", message);
-        return;
-      }
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          mimeType: "application/pdf",
-          dialogTitle: "Package Invoices",
-          UTI: "com.adobe.pdf",
-        });
-      } else {
-        Alert.alert("Invoices ready", `Saved to ${uri}`);
-      }
-      onClose();
-    } catch (err) {
-      Alert.alert(
-        "Export failed",
-        err instanceof Error ? err.message : "Could not export invoices.",
-      );
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <BottomSheet visible={visible} onClose={onClose} title="Package Invoices">
-      <ScrollView className="px-6 pb-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <Text className="text-sm text-gray-500 dark:text-gray-400 -mt-1 mb-4">
-          Export all invoices for a specific package.
-        </Text>
-
-        <View className="gap-4">
-          <SelectField
-            label="Select Package"
-            required
-            placeholder={packages.length === 0 ? "Loading packages…" : "-- Select a package --"}
-            value={packageId}
-            options={packages.map((p) => ({ label: p.name, value: p.id }))}
-            onSelect={(v) => setPackageId(Number(v))}
-          />
-
-          <View className="rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 gap-4">
-            <Text className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-              Optional filters
-            </Text>
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  Start Date
-                </Text>
-                <TextInput
-                  value={startDate}
-                  onChangeText={setStartDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
-                  className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white"
-                />
-              </View>
-              <View className="flex-1">
-                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  End Date
-                </Text>
-                <TextInput
-                  value={endDate}
-                  onChangeText={setEndDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
-                  className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white"
-                />
-              </View>
-            </View>
-            <SelectField
-              label="Payment Status"
-              value={status}
-              options={INVOICE_STATUSES}
-              onSelect={(v) => setStatus(String(v))}
-            />
-          </View>
-
-          <View className="flex-row gap-3 mt-1">
-            <Pressable
-              onPress={() => exportPdf("view")}
-              disabled={packageId == null || busy != null}
-              className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl border ${
-                packageId == null ? "border-gray-200 dark:border-neutral-800 opacity-50" : "border-gray-300 dark:border-neutral-700"
-              }`}
-            >
-              {busy === "view" ? (
-                <ActivityIndicator size="small" color="#6B7280" />
-              ) : (
-                <Feather name="eye" size={16} color="#6B7280" />
-              )}
-              <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                View
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => exportPdf("download")}
-              disabled={packageId == null || busy != null}
-              className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 rounded-xl ${
-                packageId == null ? "bg-gray-300 dark:bg-neutral-700" : "bg-[#0644C7]"
-              }`}
-            >
-              {busy === "download" ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Feather name="download" size={16} color="#FFFFFF" />
-              )}
-              <Text className="text-sm font-semibold text-white">Download PDF</Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
-    </BottomSheet>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Deleted payments sheet                                              */
-/* ------------------------------------------------------------------ */
-
-function DeletedPaymentsSheet({
-  visible,
-  onClose,
-  onChanged,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  const [rows, setRows] = useState<PaymentRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<number | null>(null);
-
-  const load = useCallback(async () => {
-    const token = getToken();
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const { rows: list, total: t } = await fetchTrashedPayments(token);
-      setRows(list);
-      setTotal(t);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load deleted payments");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (visible) load();
-  }, [visible, load]);
-
-  const restore = async (id: number) => {
-    const token = getToken();
-    if (!token) return;
-    setBusyId(id);
-    try {
-      await restorePayment(token, id);
-      await load();
-      onChanged();
-    } catch (err) {
-      Alert.alert("Restore failed", err instanceof Error ? err.message : "Please try again.");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const deleteForever = (id: number) => {
-    Alert.alert(
-      "Delete forever?",
-      "This permanently removes the payment. This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete Forever",
-          style: "destructive",
-          onPress: async () => {
-            const token = getToken();
-            if (!token) return;
-            setBusyId(id);
-            try {
-              await forceDeletePayment(token, id);
-              await load();
-              onChanged();
-            } catch (err) {
-              Alert.alert("Delete failed", err instanceof Error ? err.message : "Please try again.");
-            } finally {
-              setBusyId(null);
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  return (
-    <BottomSheet
-      visible={visible}
-      onClose={onClose}
-      title={`Deleted Payments${total ? ` (${total})` : ""}`}
-    >
-      <ScrollView className="px-6 pb-6" showsVerticalScrollIndicator={false}>
-        {loading && (
-          <View className="items-center py-10">
-            <ActivityIndicator size="small" color={PRIMARY} />
-          </View>
-        )}
-        {!loading && error && (
-          <Text className="text-sm text-red-600 dark:text-red-400 py-4">{error}</Text>
-        )}
-        {!loading && !error && rows.length === 0 && (
-          <View className="items-center py-10">
-            <Feather name="trash-2" size={36} color="#D1D5DB" />
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-              No deleted payments.
-            </Text>
-          </View>
-        )}
-
-        <View className="gap-3">
-          {rows.map((p) => (
-            <View key={p.id} className="gap-2">
-              <PaymentCard p={p} deleted />
-              <View className="flex-row gap-3">
-                <Pressable
-                  onPress={() => restore(p.id)}
-                  disabled={busyId === p.id}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl border border-green-200 dark:border-green-900/50"
-                >
-                  {busyId === p.id ? (
-                    <ActivityIndicator size="small" color="#16A34A" />
-                  ) : (
-                    <Feather name="rotate-ccw" size={15} color="#16A34A" />
-                  )}
-                  <Text className="text-sm font-semibold text-green-700 dark:text-green-400">
-                    Restore
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => deleteForever(p.id)}
-                  disabled={busyId === p.id}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl bg-red-500 active:opacity-90"
-                >
-                  <Feather name="trash-2" size={15} color="#FFFFFF" />
-                  <Text className="text-sm font-semibold text-white">Delete Forever</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
-        </View>
       </ScrollView>
     </BottomSheet>
   );

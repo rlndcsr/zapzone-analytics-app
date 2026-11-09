@@ -106,6 +106,8 @@ export function MembershipsTable({
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}
       rowLabel={(m) => `membership for ${m.memberName}`}
+      // Flat: the Manage Attractions table look (gray-200 border, no shadow).
+      flat
     />
   );
 }

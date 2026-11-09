@@ -6,9 +6,10 @@ import { PressableScale } from "./motion/PressableScale";
 
 import { BottomSheet } from "./BottomSheet";
 import { formatShortDate } from "./DateRangeSheet";
-import { SelectField, type SelectOption } from "./FormControls";
+import { type SelectOption } from "./FormControls";
 import { InputField } from "./InputField";
 import { CONTROL_RADIUS } from "./PrimaryButton";
+import { SheetSelect } from "./SheetSelect";
 
 /**
  * Payments filter values — the web Payments `filterDefs` keys, one for one:
@@ -150,38 +151,57 @@ export function PaymentFiltersSheet({
         keyboardShouldPersistTaps="handled"
       >
         <View className="gap-4 pt-1">
-          <SelectField
-            label="Status"
-            value={values.status}
-            options={STATUS_OPTS}
-            onSelect={(v) => set({ status: String(v) })}
-          />
-          <SelectField
-            label="Payment Method"
-            value={values.method}
-            options={METHOD_OPTS}
-            onSelect={(v) => set({ method: String(v) })}
-          />
-          <SelectField
-            label="Payment Type"
-            value={values.payableType}
-            options={TYPE_OPTS}
-            onSelect={(v) => set({ payableType: String(v) })}
-          />
-          <SelectField
-            label="Record Type"
-            value={values.recordType}
-            options={RECORD_OPTS}
-            onSelect={(v) =>
-              set({ recordType: v as PaymentFilterValues["recordType"] })
-            }
-          />
-          <SelectField
-            label="Time Period"
-            value={values.period}
-            options={PERIOD_OPTS}
-            onSelect={(v) => set({ period: v as PaymentFilterValues["period"] })}
-          />
+          {/* SheetSelect, not the inline SelectField: an inline list can't
+              grow this sheet (see the dropdowns-inside-sheets rule). */}
+          <View>
+            <FieldLabel>Status</FieldLabel>
+            <SheetSelect
+              title="Status"
+              value={values.status}
+              options={STATUS_OPTS}
+              onSelect={(v) => set({ status: String(v) })}
+            />
+          </View>
+          <View>
+            <FieldLabel>Payment Method</FieldLabel>
+            <SheetSelect
+              title="Payment Method"
+              value={values.method}
+              options={METHOD_OPTS}
+              onSelect={(v) => set({ method: String(v) })}
+            />
+          </View>
+          <View>
+            <FieldLabel>Payment Type</FieldLabel>
+            <SheetSelect
+              title="Payment Type"
+              value={values.payableType}
+              options={TYPE_OPTS}
+              onSelect={(v) => set({ payableType: String(v) })}
+            />
+          </View>
+          <View>
+            <FieldLabel>Record Type</FieldLabel>
+            <SheetSelect
+              title="Record Type"
+              value={values.recordType}
+              options={RECORD_OPTS}
+              onSelect={(v) =>
+                set({ recordType: v as PaymentFilterValues["recordType"] })
+              }
+            />
+          </View>
+          <View>
+            <FieldLabel>Time Period</FieldLabel>
+            <SheetSelect
+              title="Time Period"
+              value={values.period}
+              options={PERIOD_OPTS}
+              onSelect={(v) =>
+                set({ period: v as PaymentFilterValues["period"] })
+              }
+            />
+          </View>
 
           {/* Payment Date — the shared range calendar, since the sheet itself is
               a native Modal and cannot stack another one on top. */}

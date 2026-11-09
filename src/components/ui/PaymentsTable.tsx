@@ -410,6 +410,7 @@ export const PaymentsTable = memo(function PaymentsTable({
   visibleKeys,
   actions,
   invoiceBusyId = null,
+  flat = false,
 }: {
   payments: PaymentRow[];
   selectedIds: Set<number>;
@@ -419,6 +420,8 @@ export const PaymentsTable = memo(function PaymentsTable({
   actions: PaymentRowActions;
   /** Row whose invoice is downloading — swaps its icon for a spinner. */
   invoiceBusyId?: number | null;
+  /** The flatter Manage Attractions table look (see SelectableTable). */
+  flat?: boolean;
 }) {
   const columns = useMemo(() => {
     const byKey = buildColumns(actions, invoiceBusyId);
@@ -439,6 +442,7 @@ export const PaymentsTable = memo(function PaymentsTable({
       onToggleRow={onToggleRow}
       onToggleAll={onToggleAll}
       rowLabel={(p) => `payment ${p.reference}`}
+      flat={flat}
     />
   );
 });

@@ -4,17 +4,17 @@ import {
   type HubQuickLink,
 } from "../../components/ui/ModuleHub";
 
-/** One-tap actions: each opens its sheet on Manage Payments (?sheet=…). */
+/** One-tap actions: each opens its own screen. */
 const QUICK_LINKS: HubQuickLink[] = [
   {
     icon: "file-text",
     label: "Package Invoices",
-    route: "/payments/payments?sheet=invoices",
+    route: "/payments/package-invoices",
   },
   {
     icon: "trash-2",
     label: "Deleted Payments",
-    route: "/payments/payments?sheet=deleted",
+    route: "/payments/deleted-payments",
   },
 ];
 
@@ -34,7 +34,7 @@ const MODULES: HubModule[] = [
     description: "Every invoice for one package, as a single PDF.",
     tags: ["Invoices", "PDF"],
     accent: "#059669",
-    route: "/payments/payments?sheet=invoices",
+    route: "/payments/package-invoices",
   },
   {
     icon: "trash-2",
@@ -42,7 +42,7 @@ const MODULES: HubModule[] = [
     description: "Deleted payments and their totals, to restore or remove.",
     tags: ["Restore", "Remove"],
     accent: "#DC2626",
-    route: "/payments/payments?sheet=deleted",
+    route: "/payments/deleted-payments",
   },
 ];
 

@@ -4,23 +4,22 @@ import { ScrollView, Text, View } from "react-native";
 import type {
   PhotoReportAuditEntry,
   PhotoReportDay,
+  PhotoReportRow,
 } from "../../services/photosService";
-import { ViewToggle, type ViewMode } from "./ViewToggle";
+import type { ViewMode } from "./ViewToggle";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/*
+ * Photo Reports lists, drawn the Manage Attractions way: a bordered table
+ * (grey header row, hairline rows, horizontal scroll so no column is dropped)
+ * or one bordered card per row. The screen owns the list header, the
+ * Table/Cards toggle and the pager; these only draw the rows they are given.
+ */
 
-const HEADER_MIN_HEIGHT = 48;
+const HEADER_MIN_HEIGHT = 44;
 const ROW_MIN_HEIGHT = 56;
 
-const CELL_TEXT = "text-sm text-gray-600 dark:text-gray-300";
-const CELL_STRONG = "text-sm text-gray-900 dark:text-white";
-const CELL_NUM = "text-sm text-gray-700 dark:text-gray-200";
+const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
+const CELL_STRONG = "text-sm font-semibold text-gray-900 dark:text-white";
 
 const DASH = "—";
 
@@ -31,44 +30,15 @@ type Column<T> = {
   render: (row: T) => ReactNode;
 };
 
-/** Titled block carrying the Table/Cards switch, shared by both report tables. */
-function Section({
-  title,
-  subtitle,
-  mode,
-  onModeChange,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  mode: ViewMode;
-  onModeChange: (mode: ViewMode) => void;
-  children: ReactNode;
-}) {
-  return (
-    <View
-      className="mb-3 overflow-hidden rounded-2xl border border-gray-100 bg-white dark:border-neutral-800 dark:bg-neutral-900"
-      style={CARD_SHADOW}
-    >
-      <View className="flex-row items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-neutral-800">
-        <View className="flex-1">
-          <Text className="font-semibold text-gray-900 dark:text-white">
-            {title}
-          </Text>
-          {!!subtitle && (
-            <Text className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {subtitle}
-            </Text>
-          )}
-        </View>
-        <ViewToggle mode={mode} onChange={onModeChange} />
-      </View>
-      {children}
-    </View>
+/** "PHOTOS UPLOADED" -> "Photos uploaded", keeping acronyms upper case. */
+export const readableLabel = (label: string): string => {
+  const lower = label.toLowerCase();
+  return (lower.charAt(0).toUpperCase() + lower.slice(1)).replace(
+    /\b(qr|sms|mms|id|url)\b/gi,
+    (m) => m.toUpperCase(),
   );
-}
+};
 
-/** Fixed-width columns in a horizontal scroller, so no column is dropped. */
 function Table<T>({
   columns,
   rows,
@@ -80,41 +50,16 @@ function Table<T>({
 }) {
   const width = columns.reduce((sum, c) => sum + c.width, 0);
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      nestedScrollEnabled
-    >
-      <View style={{ width }}>
-        <View
-          className="flex-row items-center border-b border-gray-100 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/60"
-          style={{ minHeight: HEADER_MIN_HEIGHT }}
-        >
-          {columns.map((col) => (
-            <View
-              key={col.key}
-              className="justify-center px-4 py-3"
-              style={{ width: col.width }}
-            >
-              <Text
-                numberOfLines={1}
-                className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500"
-              >
-                {col.label}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {rows.map((row, i) => (
+    <View className="mb-3 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        nestedScrollEnabled
+      >
+        <View style={{ minWidth: width }}>
           <View
-            key={keyOf(row, i)}
-            className={`flex-row items-center ${
-              i < rows.length - 1
-                ? "border-b border-gray-100 dark:border-neutral-800"
-                : ""
-            }`}
-            style={{ minHeight: ROW_MIN_HEIGHT }}
+            className="flex-row items-center border-b border-gray-200 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/50"
+            style={{ minHeight: HEADER_MIN_HEIGHT }}
           >
             {columns.map((col) => (
               <View
@@ -122,26 +67,89 @@ function Table<T>({
                 className="justify-center px-4 py-3"
                 style={{ width: col.width }}
               >
-                {col.render(row)}
+                <Text
+                  numberOfLines={1}
+                  className="text-xs font-medium text-gray-500 dark:text-gray-400"
+                >
+                  {col.label}
+                </Text>
               </View>
             ))}
           </View>
-        ))}
-      </View>
-    </ScrollView>
+
+          {rows.map((row, i) => (
+            <View
+              key={keyOf(row, i)}
+              className={`flex-row items-center ${
+                i < rows.length - 1
+                  ? "border-b border-gray-100 dark:border-neutral-800"
+                  : ""
+              }`}
+              style={{ minHeight: ROW_MIN_HEIGHT }}
+            >
+              {columns.map((col) => (
+                <View
+                  key={col.key}
+                  className="justify-center px-4 py-3"
+                  style={{ width: col.width }}
+                >
+                  {col.render(row)}
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
-/** Label/value row, matching the report screen's existing record cards. */
-function CardField({ label, value }: { label: string; value: string }) {
+/** One row as a card: a bold title line, then label/value rows. */
+function RowCard({
+  title,
+  eyebrow,
+  badge,
+  fields,
+}: {
+  title: string;
+  eyebrow?: string;
+  badge?: string;
+  fields: { label: string; value: string }[];
+}) {
   return (
-    <View className="flex-row items-start justify-between gap-3 py-1">
-      <Text className="shrink text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">
-        {label}
+    <View className="mb-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+      {!!eyebrow && (
+        <Text className="mb-0.5 text-xs text-gray-500 dark:text-gray-400">
+          {eyebrow}
+        </Text>
+      )}
+      <Text className="text-base font-semibold text-gray-900 dark:text-white">
+        {title}
       </Text>
-      <Text className="flex-1 text-right text-sm text-gray-800 dark:text-gray-100">
-        {value}
-      </Text>
+      {!!badge && (
+        <View className="mt-1.5 flex-row">
+          <ActionChip action={badge} />
+        </View>
+      )}
+      {fields.length > 0 && (
+        <View className="mt-3 border-t border-gray-100 pt-2 dark:border-neutral-800">
+          {fields.map((f, i) => (
+            <View
+              key={`${f.label}-${i}`}
+              className="flex-row items-start justify-between gap-3 py-1"
+            >
+              {!!f.label && (
+                <Text className="shrink text-xs text-gray-500 dark:text-gray-400">
+                  {f.label}
+                </Text>
+              )}
+              <Text className="flex-1 text-right text-sm text-gray-900 dark:text-white">
+                {f.value}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -149,10 +157,10 @@ function CardField({ label, value }: { label: string; value: string }) {
 /** The web renders the action name as a <code> chip. */
 function ActionChip({ action }: { action: string }) {
   return (
-    <View className="self-start rounded bg-gray-100 px-1.5 py-0.5 dark:bg-neutral-800">
+    <View className="max-w-full self-start rounded-md bg-gray-100 px-2 py-1 dark:bg-neutral-800">
       <Text
         numberOfLines={1}
-        className="text-xs text-gray-700 dark:text-gray-200"
+        className="text-xs font-medium text-gray-700 dark:text-gray-300"
       >
         {action}
       </Text>
@@ -178,7 +186,7 @@ const DAY_COLUMNS: Column<PhotoReportDay>[] = [
     label: "Photos",
     width: 110,
     render: (r) => (
-      <Text numberOfLines={1} className={CELL_NUM}>
+      <Text numberOfLines={1} className={CELL_TEXT}>
         {r.photos.toLocaleString()}
       </Text>
     ),
@@ -188,52 +196,35 @@ const DAY_COLUMNS: Column<PhotoReportDay>[] = [
     label: "Downloads",
     width: 130,
     render: (r) => (
-      <Text numberOfLines={1} className={CELL_NUM}>
+      <Text numberOfLines={1} className={CELL_TEXT}>
         {r.downloads.toLocaleString()}
       </Text>
     ),
   },
 ];
 
-export const PhotoReportDaysSection = memo(function PhotoReportDaysSection({
+export const PhotoReportDaysList = memo(function PhotoReportDaysList({
   days,
   mode,
-  onModeChange,
 }: {
   days: PhotoReportDay[];
   mode: ViewMode;
-  onModeChange: (mode: ViewMode) => void;
 }) {
-  return (
-    <Section
-      title="Photos by operating day"
-      mode={mode}
-      onModeChange={onModeChange}
-    >
-      {mode === "table" ? (
-        <Table columns={DAY_COLUMNS} rows={days} keyOf={(r) => r.operatingDay} />
-      ) : (
-        <View className="gap-2 p-3">
-          {days.map((r) => (
-            <View
-              key={r.operatingDay}
-              className="rounded-xl border border-gray-100 p-3 dark:border-neutral-800"
-            >
-              <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-                {r.operatingDay}
-              </Text>
-              <View className="mt-1">
-                <CardField label="Photos" value={r.photos.toLocaleString()} />
-                <CardField
-                  label="Downloads"
-                  value={r.downloads.toLocaleString()}
-                />
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-    </Section>
+  return mode === "table" ? (
+    <Table columns={DAY_COLUMNS} rows={days} keyOf={(r) => r.operatingDay} />
+  ) : (
+    <>
+      {days.map((r) => (
+        <RowCard
+          key={r.operatingDay}
+          title={r.operatingDay}
+          fields={[
+            { label: "Photos", value: r.photos.toLocaleString() },
+            { label: "Downloads", value: r.downloads.toLocaleString() },
+          ]}
+        />
+      ))}
+    </>
   );
 });
 
@@ -281,7 +272,7 @@ const AUDIT_COLUMNS: Column<PhotoReportAuditEntry>[] = [
     label: "Detail",
     width: 280,
     render: (e) => (
-      <Text numberOfLines={3} className={CELL_TEXT}>
+      <Text numberOfLines={3} className={`${CELL_TEXT} leading-4`}>
         {e.description ?? DASH}
       </Text>
     ),
@@ -298,58 +289,97 @@ const AUDIT_COLUMNS: Column<PhotoReportAuditEntry>[] = [
   },
 ];
 
-export const PhotoReportAuditSection = memo(function PhotoReportAuditSection({
+export const PhotoReportAuditList = memo(function PhotoReportAuditList({
   entries,
   mode,
-  onModeChange,
 }: {
   entries: PhotoReportAuditEntry[];
   mode: ViewMode;
-  onModeChange: (mode: ViewMode) => void;
 }) {
-  return (
-    <Section
-      title="Audit log"
-      subtitle="Every capture, delivery, download, staff resend, hide and passcode change."
-      mode={mode}
-      onModeChange={onModeChange}
-    >
-      {entries.length === 0 ? (
-        <View className="p-8">
-          <Text className="text-center text-sm text-gray-500 dark:text-gray-400">
-            Nothing recorded in this range.
-          </Text>
-        </View>
-      ) : mode === "table" ? (
-        <Table
-          columns={AUDIT_COLUMNS}
-          rows={entries}
-          keyOf={(e) => String(e.id)}
+  return mode === "table" ? (
+    <Table
+      columns={AUDIT_COLUMNS}
+      rows={entries}
+      keyOf={(e) => String(e.id)}
+    />
+  ) : (
+    <>
+      {entries.map((e) => (
+        <RowCard
+          key={e.id}
+          eyebrow={auditWhen(e)}
+          title={e.userName ?? DASH}
+          badge={e.action}
+          fields={[
+            { label: "Detail", value: e.description ?? DASH },
+            { label: "Location", value: e.locationName ?? DASH },
+          ]}
         />
-      ) : (
-        <View className="gap-2 p-3">
-          {entries.map((e) => (
-            <View
-              key={e.id}
-              className="rounded-xl border border-gray-100 p-3 dark:border-neutral-800"
-            >
-              <Text className="text-xs text-gray-500 dark:text-gray-400">
-                {auditWhen(e)}
-              </Text>
-              <Text className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">
-                {e.userName ?? DASH}
-              </Text>
-              <View className="mt-1.5 flex-row">
-                <ActionChip action={e.action} />
-              </View>
-              <View className="mt-1">
-                <CardField label="Detail" value={e.description ?? DASH} />
-                <CardField label="Location" value={e.locationName ?? DASH} />
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-    </Section>
+      ))}
+    </>
   );
+});
+
+/* ------------------------------------- any other list-shaped report -- */
+
+/** Rough column width from the longest label/value, kept within bounds. */
+const columnWidth = (longest: number) =>
+  Math.min(280, Math.max(120, longest * 8 + 32));
+
+/**
+ * Records from a list-shaped report. Their fields are whatever the server
+ * sent, so the columns are the union of field keys in first-seen order.
+ */
+export const PhotoReportRecordsList = memo(function PhotoReportRecordsList({
+  rows,
+  mode,
+}: {
+  rows: PhotoReportRow[];
+  mode: ViewMode;
+}) {
+  if (mode === "cards") {
+    return (
+      <>
+        {rows.map((row) => {
+          const [first, ...rest] = row.fields;
+          return (
+            <RowCard
+              key={row.key}
+              title={first?.value ?? DASH}
+              fields={rest.map((f) => ({
+                label: f.label ? readableLabel(f.label) : "",
+                value: f.value,
+              }))}
+            />
+          );
+        })}
+      </>
+    );
+  }
+
+  const meta = new Map<string, { label: string; longest: number }>();
+  rows.forEach((row) =>
+    row.fields.forEach((f) => {
+      const label = f.label ? readableLabel(f.label) : "Value";
+      const prev = meta.get(f.key);
+      const longest = Math.max(prev?.longest ?? label.length, f.value.length);
+      meta.set(f.key, { label: prev?.label ?? label, longest });
+    }),
+  );
+  const columns: Column<PhotoReportRow>[] = [...meta.entries()].map(
+    ([key, { label, longest }], i) => ({
+      key,
+      label,
+      width: columnWidth(longest),
+      render: (row) => (
+        <Text
+          numberOfLines={2}
+          className={i === 0 ? CELL_STRONG : CELL_TEXT}
+        >
+          {row.fields.find((f) => f.key === key)?.value ?? DASH}
+        </Text>
+      ),
+    }),
+  );
+  return <Table columns={columns} rows={rows} keyOf={(r) => r.key} />;
 });

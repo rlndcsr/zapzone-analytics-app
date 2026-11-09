@@ -19,16 +19,34 @@ import {
   ScrollView,
   Text,
   TextInput,
-  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { FieldLabel } from "../../components/ui/FormControls";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
-import { SelectField } from "../../components/ui/FormControls";
-import { MembershipsListSkeleton } from "../../components/ui/skeleton/MembershipsSkeleton";
+import { SheetSelect } from "../../components/ui/SheetSelect";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FilterChipGroup,
+  FilterSheetFooter,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SpecCell,
+  SummaryPanel,
+} from "../../components/ui/SummaryPanel";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
 import { MembershipsTable } from "../../components/ui/MembershipsTable";
 import {
   MembershipsBulkBar,
@@ -60,6 +78,7 @@ import {
   fetchMembershipGatewayKey,
   freezeMembership,
   unfreezeMembership,
+  type MembershipRow,
   type MembershipStatus,
   type PaymentType,
 } from "../../services/membershipsService";
@@ -69,15 +88,10 @@ import {
   type CustomerHit,
 } from "../../services/customersService";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PRIMARY = "#0644C7";
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 type FeatherName = ComponentProps<typeof Feather>["name"];
 
@@ -152,45 +166,65 @@ function formatDate(iso: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
 }
 
-/** A stat card in the 2×2 overview grid. */
-function StatCard({
-  icon,
-  iconBg,
-  iconColor,
-  label,
-  value,
+/** A membership as a card — the Cards layout of the list. */
+function MembershipCard({
+  membership: m,
+  onPress,
 }: {
-  icon: FeatherName;
-  iconBg: string;
-  iconColor: string;
-  label: string;
-  value: number;
+  membership: MembershipRow;
+  onPress: () => void;
 }) {
+  const meta = STATUS_META[m.status];
   return (
-    <View
-      className="flex-1 min-w-[45%] bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-      style={CARD_SHADOW}
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`View membership for ${m.memberName}`}
+      className="mb-3 rounded-2xl border border-gray-200 bg-white p-4 active:opacity-90 dark:border-neutral-800 dark:bg-neutral-900"
     >
-      <View
-        className={`w-9 h-9 rounded-xl items-center justify-center ${iconBg}`}
-      >
-        <Feather name={icon} size={18} color={iconColor} />
+      <View className="flex-row items-start justify-between gap-2">
+        <View className="flex-1">
+          <Text
+            className="text-base font-semibold text-gray-900 dark:text-white"
+            numberOfLines={1}
+          >
+            {m.memberName}
+          </Text>
+          {!!m.memberEmail && (
+            <Text
+              className="mt-0.5 text-xs text-gray-500 dark:text-gray-400"
+              numberOfLines={1}
+            >
+              {m.memberEmail}
+            </Text>
+          )}
+        </View>
+        <View className={`rounded-full px-2.5 py-0.5 ${meta.pill}`}>
+          <Text className={`text-xs font-medium ${meta.dot}`}>{meta.label}</Text>
+        </View>
       </View>
-      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-3">
-        {label}
-      </Text>
-      <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-0.5">
-        {value}
-      </Text>
-    </View>
+
+      <View className="mt-2 flex-row items-center gap-1.5">
+        <Feather name="tag" size={13} color="#9CA3AF" />
+        <Text
+          numberOfLines={1}
+          className="shrink text-xs text-gray-500 dark:text-gray-400"
+        >
+          Plan {m.planLabel}
+        </Text>
+      </View>
+
+      <View className="mt-3 flex-row overflow-hidden rounded-xl border border-gray-200 dark:border-neutral-800">
+        <SpecCell label="Started" value={formatDate(m.startedAt)} />
+        <SpecCell label="Renews" value={formatDate(m.renewsAt)} divider />
+      </View>
+    </Pressable>
   );
 }
 
 const Memberships = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   // Scope to the global workspace location (company_admin); managers stay
   // backend-scoped. Reactive so switching location refetches server-side.
@@ -395,124 +429,176 @@ const Memberships = () => {
     }, [refetch]),
   );
 
-  const filterActive = statusFilter !== "all";
+  const activeFilterCount = statusFilter !== "all" ? 1 : 0;
   const showInitialLoader = loading && memberships.length === 0;
   const showError = !loading && !!error && memberships.length === 0;
 
+  // Per-status counts for the chips, over everything loaded for this location.
+  const statusCounts = useMemo(() => {
+    const map = new Map<MembershipStatus, number>();
+    memberships.forEach((m) => map.set(m.status, (map.get(m.status) ?? 0) + 1));
+    return map;
+  }, [memberships]);
+
+  const goAdd = useCallback(() => setShowAdd(true), []);
+  const clearSearchAndFilters = useCallback(() => {
+    setSearch("");
+    setStatusFilter("all");
+  }, []);
+
+  // Sibling Memberships screens plus the old Filters · Refresh pill's
+  // Refresh, as module-hub shortcuts.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Membership Plans", icon: "layers", route: "/memberships/membership-plan" },
+    { label: "New Plan", icon: "plus", route: "/memberships/membership-plan?create=1" },
+    {
+      label: "Membership Reports",
+      icon: "bar-chart-2",
+      route: "/memberships/membership-reports",
+    },
+    { label: "Check-in", icon: "maximize", route: "/check-in" },
+    { label: "Refresh", icon: "refresh-cw", onPress: onRefresh },
+  ];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white items-center text-lg font-bold">
-            Manage Memberships
-          </Text>
-          <View className="flex-row  gap-2"></View>
-        </View>
-      </View>
+      {/* Header — back, title, and the primary Add action. */}
+      <ModuleHeader
+        title="Manage Memberships"
+        action={{
+          onPress: goAdd,
+          label: "Add",
+          icon: "user-plus",
+          accessibilityLabel: "Add member",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="px-5">
-          <Pressable
-            onPress={() => setShowAdd(true)}
-            className="mt-6 flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90 mb-5"
-            accessibilityRole="button"
-            accessibilityLabel="Add member"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white" numberOfLines={1}>
-              Add Member
-            </Text>
-          </Pressable>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Every member subscription, with status, billing and freezes at a
+            glance
+          </Text>
 
-          {/* Stat cards */}
-          <View className="flex-row flex-wrap gap-3 mb-5">
-            <StatCard
-              icon="users"
-              iconBg="bg-blue-50 dark:bg-blue-900/30"
-              iconColor={PRIMARY}
-              label="Total"
-              value={counts.total}
+          {/* Global workspace location selector (company-admin only). */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
+          </View>
+
+          {/* Error state (nothing loaded to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load memberships"
+              message={error ?? ""}
+              onRetry={onRefresh}
             />
-            <StatCard
-              icon="check-circle"
-              iconBg="bg-green-50 dark:bg-green-900/30"
-              iconColor="#16A34A"
-              label="Active"
-              value={counts.active}
+          )}
+
+          {/* Summary — one panel, four figures. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            <SummaryPanel
+              figures={[
+                {
+                  icon: "users",
+                  title: "Total",
+                  value: String(counts.total),
+                  hint: "All memberships",
+                },
+                {
+                  icon: "check-circle",
+                  title: "Active",
+                  value: String(counts.active),
+                  hint: "Currently active",
+                },
+                {
+                  icon: "alert-triangle",
+                  title: "Past Due",
+                  value: String(counts.pastDue),
+                  hint: "Payment overdue",
+                },
+                {
+                  icon: "pause-circle",
+                  title: "Frozen",
+                  value: String(counts.frozen),
+                  hint: "Paused memberships",
+                },
+              ]}
             />
-            <StatCard
-              icon="alert-triangle"
-              iconBg="bg-orange-50 dark:bg-orange-900/30"
-              iconColor="#EA580C"
-              label="Past Due"
-              value={counts.pastDue}
-            />
-            <StatCard
-              icon="pause-circle"
-              iconBg="bg-blue-50 dark:bg-blue-900/30"
-              iconColor="#2563EB"
-              label="Frozen"
-              value={counts.frozen}
+          )}
+
+          {/* More — sibling Memberships screens as hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
             />
           </View>
 
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 mb-3">
-            <Feather name="search" size={18} color="#9CA3AF" />
-            <TextInput
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
               value={search}
               onChangeText={setSearch}
-              placeholder="Search by name, email, or QR token..."
-              placeholderTextColor="#9CA3AF"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              style={{ paddingVertical: 0 }}
+              placeholder="Search by name, email, or QR token"
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
+            <FiltersButton
+              count={activeFilterCount}
+              onPress={() => setShowFilters(true)}
+            />
           </View>
 
-          {/* Filters · Refresh pill */}
-          <FilterPill>
-            <PillSegment
-              label="Filters"
-              active={showFilters || filterActive}
-              onPress={() => setShowFilters(true)}
-              renderIcon={(c) => <Feather name="filter" size={15} color={c} />}
-            />
-            <PillSegment
-              label="Refresh"
-              onPress={onRefresh}
-              renderIcon={(c) => <Feather name="refresh-cw" size={15} color={c} />}
-            />
-          </FilterPill>
+          <AppliedFiltersHint
+            count={activeFilterCount}
+            onClear={() => setStatusFilter("all")}
+          />
 
-          {/* Count + view toggle (Table default / Cards) */}
+          {/* Status chips — a visible surface over the sheet's Status filter,
+              not a second one: both write the same `statusFilter`. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {STATUS_FILTERS.map((s) => (
+              <FilterChip
+                key={s.key}
+                label={s.label}
+                count={
+                  showInitialLoader
+                    ? undefined
+                    : s.key === "all"
+                      ? memberships.length
+                      : (statusCounts.get(s.key) ?? 0)
+                }
+                selected={statusFilter === s.key}
+                onPress={() => setStatusFilter(s.key)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* List header — title + count, layout toggle. */}
           {!showInitialLoader && !showError && (
-            <View className="flex-row items-center justify-between mt-4">
-              <Text className="shrink text-sm text-gray-500 dark:text-gray-400">
-                Showing {filtered.length} of {memberships.length} members
-              </Text>
+            <ListHeader title="All Members" count={filtered.length}>
               <ViewToggle mode={viewMode} onChange={setViewMode} />
-            </View>
+            </ListHeader>
           )}
 
           {/* Bulk actions — table view only, while a selection exists. */}
@@ -520,7 +606,7 @@ const Memberships = () => {
             !showError &&
             viewMode === "table" &&
             selectedIds.size > 0 && (
-              <View className="mt-3">
+              <View className="mb-3">
                 <MembershipsBulkBar
                   count={selectedIds.size}
                   busy={bulkBusy}
@@ -531,32 +617,42 @@ const Memberships = () => {
               </View>
             )}
 
-          {/* Loading */}
-          {showInitialLoader && (
-            <View className="mt-5">
-              <MembershipsListSkeleton />
+          {/* List / states — each keyed so switching remounts cleanly. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? (
+                <AttractionsTableSkeleton />
+              ) : (
+                <AttractionsListSkeleton />
+              )}
             </View>
-          )}
-
-          {/* Error */}
-          {showError && (
-            <View className="items-center py-14">
-              <Feather name="alert-circle" size={40} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable
-                onPress={onRefresh}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]"
-              >
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {/* List — table (default) or cards, both from the same `paged` slice */}
-          {!showInitialLoader && !showError && filtered.length > 0 && (
-            <View className="mt-3 gap-3">
+          ) : showError ? null : filtered.length === 0 ? (
+            memberships.length === 0 ? (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon="credit-card"
+                  title="No memberships yet"
+                  message="Add your first member to start a subscription."
+                  actionLabel="Add Member"
+                  actionIcon="user-plus"
+                  primary
+                  onAction={goAdd}
+                />
+              </View>
+            ) : (
+              <View key="s-no-match">
+                <ListEmptyState
+                  icon="search"
+                  title="No members found"
+                  message="No members match your search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={clearSearchAndFilters}
+                />
+              </View>
+            )
+          ) : (
+            <View key="s-list">
+              {/* Table (default) and cards render from the same `paged` slice. */}
               {viewMode === "table" ? (
                 <MembershipsTable
                   memberships={paged}
@@ -566,70 +662,13 @@ const Memberships = () => {
                   onRowPress={(m) => openDetails(m.id)}
                 />
               ) : (
-                paged.map((m) => {
-                  const meta = STATUS_META[m.status];
-                  return (
-                    <Pressable
-                      key={m.id}
-                      onPress={() => openDetails(m.id)}
-                      className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 active:opacity-90"
-                      style={CARD_SHADOW}
-                    >
-                    <View className="flex-row items-center justify-between">
-                      <View className="flex-1 mr-2">
-                        <Text
-                          className="text-base font-bold text-gray-900 dark:text-white"
-                          numberOfLines={1}
-                        >
-                          {m.memberName}
-                        </Text>
-                        {!!m.memberEmail && (
-                          <Text
-                            className="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
-                            numberOfLines={1}
-                          >
-                            {m.memberEmail}
-                          </Text>
-                        )}
-                      </View>
-                      <View className={`px-3 py-1 rounded-full ${meta.pill}`}>
-                        <Text className={`text-xs font-semibold ${meta.dot}`}>
-                          {meta.label}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View className="flex-row items-center justify-between mt-3">
-                      <View className="flex-row items-center gap-1.5">
-                        <Feather name="tag" size={13} color="#9CA3AF" />
-                        <Text className="text-xs text-gray-500 dark:text-gray-400">
-                          Plan {m.planLabel}
-                        </Text>
-                      </View>
-                      <Feather name="chevron-right" size={18} color="#9CA3AF" />
-                    </View>
-
-                    <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800">
-                      <View>
-                        <Text className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          Started
-                        </Text>
-                        <Text className="text-sm text-gray-700 dark:text-gray-200 mt-0.5">
-                          {formatDate(m.startedAt)}
-                        </Text>
-                      </View>
-                      <View className="items-end">
-                        <Text className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          Renews
-                        </Text>
-                        <Text className="text-sm text-gray-700 dark:text-gray-200 mt-0.5">
-                          {formatDate(m.renewsAt)}
-                        </Text>
-                      </View>
-                    </View>
-                    </Pressable>
-                  );
-                })
+                paged.map((m) => (
+                  <MembershipCard
+                    key={m.id}
+                    membership={m}
+                    onPress={() => openDetails(m.id)}
+                  />
+                ))
               )}
               <Pagination
                 page={page}
@@ -638,18 +677,6 @@ const Memberships = () => {
                 onPageChange={setPage}
                 onPerPageChange={setPerPage}
               />
-            </View>
-          )}
-
-          {/* Empty */}
-          {!showInitialLoader && !showError && filtered.length === 0 && (
-            <View className="items-center py-14">
-              <Feather name="credit-card" size={40} color="#D1D5DB" />
-              <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3 text-center">
-                {memberships.length === 0
-                  ? "No memberships yet"
-                  : "No members match your filters"}
-              </Text>
             </View>
           )}
         </View>
@@ -661,6 +688,7 @@ const Memberships = () => {
         onClose={() => setShowFilters(false)}
         statusFilter={statusFilter}
         onStatus={setStatusFilter}
+        resultCount={filtered.length}
       />
 
       {/* Add Member sheet */}
@@ -688,61 +716,29 @@ function FiltersSheet({
   onClose,
   statusFilter,
   onStatus,
+  resultCount,
 }: {
   visible: boolean;
   onClose: () => void;
   statusFilter: MembershipStatus | "all";
   onStatus: (s: MembershipStatus | "all") => void;
+  resultCount: number;
 }) {
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Filters">
-      <ScrollView className="px-6 pb-6" showsVerticalScrollIndicator={false}>
-        <Text className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-          Status
-        </Text>
-        <View className="flex-row flex-wrap gap-2">
-          {STATUS_FILTERS.map((s) => {
-            const active = statusFilter === s.key;
-            return (
-              <Pressable
-                key={s.key}
-                onPress={() => onStatus(s.key)}
-                className={`px-4 py-2 rounded-lg border ${
-                  active
-                    ? "bg-[#0644C7] border-[#0644C7]"
-                    : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-800"
-                }`}
-              >
-                <Text
-                  className={`text-sm font-medium ${
-                    active ? "text-white" : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {s.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View className="flex-row gap-3 mt-8">
-          <Pressable
-            onPress={() => {
-              onStatus("all");
-            }}
-            className="flex-1 items-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-          >
-            <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Clear
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={onClose}
-            className="flex-1 items-center py-3.5 rounded-xl bg-[#0644C7]"
-          >
-            <Text className="text-sm font-semibold text-white">Done</Text>
-          </Pressable>
-        </View>
+      <ScrollView className="px-4 pb-8" showsVerticalScrollIndicator={false}>
+        <FilterChipGroup
+          label="Status"
+          options={STATUS_FILTERS.map((s) => ({ label: s.label, value: s.key }))}
+          value={statusFilter}
+          onChange={onStatus}
+        />
+        <FilterSheetFooter
+          canReset={statusFilter !== "all"}
+          onReset={() => onStatus("all")}
+          onDone={onClose}
+          doneLabel={`Show ${resultCount} ${resultCount === 1 ? "member" : "members"}`}
+        />
       </ScrollView>
     </BottomSheet>
   );
@@ -1052,14 +1048,15 @@ function AddMemberSheet({
           Leave blank to use the account holder&apos;s name.
         </Text>
 
-        {/* Plan */}
+        {/* Plan — SheetSelect, since an inline list can't grow this sheet. */}
         <View className="mt-5">
-          <SelectField
-            label="Plan"
-            required
+          <FieldLabel required>Plan</FieldLabel>
+          <SheetSelect
+            title="Plan"
             placeholder={
               plans.length === 0 ? "No active plans available" : "Select..."
             }
+            disabled={plans.length === 0}
             value={planId}
             options={plans.map((p) => ({
               label: `${p.name} — ${p.price <= 0 ? "Free" : `$${p.price.toFixed(2)}`}`,
@@ -1071,8 +1068,9 @@ function AddMemberSheet({
 
         {/* Home location */}
         <View className="mt-5">
-          <SelectField
-            label="Home Location"
+          <FieldLabel>Home Location</FieldLabel>
+          <SheetSelect
+            title="Home Location"
             value={locationId ?? "any"}
             options={[
               { label: "Any", value: "any" },

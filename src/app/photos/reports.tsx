@@ -1,8 +1,13 @@
 import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
   Pressable,
   RefreshControl,
   ScrollView,
@@ -15,44 +20,47 @@ import {
   DateRangeSheet,
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
-import {
-  FilterOptionSheet,
-  type FilterOption,
-} from "../../components/ui/FilterOptionSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
 import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { ModuleHeader } from "../../components/ui/ModuleHeader";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import { Pagination } from "../../components/ui/Pagination";
 import {
-  PhotoReportAuditSection,
-  PhotoReportDaysSection,
+  PhotoReportAuditList,
+  PhotoReportDaysList,
+  PhotoReportRecordsList,
+  readableLabel,
 } from "../../components/ui/PhotoReportTables";
-import { Toast, type ToastType } from "../../components/ui/Toast";
-import { type ViewMode } from "../../components/ui/ViewToggle";
 import {
-  SkeletonBlock,
-  usePulse,
-} from "../../components/ui/skeleton/SkeletonBlock";
+  FilterChip,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+  type SummaryFigure,
+} from "../../components/ui/SummaryPanel";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
+import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
 import { toKey } from "../../lib/date/calendar";
-import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchPhotoReport,
   type PhotoReport,
-  type PhotoReportRow,
+  type PhotoReportMetric,
   type PhotoReportSection,
 } from "../../services/photosService";
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
-const REPORT_OPTIONS: FilterOption[] = [
+const REPORT_OPTIONS = [
   { label: "Photo activity", value: "activity" },
   { label: "Delivery", value: "delivery" },
   { label: "QR codes", value: "qr" },
@@ -76,57 +84,58 @@ const defaultRange = (): { from: string; to: string } => {
 const errorMessage = (e: unknown, fallback: string): string =>
   e instanceof Error && e.message ? e.message : fallback;
 
-const TILE_MIN_HEIGHT = 112;
-const TILE_LABEL_LINES = 3;
+/** Short enough for a summary cell's big figure; longer text gets a row. */
+const isFigure = (value: string) => value.length <= 12;
 
-/** Plain label-over-value tile, as the web renders it — no icon, no hint. */
-function MetricTile({ label, value }: { label: string; value: string }) {
-  const isFigure = value.length <= 12;
-  return (
-    <View className={`${isFigure ? "w-1/2" : "w-full"} p-1.5`}>
-      <View
-        className="flex-1 justify-between rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
-        style={[CARD_SHADOW, { minHeight: TILE_MIN_HEIGHT }]}
-      >
-        <Text
-          className="text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500"
-          numberOfLines={TILE_LABEL_LINES}
-        >
-          {label}
-        </Text>
-        <Text
-          className={`mt-1.5 font-bold text-gray-900 dark:text-white ${
-            isFigure ? "text-2xl" : "text-sm"
-          }`}
-          numberOfLines={isFigure ? 1 : 3}
-          adjustsFontSizeToFit={isFigure}
-        >
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
+/** First match wins, so the more specific words come first. */
+const METRIC_ICONS: [RegExp, FeatherIconName][] = [
+  [/fail|error|bounce|reject/, "alert-triangle"],
+  [/download/, "download"],
+  [/email/, "mail"],
+  [/sms|text/, "message-square"],
+  [/qr|scan/, "maximize"],
+  [/kiosk/, "tablet"],
+  [/slideshow|screen|display/, "monitor"],
+  [/overlay|frame/, "layers"],
+  [/deliver|sent|send/, "send"],
+  [/hidden|hide/, "eye-off"],
+  [/view|open/, "eye"],
+  [/session|capture|camera/, "camera"],
+  [/photo|image|upload/, "image"],
+  [/rate|percent/, "percent"],
+  [/day|date/, "calendar"],
+  [/user|staff|customer|guest/, "users"],
+];
 
-/** A record from a list-shaped report, as a label/value card. */
-function RecordCard({ row }: { row: PhotoReportRow }) {
+const metricIcon = (key: string): FeatherIconName =>
+  METRIC_ICONS.find(([re]) => re.test(key.toLowerCase()))?.[1] ?? "bar-chart-2";
+
+const toFigure = (m: PhotoReportMetric, hint: string): SummaryFigure => ({
+  icon: metricIcon(m.key),
+  title: readableLabel(m.label),
+  value: m.value,
+  hint,
+});
+
+/** Text values too long for a summary cell, as one bordered list. */
+function DetailsCard({ metrics }: { metrics: PhotoReportMetric[] }) {
   return (
-    <View
-      className="mb-2 rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
-      style={CARD_SHADOW}
-    >
-      {row.fields.map((field) => (
+    <View className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+      {metrics.map((m, i) => (
         <View
-          key={field.key}
-          className="flex-row items-start justify-between gap-3 py-1"
+          key={m.key}
+          className={`flex-row items-start justify-between gap-3 px-4 py-3 ${
+            i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""
+          }`}
         >
-          {!!field.label && (
-            <Text className="shrink text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">
-              {field.label}
+          <View className="shrink flex-row items-center gap-1.5">
+            <Feather name={metricIcon(m.key)} size={13} color="#9CA3AF" />
+            <Text className="shrink text-xs font-medium text-gray-500 dark:text-gray-400">
+              {readableLabel(m.label)}
             </Text>
-          )}
-          <Text className="flex-1 text-right text-sm text-gray-800 dark:text-gray-100">
-            {field.value}
+          </View>
+          <Text className="flex-1 text-right text-sm text-gray-900 dark:text-white">
+            {m.value}
           </Text>
         </View>
       ))}
@@ -134,53 +143,82 @@ function RecordCard({ row }: { row: PhotoReportRow }) {
   );
 }
 
-/** One block of a report: its figures as tiles, then its records as cards. */
-function ReportSection({ section }: { section: PhotoReportSection }) {
+/** A block of figures: summary panel for the short ones, rows for the rest. */
+function FiguresBlock({
+  metrics,
+  hint,
+}: {
+  metrics: PhotoReportMetric[];
+  hint: string;
+}) {
+  const figures = metrics.filter((m) => isFigure(m.value));
+  const details = metrics.filter((m) => !isFigure(m.value));
   return (
-    <View className="mb-2">
-      {!!section.label && (
-        <Text className="mb-2 mt-3 text-base font-bold text-gray-900 dark:text-white">
-          {section.label}
+    <View className="gap-3">
+      {figures.length > 0 && (
+        <SummaryPanel figures={figures.map((m) => toFigure(m, hint))} />
+      )}
+      {details.length > 0 && <DetailsCard metrics={details} />}
+    </View>
+  );
+}
+
+/**
+ * A list in the Manage Attractions layout: title + count with the Table/Cards
+ * toggle, the rows, then the pager. Each list pages on its own.
+ */
+function PagedList<T>({
+  title,
+  subtitle,
+  items,
+  mode,
+  onModeChange,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  items: T[];
+  mode: ViewMode;
+  onModeChange: (mode: ViewMode) => void;
+  children: (paged: T[]) => ReactNode;
+}) {
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(5);
+
+  // Back to the first page whenever the rows or page size change.
+  useEffect(() => {
+    setPage(1);
+  }, [items, perPage]);
+
+  const paged = useMemo(
+    () => items.slice((page - 1) * perPage, page * perPage),
+    [items, page, perPage],
+  );
+
+  return (
+    <View className="mb-4">
+      <ListHeader title={title} count={items.length}>
+        <ViewToggle mode={mode} onChange={onModeChange} />
+      </ListHeader>
+      {!!subtitle && (
+        <Text className="-mt-1.5 mb-3 text-xs text-gray-500 dark:text-gray-400">
+          {subtitle}
         </Text>
       )}
-
-      {section.metrics.length > 0 && (
-        <View className="-mx-1.5 flex-row flex-wrap">
-          {section.metrics.map((metric) => (
-            <MetricTile
-              key={metric.key}
-              label={metric.label}
-              value={metric.value}
-            />
-          ))}
-        </View>
-      )}
-
-      {section.rows.map((row) => (
-        <RecordCard key={`${section.key}-${row.key}`} row={row} />
-      ))}
+      {children(paged)}
+      <Pagination
+        page={page}
+        perPage={perPage}
+        total={items.length}
+        onPageChange={setPage}
+        onPerPageChange={setPerPage}
+      />
     </View>
   );
 }
 
-function ReportSkeleton() {
-  const pulse = usePulse();
-  return (
-    <View className="-mx-1.5 flex-row flex-wrap">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <View key={i} className="w-1/2 p-1.5">
-          <View
-            className="justify-between rounded-2xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
-            style={{ minHeight: TILE_MIN_HEIGHT }}
-          >
-            <SkeletonBlock pulse={pulse} className="h-3 w-2/3" />
-            <SkeletonBlock pulse={pulse} className="h-7 w-1/3" />
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
+const hasContent = (s: PhotoReportSection) =>
+  s.metrics.length > 0 || s.rows.length > 0;
 
 export default function PhotoReportsScreen() {
   const insets = useSafeAreaInsets();
@@ -199,54 +237,52 @@ export default function PhotoReportsScreen() {
     user?.role === "company_admin" ||
     user?.role === "admin" ||
     user?.role === "location_manager";
+  // Same gate as the Photos hub's manager-only modules (Photo Settings).
+  const canManageSubModules =
+    user?.role === "company_admin" || user?.role === "location_manager";
 
-  const [report, setReport] = useState<string>(
-    REPORT_OPTIONS[0].value as string,
-  );
+  const [report, setReport] = useState<string>(REPORT_OPTIONS[0].value);
   const [range, setRange] = useState(defaultRange);
-  const [sheet, setSheet] = useState<null | "report" | "date">(null);
-  const [daysMode, setDaysMode] = useState<ViewMode>("table");
-  const [auditMode, setAuditMode] = useState<ViewMode>("table");
+  const [dateSheetOpen, setDateSheetOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   const [data, setData] = useState<PhotoReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [toast, showToast] = useTransientAlert<{
-    message: string;
-    type: ToastType;
-  }>(4000);
+
+  // Bumped per run, so switching report/dates/location quickly shows the last
+  // choice's figures, not whichever reply happened to arrive last.
+  const requestIdRef = useRef(0);
 
   const run = useCallback(async () => {
     const token = getToken();
     if (!token || !canManage) return;
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      setData(
-        await fetchPhotoReport(token, {
-          report,
-          locationId: effectiveLocationId,
-          from: range.from,
-          to: range.to,
-        }),
-      );
+      const next = await fetchPhotoReport(token, {
+        report,
+        locationId: effectiveLocationId,
+        from: range.from,
+        to: range.to,
+      });
+      if (isCurrent()) setData(next);
     } catch (e) {
-      // Also shown in the body — a toast fades, and a failed run must not read
-      // as a report with no figures in it.
-      const message = errorMessage(e, "Could not run that report.");
-      setError(message);
-      showToast({ message, type: "error" });
+      if (isCurrent()) {
+        setError(errorMessage(e, "Could not run that report."));
+      }
     } finally {
-      setLoading(false);
-      setLoaded(true);
+      if (isCurrent()) setLoading(false);
     }
-  }, [canManage, effectiveLocationId, range.from, range.to, report, showToast]);
+  }, [canManage, effectiveLocationId, range.from, range.to, report]);
 
+  // Runs on open and whenever the report, date range or location changes.
   useEffect(() => {
     void run();
-  }, [canManage, effectiveLocationId, report]);
+  }, [run]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -256,18 +292,6 @@ export default function PhotoReportsScreen() {
       setRefreshing(false);
     }
   }, [run]);
-
-  const sections = data?.sections ?? [];
-  const byDay = data?.byDay ?? [];
-  const auditEntries = data?.auditEntries ?? [];
-  // The web shows the audit table (with its own empty state) for that report.
-  const showAudit = report === "audit" && loaded && !error;
-  const showEmpty =
-    loaded &&
-    !error &&
-    !showAudit &&
-    sections.length === 0 &&
-    byDay.length === 0;
 
   const reportLabel =
     REPORT_OPTIONS.find((o) => o.value === report)?.label ??
@@ -284,195 +308,278 @@ export default function PhotoReportsScreen() {
       ? `Date filters are read in ${data.timezone} time.`
       : "Date filters are read in this location's time zone.");
 
-  const header = (
-    <View className="w-full border-b border-gray-100 bg-white px-5 pb-5 pt-12 dark:border-neutral-800 dark:bg-neutral-900">
-      <View className="flex-row items-center justify-between">
-        <Pressable
-          onPress={() => router.back()}
-          className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Feather name="chevron-left" size={20} color="#111827" />
-        </Pressable>
-        <Text className="text-lg font-bold text-gray-900 dark:text-white">
-          Photo Reports
-        </Text>
-        <Pressable
-          onPress={() => void run()}
-          disabled={loading || !canManage}
-          className="rounded-full bg-gray-100 p-2 dark:bg-neutral-800"
-          accessibilityRole="button"
-          accessibilityLabel="Refresh"
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color={PRIMARY} />
-          ) : (
-            <Feather name="refresh-cw" size={18} color="#111827" />
-          )}
-        </Pressable>
-      </View>
-    </View>
-  );
+  // Pull-to-refresh keeps the report on screen; any other run shows skeletons,
+  // so a new report's name never sits over the previous report's figures.
+  const busy = loading && !refreshing;
+  const showReport = !!data && !error && !busy;
+
+  const sections = data?.sections ?? [];
+  const root = sections.find((s) => s.label === null) ?? null;
+  const nested = sections.filter((s) => s.label !== null && hasContent(s));
+  const byDay = data?.byDay ?? [];
+  const auditEntries = data?.auditEntries ?? [];
+  // The web shows the audit table (with its own empty state) for that report.
+  const isAudit = report === "audit";
+  const showEmpty =
+    showReport &&
+    !isAudit &&
+    !(root && hasContent(root)) &&
+    nested.length === 0 &&
+    byDay.length === 0;
+
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Photo Library", icon: "image", route: "/photos/library" },
+    { label: "Delivery Log", icon: "send", route: "/photos/delivery-log" },
+    {
+      label: "Slideshow Queue",
+      icon: "monitor",
+      route: "/photos/slideshow-queue",
+    },
+    ...(canManageSubModules
+      ? [
+          {
+            label: "Photo Settings",
+            icon: "settings",
+            route: "/photos/settings",
+          } as HubQuickLink,
+        ]
+      : []),
+  ];
 
   if (!canManage) {
     return (
       <View className="flex-1 bg-gray-50 dark:bg-black">
-        {header}
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <View className="items-center rounded-2xl border border-gray-100 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
-            <Feather name="lock" size={34} color="#9CA3AF" />
-            <Text className="mt-3 text-lg font-bold text-gray-900 dark:text-white">
-              Reports are managed by a manager
-            </Text>
-            <Text className="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">
-              Your role does not have access to the photo reports. Please ask a
-              manager if you need these figures.
-            </Text>
-          </View>
-        </ScrollView>
+        <ModuleHeader title="Photo Reports" />
+        <View className="mt-4 px-4">
+          <ListEmptyState
+            icon="lock"
+            title="Reports are managed by a manager"
+            message="Your role does not have access to the photo reports. Please ask a manager if you need these figures."
+          />
+        </View>
       </View>
     );
   }
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {header}
+      {/* Header — back, title, and Run (the web's Run button). */}
+      <ModuleHeader
+        title="Photo Reports"
+        action={{
+          onPress: () => void run(),
+          label: "Run",
+          icon: "refresh-cw",
+          accessibilityLabel: "Run the report",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="mt-5 px-5">
-          <Text className="mb-5 text-sm text-gray-500 dark:text-gray-400">
+        <View className="mt-4 px-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400">
+            Capture, delivery, QR, kiosk and slideshow stats
+          </Text>
+          <Text className="mb-4 mt-0.5 text-xs text-gray-400 dark:text-gray-500">
             {timezoneNote}
           </Text>
 
+          {/* Global workspace location selector (company-admin only). */}
           <View className="mb-4">
             <LocationWorkspaceSelector />
           </View>
 
-          {!!error && (
-            <View className="mb-5 rounded-2xl border border-red-100 bg-red-50 p-5 dark:border-red-900/40 dark:bg-red-900/20">
-              <Text className="font-semibold text-red-600 dark:text-red-400">
-                Something went wrong
-              </Text>
-              <Text className="mt-1 text-sm text-red-500 dark:text-red-300">
-                {error}
-              </Text>
-            </View>
+          {!!error && !busy && (
+            <ListErrorBanner
+              title={`Could not run ${reportLabel}`}
+              message={error}
+              onRetry={() => void run()}
+            />
           )}
 
-          {/* Report · date range — the web's select and its two date inputs. */}
-          <FilterPill>
-            <PillSegment
-              label={reportLabel}
-              active={sheet === "report"}
-              onPress={() => setSheet("report")}
-              renderIcon={(c) => (
-                <Feather name="bar-chart-2" size={15} color={c} />
-              )}
-            />
-            <PillSegment
-              label={dateLabel}
-              active={sheet === "date"}
-              onPress={() => setSheet("date")}
-              renderIcon={(c) => (
-                <Feather name="calendar" size={15} color={c} />
-              )}
-            />
-          </FilterPill>
+          {/* Summary — the report's top-level figures in one panel. */}
+          {busy ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            showReport &&
+            root &&
+            root.metrics.length > 0 && (
+              <FiguresBlock metrics={root.metrics} hint={dateLabel} />
+            )
+          )}
 
-          {/* Run — the report is fetched when asked for, as on the web. */}
-          <Pressable
-            onPress={() => void run()}
-            disabled={loading}
-            className={`mb-5 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-[#0644C7] active:opacity-90 ${
-              loading ? "opacity-60" : ""
-            }`}
-            accessibilityRole="button"
-            accessibilityLabel="Run the report"
+          {/* More — the other Photos screens as module-hub shortcuts. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
+            />
+          </View>
+
+          {/* Date range — the web's two date inputs. */}
+          <View className="mb-3 mt-4 flex-row items-center gap-2">
+            <Pressable
+              onPress={() => setDateSheetOpen(true)}
+              className="h-11 flex-1 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 active:opacity-70 dark:border-neutral-800 dark:bg-neutral-900"
+              accessibilityRole="button"
+              accessibilityLabel={`Date range, ${dateLabel}`}
+            >
+              <Feather name="calendar" size={16} color="#9CA3AF" />
+              <Text
+                numberOfLines={1}
+                className="flex-1 text-sm text-gray-900 dark:text-white"
+              >
+                {dateLabel}
+              </Text>
+              <Feather name="chevron-down" size={16} color="#9CA3AF" />
+            </Pressable>
+          </View>
+
+          {/* Report chips — the web's report select. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="-mx-1 mb-4 px-1"
           >
-            {loading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Feather name="refresh-cw" size={16} color="#FFFFFF" />
-            )}
-            <Text className="text-sm font-semibold text-white">Run</Text>
-          </Pressable>
+            {REPORT_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.label}
+                selected={report === opt.value}
+                onPress={() => setReport(opt.value)}
+              />
+            ))}
+          </ScrollView>
 
-          {!loaded && loading && <ReportSkeleton />}
+          {busy &&
+            (viewMode === "table" ? (
+              <AttractionsTableSkeleton />
+            ) : (
+              <AttractionsListSkeleton />
+            ))}
 
           {showEmpty && (
-            <View className="items-center rounded-2xl border border-gray-100 bg-white p-8 dark:border-neutral-800 dark:bg-neutral-900">
-              <Feather name="bar-chart-2" size={34} color="#D1D5DB" />
-              <Text className="mt-3 font-bold text-gray-900 dark:text-white">
-                Nothing to report
-              </Text>
-              <Text className="mt-1 text-center text-sm text-gray-500 dark:text-gray-400">
-                {reportLabel} has nothing for this range
-                {isCompanyAdmin && activeLocation.id !== "all"
+            <ListEmptyState
+              icon="bar-chart-2"
+              title="Nothing to report"
+              message={`${reportLabel} has nothing for this range${
+                isCompanyAdmin && activeLocation.id !== "all"
                   ? ` at ${activeLocation.name}`
-                  : ""}
-                .
-              </Text>
-            </View>
-          )}
-
-          {/* Everything the report returned, in the server's own order. */}
-          {sections.map((section) => (
-            <ReportSection key={section.key} section={section} />
-          ))}
-
-          {byDay.length > 0 && (
-            <PhotoReportDaysSection
-              days={byDay}
-              mode={daysMode}
-              onModeChange={setDaysMode}
+                  : ""
+              }.`}
+              actionLabel="Change dates"
+              actionIcon="calendar"
+              onAction={() => setDateSheetOpen(true)}
             />
           )}
 
-          {showAudit && (
-            <PhotoReportAuditSection
-              entries={auditEntries}
-              mode={auditMode}
-              onModeChange={setAuditMode}
-            />
+          {showReport && (
+            <>
+              {/* Top-level records, if the report returned any. */}
+              {root && root.rows.length > 0 && (
+                <PagedList
+                  title="Records"
+                  items={root.rows}
+                  mode={viewMode}
+                  onModeChange={setViewMode}
+                >
+                  {(paged) => (
+                    <PhotoReportRecordsList rows={paged} mode={viewMode} />
+                  )}
+                </PagedList>
+              )}
+
+              {/* Every nested block, in the server's own order. */}
+              {nested.map((section) => (
+                <View key={section.key}>
+                  {section.metrics.length > 0 && (
+                    <View className="mb-4">
+                      <Text className="mb-3 text-base font-semibold text-gray-900 dark:text-white">
+                        {readableLabel(section.label ?? "")}
+                      </Text>
+                      <FiguresBlock metrics={section.metrics} hint={dateLabel} />
+                    </View>
+                  )}
+                  {section.rows.length > 0 && (
+                    <PagedList
+                      title={readableLabel(section.label ?? "Records")}
+                      items={section.rows}
+                      mode={viewMode}
+                      onModeChange={setViewMode}
+                    >
+                      {(paged) => (
+                        <PhotoReportRecordsList rows={paged} mode={viewMode} />
+                      )}
+                    </PagedList>
+                  )}
+                </View>
+              ))}
+
+              {byDay.length > 0 && (
+                <PagedList
+                  title="Photos by operating day"
+                  items={byDay}
+                  mode={viewMode}
+                  onModeChange={setViewMode}
+                >
+                  {(paged) => (
+                    <PhotoReportDaysList days={paged} mode={viewMode} />
+                  )}
+                </PagedList>
+              )}
+
+              {isAudit &&
+                (auditEntries.length > 0 ? (
+                  <PagedList
+                    title="Audit log"
+                    subtitle="Every capture, delivery, download, staff resend, hide and passcode change."
+                    items={auditEntries}
+                    mode={viewMode}
+                    onModeChange={setViewMode}
+                  >
+                    {(paged) => (
+                      <PhotoReportAuditList entries={paged} mode={viewMode} />
+                    )}
+                  </PagedList>
+                ) : (
+                  <ListEmptyState
+                    icon="file-text"
+                    title="No audit entries"
+                    message="Nothing recorded in this range."
+                    actionLabel="Change dates"
+                    actionIcon="calendar"
+                    onAction={() => setDateSheetOpen(true)}
+                  />
+                ))}
+            </>
           )}
         </View>
       </ScrollView>
 
-      <FilterOptionSheet
-        visible={sheet === "report"}
-        title="Report"
-        value={report}
-        options={REPORT_OPTIONS}
-        onSelect={(v) => setReport(String(v))}
-        onClose={() => setSheet(null)}
-      />
-
       <DateRangeSheet
-        visible={sheet === "date"}
+        visible={dateSheetOpen}
         initialStart={range.from}
         initialEnd={range.to}
-        onClose={() => setSheet(null)}
+        onClose={() => setDateSheetOpen(false)}
         onApply={(from, to) => {
           setRange({ from, to });
-          setSheet(null);
+          setDateSheetOpen(false);
         }}
       />
-
-      {!!toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => showToast(null)}
-        />
-      )}
     </View>
   );
 }

@@ -1,29 +1,36 @@
-import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useColorScheme } from "nativewind";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BottomSheet } from "../../components/ui/BottomSheet";
+import { ConcernCard } from "../../components/ui/ConcernCard";
 import {
   ConcernsTable,
   STATUS_META,
   describeWanted,
   formatReceived,
 } from "../../components/ui/ConcernsTable";
+import { LocationWorkspaceSelector } from "../../components/ui/LocationWorkspaceSelector";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
-import { SheetSelect, type SheetSelectOption } from "../../components/ui/SheetSelect";
-import { StatTile } from "../../components/ui/StatTile";
-import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FilterChipGroup,
+  FilterSheetFooter,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+} from "../../components/ui/SummaryPanel";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
 import {
   LEAD_FILTER_OPTIONS,
   bookedLabel,
@@ -44,13 +51,8 @@ import {
 
 const PRIMARY = "#0644C7";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 /** The web page's "Received" timeframe buttons, in the same order. */
 type Timeframe = "all" | "today" | "yesterday" | "last7" | "last30" | "month";
@@ -64,14 +66,15 @@ const TIMEFRAMES: { label: string; value: Timeframe }[] = [
   { label: "This month", value: "month" },
 ];
 
-const STATUS_OPTIONS: SheetSelectOption[] = [
+/** The Status chips — the web's status select, as the screen's chip row. */
+const STATUS_OPTIONS: { label: string; value: ConcernStatus | "all" }[] = [
   { label: "All statuses", value: "all" },
   { label: "Needs a call", value: "new" },
   { label: "Contacted", value: "contacted" },
   { label: "Resolved", value: "resolved" },
 ];
 
-const KIND_OPTIONS: SheetSelectOption[] = [
+const KIND_OPTIONS: { label: string; value: string }[] = [
   { label: "Everything", value: "all" },
   { label: "Schedule help", value: "schedule_help" },
   { label: "Call to book", value: "call_to_book" },
@@ -119,8 +122,6 @@ function timeframeWindow(tf: Timeframe): { from: string; to: string } | null {
  */
 const CustomerConcerns = () => {
   const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
-  const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
 
   // Scoped to the global workspace location, like every other list screen.
   const activeLocation = useActiveLocation();
@@ -143,7 +144,9 @@ const CustomerConcerns = () => {
   const [kind, setKind] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(5);
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [showFilters, setShowFilters] = useState(false);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -193,7 +196,9 @@ const CustomerConcerns = () => {
 
   // Timeframe · lead · status · kind · search, all client-side over the loaded
   // set — the same predicates the web table applies.
-  const filtered = useMemo(() => {
+  // Everything but Status first, so the Status chips can count each status
+  // within the other filters.
+  const beforeStatus = useMemo(() => {
     const window = timeframeWindow(timeframe);
     const term = search.trim().toLowerCase();
 
@@ -203,7 +208,6 @@ const CustomerConcerns = () => {
         if (!day || day < window.from || day > window.to) return false;
       }
       if (!matchesLeadFilter(c, lead)) return false;
-      if (status !== "all" && c.status !== status) return false;
       if (kind !== "all" && c.kind !== kind) return false;
       if (term) {
         const haystack = [
@@ -220,7 +224,35 @@ const CustomerConcerns = () => {
       }
       return true;
     });
-  }, [concerns, timeframe, lead, status, kind, search]);
+  }, [concerns, timeframe, lead, kind, search]);
+
+  const filtered = useMemo(
+    () =>
+      status === "all"
+        ? beforeStatus
+        : beforeStatus.filter((c) => c.status === status),
+    [beforeStatus, status],
+  );
+
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    beforeStatus.forEach((c) =>
+      counts.set(c.status, (counts.get(c.status) ?? 0) + 1),
+    );
+    return counts;
+  }, [beforeStatus]);
+
+  /** Filters held in the sheet (Received · Lead · Why) — status has chips. */
+  const sheetFilterCount =
+    (timeframe !== "all" ? 1 : 0) +
+    (lead !== "all" ? 1 : 0) +
+    (kind !== "all" ? 1 : 0);
+
+  const clearSheetFilters = useCallback(() => {
+    setTimeframe("all");
+    setLead("all");
+    setKind("all");
+  }, []);
 
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
@@ -277,6 +309,8 @@ const CustomerConcerns = () => {
   );
 
   const exportCsv = useCallback(async () => {
+    // The More shortcut has no disabled state, so a second tap is ignored here.
+    if (exporting) return;
     if (filtered.length === 0) {
       Alert.alert(
         "Nothing to export",
@@ -347,43 +381,45 @@ const CustomerConcerns = () => {
     } finally {
       setExporting(false);
     }
-  }, [filtered]);
+  }, [exporting, filtered]);
+
+  const showInitialLoader = loading && concerns.length === 0;
+  const showError = !!error && !loading;
+
+  const clearAll = () => {
+    clearSheetFilters();
+    setStatus("all");
+    setSearch("");
+  };
+
+  // Export, plus the sibling Customers screens, as module-hub shortcuts.
+  const moreShortcuts: HubQuickLink[] = [
+    {
+      label: exporting ? "Exporting…" : "Export CSV",
+      icon: "download",
+      onPress: () => void exportCsv(),
+    },
+    { label: "Manage Customers", icon: "users", route: "/customers/customers" },
+    {
+      label: "Customer Analytics",
+      icon: "pie-chart",
+      route: "/customers/analytics",
+    },
+    {
+      label: "Visitor Tracking",
+      icon: "activity",
+      route: "/customers/visitor-tracking",
+    },
+  ];
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header — Export CSV is icon-only here, as on the other list screens. */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Customer Concerns
-          </Text>
-          <Pressable
-            onPress={exportCsv}
-            disabled={exporting}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Export CSV"
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={headerIcon} />
-            ) : (
-              <Feather name="download" size={20} color={headerIcon} />
-            )}
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader title="Customer Concerns" />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
           <RefreshControl
@@ -391,221 +427,193 @@ const CustomerConcerns = () => {
             onRefresh={onRefresh}
             tintColor={PRIMARY}
             colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
           />
         }
       >
-        <View className="px-5 gap-4">
-          {/* Intro — same heading and copy as the web page. */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 shadow-sm"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Customer Concerns
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Guests who asked for schedule help, want to book by phone, or left
-              checkout with their details filled in
-            </Text>
+        <View className="px-4 mt-4">
+          {/* Same copy as the web page's intro. */}
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Guests who asked for schedule help, want to book by phone, or left
+            checkout with their details filled in
+          </Text>
+
+          {/* Global workspace location selector (company-admin only) — the
+              list is scoped to it. */}
+          <View className="mb-4">
+            <LocationWorkspaceSelector />
           </View>
 
-          {/* Counters */}
-          {loading && concerns.length === 0 ? (
-            <AnalyticsSkeleton tiles={4} panels={0} />
-          ) : (
-            <View className="flex-row flex-wrap gap-3">
-              <StatTile
-                icon="phone-call"
-                iconBg="bg-amber-50 dark:bg-amber-900/30"
-                iconColor="#D97706"
-                label="Waiting on a Call"
-                value={String(stats?.open ?? 0)}
-                hint="Open concerns"
-              />
-              <StatTile
-                icon="calendar"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Schedule Help"
-                value={String(stats?.scheduleHelp ?? 0)}
-                hint="Calendar did not work"
-              />
-              <StatTile
-                icon="phone"
-                iconBg="bg-teal-50 dark:bg-teal-900/30"
-                iconColor="#0D9488"
-                label="Call to Book"
-                value={String(stats?.callToBook ?? 0)}
-                hint="No online schedule"
-              />
-              <StatTile
-                icon="shopping-cart"
-                iconBg="bg-purple-50 dark:bg-purple-900/30"
-                iconColor="#7C3AED"
-                label="Left Unfinished"
-                value={String(stats?.abandonedCheckout ?? 0)}
-                hint="Closed checkout mid-way"
-              />
-              <StatTile
-                icon="inbox"
-                iconBg="bg-green-50 dark:bg-green-900/30"
-                iconColor="#16A34A"
-                label="Today"
-                value={String(stats?.today ?? 0)}
-                hint="Received today"
-              />
-            </View>
+          {showError && (
+            <ListErrorBanner
+              title="Could not load customer concerns"
+              message={error ?? ""}
+              onRetry={load}
+            />
           )}
 
-          {/* Received timeframe — the web's button row, scrolled sideways. */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-100 dark:border-neutral-800 p-3"
-            style={CARD_SHADOW}
-          >
-            <View className="flex-row items-center gap-1.5 mb-2.5">
-              <Feather name="calendar" size={13} color="#9CA3AF" />
-              <Text className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                Received
-              </Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8 }}
-            >
-              {TIMEFRAMES.map((option) => {
-                const active = timeframe === option.value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    onPress={() => setTimeframe(option.value)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    className={`px-3.5 py-2 rounded-xl border ${
-                      active
-                        ? "bg-blue-50 dark:bg-blue-900/20 border-[#0644C7]"
-                        : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
-                    }`}
-                  >
-                    <Text
-                      className={`text-xs font-semibold ${
-                        active
-                          ? "text-[#0644C7] dark:text-blue-400"
-                          : "text-gray-600 dark:text-gray-300"
-                      }`}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+          {/* Summary — the web's five counters in one panel. */}
+          {showInitialLoader ? (
+            <AttractionsSummarySkeleton />
+          ) : (
+            <SummaryPanel
+              figures={[
+                {
+                  icon: "phone-call",
+                  title: "Waiting on a Call",
+                  value: String(stats?.open ?? 0),
+                  hint: "Open concerns",
+                },
+                {
+                  icon: "calendar",
+                  title: "Schedule Help",
+                  value: String(stats?.scheduleHelp ?? 0),
+                  hint: "Calendar did not work",
+                },
+                {
+                  icon: "phone",
+                  title: "Call to Book",
+                  value: String(stats?.callToBook ?? 0),
+                  hint: "No online schedule",
+                },
+                {
+                  icon: "shopping-cart",
+                  title: "Left Unfinished",
+                  value: String(stats?.abandonedCheckout ?? 0),
+                  hint: "Closed checkout mid-way",
+                },
+                {
+                  icon: "inbox",
+                  title: "Today",
+                  value: String(stats?.today ?? 0),
+                  hint: "Received today",
+                },
+              ]}
+            />
+          )}
+
+          {/* More — export and the other Customers screens. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
+            />
           </View>
 
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-            <Feather name="search" size={18} color="#9CA3AF" />
-            <TextInput
+          {/* Search + Filters (Received · Lead · Why). */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
               value={search}
               onChangeText={setSearch}
-              placeholder="Search by name, phone, email, item or message..."
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="none"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              style={{ paddingVertical: 0 }}
+              placeholder="Search name, phone, email, item…"
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
+            <FiltersButton
+              count={sheetFilterCount}
+              onPress={() => setShowFilters(true)}
+            />
           </View>
 
-          {/* Lead, then Status + Why — the web's filter order. */}
-          <SheetSelect
-            icon="user-check"
-            title="Lead"
-            value={lead}
-            options={LEAD_FILTER_OPTIONS}
-            onSelect={(v) => setLead(v as LeadFilter | "all")}
+          <AppliedFiltersHint
+            count={sheetFilterCount}
+            onClear={clearSheetFilters}
           />
-          <View className="flex-row gap-3">
-            <View className="flex-1">
-              <SheetSelect
-                icon="check-circle"
-                title="Status"
-                value={status}
-                options={STATUS_OPTIONS}
-                onSelect={(v) => setStatus(v as ConcernStatus | "all")}
-              />
-            </View>
-            <View className="flex-1">
-              <SheetSelect
-                icon="help-circle"
-                title="Why"
-                value={kind}
-                options={KIND_OPTIONS}
-                onSelect={(v) => setKind(String(v))}
-              />
-            </View>
-          </View>
 
-          {/* Count line + the cap notice, when the server holds more than the
-              screen loaded (so a filtered count is never read as the total). */}
-          {!loading && !error && (
-            <View>
-              <Text className="text-sm text-gray-500 dark:text-gray-400">
-                Showing {filtered.length}{" "}
-                {filtered.length === 1 ? "concern" : "concerns"}
-                {concerns.length !== filtered.length
-                  ? ` of ${concerns.length} loaded`
-                  : ""}
-              </Text>
-              {serverTotal > concerns.length && (
-                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                  Newest {concerns.length} of {serverTotal} — older ones aren’t
-                  loaded on mobile.
+          {/* Status chips — "Needs a call" starts selected, as on the web. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.value}
+                label={opt.value === "all" ? "All" : opt.label}
+                count={
+                  showInitialLoader
+                    ? undefined
+                    : opt.value === "all"
+                      ? beforeStatus.length
+                      : (statusCounts.get(opt.value) ?? 0)
+                }
+                selected={status === opt.value}
+                onPress={() => setStatus(opt.value)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* List header — title + count and the layout toggle, then the cap
+              notice when the server holds more than the screen loaded (so a
+              filtered count is never read as the total). */}
+          {!showInitialLoader && !showError && (
+            <>
+              <ListHeader title="All Concerns" count={filtered.length}>
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </ListHeader>
+              {(concerns.length !== filtered.length ||
+                serverTotal > concerns.length) && (
+                <Text className="text-xs text-gray-400 dark:text-gray-500 -mt-1.5 mb-3">
+                  {[
+                    concerns.length !== filtered.length
+                      ? `${filtered.length} of ${concerns.length} loaded`
+                      : null,
+                    serverTotal > concerns.length
+                      ? `Newest ${concerns.length} of ${serverTotal} — older ones aren’t loaded on mobile.`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </Text>
               )}
-            </View>
+            </>
           )}
 
-          {/* List / states */}
-          {loading && concerns.length === 0 ? (
-            <View className="py-16 items-center">
-              <ActivityIndicator color={PRIMARY} />
+          {/* List — Table (default) or Cards over the same paged slice. */}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? (
+                <AttractionsTableSkeleton />
+              ) : (
+                <AttractionsListSkeleton />
+              )}
             </View>
-          ) : error ? (
-            <View className="bg-red-50 border border-red-100 rounded-2xl p-5">
-              <Text className="text-red-600 font-semibold">
-                Something went wrong
-              </Text>
-              <Text className="text-red-500 text-sm mt-1">{error}</Text>
-            </View>
-          ) : filtered.length === 0 ? (
-            <View
-              className="bg-white dark:bg-neutral-900 rounded-2xl p-8 items-center"
-              style={CARD_SHADOW}
-            >
-              <View className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 items-center justify-center mb-3">
-                <Feather name="inbox" size={26} color={PRIMARY} />
-              </View>
-              <Text className="text-gray-700 dark:text-gray-200 font-semibold text-lg">
-                Nothing here
-              </Text>
-              <Text className="text-gray-400 dark:text-gray-500 text-sm text-center mt-1">
-                {filtersActive
-                  ? "Try adjusting your search or filters"
-                  : "No guest is waiting on a call"}
-              </Text>
+          ) : showError ? null : filtered.length === 0 ? (
+            <View key="s-empty">
+              {filtersActive ? (
+                <ListEmptyState
+                  icon="search"
+                  title="No concerns found"
+                  message="Try adjusting your search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={clearAll}
+                />
+              ) : (
+                <ListEmptyState
+                  icon="inbox"
+                  title="Nothing here"
+                  message="No guest is waiting on a call."
+                />
+              )}
             </View>
           ) : (
-            <View>
-              <ConcernsTable
-                concerns={paged}
-                busyId={busyId}
-                onSetStatus={setConcernStatus}
-              />
+            <View key="s-list">
+              {viewMode === "table" ? (
+                <ConcernsTable
+                  concerns={paged}
+                  busyId={busyId}
+                  onSetStatus={setConcernStatus}
+                />
+              ) : (
+                paged.map((concern) => (
+                  <ConcernCard
+                    key={concern.id}
+                    concern={concern}
+                    busy={busyId === concern.id}
+                    onSetStatus={setConcernStatus}
+                  />
+                ))
+              )}
               <Pagination
                 page={page}
                 perPage={perPage}
@@ -617,6 +625,40 @@ const CustomerConcerns = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Filters — Received · Lead · Why (status lives in the chips). */}
+      <BottomSheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
+      >
+        <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
+          <FilterChipGroup
+            label="Received"
+            options={TIMEFRAMES}
+            value={timeframe}
+            onChange={setTimeframe}
+          />
+          <FilterChipGroup
+            label="Lead"
+            options={LEAD_FILTER_OPTIONS}
+            value={lead}
+            onChange={setLead}
+          />
+          <FilterChipGroup
+            label="Why"
+            options={KIND_OPTIONS}
+            value={kind}
+            onChange={setKind}
+          />
+          <FilterSheetFooter
+            canReset={sheetFilterCount > 0}
+            onReset={clearSheetFilters}
+            onDone={() => setShowFilters(false)}
+            doneLabel={`Show ${filtered.length} concern${filtered.length === 1 ? "" : "s"}`}
+          />
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 };

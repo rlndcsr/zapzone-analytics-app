@@ -15,19 +15,17 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
-  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AddTagSheet } from "../../components/ui/AddTagSheet";
-import { BottomSheet } from "../../components/ui/BottomSheet";
 import {
   CampaignExportSheet,
   EMPTY_CAMPAIGN_EXPORT_FILTERS,
   type CampaignExportFilters,
 } from "../../components/ui/CampaignExportSheet";
+import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import { ContactActionsSheet } from "../../components/ui/ContactActionsSheet";
 import {
   CustomerFiltersSheet,
@@ -35,7 +33,6 @@ import {
   countActiveCustomerFilters,
   type CustomerFilterValues,
 } from "../../components/ui/CustomerFiltersSheet";
-import { ColumnsSheet } from "../../components/ui/ColumnsSheet";
 import {
   CUSTOMER_COLUMNS,
   CustomersTable,
@@ -43,14 +40,27 @@ import {
   defaultCustomerColumnKeys,
 } from "../../components/ui/CustomersTable";
 import { DateRangeSheet } from "../../components/ui/DateRangeSheet";
-import { FilterPill, PillSegment } from "../../components/ui/FilterPill";
+import { FilterOptionSheet } from "../../components/ui/FilterOptionSheet";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
 import { Pagination } from "../../components/ui/Pagination";
-import { type SheetSelectOption } from "../../components/ui/SheetSelect";
-import { StatTile } from "../../components/ui/StatTile";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SummaryPanel,
+  ToolbarIconButton,
+} from "../../components/ui/SummaryPanel";
 import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
-import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
-import { PurchasesListSkeleton } from "../../components/ui/skeleton/AttractionPurchasesSkeleton";
+import {
+  AttractionsListSkeleton,
+  AttractionsSummarySkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
 import { consumeContactsStale } from "../../lib/contactsStale";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { getCurrentUser, getToken } from "../../lib/session";
@@ -67,13 +77,11 @@ import {
 
 const PRIMARY = "#0644C7";
 const PAGE_SIZE = 5;
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
+
+const DEFAULT_SORT = "created_at:desc";
 
 const SORT_OPTIONS = [
   { label: "Newest", value: "created_at:desc" },
@@ -83,75 +91,94 @@ const SORT_OPTIONS = [
   { label: "Status", value: "status:asc" },
 ];
 
-/** A FilterPill segment that opens its own options sheet (replaces SheetSelect
- *  inside the pills, so the customers filters match the app's pill design). */
-function PillSelect({
-  icon,
-  title,
-  value,
-  options,
-  onSelect,
+/** One customer in the Cards layout — the Manage Attractions card shape. */
+function CustomerCard({
+  contact: c,
+  onPress,
 }: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  title: string;
-  value: string;
-  options: SheetSelectOption[];
-  onSelect: (v: string) => void;
+  contact: ContactRow;
+  onPress: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const selected = options.find((o) => String(o.value) === value) ?? null;
   return (
-    <>
-      <PillSegment
-        label={selected ? selected.label : title}
-        active={open}
-        onPress={() => setOpen(true)}
-        renderIcon={(c) => <Feather name={icon} size={15} color={c} />}
-      />
-      <BottomSheet visible={open} onClose={() => setOpen(false)} title={title}>
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {options.map((option) => {
-            const isSelected = String(option.value) === value;
-            return (
-              <Pressable
-                key={String(option.value)}
-                onPress={() => {
-                  onSelect(String(option.value));
-                  setOpen(false);
-                }}
-                className={`flex-row items-center justify-between px-4 py-3.5 rounded-xl mb-1 ${
-                  isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                }`}
-              >
-                <Text
-                  className={`text-base font-medium flex-1 mr-2 ${
-                    isSelected
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                  numberOfLines={1}
-                >
-                  {option.label}
-                </Text>
-                {isSelected && (
-                  <View className="w-6 h-6 rounded-full bg-blue-500 items-center justify-center">
-                    <Feather name="check" size={14} color="#FFFFFF" />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-    </>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`View details for ${c.name}`}
+      className="bg-white dark:bg-neutral-900 rounded-2xl border border-gray-200 dark:border-neutral-800 p-4 mb-3 active:opacity-80"
+    >
+      <View className="flex-row items-start justify-between gap-2">
+        <Text
+          className="text-base font-semibold text-gray-900 dark:text-white flex-1"
+          numberOfLines={1}
+        >
+          {c.name}
+        </Text>
+        <StatusBadge status={c.status} />
+      </View>
+      {!!c.email && (
+        <View className="flex-row items-center gap-1.5 mt-2">
+          <Feather name="mail" size={13} color="#9CA3AF" />
+          <Text
+            className="text-xs text-gray-500 dark:text-gray-400 flex-1"
+            numberOfLines={1}
+          >
+            {c.email}
+          </Text>
+        </View>
+      )}
+      {!!c.phone && (
+        <View className="flex-row items-center gap-1.5 mt-1">
+          <Feather name="phone" size={13} color="#9CA3AF" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {c.phone}
+          </Text>
+        </View>
+      )}
+      {(!!c.companyName || !!c.jobTitle) && (
+        <View className="flex-row items-center gap-1.5 mt-1">
+          <Feather name="briefcase" size={13} color="#9CA3AF" />
+          <Text
+            className="text-xs text-gray-500 dark:text-gray-400 flex-1"
+            numberOfLines={1}
+          >
+            {[c.jobTitle, c.companyName].filter(Boolean).join(" · ")}
+          </Text>
+        </View>
+      )}
+      {!!c.locationName && (
+        <View className="flex-row items-center gap-1.5 mt-1">
+          <Feather name="map-pin" size={13} color="#9CA3AF" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">
+            {c.locationName}
+          </Text>
+        </View>
+      )}
+      {c.tags.length > 0 && (
+        <View className="flex-row flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-gray-100 dark:border-neutral-800">
+          {c.tags.slice(0, 4).map((t) => (
+            <View
+              key={t}
+              className="bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-md"
+            >
+              <Text className="text-[11px] font-medium text-[#0644C7] dark:text-blue-300">
+                {t}
+              </Text>
+            </View>
+          ))}
+          {c.tags.length > 4 && (
+            <Text className="text-[11px] text-gray-400 dark:text-gray-500">
+              +{c.tags.length - 4}
+            </Text>
+          )}
+        </View>
+      )}
+    </Pressable>
   );
 }
 
 const Customers = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
   const user = getCurrentUser();
   const companyId = user?.company_id ?? null;
@@ -176,7 +203,10 @@ const Customers = () => {
   );
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [showDateSheet, setShowDateSheet] = useState(false);
-  const [sort, setSort] = useState("created_at:desc");
+  const [sort, setSort] = useState(DEFAULT_SORT);
+  const [showSortSheet, setShowSortSheet] = useState(false);
+  const sortLabel =
+    SORT_OPTIONS.find((o) => o.value === sort)?.label ?? SORT_OPTIONS[0].label;
 
   // Exports — the plain CSV and the campaign mailing list.
   const [exportingCsv, setExportingCsv] = useState(false);
@@ -185,8 +215,6 @@ const Customers = () => {
     EMPTY_CAMPAIGN_EXPORT_FILTERS,
   );
   const [campaignExporting, setCampaignExporting] = useState(false);
-  // Header "more" menu, hosting both export actions.
-  const [showMoreSheet, setShowMoreSheet] = useState(false);
 
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(PAGE_SIZE);
@@ -677,259 +705,280 @@ const Customers = () => {
       setCampaignExporting(false);
     }
   }, [companyId, user?.location_id, campaignFilters, shareCsv]);
-
-  // Header "more" menu entries — the two export actions that used to sit as
-  // buttons above the list (same shape as the Attractions / Payments menus).
-  const moreActions: {
-    label: string;
-    icon: React.ComponentProps<typeof Feather>["name"];
-    hint: string;
-    onPress: () => void;
-  }[] = [
+  // More — the two exports (formerly the header "more" menu) plus the sibling
+  // Customers screens, as module-hub shortcuts like Manage Attractions.
+  const moreShortcuts: HubQuickLink[] = [
     {
-      label: "Export CSV",
+      label: exportingCsv ? "Exporting…" : "Export CSV",
       icon: "download",
-      hint: exportingCsv
-        ? "Exporting…"
-        : `All ${filtered.length} filtered ${filtered.length === 1 ? "row" : "rows"} as a spreadsheet`,
       onPress: () => {
-        setShowMoreSheet(false);
-        exportCsv();
+        if (!exportingCsv) exportCsv();
       },
     },
     {
       label: "Campaign Export",
       icon: "send",
-      hint: "Build a mailing list by tag and status",
-      onPress: () => {
-        setShowMoreSheet(false);
-        setShowCampaignSheet(true);
-      },
+      onPress: () => setShowCampaignSheet(true),
+    },
+    { label: "Customer Analytics", icon: "pie-chart", route: "/customers/analytics" },
+    {
+      label: "Customer Concerns",
+      icon: "message-circle",
+      route: "/customers/customer-concerns",
+    },
+    {
+      label: "Visitor Tracking",
+      icon: "activity",
+      route: "/customers/visitor-tracking",
     },
   ];
 
-  // Show the page skeleton on initial load AND pull-to-refresh (not just when empty).
+  // Status chips — a visible surface over the Filters sheet's Status field,
+  // not a second filter: both write the same `filters.status`.
+  const statusChips = useMemo(() => {
+    const active = allRows.filter((c) => c.status === "active").length;
+    return [
+      { label: "All", value: "all", count: allRows.length },
+      { label: "Active", value: "active", count: active },
+      { label: "Inactive", value: "inactive", count: allRows.length - active },
+    ];
+  }, [allRows]);
+
+  // Show the page skeleton on the first load (refetches keep rows on screen).
   const showSkeleton = loading && !error;
   const showError = !loading && !!error && allRows.length === 0;
+  const hasFilters = search.length > 0 || activeFilterCount > 0;
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Manage Customers
-          </Text>
-          {/* Page-level "More" menu (mirrors the Attractions header menu):
-              hosts Export CSV / Campaign Export. */}
-          <Pressable
-            onPress={() => setShowMoreSheet(true)}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="More actions"
-          >
-            <Feather name="more-horizontal" size={20} color={headerIcon} />
-          </Pressable>
-        </View>
-      </View>
+      {/* Header — back, title, and the primary Add action. */}
+      <ModuleHeader
+        title="Manage Customers"
+        action={{
+          onPress: () => setSheetContact(null),
+          label: "Add",
+          accessibilityLabel: "Add customer",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="px-5 pt-6 gap-4">
-          {/* KPI cards — skeleton while loading (tiles match StatTile exactly). */}
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Every customer in your CRM, with their tags, status and contact details
+          </Text>
+
+          {/* Error state (nothing loaded to show) */}
+          {showError && (
+            <ListErrorBanner
+              title="Could not load customers"
+              message={error ?? ""}
+              onRetry={load}
+            />
+          )}
+
+          {/* Summary — one panel, four figures, divided by hairlines. */}
           {showSkeleton ? (
-            <AnalyticsSkeleton tiles={4} panels={0} />
-          ) : (stats || allRows.length > 0) ? (
-            <View className="flex-row flex-wrap gap-3">
-              <StatTile
-                icon="users"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Total Customers"
-                value={String(allRows.length)}
-                hint="All registered customers"
-              />
-              <StatTile
-                icon="user-check"
-                iconBg="bg-green-50 dark:bg-green-900/30"
-                iconColor="#16A34A"
-                label="Active"
-                value={String(stats?.active ?? 0)}
-                hint="Currently active"
-              />
-              <StatTile
-                icon="user-x"
-                iconBg="bg-red-50 dark:bg-red-900/30"
-                iconColor="#EF4444"
-                label="Inactive"
-                value={String(stats?.inactive ?? 0)}
-                hint="Currently inactive"
-              />
-              <StatTile
-                icon="calendar"
-                iconBg="bg-blue-50 dark:bg-blue-900/30"
-                iconColor={PRIMARY}
-                label="Recently Added"
-                value={String(stats?.recentlyAdded ?? 0)}
-                hint="New customers"
-              />
-            </View>
+            <AttractionsSummarySkeleton />
+          ) : stats || allRows.length > 0 ? (
+            <SummaryPanel
+              figures={[
+                {
+                  icon: "users",
+                  title: "Total Customers",
+                  value: String(allRows.length),
+                  hint: "All registered customers",
+                },
+                {
+                  icon: "user-check",
+                  title: "Active",
+                  value: String(stats?.active ?? 0),
+                  hint: "Currently active",
+                },
+                {
+                  icon: "user-x",
+                  title: "Inactive",
+                  value: String(stats?.inactive ?? 0),
+                  hint: "Currently inactive",
+                },
+                {
+                  icon: "calendar",
+                  title: "Recently Added",
+                  value: String(stats?.recentlyAdded ?? 0),
+                  hint: "New customers",
+                },
+              ]}
+            />
           ) : null}
 
-          {/* Add Customer — the primary CTA. Both exports live in the header
-              menu. */}
-          <Pressable
-            onPress={() => setSheetContact(null)}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl active:opacity-90"
-            accessibilityRole="button"
-            accessibilityLabel="Add customer"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white" numberOfLines={1}>
-              Add Customer
-            </Text>
-          </Pressable>
-
-          {/* Search */}
-          <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800">
-            <Feather name="search" size={18} color="#9CA3AF" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search customers..."
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="none"
-              className="flex-1 text-sm text-gray-900 dark:text-white"
-              style={{ paddingVertical: 0 }}
+          {/* More — exports and the sibling Customers screens. */}
+          <View className="mt-5">
+            <HubShortcuts
+              title="More"
+              links={moreShortcuts}
+              gutter={SCREEN_GUTTER}
             />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
-                <Feather name="x" size={16} color="#9CA3AF" />
-              </Pressable>
-            )}
           </View>
 
-          {/* Controls — segmented pill (Filters · Sort) */}
-          <FilterPill>
-            <PillSegment
-              label={
-                activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"
-              }
-              active={showFilterSheet || activeFilterCount > 0}
+          {/* Search + Filters */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search customers"
+            />
+            <FiltersButton
+              count={activeFilterCount}
               onPress={() => setShowFilterSheet(true)}
-              renderIcon={(c) => <Feather name="sliders" size={15} color={c} />}
             />
-            <PillSelect
-              icon="bar-chart-2"
-              title="Newest"
-              value={sort}
-              options={SORT_OPTIONS}
-              onSelect={setSort}
-            />
-            {/* Columns — table view only, like the web table toolbar. */}
-            {viewMode === "table" && (
-              <PillSegment
-                label="Columns"
-                active={showColumnsSheet}
-                onPress={() => setShowColumnsSheet(true)}
-                renderIcon={(c) => (
-                  <Feather name="columns" size={15} color={c} />
-                )}
+          </View>
+
+          {/* Applied-filters hint with a one-tap reset. */}
+          <AppliedFiltersHint
+            count={activeFilterCount}
+            onClear={() => setFilters(EMPTY_CUSTOMER_FILTERS)}
+          />
+
+          {/* Status chips */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {statusChips.map((chip) => (
+              <FilterChip
+                key={chip.value}
+                label={chip.label}
+                count={showSkeleton ? undefined : chip.count}
+                selected={filters.status === chip.value}
+                onPress={() =>
+                  setFilters((prev) => ({ ...prev, status: chip.value }))
+                }
               />
-            )}
-          </FilterPill>
+            ))}
+          </ScrollView>
 
-          {/* Count + layout toggle (Table default / Cards) */}
+          {/* List header — title + count, Sort, Columns (table only), layout. */}
           {!showSkeleton && !showError && (
-            <View className="flex-row items-center justify-between gap-2">
-              <Text className="shrink text-sm text-gray-500 dark:text-gray-400">
-                Showing {visible.length} of {filtered.length} customers
-              </Text>
-              <ViewToggle mode={viewMode} onChange={setViewMode} />
-            </View>
+            <ListHeader title="All Customers" count={filtered.length}>
+              <View className="flex-row items-center gap-2">
+                <ToolbarIconButton
+                  icon="bar-chart-2"
+                  label={`Sort, ${sortLabel}`}
+                  active={showSortSheet || sort !== DEFAULT_SORT}
+                  onPress={() => setShowSortSheet(true)}
+                />
+                {viewMode === "table" && (
+                  <ToolbarIconButton
+                    icon="columns"
+                    label="Toggle columns"
+                    active={showColumnsSheet}
+                    onPress={() => setShowColumnsSheet(true)}
+                  />
+                )}
+                <ViewToggle mode={viewMode} onChange={setViewMode} />
+              </View>
+            </ListHeader>
           )}
 
-          {/* List skeleton — table/card aware, in the same spot as the real list. */}
-          {showSkeleton && !showError && (
-            <PurchasesListSkeleton view={viewMode} />
-          )}
-
-          {showError && (
-            <View className="items-center py-14">
-              <Feather name="alert-circle" size={40} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable
-                onPress={load}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]"
-              >
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {/* List — table (default) and card layouts render from the same
-              `visible` slice, so switching is instant and never refetches. */}
-          {!showSkeleton && !showError && viewMode === "table" && (
-            <View className="gap-3">
-              {/* Bulk-action bar — shown while a selection exists. */}
-              {selectedIds.size > 0 && (
-                <View className="rounded-2xl border border-[#0644C7]/30 bg-blue-50 dark:bg-blue-900/20 p-3 flex-row items-center justify-between">
-                  <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
-                    {selectedIds.size} selected
-                  </Text>
-                  <View className="flex-row items-center gap-2">
-                    <Pressable
-                      onPress={confirmBulkDelete}
-                      disabled={bulkBusy}
-                      className={`flex-row items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 bg-white dark:bg-neutral-900 active:opacity-70 ${
-                        bulkBusy ? "opacity-50" : ""
-                      }`}
-                      accessibilityRole="button"
-                      accessibilityLabel="Delete selected customers"
-                    >
-                      {bulkBusy ? (
-                        <ActivityIndicator size="small" color="#DC2626" />
-                      ) : (
-                        <Feather name="trash-2" size={15} color="#DC2626" />
-                      )}
-                      <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
-                        Delete
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={clearSelection}
-                      disabled={bulkBusy}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear selection"
-                      className="flex-row items-center gap-1 active:opacity-70"
-                    >
-                      <Feather name="x" size={14} color="#6B7280" />
-                      <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        Clear
-                      </Text>
-                    </Pressable>
-                  </View>
+          {/* Bulk-action bar — table view only, shown while a selection exists. */}
+          {!showSkeleton &&
+            !showError &&
+            viewMode === "table" &&
+            selectedIds.size > 0 && (
+              <View className="rounded-2xl border border-[#0644C7]/30 bg-blue-50 dark:bg-blue-900/20 p-3 mb-3 flex-row items-center justify-between">
+                <Text className="text-sm font-semibold text-[#0644C7] dark:text-blue-300">
+                  {selectedIds.size} selected
+                </Text>
+                <View className="flex-row items-center gap-2">
+                  <Pressable
+                    onPress={confirmBulkDelete}
+                    disabled={bulkBusy}
+                    className={`flex-row items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 bg-white dark:bg-neutral-900 active:opacity-70 ${
+                      bulkBusy ? "opacity-50" : ""
+                    }`}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete selected customers"
+                  >
+                    {bulkBusy ? (
+                      <ActivityIndicator size="small" color="#DC2626" />
+                    ) : (
+                      <Feather name="trash-2" size={15} color="#DC2626" />
+                    )}
+                    <Text className="text-xs font-semibold text-red-600 dark:text-red-400">
+                      Delete
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={clearSelection}
+                    disabled={bulkBusy}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear selection"
+                    className="flex-row items-center gap-1 active:opacity-70"
+                  >
+                    <Feather name="x" size={14} color="#6B7280" />
+                    <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Clear
+                    </Text>
+                  </Pressable>
                 </View>
-              )}
+              </View>
+            )}
 
-              {visible.length > 0 && (
+          {/* List / states. Each state is keyed so switching remounts cleanly. */}
+          {showSkeleton ? (
+            <View key="s-loading">
+              {viewMode === "table" ? (
+                <AttractionsTableSkeleton />
+              ) : (
+                <AttractionsListSkeleton />
+              )}
+            </View>
+          ) : showError ? null : filtered.length === 0 ? (
+            <View key="s-empty">
+              {hasFilters ? (
+                <ListEmptyState
+                  icon="search"
+                  title="No customers found"
+                  message="No customers match your search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={() => {
+                    setSearch("");
+                    setFilters(EMPTY_CUSTOMER_FILTERS);
+                  }}
+                />
+              ) : (
+                <ListEmptyState
+                  icon="users"
+                  title="No customers yet"
+                  message="Add your first customer to start building your CRM."
+                  actionLabel="Add Customer"
+                  actionIcon="plus"
+                  primary
+                  onAction={() => setSheetContact(null)}
+                />
+              )}
+            </View>
+          ) : (
+            <View key="s-list">
+              {/* Table (default) and card layouts render from the same
+                  `visible` slice, so switching is instant and never refetches. */}
+              {viewMode === "table" ? (
                 <CustomersTable
                   contacts={visible}
                   busyId={busyRowId}
@@ -945,123 +994,16 @@ const Customers = () => {
                   onToggleStatus={handleToggleStatus}
                   visibleColumns={visibleColumns}
                 />
+              ) : (
+                visible.map((c) => (
+                  <CustomerCard
+                    key={c.id}
+                    contact={c}
+                    onPress={() => setSheetContact(c)}
+                  />
+                ))
               )}
 
-              {/* Empty */}
-              {filtered.length === 0 && (
-                <View className="items-center py-12">
-                  <Feather name="users" size={40} color="#D1D5DB" />
-                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-                    {search || activeFilterCount > 0
-                      ? "No customers match your filters"
-                      : "No customers yet"}
-                  </Text>
-                </View>
-              )}
-
-              {/* Pagination */}
-              <Pagination
-                page={page}
-                perPage={perPage}
-                total={filtered.length}
-                onPageChange={setPage}
-                onPerPageChange={setPerPage}
-              />
-            </View>
-          )}
-
-          {/* Cards */}
-          {!showSkeleton && !showError && viewMode === "cards" && (
-            <View className="gap-3">
-              {visible.map((c) => (
-                <Pressable
-                  key={c.id}
-                  onPress={() => setSheetContact(c)}
-                  className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-                  style={CARD_SHADOW}
-                >
-                  <View className="flex-row items-start justify-between">
-                    <Text
-                      className="text-base font-bold text-gray-900 dark:text-white flex-1 mr-2"
-                      numberOfLines={1}
-                    >
-                      {c.name}
-                    </Text>
-                    <StatusBadge status={c.status} />
-                  </View>
-                  {!!c.email && (
-                    <View className="flex-row items-center gap-1.5 mt-2">
-                      <Feather name="mail" size={13} color="#9CA3AF" />
-                      <Text
-                        className="text-xs text-gray-500 dark:text-gray-400 flex-1"
-                        numberOfLines={1}
-                      >
-                        {c.email}
-                      </Text>
-                    </View>
-                  )}
-                  {!!c.phone && (
-                    <View className="flex-row items-center gap-1.5 mt-1">
-                      <Feather name="phone" size={13} color="#9CA3AF" />
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        {c.phone}
-                      </Text>
-                    </View>
-                  )}
-                  {(!!c.companyName || !!c.jobTitle) && (
-                    <View className="flex-row items-center gap-1.5 mt-1">
-                      <Feather name="briefcase" size={13} color="#9CA3AF" />
-                      <Text
-                        className="text-xs text-gray-500 dark:text-gray-400 flex-1"
-                        numberOfLines={1}
-                      >
-                        {[c.jobTitle, c.companyName].filter(Boolean).join(" · ")}
-                      </Text>
-                    </View>
-                  )}
-                  {!!c.locationName && (
-                    <View className="flex-row items-center gap-1.5 mt-1">
-                      <Feather name="map-pin" size={13} color="#9CA3AF" />
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        {c.locationName}
-                      </Text>
-                    </View>
-                  )}
-                  {c.tags.length > 0 && (
-                    <View className="flex-row flex-wrap gap-1.5 mt-2.5">
-                      {c.tags.slice(0, 4).map((t) => (
-                        <View
-                          key={t}
-                          className="bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-md"
-                        >
-                          <Text className="text-[11px] font-medium text-[#0644C7] dark:text-blue-300">
-                            {t}
-                          </Text>
-                        </View>
-                      ))}
-                      {c.tags.length > 4 && (
-                        <Text className="text-[11px] text-gray-400 dark:text-gray-500">
-                          +{c.tags.length - 4}
-                        </Text>
-                      )}
-                    </View>
-                  )}
-                </Pressable>
-              ))}
-
-              {/* Empty */}
-              {filtered.length === 0 && (
-                <View className="items-center py-12">
-                  <Feather name="users" size={40} color="#D1D5DB" />
-                  <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-                    {search || activeFilterCount > 0
-                      ? "No customers match your filters"
-                      : "No customers yet"}
-                  </Text>
-                </View>
-              )}
-
-              {/* Pagination */}
               <Pagination
                 page={page}
                 perPage={perPage}
@@ -1110,6 +1052,16 @@ const Customers = () => {
         onClose={() => setShowColumnsSheet(false)}
       />
 
+      {/* Sort — the web table's sort select. */}
+      <FilterOptionSheet
+        visible={showSortSheet}
+        title="Sort by"
+        value={sort}
+        options={SORT_OPTIONS}
+        onSelect={(v) => setSort(String(v))}
+        onClose={() => setShowSortSheet(false)}
+      />
+
       {/* All filters in one sheet, same as the other list screens. */}
       <CustomerFiltersSheet
         visible={showFilterSheet}
@@ -1132,37 +1084,6 @@ const Customers = () => {
         onClose={closeCreatedDate}
         onApply={applyCreatedDate}
       />
-
-      {/* Header "more" menu — page-level export actions. */}
-      <BottomSheet
-        visible={showMoreSheet}
-        onClose={() => setShowMoreSheet(false)}
-        title="More"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {moreActions.map((action) => (
-            <Pressable
-              key={action.label}
-              onPress={action.onPress}
-              style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}
-              className="flex-row items-center gap-3 px-4 py-3.5 rounded-xl mb-1"
-            >
-              <View className="w-9 h-9 rounded-xl items-center justify-center bg-gray-100 dark:bg-neutral-800">
-                <Feather name={action.icon} size={18} color="#374151" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-base font-medium text-gray-800 dark:text-gray-100">
-                  {action.label}
-                </Text>
-                <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                  {action.hint}
-                </Text>
-              </View>
-              <Feather name="chevron-right" size={18} color="#9CA3AF" />
-            </Pressable>
-          ))}
-        </ScrollView>
-      </BottomSheet>
 
       <CampaignExportSheet
         visible={showCampaignSheet}
