@@ -710,12 +710,12 @@ const VisitorTracking = () => {
         if (!exporting) void exportCsv();
       },
     },
-    { label: "Manage Customers", icon: "users", route: "/customers/customers" },
     {
       label: "Customer Analytics",
       icon: "pie-chart",
       route: "/customers/analytics",
     },
+    { label: "Customers", icon: "users", route: "/customers/customers" },
     {
       label: "Customer Concerns",
       icon: "message-circle",

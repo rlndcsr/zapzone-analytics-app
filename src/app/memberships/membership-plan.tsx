@@ -7,9 +7,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Switch,
   Text,
-  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,7 +22,31 @@ import {
   ToggleRow,
   type SelectOption,
 } from "../../components/ui/FormControls";
-import { MembershipPlansListSkeleton } from "../../components/ui/skeleton/MembershipsSkeleton";
+import {
+  MembershipPlansTable,
+  PlanActions,
+  PlanStatusToggle,
+  planPrice,
+  type PlanRowHandlers,
+} from "../../components/ui/MembershipPlansTable";
+import { ModuleHeader, SearchField } from "../../components/ui/ModuleHeader";
+import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
+import {
+  AppliedFiltersHint,
+  FilterChip,
+  FilterChipGroup,
+  FilterSheetFooter,
+  FiltersButton,
+  ListEmptyState,
+  ListErrorBanner,
+  ListHeader,
+  SpecCell,
+} from "../../components/ui/SummaryPanel";
+import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
+import {
+  AttractionsListSkeleton,
+  AttractionsTableSkeleton,
+} from "../../components/ui/skeleton/AttractionsSkeleton";
 import { useMembershipPlans } from "../../lib/hooks/useMembershipPlans";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { fetchAddOns } from "../../services/addOnsService";
@@ -54,15 +76,10 @@ import {
   type ValueMode,
 } from "../../services/membershipPlansService";
 
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
-
 const PRIMARY = "#0644C7";
+
+/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
+const SCREEN_GUTTER = 16;
 
 const BILLING_CYCLES: { value: BillingCycle; label: string }[] = [
   { value: "monthly", label: "Monthly" },
@@ -173,23 +190,236 @@ async function fetchBenefitTargets(
   }
 }
 
-/** A labeled attribute chip (INTERVAL / USAGE / ACCESS). */
-function AttrChip({ icon, label }: { icon: React.ReactNode; label: string }) {
+/* ------------------------------------------------------------------ */
+/* Plans list (web parity: MembershipPlans.tsx)                         */
+/* ------------------------------------------------------------------ */
+
+type YesNo = "all" | "yes" | "no";
+
+type PlanFilters = {
+  status: "all" | "active" | "inactive";
+  interval: "all" | BillingCycle;
+  usage: "all" | "unlimited" | "limited_visits" | "punch_card";
+  access: "all" | LocationAccessMode;
+  family: YesNo;
+  trial: YesNo;
+  schedule: "all" | "seasonal" | "rolling";
+};
+
+const NO_FILTERS: PlanFilters = {
+  status: "all",
+  interval: "all",
+  usage: "all",
+  access: "all",
+  family: "all",
+  trial: "all",
+  schedule: "all",
+};
+
+/** The web's select filters, in its order, with its labels. */
+const FILTER_GROUPS: {
+  key: keyof PlanFilters;
+  label: string;
+  options: { value: string; label: string }[];
+}[] = [
+  {
+    key: "status",
+    label: "Status",
+    options: [
+      { value: "all", label: "All Statuses" },
+      { value: "active", label: "Active" },
+      { value: "inactive", label: "Inactive" },
+    ],
+  },
+  {
+    key: "interval",
+    label: "Billing Interval",
+    options: [{ value: "all", label: "All Intervals" }, ...BILLING_CYCLES],
+  },
+  {
+    key: "usage",
+    label: "Usage Type",
+    options: [
+      { value: "all", label: "All Usage Types" },
+      { value: "unlimited", label: "Unlimited" },
+      { value: "limited_visits", label: "Limited Visits" },
+      { value: "punch_card", label: "Punch Card" },
+    ],
+  },
+  {
+    key: "access",
+    label: "Access Mode",
+    options: [{ value: "all", label: "All Access Modes" }, ...ACCESS_MODES],
+  },
+  {
+    key: "family",
+    label: "Plan Type",
+    options: [
+      { value: "all", label: "All Plan Types" },
+      { value: "yes", label: "Family / Group" },
+      { value: "no", label: "Individual" },
+    ],
+  },
+  {
+    key: "trial",
+    label: "Trial",
+    options: [
+      { value: "all", label: "All Plans" },
+      { value: "yes", label: "Has Trial" },
+      { value: "no", label: "No Trial" },
+    ],
+  },
+  {
+    key: "schedule",
+    label: "Schedule",
+    options: [
+      { value: "all", label: "All Schedules" },
+      { value: "seasonal", label: "Seasonal" },
+      { value: "rolling", label: "Rolling" },
+    ],
+  },
+];
+
+const STATUS_CHIPS = FILTER_GROUPS[0].options.map((o) => ({
+  value: o.value as PlanFilters["status"],
+  label: o.value === "all" ? "All" : o.label,
+}));
+
+const trialDays = (p: MembershipPlanRow) => Number(p.raw.trial_days ?? 0);
+const isSeasonal = (p: MembershipPlanRow) =>
+  !!(p.raw.season_start_date || p.raw.season_end_date);
+
+function matchesFilters(p: MembershipPlanRow, f: PlanFilters): boolean {
+  if (f.status !== "all" && p.isActive !== (f.status === "active")) return false;
+  if (f.interval !== "all" && p.billingCycle !== f.interval) return false;
+  if (f.usage !== "all" && p.usageType !== f.usage) return false;
+  if (f.access !== "all" && p.locationAccessMode !== f.access) return false;
+  if (f.family !== "all" && !!p.raw.is_family_or_group !== (f.family === "yes"))
+    return false;
+  if (f.trial !== "all" && trialDays(p) > 0 !== (f.trial === "yes")) return false;
+  if (f.schedule !== "all" && isSeasonal(p) !== (f.schedule === "seasonal"))
+    return false;
+  return true;
+}
+
+/** The web's search fields: id, name, description, tier, price, modes, status. */
+function matchesSearch(p: MembershipPlanRow, q: string): boolean {
+  if (!q) return true;
+  const tier = typeof p.raw.tier === "string" ? p.raw.tier : "";
+  return [
+    String(p.id),
+    p.name,
+    p.description,
+    tier,
+    String(p.price),
+    p.billingCycle,
+    p.intervalLabel,
+    p.usageType,
+    p.usageLabel,
+    p.locationAccessMode,
+    p.raw.cancellation_mode ?? "",
+    p.isActive ? "active" : "inactive",
+  ].some((v) => v.toLowerCase().includes(q));
+}
+
+/** A plan as a card — the Cards layout of the list. */
+function PlanCard({
+  plan,
+  handlers,
+}: {
+  plan: MembershipPlanRow;
+  handlers: PlanRowHandlers;
+}) {
   return (
-    <View className="flex-row items-center gap-1.5 bg-gray-100 dark:bg-neutral-800 px-2.5 py-1.5 rounded-md">
-      {icon}
-      <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-        {label}
-      </Text>
+    <View className="mb-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+      <View className="flex-row items-start justify-between gap-2">
+        <View className="flex-1">
+          <Text
+            numberOfLines={2}
+            className="text-base font-semibold text-gray-900 dark:text-white"
+          >
+            {plan.name}
+          </Text>
+          <Text className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+            {planPrice(plan)}
+          </Text>
+        </View>
+        <PlanStatusToggle plan={plan} h={handlers} />
+      </View>
+
+      <View className="mt-3 flex-row overflow-hidden rounded-xl border border-gray-200 dark:border-neutral-800">
+        <SpecCell label="Interval" value={plan.intervalLabel} />
+        <SpecCell label="Usage" value={plan.usageLabel} divider />
+        <SpecCell label="Access" value={plan.accessLabel} divider />
+      </View>
+
+      <View className="mt-3">
+        <PlanActions plan={plan} h={handlers} />
+      </View>
     </View>
   );
+}
+
+/** One CSV cell, quoted. */
+const csvCell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+const humanize = (v: string | null | undefined) => (v ?? "").replace(/_/g, " ");
+
+/** The web export's default columns plus the plan settings behind them. */
+function plansCsv(rows: MembershipPlanRow[]): string {
+  const header = [
+    "Plan #",
+    "Name",
+    "Price",
+    "Interval",
+    "Trial (days)",
+    "Term (months)",
+    "Usage",
+    "Visits/Term",
+    "Punch Card Total",
+    "Access",
+    "Family/Group",
+    "Cancellation",
+    "Grace Period (days)",
+    "Payment Retry (days)",
+    "Season Start",
+    "Season End",
+    "Status",
+    "Description",
+  ];
+  const lines = rows.map((p) =>
+    [
+      p.id,
+      p.name,
+      p.price.toFixed(2),
+      humanize(p.billingCycle),
+      trialDays(p),
+      p.raw.term_length_months ?? "",
+      humanize(p.usageType),
+      p.raw.visits_per_term ?? "",
+      p.raw.punch_card_total ?? "",
+      p.locationAccessMode,
+      p.raw.is_family_or_group ? "Yes" : "No",
+      humanize(p.raw.cancellation_mode),
+      p.raw.grace_period_days ?? "",
+      p.raw.failed_payment_retry_days ?? "",
+      toDateInput(p.raw.season_start_date),
+      toDateInput(p.raw.season_end_date),
+      p.isActive ? "Active" : "Inactive",
+      p.description,
+    ]
+      .map(csvCell)
+      .join(","),
+  );
+  return [header.map(csvCell).join(","), ...lines].join("\n");
 }
 
 const MembershipPlans = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
+
+  const role = getCurrentUser()?.role;
+  // Web: New Plan and the row actions are admin / location-manager only.
+  const canManage = role === "company_admin" || role === "location_manager";
 
   const { plans, loading, error, refetch, applyStatus, invalidate } =
     useMembershipPlans();
@@ -197,37 +427,58 @@ const MembershipPlans = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState<MembershipPlanRow | null | undefined>(
     undefined, // undefined = closed, null = new plan, row = edit
   );
+  const [benefitsPlan, setBenefitsPlan] = useState<MembershipPlanRow | null>(null);
+
+  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<PlanFilters>(NO_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   // From the Memberships hub's "New Plan" shortcut (?create=1): open the
   // New Plan form once, as the "New Plan" button does.
   const { create } = useLocalSearchParams<{ create?: string }>();
   useEffect(() => {
     if (create !== "1") return;
-    setEditing(null);
+    if (canManage) setEditing(null);
     router.setParams({ create: undefined });
-  }, [create, router]);
-  const [benefitsPlan, setBenefitsPlan] = useState<MembershipPlanRow | null>(null);
+  }, [create, router, canManage]);
 
-  // Client-side pagination over the plans list.
+  // Search + filters, sorted by name like the web table's default.
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return plans
+      .filter((p) => matchesSearch(p, q) && matchesFilters(p, filters))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [plans, search, filters]);
+
+  // Client-side pagination over the filtered list.
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(5);
+  const [perPage, setPerPage] = useState(10);
   const paged = useMemo(
-    () => plans.slice((page - 1) * perPage, page * perPage),
-    [plans, page, perPage],
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage],
   );
   // Deleting the last page's only row would otherwise leave an empty page.
   useEffect(() => {
-    const last = Math.max(1, Math.ceil(plans.length / perPage));
+    const last = Math.max(1, Math.ceil(filtered.length / perPage));
     if (page > last) setPage(last);
-  }, [page, plans.length, perPage]);
-
-  // Reset to the first page whenever the page size changes.
+  }, [page, filtered.length, perPage]);
+  // Back to the first page whenever the search, filters or page size move.
   useEffect(() => {
     setPage(1);
-  }, [perPage]);
+  }, [search, filters, perPage]);
+
+  const activeFilterCount = (Object.keys(filters) as (keyof PlanFilters)[]).filter(
+    (k) => filters[k] !== "all",
+  ).length;
+  const statusCounts = useMemo(() => {
+    const active = plans.filter((p) => p.isActive).length;
+    return { all: plans.length, active, inactive: plans.length - active };
+  }, [plans]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -235,259 +486,306 @@ const MembershipPlans = () => {
     setRefreshing(false);
   }, [refetch]);
 
-  // Optimistically flip the toggle, then reconcile with the server's response.
-  const handleToggle = async (plan: MembershipPlanRow) => {
-    const token = getToken();
-    if (!token) return;
-    const next = !plan.isActive;
-    applyStatus(plan.id, next);
-    setTogglingId(plan.id);
-    try {
-      const confirmed = await togglePlanStatus(token, plan.id);
-      applyStatus(plan.id, confirmed);
-    } catch (err) {
-      applyStatus(plan.id, !next); // revert
+  // Optimistically flip the status, then reconcile with the server's response.
+  const handleToggle = useCallback(
+    async (plan: MembershipPlanRow) => {
+      const token = getToken();
+      if (!token) return;
+      const next = !plan.isActive;
+      applyStatus(plan.id, next);
+      setTogglingId(plan.id);
+      try {
+        const confirmed = await togglePlanStatus(token, plan.id);
+        applyStatus(plan.id, confirmed);
+      } catch (err) {
+        applyStatus(plan.id, !next); // revert
+        Alert.alert(
+          "Update failed",
+          err instanceof Error ? err.message : "Could not update plan status.",
+        );
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [applyStatus],
+  );
+
+  const handleDelete = useCallback(
+    (plan: MembershipPlanRow) => {
       Alert.alert(
-        "Update failed",
-        err instanceof Error ? err.message : "Could not update plan status.",
+        "Delete plan?",
+        `"${plan.name}" will be permanently deleted. This cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const token = getToken();
+              if (!token) return;
+              setDeletingId(plan.id);
+              try {
+                await deletePlan(token, plan.id);
+                invalidate();
+                await refetch();
+              } catch (err) {
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error ? err.message : "Could not delete plan.",
+                );
+              } finally {
+                setDeletingId(null);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [invalidate, refetch],
+  );
+
+  // Web: "Export CSV" exports the rows the search and filters leave.
+  const exportCsv = useCallback(async () => {
+    if (filtered.length === 0) {
+      Alert.alert("Nothing to export", "No plans match your search or filters.");
+      return;
+    }
+    setExporting(true);
+    try {
+      // Loaded lazily so these native modules never run at app startup.
+      const FileSystem = await import("expo-file-system/legacy");
+      const Sharing = await import("expo-sharing");
+      const date = new Date().toISOString().split("T")[0];
+      const uri = `${FileSystem.cacheDirectory}membership-plans-${date}.csv`;
+      await FileSystem.writeAsStringAsync(uri, plansCsv(filtered), {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Membership Plans",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Sharing unavailable", "Sharing isn't available on this device.");
+      }
+    } catch (err) {
+      Alert.alert(
+        "Export failed",
+        err instanceof Error ? err.message : "Could not export.",
       );
     } finally {
-      setTogglingId(null);
+      setExporting(false);
     }
+  }, [filtered]);
+
+  const handlers: PlanRowHandlers = {
+    canManage,
+    togglingId,
+    deletingId,
+    onToggle: (p) => void handleToggle(p),
+    onBenefits: setBenefitsPlan,
+    onEdit: setEditing,
+    onDelete: handleDelete,
   };
 
-  const handleDelete = (plan: MembershipPlanRow) => {
-    Alert.alert(
-      "Delete plan?",
-      `"${plan.name}" will be permanently deleted. This cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            const token = getToken();
-            if (!token) return;
-            setDeletingId(plan.id);
-            try {
-              await deletePlan(token, plan.id);
-              invalidate();
-              await refetch();
-            } catch (err) {
-              Alert.alert(
-                "Delete failed",
-                err instanceof Error ? err.message : "Could not delete plan.",
-              );
-            } finally {
-              setDeletingId(null);
-            }
-          },
-        },
-      ],
-    );
+  const clearSearchAndFilters = () => {
+    setSearch("");
+    setFilters(NO_FILTERS);
   };
+
+  // Sibling Memberships screens plus the web header's Export CSV.
+  const moreShortcuts: HubQuickLink[] = [
+    { label: "Memberships", icon: "credit-card", route: "/memberships/memberships" },
+    {
+      label: "Membership Reports",
+      icon: "bar-chart-2",
+      route: "/memberships/membership-reports",
+    },
+    {
+      label: exporting ? "Exporting…" : "Export CSV",
+      icon: "download",
+      onPress: () => {
+        if (!exporting) void exportCsv();
+      },
+    },
+    { label: "Refresh", icon: "refresh-cw", onPress: () => void onRefresh() },
+  ];
 
   const showInitialLoader = loading && plans.length === 0;
   const showError = !loading && !!error && plans.length === 0;
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full relative overflow-hidden z-10 border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between relative z-10">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Membership Plans
-          </Text>
-          <View style={{ width: 36 }} />
-        </View>
-      </View>
+      {/* Header — back, title, and the web's New Plan. */}
+      <ModuleHeader
+        title="Membership Plans"
+        action={
+          canManage
+            ? {
+                onPress: () => setEditing(null),
+                label: "New Plan",
+                icon: "plus",
+                accessibilityLabel: "New plan",
+              }
+            : undefined
+        }
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="px-5">
-          {/* Intro */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6 mb-5"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Membership Plans
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Pricing, billing cadence, and access rules
-            </Text>
-          </View>
+        <View className="px-4 mt-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Pricing, billing cadence, and access rules
+          </Text>
 
-          {/* New Plan */}
-          <Pressable
-            onPress={() => setEditing(null)}
-            className="flex-row items-center justify-center gap-2 bg-[#0644C7] px-4 py-3.5 rounded-xl mb-5 active:opacity-90"
-            accessibilityRole="button"
-            accessibilityLabel="New plan"
-          >
-            <Feather name="plus" size={16} color="#FFFFFF" />
-            <Text className="text-sm font-semibold text-white">New Plan</Text>
-          </Pressable>
-
-          {/* Loading */}
-          {showInitialLoader && <MembershipPlansListSkeleton />}
-
-          {/* Error */}
           {showError && (
-            <View className="items-center py-14">
-              <Feather name="alert-circle" size={40} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable
-                onPress={onRefresh}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]"
-              >
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
-            </View>
+            <ListErrorBanner
+              title="Could not load plans"
+              message={error ?? ""}
+              onRetry={onRefresh}
+            />
           )}
 
-          {/* Plan cards */}
+          {/* More — sibling screens and Export CSV as hub shortcuts. */}
+          <HubShortcuts title="More" links={moreShortcuts} gutter={SCREEN_GUTTER} />
+
+          {/* Search + Filters — the web toolbar. */}
+          <View className="flex-row items-center gap-2 mt-4 mb-3">
+            <SearchField
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search plans..."
+            />
+            <FiltersButton
+              count={activeFilterCount}
+              onPress={() => setShowFilters(true)}
+            />
+          </View>
+
+          <AppliedFiltersHint
+            count={activeFilterCount}
+            onClear={() => setFilters(NO_FILTERS)}
+          />
+
+          {/* Status chips — a visible surface over the sheet's Status filter. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+            className="mb-4 -mx-1 px-1"
+          >
+            {STATUS_CHIPS.map((s) => (
+              <FilterChip
+                key={s.value}
+                label={s.label}
+                count={showInitialLoader ? undefined : statusCounts[s.value]}
+                selected={filters.status === s.value}
+                onPress={() => setFilters((f) => ({ ...f, status: s.value }))}
+              />
+            ))}
+          </ScrollView>
+
           {!showInitialLoader && !showError && (
-            <View className="gap-4">
-              {paged.map((plan) => (
-                <View
-                  key={plan.id}
-                  className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-                  style={CARD_SHADOW}
-                >
-                  {/* Name + status toggle */}
-                  <View className="flex-row items-start justify-between">
-                    <View className="flex-1 mr-3">
-                      <Text className="text-base font-bold text-gray-900 dark:text-white">
-                        {plan.name}
-                      </Text>
-                      <Text className="text-xl font-bold text-gray-900 dark:text-white mt-1">
-                        {plan.price <= 0 ? "Free" : `$${plan.price.toFixed(2)}`}
-                      </Text>
-                    </View>
-                    <View className="items-end">
-                      <View className="flex-row items-center gap-2">
-                        {togglingId === plan.id && (
-                          <ActivityIndicator size="small" color={PRIMARY} />
-                        )}
-                        <Switch
-                          value={plan.isActive}
-                          onValueChange={() => handleToggle(plan)}
-                          disabled={togglingId === plan.id}
-                          trackColor={{ false: "#D1D5DB", true: "#86B7FF" }}
-                          thumbColor={plan.isActive ? PRIMARY : "#F3F4F6"}
-                        />
-                      </View>
-                      <Text
-                        className={`text-xs font-semibold mt-1 ${
-                          plan.isActive
-                            ? "text-green-600 dark:text-green-400"
-                            : "text-gray-400 dark:text-gray-500"
-                        }`}
-                      >
-                        {plan.isActive ? "Active" : "Inactive"}
-                      </Text>
-                    </View>
-                  </View>
+            <ListHeader title="All Plans" count={filtered.length}>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+            </ListHeader>
+          )}
 
-                  {/* Attribute chips */}
-                  <View className="flex-row flex-wrap items-center gap-2 mt-3">
-                    <AttrChip
-                      icon={<Feather name="repeat" size={11} color="#6B7280" />}
-                      label={plan.intervalLabel}
-                    />
-                    <AttrChip
-                      icon={<Feather name="activity" size={11} color="#6B7280" />}
-                      label={plan.usageLabel}
-                    />
-                    <AttrChip
-                      icon={<Feather name="map-pin" size={11} color="#6B7280" />}
-                      label={plan.accessLabel}
-                    />
-                    {plan.membersCount > 0 && (
-                      <AttrChip
-                        icon={<Feather name="users" size={11} color="#6B7280" />}
-                        label={`${plan.membersCount} member${
-                          plan.membersCount === 1 ? "" : "s"
-                        }`}
-                      />
-                    )}
-                  </View>
-
-                  {/* Actions */}
-                  <View className="flex-row items-center gap-2 mt-4">
-                    <Pressable
-                      onPress={() => setBenefitsPlan(plan)}
-                      className="flex-1 flex-row items-center justify-center gap-1.5 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-                    >
-                      <Feather name="gift" size={14} color="#6B7280" />
-                      <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                        Benefits
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setEditing(plan)}
-                      className="flex-1 flex-row items-center justify-center gap-1.5 py-2.5 rounded-xl border border-gray-200 dark:border-neutral-800"
-                    >
-                      <Feather name="edit-2" size={14} color="#6B7280" />
-                      <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                        Edit
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleDelete(plan)}
-                      disabled={deletingId === plan.id}
-                      className="flex-1 flex-row items-center justify-center gap-1.5 py-2.5 rounded-xl bg-red-500 active:opacity-90"
-                    >
-                      {deletingId === plan.id ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Feather name="trash-2" size={14} color="#FFFFFF" />
-                      )}
-                      <Text className="text-xs font-semibold text-white">
-                        Delete
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
+          {showInitialLoader ? (
+            <View key="s-loading">
+              {viewMode === "table" ? (
+                <AttractionsTableSkeleton />
+              ) : (
+                <AttractionsListSkeleton />
+              )}
+            </View>
+          ) : showError ? null : filtered.length === 0 ? (
+            plans.length === 0 ? (
+              <View key="s-empty">
+                <ListEmptyState
+                  icon="credit-card"
+                  title="No plans yet"
+                  message={
+                    canManage
+                      ? "Tap New Plan to create one."
+                      : "No membership plans have been set up."
+                  }
+                  actionLabel={canManage ? "New Plan" : undefined}
+                  actionIcon="plus"
+                  primary
+                  onAction={canManage ? () => setEditing(null) : undefined}
+                />
+              </View>
+            ) : (
+              <View key="s-no-match">
+                <ListEmptyState
+                  icon="search"
+                  title="No plans found"
+                  message="No plans match your search or filters."
+                  actionLabel="Clear search & filters"
+                  onAction={clearSearchAndFilters}
+                />
+              </View>
+            )
+          ) : (
+            <View key="s-list">
+              {viewMode === "table" ? (
+                <MembershipPlansTable plans={paged} handlers={handlers} />
+              ) : (
+                paged.map((p) => (
+                  <PlanCard key={p.id} plan={p} handlers={handlers} />
+                ))
+              )}
               <Pagination
                 page={page}
                 perPage={perPage}
-                total={plans.length}
+                total={filtered.length}
                 onPageChange={setPage}
                 onPerPageChange={setPerPage}
               />
             </View>
           )}
-
-          {/* Empty */}
-          {!showInitialLoader && !showError && plans.length === 0 && (
-            <View className="items-center py-14">
-              <Feather name="layers" size={40} color="#D1D5DB" />
-              <Text className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-                No plans yet
-              </Text>
-            </View>
-          )}
         </View>
       </ScrollView>
+
+      {/* Filters sheet — the web's select filters as chip groups. */}
+      <BottomSheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
+      >
+        <ScrollView className="px-4 pb-8" showsVerticalScrollIndicator={false}>
+          {FILTER_GROUPS.map((g) => (
+            <FilterChipGroup
+              key={g.key}
+              label={g.label}
+              options={g.options}
+              value={filters[g.key]}
+              onChange={(v) => setFilters((f) => ({ ...f, [g.key]: v }))}
+            />
+          ))}
+          <FilterSheetFooter
+            canReset={activeFilterCount > 0}
+            onReset={() => setFilters(NO_FILTERS)}
+            onDone={() => setShowFilters(false)}
+            doneLabel={`Show ${filtered.length} ${filtered.length === 1 ? "plan" : "plans"}`}
+          />
+        </ScrollView>
+      </BottomSheet>
 
       {/* Create / edit form */}
       <PlanFormSheet

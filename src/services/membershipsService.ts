@@ -731,15 +731,19 @@ export type MembershipReport = {
   arr: number;
   failedPayments: number;
   revenueInRange: number;
-  topPlans: { id: number; name: string; price: number }[];
+  /** Plans ranked by active members (backend `active_count`). */
+  topPlans: { id: number; name: string; activeCount: number }[];
   visitsByLocation: { locationId: number | null; locationName: string; visits: number }[];
   underused: {
     id: number;
+    customerId: number | null;
     customerName: string | null;
+    customerEmail: string | null;
     planName: string | null;
     visitsRemaining: number;
     visitsUsed: number;
     visitsPerTerm: number;
+    termEnds: string | null;
   }[];
   dateRange: { from: string | null; to: string | null };
 };
@@ -751,7 +755,11 @@ type RawReport = {
     arr?: number;
     failed_payments?: number;
     revenue_in_range?: number;
-    top_plans?: { id: number; name?: string | null; price?: number | string | null }[];
+    top_plans?: {
+      id: number;
+      name?: string | null;
+      active_count?: number | string | null;
+    }[];
     visits_by_location?: {
       location_id?: number | null;
       location_name?: string | null;
@@ -759,11 +767,14 @@ type RawReport = {
     }[];
     underused_sample?: {
       id: number;
+      customer_id?: number | null;
       customer_name?: string | null;
+      customer_email?: string | null;
       plan_name?: string | null;
       visits_remaining?: number;
       visits_used_this_term?: number;
       visits_per_term?: number;
+      term_ends?: string | null;
     }[];
     date_range?: { from?: string | null; to?: string | null };
   };
@@ -814,7 +825,7 @@ export async function fetchMembershipReport({
     topPlans: (d.top_plans ?? []).map((p) => ({
       id: p.id,
       name: p.name?.trim() || `#${p.id}`,
-      price: Number(p.price ?? 0),
+      activeCount: Number(p.active_count ?? 0),
     })),
     visitsByLocation: (d.visits_by_location ?? []).map((v) => ({
       locationId: v.location_id ?? null,
@@ -823,11 +834,14 @@ export async function fetchMembershipReport({
     })),
     underused: (d.underused_sample ?? []).map((u) => ({
       id: u.id,
+      customerId: u.customer_id ?? null,
       customerName: u.customer_name?.trim() || null,
+      customerEmail: u.customer_email?.trim() || null,
       planName: u.plan_name?.trim() || null,
       visitsRemaining: Number(u.visits_remaining ?? 0),
       visitsUsed: Number(u.visits_used_this_term ?? 0),
       visitsPerTerm: Number(u.visits_per_term ?? 0),
+      termEnds: u.term_ends ?? null,
     })),
     dateRange: { from: d.date_range?.from ?? null, to: d.date_range?.to ?? null },
   };
