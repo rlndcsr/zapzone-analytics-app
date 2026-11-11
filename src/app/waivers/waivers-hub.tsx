@@ -3,6 +3,7 @@ import {
   type HubModule,
   type HubQuickLink,
 } from "../../components/ui/ModuleHub";
+import { getCurrentUser } from "../../lib/session";
 
 /** One-tap jumps to the create screens (same as their in-screen buttons). */
 const QUICK_LINKS: HubQuickLink[] = [
@@ -19,8 +20,36 @@ const QUICK_LINKS: HubQuickLink[] = [
   },
 ];
 
-// Returning Customers, Deletion Log and Settings live in the Waiver Records
-// "⋯" Manage sheet rather than here.
+/**
+ * The web Waiver Records "⋯ Manage" menu, in its order, as a shortcut row.
+ * Role rules match Waiver Records' own shortcuts: attendants only get Reports
+ * and Deletion Log; Settings is company-admin only.
+ */
+function manageLinksFor(role: string | undefined): HubQuickLink[] {
+  const isCompanyAdmin = role === "company_admin";
+  const canManageSubModules = isCompanyAdmin || role === "location_manager";
+  return [
+    ...(canManageSubModules
+      ? ([
+          { label: "Templates", icon: "file-text", route: "/waivers/templates" },
+          { label: "Group Invites", icon: "users", route: "/waivers/group-invites" },
+          {
+            label: "Returning Customers",
+            icon: "user-check",
+            route: "/waivers/returning-customers",
+          },
+        ] as HubQuickLink[])
+      : []),
+    { label: "Reports", icon: "bar-chart-2", route: "/waivers/reports" },
+    { label: "Deletion Log", icon: "clipboard", route: "/waivers/deletion-log" },
+    ...(isCompanyAdmin
+      ? ([
+          { label: "Settings", icon: "settings", route: "/waivers/waiver-settings" },
+        ] as HubQuickLink[])
+      : []),
+  ];
+}
+
 const MODULES: HubModule[] = [
   {
     icon: "file-text",
@@ -66,6 +95,7 @@ const WaiversHub = () => (
     heading="What would you like to do?"
     intro="Collect and track guest waivers, from signed records to templates and group invites."
     quickLinks={QUICK_LINKS}
+    manageLinks={manageLinksFor(getCurrentUser()?.role)}
     modules={MODULES}
   />
 );

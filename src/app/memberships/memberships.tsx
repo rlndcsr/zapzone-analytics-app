@@ -464,7 +464,7 @@ const Memberships = () => {
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header — back, title, and the primary Add action. */}
       <ModuleHeader
-        title="Manage Memberships"
+        title="Memberships"
         action={{
           onPress: goAdd,
           label: "Add",
@@ -490,8 +490,7 @@ const Memberships = () => {
       >
         <View className="px-4 mt-4">
           <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Every member subscription, with status, billing and freezes at a
-            glance
+            View and manage all member subscriptions
           </Text>
 
           {/* Global workspace location selector (company-admin only). */}

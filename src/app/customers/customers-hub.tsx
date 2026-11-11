@@ -25,16 +25,10 @@ const QUICK_LINKS: HubQuickLink[] = [
   },
 ];
 
+// Same four modules, same names, same order as the web sidebar's Customers
+// group (AdminSidebar.tsx): Customer Analytics, Customers, Customer Concerns,
+// Visitor Tracking.
 const MODULES: HubModule[] = [
-  {
-    icon: "users",
-    title: "Manage Customers",
-    description:
-      "Search, add and edit every customer, with their status at a glance.",
-    tags: ["Customer list", "Filters", "Export CSV"],
-    accent: "#0644C7",
-    route: "/customers/customers",
-  },
   {
     icon: "pie-chart",
     title: "Customer Analytics",
@@ -42,6 +36,15 @@ const MODULES: HubModule[] = [
     tags: ["KPIs", "Segments"],
     accent: "#059669",
     route: "/customers/analytics",
+  },
+  {
+    icon: "users",
+    title: "Customers",
+    description:
+      "Search, add and edit every customer, with their status at a glance.",
+    tags: ["Customer list", "Filters", "Export CSV"],
+    accent: "#0644C7",
+    route: "/customers/customers",
   },
   {
     icon: "phone-call",
@@ -67,7 +70,7 @@ const MODULES: HubModule[] = [
 ];
 
 // The Customers module hub, same design as the other modules. The customer
-// list stays at /customers/customers (now titled Manage Customers) because
+// list stays at /customers/customers (titled Customers, like the web) because
 // notifications link there with ?openId.
 const CustomersHub = () => (
   <ModuleHubScreen

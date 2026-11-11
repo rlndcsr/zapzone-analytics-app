@@ -1,14 +1,14 @@
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -22,23 +22,7 @@ import {
   formatShortDate,
 } from "../../components/ui/DateRangeSheet";
 import { ModuleHeader } from "../../components/ui/ModuleHeader";
-import { HubShortcuts, type HubQuickLink } from "../../components/ui/ModuleHub";
-import { Pagination } from "../../components/ui/Pagination";
-import {
-  FilterChip,
-  ListEmptyState,
-  ListErrorBanner,
-  ListHeader,
-  SummaryPanel,
-  ToneDotBadge,
-  type SummaryFigure,
-} from "../../components/ui/SummaryPanel";
-import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
-import {
-  AttractionsListSkeleton,
-  AttractionsSummarySkeleton,
-  AttractionsTableSkeleton,
-} from "../../components/ui/skeleton/AttractionsSkeleton";
+import { ListErrorBanner } from "../../components/ui/SummaryPanel";
 import type { FeatherIconName } from "../../lib/attractions/attractionDisplay";
 import { getToken } from "../../lib/session";
 import {
@@ -47,9 +31,6 @@ import {
 } from "../../services/membershipsService";
 
 const PRIMARY = "#0644C7";
-
-/** Horizontal page padding (`px-4`) — the More shortcuts row bleeds past it. */
-const SCREEN_GUTTER = 16;
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -73,304 +54,249 @@ function prettyDate(raw: string | null): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
-/** The last `days` days up to today. 30 matches the web's default range. */
-const lastDays = (days: number) => {
+/** ISO/date -> "6/9/2026". */
+function shortDate(raw: string | null): string {
+  if (!raw) return "";
+  const d = new Date(`${raw.substring(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+
+/** One month back to today — the web's default range. */
+const lastMonth = () => {
   const start = new Date();
-  start.setDate(start.getDate() - days);
+  start.setMonth(start.getMonth() - 1);
   return { from: ymd(start), to: ymd(new Date()) };
 };
 
-/** Quick ranges over the same From/To the date field sets. */
-const PRESETS = [
-  { label: "Last 7 days", days: 7 },
-  { label: "Last 30 days", days: 30 },
-  { label: "Last 90 days", days: 90 },
-  { label: "Last year", days: 365 },
-];
+/** The web's ⓘ tooltips, as a tap-to-read alert. */
+function InfoButton({ title, text }: { title: string; text: string }) {
+  return (
+    <Pressable
+      onPress={() => Alert.alert(title, text)}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={`About ${title}`}
+      className="active:opacity-60"
+    >
+      <Feather name="info" size={14} color="#9CA3AF" />
+    </Pressable>
+  );
+}
 
-/* ----------------------------------------------- Manage Attractions table -- */
+/* ----------------------------------------------------------- KPI tiles -- */
 
-const HEADER_MIN_HEIGHT = 44;
-const ROW_MIN_HEIGHT = 56;
-const CELL_TEXT = "text-sm text-gray-700 dark:text-gray-300";
-const CELL_STRONG = "text-sm font-semibold text-gray-900 dark:text-white";
+type Accent = "blue" | "orange" | "red" | "green";
 
-type Column<T> = {
-  key: string;
-  label: string;
-  width: number;
-  render: (row: T) => ReactNode;
+const ACCENT: Record<Accent, { bg: string; fg: string }> = {
+  blue: { bg: "#DBEAFE", fg: "#2563EB" },
+  orange: { bg: "#FFEDD5", fg: "#EA580C" },
+  red: { bg: "#FEE2E2", fg: "#DC2626" },
+  green: { bg: "#DCFCE7", fg: "#16A34A" },
 };
 
-/** Bordered table: grey header row, hairline rows, sideways scroll. */
-function Table<T>({
-  columns,
-  rows,
-  keyOf,
-}: {
-  columns: Column<T>[];
-  rows: T[];
-  keyOf: (row: T, index: number) => string;
-}) {
-  const width = columns.reduce((sum, c) => sum + c.width, 0);
-  return (
-    <View className="mb-3 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        nestedScrollEnabled
-      >
-        <View style={{ minWidth: width }}>
-          <View
-            className="flex-row items-center border-b border-gray-200 bg-gray-50 dark:border-neutral-800 dark:bg-neutral-800/50"
-            style={{ minHeight: HEADER_MIN_HEIGHT }}
-          >
-            {columns.map((col) => (
-              <View
-                key={col.key}
-                className="justify-center px-4 py-3"
-                style={{ width: col.width }}
-              >
-                <Text
-                  numberOfLines={1}
-                  className="text-xs font-medium text-gray-500 dark:text-gray-400"
-                >
-                  {col.label}
-                </Text>
-              </View>
-            ))}
-          </View>
-          {rows.map((row, i) => (
-            <View
-              key={keyOf(row, i)}
-              className={`flex-row items-center ${
-                i < rows.length - 1
-                  ? "border-b border-gray-100 dark:border-neutral-800"
-                  : ""
-              }`}
-              style={{ minHeight: ROW_MIN_HEIGHT }}
-            >
-              {columns.map((col) => (
-                <View
-                  key={col.key}
-                  className="justify-center px-4 py-3"
-                  style={{ width: col.width }}
-                >
-                  {col.render(row)}
-                </View>
-              ))}
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-    </View>
-  );
-}
+type Stat = {
+  label: string;
+  value: string;
+  accent: Accent;
+  tooltip: string;
+  icon: FeatherIconName;
+  /** For an icon Feather lacks (the web's Frozen snowflake). */
+  renderIcon?: (color: string) => ReactNode;
+};
 
-/** One row as a bordered card: title, optional badge, label/value rows. */
-function RowCard({
-  title,
-  badge,
-  fields,
-}: {
-  title: string;
-  badge?: ReactNode;
-  fields: { label: string; value: string }[];
-}) {
+function StatTile({ stat }: { stat: Stat }) {
+  const a = ACCENT[stat.accent];
   return (
-    <View className="mb-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-      <View className="flex-row items-center justify-between gap-2">
+    <View className="flex-1 rounded-xl border border-gray-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+      <View className="flex-row items-center gap-2">
+        <View
+          className="h-8 w-8 items-center justify-center rounded-lg"
+          style={{ backgroundColor: a.bg }}
+        >
+          {stat.renderIcon ? (
+            stat.renderIcon(a.fg)
+          ) : (
+            <Feather name={stat.icon} size={16} color={a.fg} />
+          )}
+        </View>
         <Text
           numberOfLines={2}
-          className="shrink text-base font-semibold text-gray-900 dark:text-white"
+          className="flex-1 text-sm font-semibold text-gray-800 dark:text-gray-100"
         >
-          {title}
+          {stat.label}
         </Text>
-        {badge}
+        <InfoButton title={stat.label} text={stat.tooltip} />
       </View>
-      {fields.length > 0 && (
-        <View className="mt-3 border-t border-gray-100 pt-2 dark:border-neutral-800">
-          {fields.map((f) => (
-            <View
-              key={f.label}
-              className="flex-row items-start justify-between gap-3 py-1"
-            >
-              <Text className="shrink text-xs text-gray-500 dark:text-gray-400">
-                {f.label}
-              </Text>
-              <Text className="flex-1 text-right text-sm text-gray-900 dark:text-white">
-                {f.value}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
+      <Text className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">
+        {stat.value}
+      </Text>
     </View>
   );
 }
 
-/**
- * A list in the Manage Attractions layout: title + count with the Table/Cards
- * toggle, the rows (or an empty card), then the pager. Each list pages alone.
- */
-function PagedList<T>({
+function statsFor(r: MembershipReport): Stat[] {
+  const c = r.counts;
+  return [
+    {
+      label: "Active",
+      value: String(c.active),
+      accent: "blue",
+      icon: "users",
+      tooltip:
+        "Currently paying members in good standing. Their card is on file and the current term is active.",
+    },
+    {
+      label: "Past Due",
+      value: String(c.pastDue),
+      accent: "orange",
+      icon: "alert-circle",
+      tooltip:
+        "Last renewal payment failed. Member is in grace period — auto-retry attempts are scheduled per the plan settings.",
+    },
+    {
+      label: "Suspended",
+      value: String(c.suspended),
+      accent: "red",
+      icon: "x-circle",
+      tooltip:
+        "Grace period exhausted after failed payments. Access is blocked until payment is updated and a manual reactivation is performed.",
+    },
+    {
+      label: "Frozen",
+      value: String(c.frozen),
+      accent: "blue",
+      icon: "pause-circle",
+      renderIcon: (color) => <Ionicons name="snow-outline" size={16} color={color} />,
+      tooltip:
+        "Member-paused membership. Billing is paused and visits cannot be redeemed until the freeze-until date is reached.",
+    },
+    {
+      label: "New (range)",
+      value: String(c.newInRange),
+      accent: "green",
+      icon: "trending-up",
+      tooltip: "Memberships purchased between the selected From and To dates.",
+    },
+    {
+      label: "Canceled (range)",
+      value: String(c.canceledInRange),
+      accent: "red",
+      icon: "x-circle",
+      tooltip:
+        "Memberships canceled between the selected dates (immediate cancellations + end-of-term effective dates falling in range).",
+    },
+    {
+      label: "MRR",
+      value: money(r.mrr),
+      accent: "green",
+      icon: "dollar-sign",
+      tooltip:
+        "Monthly Recurring Revenue: sum of active membership prices normalized to a monthly cadence (annual plans / 12, etc.).",
+    },
+    {
+      label: "ARR",
+      value: money(r.arr),
+      accent: "green",
+      icon: "dollar-sign",
+      tooltip:
+        "Annual Recurring Revenue: MRR × 12. Projection of yearly run-rate from current active members.",
+    },
+  ];
+}
+
+/* ------------------------------------------------------- Section cards -- */
+
+function SectionCard({
+  icon,
+  iconColor = PRIMARY,
   title,
-  items,
-  mode,
-  onModeChange,
-  emptyIcon,
-  emptyTitle,
-  emptyMessage,
+  tooltip,
   children,
 }: {
+  icon: FeatherIconName;
+  iconColor?: string;
   title: string;
-  items: T[];
-  mode: ViewMode;
-  onModeChange: (mode: ViewMode) => void;
-  emptyIcon: FeatherIconName;
-  emptyTitle: string;
-  emptyMessage: string;
-  children: (paged: T[]) => ReactNode;
+  tooltip: string;
+  children: ReactNode;
 }) {
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(5);
-
-  // Back to the first page whenever the rows or page size change.
-  useEffect(() => {
-    setPage(1);
-  }, [items, perPage]);
-
-  const paged = useMemo(
-    () => items.slice((page - 1) * perPage, page * perPage),
-    [items, page, perPage],
-  );
-
   return (
-    <View className="mb-4">
-      <ListHeader title={title} count={items.length}>
-        {items.length > 0 && <ViewToggle mode={mode} onChange={onModeChange} />}
-      </ListHeader>
-      {items.length === 0 ? (
-        <ListEmptyState
-          icon={emptyIcon}
-          title={emptyTitle}
-          message={emptyMessage}
-        />
-      ) : (
-        <>
-          {children(paged)}
-          <Pagination
-            page={page}
-            perPage={perPage}
-            total={items.length}
-            onPageChange={setPage}
-            onPerPageChange={setPerPage}
-          />
-        </>
-      )}
+    <View className="mb-4 rounded-xl border border-gray-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+      <View className="mb-3 flex-row items-center gap-2">
+        <Feather name={icon} size={16} color={iconColor} />
+        <Text className="text-base font-semibold text-gray-900 dark:text-white">
+          {title}
+        </Text>
+        <InfoButton title={title} text={tooltip} />
+      </View>
+      {children}
     </View>
   );
 }
 
-type TopPlan = MembershipReport["topPlans"][number];
-type LocationVisits = MembershipReport["visitsByLocation"][number];
-type Underused = MembershipReport["underused"][number];
+const NoData = ({ text = "No data." }: { text?: string }) => (
+  <Text className="text-sm text-gray-500 dark:text-gray-400">{text}</Text>
+);
 
-const PLAN_COLUMNS: Column<TopPlan>[] = [
-  {
-    key: "plan",
-    label: "Plan",
-    width: 220,
-    render: (p) => (
-      <Text numberOfLines={2} className={CELL_STRONG}>
-        {p.name}
+/** A name on the left, a figure on the right, hairline between rows. */
+function ListRow({
+  label,
+  value,
+  last,
+}: {
+  label: string;
+  value: string;
+  last: boolean;
+}) {
+  return (
+    <View
+      className={`flex-row items-center justify-between gap-3 py-2 ${
+        last ? "" : "border-b border-gray-100 dark:border-neutral-800"
+      }`}
+    >
+      <Text
+        numberOfLines={2}
+        className="flex-1 text-sm text-gray-700 dark:text-gray-300"
+      >
+        {label}
       </Text>
-    ),
-  },
-  {
-    key: "price",
-    label: "Price",
-    width: 120,
-    render: (p) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {money(p.price)}
+      <Text className="text-sm font-semibold text-gray-900 dark:text-white">
+        {value}
       </Text>
-    ),
-  },
-];
+    </View>
+  );
+}
 
-const LOCATION_COLUMNS: Column<LocationVisits>[] = [
-  {
-    key: "location",
-    label: "Location",
-    width: 220,
-    render: (v) => (
-      <Text numberOfLines={2} className={CELL_STRONG}>
-        {v.locationName}
-      </Text>
-    ),
-  },
-  {
-    key: "visits",
-    label: "Visits",
-    width: 120,
-    render: (v) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {v.visits.toLocaleString()}
-      </Text>
-    ),
-  },
-];
+function ReportSkeleton() {
+  const box = "rounded-xl bg-gray-100 dark:bg-neutral-800";
+  return (
+    <View>
+      {[0, 1, 2, 3].map((row) => (
+        <View key={row} className="mb-3 flex-row gap-3">
+          <View className={`h-24 flex-1 ${box}`} />
+          <View className={`h-24 flex-1 ${box}`} />
+        </View>
+      ))}
+      {[0, 1, 2, 3].map((i) => (
+        <View key={i} className={`mb-4 h-36 ${box}`} />
+      ))}
+    </View>
+  );
+}
 
-const usageLabel = (u: Underused) => `${u.visitsUsed}/${u.visitsPerTerm} used`;
+/* --------------------------------------------------------------- Screen -- */
 
-const UNDERUSED_COLUMNS: Column<Underused>[] = [
-  {
-    key: "member",
-    label: "Member",
-    width: 180,
-    render: (u) => (
-      <Text numberOfLines={2} className={CELL_STRONG}>
-        {u.customerName ?? "Member"}
-      </Text>
-    ),
-  },
-  {
-    key: "plan",
-    label: "Plan",
-    width: 180,
-    render: (u) => (
-      <Text numberOfLines={2} className={CELL_TEXT}>
-        {u.planName ?? "—"}
-      </Text>
-    ),
-  },
-  {
-    key: "used",
-    label: "Used",
-    width: 140,
-    render: (u) => <ToneDotBadge tone="amber" label={usageLabel(u)} />,
-  },
-  {
-    key: "remaining",
-    label: "Remaining",
-    width: 110,
-    render: (u) => (
-      <Text numberOfLines={1} className={CELL_TEXT}>
-        {u.visitsRemaining}
-      </Text>
-    ),
-  },
-];
-
+/**
+ * Membership Reports — web parity with MembershipReports.tsx: a date range,
+ * eight KPI tiles, then Top Plans, Visits by Location, Revenue and Underused
+ * Memberships.
+ */
 const MembershipReports = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  // Default to the last 30 days (matching the web's default range).
-  const [range, setRange] = useState(() => lastDays(30));
+  const [range, setRange] = useState(lastMonth);
   const [dateSheetOpen, setDateSheetOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("table");
 
   const [report, setReport] = useState<MembershipReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -408,8 +334,7 @@ const MembershipReports = () => {
     }
   }, [range.from, range.to]);
 
-  // Loads on open and whenever a range is applied (date sheet or chip) —
-  // both are explicit choices, like the old Apply button.
+  // Loads on open and whenever a range is applied from the date sheet.
   useEffect(() => {
     void load();
   }, [load]);
@@ -420,75 +345,27 @@ const MembershipReports = () => {
     setRefreshing(false);
   }, [load]);
 
-  const dateLabel = `${formatShortDate(range.from)} – ${formatShortDate(range.to)}`;
-  const activePreset = PRESETS.find((p) => {
-    const r = lastDays(p.days);
-    return r.from === range.from && r.to === range.to;
-  });
-
-  const figures: SummaryFigure[] = useMemo(() => {
-    const c = report?.counts;
-    const rangeHint = report
-      ? `${prettyDate(report.dateRange.from)} → ${prettyDate(report.dateRange.to)}`
-      : "Selected range";
-    const failed = report?.failedPayments ?? 0;
-    return [
-      { icon: "users", title: "Active", value: String(c?.active ?? 0), hint: "Current members" },
-      { icon: "alert-triangle", title: "Past Due", value: String(c?.pastDue ?? 0), hint: "Payment overdue" },
-      { icon: "x-circle", title: "Suspended", value: String(c?.suspended ?? 0), hint: "Access suspended" },
-      { icon: "pause-circle", title: "Frozen", value: String(c?.frozen ?? 0), hint: "On hold" },
-      { icon: "trending-up", title: "New (range)", value: String(c?.newInRange ?? 0), hint: "Joined in range" },
-      { icon: "x-circle", title: "Canceled (range)", value: String(c?.canceledInRange ?? 0), hint: "Canceled in range" },
-      { icon: "dollar-sign", title: "MRR", value: money(report?.mrr ?? 0), hint: "Monthly recurring" },
-      { icon: "dollar-sign", title: "ARR", value: money(report?.arr ?? 0), hint: "Annual recurring" },
-      { icon: "credit-card", title: "Revenue", value: money(report?.revenueInRange ?? 0), hint: rangeHint },
-      {
-        icon: "alert-circle",
-        title: "Failed Payments",
-        value: String(failed),
-        hint: `Failed payment${failed === 1 ? "" : "s"} in range`,
-      },
-    ];
-  }, [report]);
+  const dateLabel = `${formatShortDate(range.from)} — ${formatShortDate(range.to)}`;
 
   // Pull-to-refresh keeps the report on screen; any other load shows skeletons.
   const busy = loading && !refreshing;
   const showReport = !!report && !busy && !error;
 
-  const moreShortcuts: HubQuickLink[] = [
-    {
-      label: "Manage Memberships",
-      icon: "credit-card",
-      route: "/memberships/memberships",
-    },
-    {
-      label: "Membership Plans",
-      icon: "layers",
-      route: "/memberships/membership-plan",
-    },
-    {
-      label: "Add Member",
-      icon: "user-plus",
-      route: "/memberships/memberships?add=1",
-    },
-    {
-      label: "New Plan",
-      icon: "plus",
-      route: "/memberships/membership-plan?create=1",
-    },
-  ];
+  const stats = report ? statsFor(report) : [];
+  const statRows: Stat[][] = [];
+  for (let i = 0; i < stats.length; i += 2) statRows.push(stats.slice(i, i + 2));
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header — back, title, and Run (the old Apply button). */}
+      {/* Header — back, title, and the web's Apply. */}
       <ModuleHeader
         title="Membership Reports"
         onBack={() => router.back()}
         action={{
           onPress: () => void load(),
-          label: "Run",
+          label: "Apply",
           icon: "refresh-cw",
-          accessibilityLabel: "Run the report",
+          accessibilityLabel: "Apply the date range",
         }}
       />
 
@@ -511,6 +388,23 @@ const MembershipReports = () => {
             KPIs, revenue, and engagement for the selected range
           </Text>
 
+          {/* Date range — the web's range calendar. */}
+          <Pressable
+            onPress={() => setDateSheetOpen(true)}
+            className="mb-4 h-11 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 active:opacity-70 dark:border-neutral-800 dark:bg-neutral-900"
+            accessibilityRole="button"
+            accessibilityLabel={`Date range, ${dateLabel}`}
+          >
+            <Feather name="calendar" size={16} color="#9CA3AF" />
+            <Text
+              numberOfLines={1}
+              className="flex-1 text-sm text-gray-900 dark:text-white"
+            >
+              {dateLabel}
+            </Text>
+            <Feather name="chevron-down" size={16} color="#9CA3AF" />
+          </Pressable>
+
           {!!error && !busy && (
             <ListErrorBanner
               title="Could not load membership reports"
@@ -519,164 +413,142 @@ const MembershipReports = () => {
             />
           )}
 
-          {/* Summary — every headline figure in one panel. */}
-          {busy ? (
-            <AttractionsSummarySkeleton />
-          ) : (
-            showReport && <SummaryPanel figures={figures} />
-          )}
-
-          {/* More — the other Memberships screens as module-hub shortcuts. */}
-          <View className="mt-5">
-            <HubShortcuts
-              title="More"
-              links={moreShortcuts}
-              gutter={SCREEN_GUTTER}
-            />
-          </View>
-
-          {/* Date range — the web's From / To inputs. */}
-          <View className="mb-3 mt-4 flex-row items-center gap-2">
-            <Pressable
-              onPress={() => setDateSheetOpen(true)}
-              className="h-11 flex-1 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 active:opacity-70 dark:border-neutral-800 dark:bg-neutral-900"
-              accessibilityRole="button"
-              accessibilityLabel={`Date range, ${dateLabel}`}
-            >
-              <Feather name="calendar" size={16} color="#9CA3AF" />
-              <Text
-                numberOfLines={1}
-                className="flex-1 text-sm text-gray-900 dark:text-white"
-              >
-                {dateLabel}
-              </Text>
-              <Feather name="chevron-down" size={16} color="#9CA3AF" />
-            </Pressable>
-          </View>
-
-          {/* Quick ranges. */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingRight: 4, gap: 8 }}
-            className="-mx-1 mb-4 px-1"
-          >
-            {PRESETS.map((p) => (
-              <FilterChip
-                key={p.days}
-                label={p.label}
-                selected={activePreset?.days === p.days}
-                onPress={() => setRange(lastDays(p.days))}
-              />
-            ))}
-            <FilterChip
-              label="Custom"
-              selected={!activePreset}
-              onPress={() => setDateSheetOpen(true)}
-            />
-          </ScrollView>
-
-          {busy &&
-            (viewMode === "table" ? (
-              <AttractionsTableSkeleton />
-            ) : (
-              <AttractionsListSkeleton />
-            ))}
+          {busy && <ReportSkeleton />}
 
           {showReport && (
             <>
-              <PagedList
+              {/* KPI tiles, two a row. */}
+              <View className="mb-4 gap-3">
+                {statRows.map((row) => (
+                  <View key={row[0].label} className="flex-row gap-3">
+                    {row.map((s) => (
+                      <StatTile key={s.label} stat={s} />
+                    ))}
+                  </View>
+                ))}
+              </View>
+
+              <SectionCard
+                icon="star"
                 title="Top Plans"
-                items={report.topPlans}
-                mode={viewMode}
-                onModeChange={setViewMode}
-                emptyIcon="star"
-                emptyTitle="No plans yet"
-                emptyMessage="No plan data for this range."
+                tooltip="Plans ranked by total active members."
               >
-                {(paged) =>
-                  viewMode === "table" ? (
-                    <Table
-                      columns={PLAN_COLUMNS}
-                      rows={paged}
-                      keyOf={(p) => String(p.id)}
+                {report.topPlans.length === 0 ? (
+                  <NoData />
+                ) : (
+                  report.topPlans.map((p, i) => (
+                    <ListRow
+                      key={p.id}
+                      label={p.name}
+                      value={String(p.activeCount)}
+                      last={i === report.topPlans.length - 1}
                     />
-                  ) : (
-                    paged.map((p) => (
-                      <RowCard
-                        key={p.id}
-                        title={p.name}
-                        fields={[{ label: "Price", value: money(p.price) }]}
-                      />
-                    ))
-                  )
-                }
-              </PagedList>
+                  ))
+                )}
+              </SectionCard>
 
-              <PagedList
+              <SectionCard
+                icon="map-pin"
                 title="Visits by Location"
-                items={report.visitsByLocation}
-                mode={viewMode}
-                onModeChange={setViewMode}
-                emptyIcon="map-pin"
-                emptyTitle="No visits"
-                emptyMessage="No member visits recorded in this range."
+                tooltip="Total member check-ins per location within the selected date range."
               >
-                {(paged) =>
-                  viewMode === "table" ? (
-                    <Table
-                      columns={LOCATION_COLUMNS}
-                      rows={paged}
-                      keyOf={(v, i) => `${v.locationId}-${i}`}
+                {report.visitsByLocation.length === 0 ? (
+                  <NoData />
+                ) : (
+                  report.visitsByLocation.map((v, i) => (
+                    <ListRow
+                      key={`${v.locationId}-${i}`}
+                      label={v.locationName}
+                      value={v.visits.toLocaleString()}
+                      last={i === report.visitsByLocation.length - 1}
                     />
-                  ) : (
-                    paged.map((v, i) => (
-                      <RowCard
-                        key={`${v.locationId}-${i}`}
-                        title={v.locationName}
-                        fields={[
-                          { label: "Visits", value: v.visits.toLocaleString() },
-                        ]}
-                      />
-                    ))
-                  )
-                }
-              </PagedList>
+                  ))
+                )}
+              </SectionCard>
 
-              <PagedList
-                title="Underused Memberships"
-                items={report.underused}
-                mode={viewMode}
-                onModeChange={setViewMode}
-                emptyIcon="activity"
-                emptyTitle="No underused memberships"
-                emptyMessage="No underused samples for this range."
+              <SectionCard
+                icon="dollar-sign"
+                iconColor="#16A34A"
+                title="Revenue"
+                tooltip="Sum of all successfully captured membership payments (initial purchases + renewals) in range. Refunds are not subtracted."
               >
-                {(paged) =>
-                  viewMode === "table" ? (
-                    <Table
-                      columns={UNDERUSED_COLUMNS}
-                      rows={paged}
-                      keyOf={(u) => String(u.id)}
-                    />
-                  ) : (
-                    paged.map((u) => (
-                      <RowCard
+                <Text className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+                  {prettyDate(report.dateRange.from)} →{" "}
+                  {prettyDate(report.dateRange.to)}
+                </Text>
+                <Text className="text-3xl font-bold text-green-700 dark:text-green-400">
+                  {money(report.revenueInRange)}
+                </Text>
+                <View className="mt-2 flex-row items-center gap-1.5">
+                  <Text className="text-sm text-gray-500 dark:text-gray-400">
+                    {report.failedPayments} failed payments in range
+                  </Text>
+                  <InfoButton
+                    title="Failed payments"
+                    text="Payment attempts that returned a declined/error response from the gateway. These trigger past-due status and retry scheduling."
+                  />
+                </View>
+              </SectionCard>
+
+              <SectionCard
+                icon="activity"
+                title="Underused Memberships"
+                tooltip="Active members with abnormally low visit counts for the current term — good candidates for retention outreach before they churn."
+              >
+                {report.underused.length === 0 ? (
+                  <NoData text="No underused samples." />
+                ) : (
+                  report.underused.map((u, i) => {
+                    const ends = shortDate(u.termEnds);
+                    return (
+                      <View
                         key={u.id}
-                        title={u.customerName ?? "Member"}
-                        badge={<ToneDotBadge tone="amber" label={usageLabel(u)} />}
-                        fields={[
-                          { label: "Plan", value: u.planName ?? "—" },
-                          {
-                            label: "Remaining",
-                            value: String(u.visitsRemaining),
-                          },
-                        ]}
-                      />
-                    ))
-                  )
-                }
-              </PagedList>
+                        className={`flex-row items-start justify-between gap-3 py-2.5 ${
+                          i < report.underused.length - 1
+                            ? "border-b border-gray-100 dark:border-neutral-800"
+                            : ""
+                        }`}
+                      >
+                        <View className="flex-1">
+                          <Text
+                            numberOfLines={1}
+                            className="text-sm font-medium text-gray-900 dark:text-white"
+                          >
+                            {u.customerName ?? `Customer #${u.customerId ?? "—"}`}
+                          </Text>
+                          <Text
+                            numberOfLines={1}
+                            className="text-xs text-gray-500 dark:text-gray-400"
+                          >
+                            {u.planName ?? `Membership #${u.id}`}
+                          </Text>
+                          {!!u.customerEmail && (
+                            <Text
+                              numberOfLines={1}
+                              className="text-xs text-gray-400 dark:text-gray-500"
+                            >
+                              {u.customerEmail}
+                            </Text>
+                          )}
+                        </View>
+                        <View className="items-end">
+                          <Text className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                            {u.visitsUsed} / {u.visitsPerTerm} visits
+                          </Text>
+                          <Text className="text-xs text-gray-400 dark:text-gray-500">
+                            {u.visitsRemaining} remaining
+                          </Text>
+                          {!!ends && (
+                            <Text className="text-xs text-gray-400 dark:text-gray-500">
+                              ends {ends}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </SectionCard>
             </>
           )}
         </View>

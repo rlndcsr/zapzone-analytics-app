@@ -22,7 +22,7 @@ const QUICK_LINKS: HubQuickLink[] = [
 const MODULES: HubModule[] = [
   {
     icon: "credit-card",
-    title: "Manage Memberships",
+    title: "Memberships",
     description:
       "Every member subscription, with status, billing and freezes at a glance.",
     tags: ["Members", "Filters", "Past due"],
@@ -48,8 +48,9 @@ const MODULES: HubModule[] = [
 ];
 
 // The Memberships module hub, same design as the other modules. The member
-// list stays at /memberships/memberships (now titled Manage Memberships)
-// because notifications link there with ?openId.
+// list stays at /memberships/memberships (titled Memberships, like the web
+// sidebar) because notifications link there with ?openId. Modules follow the
+// web sidebar: Memberships, Plans, Reports.
 const MembershipsHub = () => (
   <ModuleHubScreen
     title="Memberships"

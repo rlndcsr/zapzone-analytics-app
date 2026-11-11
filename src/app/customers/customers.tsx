@@ -753,7 +753,7 @@ const Customers = () => {
     <View className="flex-1 bg-gray-50 dark:bg-black">
       {/* Header — back, title, and the primary Add action. */}
       <ModuleHeader
-        title="Manage Customers"
+        title="Customers"
         action={{
           onPress: () => setSheetContact(null),
           label: "Add",

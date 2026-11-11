@@ -235,12 +235,15 @@ export const ModuleHubScreen = ({
   heading,
   intro,
   quickLinks,
+  manageLinks = [],
   modules,
 }: {
   title: string;
   heading: string;
   intro: string;
   quickLinks: HubQuickLink[];
+  /** Optional second shortcut row, titled "Manage" (e.g. the web's Manage menu). */
+  manageLinks?: HubQuickLink[];
   modules: HubModule[];
 }) => {
   const insets = useSafeAreaInsets();
@@ -308,6 +311,12 @@ export const ModuleHubScreen = ({
         {quickLinks.length > 0 && (
           <View className="mt-6">
             <HubShortcuts links={quickLinks} />
+          </View>
+        )}
+
+        {manageLinks.length > 0 && (
+          <View className="mt-6">
+            <HubShortcuts title="Manage" links={manageLinks} />
           </View>
         )}
 
