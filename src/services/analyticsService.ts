@@ -324,6 +324,39 @@ export async function fetchLandingPages(
   }));
 }
 
+/** One source's conversions and revenue, as first or last touch. */
+export type TouchRow = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  conversions: number;
+  revenue: number;
+};
+
+/**
+ * GET /page-analytics/attribution — conversion revenue credited to the first
+ * source a visitor came from (first touch) and to the one they converted on
+ * (last touch).
+ */
+export async function fetchAttribution(
+  p: RangeParams,
+): Promise<{ firstTouch: TouchRow[]; lastTouch: TouchRow[] }> {
+  const res = await apiRequest<{ data?: Record<string, unknown> }>(
+    `/api/page-analytics/attribution${rangeQuery(p)}`,
+    { token: p.token },
+  );
+  const d = res.data ?? {};
+  const touch = (rows: unknown): TouchRow[] =>
+    (Array.isArray(rows) ? (rows as Record<string, unknown>[]) : []).map((r) => ({
+      source: r.source != null && r.source !== "" ? String(r.source) : null,
+      medium: r.medium != null && r.medium !== "" ? String(r.medium) : null,
+      campaign: r.campaign != null && r.campaign !== "" ? String(r.campaign) : null,
+      conversions: num(r.conversions),
+      revenue: num(r.revenue),
+    }));
+  return { firstTouch: touch(d.first_touch), lastTouch: touch(d.last_touch) };
+}
+
 export type ConversionRow = {
   when: string | null;
   event: string;

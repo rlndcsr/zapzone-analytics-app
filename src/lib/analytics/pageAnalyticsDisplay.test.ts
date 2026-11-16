@@ -5,9 +5,44 @@ import {
   formatDuration,
   formatPercent,
   formatWhen,
+  mergeAttribution,
   pageRange,
   shortDay,
 } from "./pageAnalyticsDisplay.ts";
+
+describe("mergeAttribution", () => {
+  const t = (source: string | null, medium: string | null, campaign: string | null, revenue: number) => ({
+    source,
+    medium,
+    campaign,
+    revenue,
+  });
+
+  it("joins first and last touch per source and sorts by combined revenue", () => {
+    const rows = mergeAttribution(
+      [t("chatgpt.com", null, null, 170), t("google", "cpc", "spring", 40)],
+      [t("google", "cpc", "spring", 60), t("facebook", "social", null, 20)],
+    );
+    assert.deepEqual(
+      rows.map((r) => [r.label, r.firstTouch, r.lastTouch]),
+      [
+        ["chatgpt.com/—", 170, 0],
+        ["google/cpc · spring", 40, 60],
+        ["facebook/social", 0, 20],
+      ],
+    );
+  });
+
+  it("labels a missing source as direct, and keeps the top rows only", () => {
+    const many = Array.from({ length: 12 }, (_, i) => t(`s${i}`, "m", null, i));
+    assert.equal(mergeAttribution(many, []).length, 10);
+    assert.equal(mergeAttribution([t(null, null, null, 5)], [])[0].label, "direct/—");
+  });
+
+  it("is empty when nothing converted", () => {
+    assert.deepEqual(mergeAttribution([], []), []);
+  });
+});
 
 describe("pageRange", () => {
   // Midday UTC, so the local and UTC calendar days agree in any timezone.

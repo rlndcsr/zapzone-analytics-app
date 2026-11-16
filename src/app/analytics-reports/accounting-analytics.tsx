@@ -1,49 +1,40 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
-import {
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  Text,
-  TextInput,
-  useColorScheme,
-  View,
-} from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import {
+  AnalyticsPanel,
+  PanelEmpty,
+  PeriodCaption,
+} from "../../components/analytics/CustomerAnalyticsBlocks";
+import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
+import { ModuleHeader } from "../../components/ui/ModuleHeader";
 import { SheetSelect } from "../../components/ui/SheetSelect";
+import {
+  FilterChip,
+  ListErrorBanner,
+  SummaryPanel,
+  type SummaryFigure,
+} from "../../components/ui/SummaryPanel";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
 import { ALL_LOCATIONS_SCOPE } from "../../lib/analytics/accountingScope";
-import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  analyticsViewState,
+  formatClockTime,
+  formatMoney,
+  formatNumber,
+} from "../../lib/customers/customerAnalyticsDisplay";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { getCurrentUser, getToken, useCurrentUserRole } from "../../lib/session";
 import {
   fetchAccountingReport,
   type AccountingCategory,
   type AccountingCategoryItem,
   type AccountingReport,
 } from "../../services/analyticsService";
-import {
-  fetchLocations,
-  type LocationOption,
-} from "../../services/locationsService";
-
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
 
 const PRIMARY = "#0644C7";
-type FeatherName = ComponentProps<typeof Feather>["name"];
 
 /**
  * Report across every location the account can see. The service turns this into
@@ -52,10 +43,46 @@ type FeatherName = ComponentProps<typeof Feather>["name"];
  */
 const ALL_LOCATIONS = ALL_LOCATIONS_SCOPE;
 
-const money = (n: number) => `$${n.toFixed(2)}`;
+/** Date -> "YYYY-MM-DD" (local). */
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, "0")}-${`${d.getDate()}`.padStart(2, "0")}`;
 }
+
+type DatePreset = "today" | "yesterday" | "7d" | "month" | "custom";
+
+/** Local start/end dates for a quick pick ("Last 7 days" counts today in). */
+function presetDates(preset: Exclude<DatePreset, "custom">, now = new Date()) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const shift = (days: number) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + days);
+    return ymd(d);
+  };
+  switch (preset) {
+    case "today":
+      return { start: ymd(today), end: ymd(today) };
+    case "yesterday":
+      return { start: shift(-1), end: shift(-1) };
+    case "7d":
+      return { start: shift(-6), end: ymd(today) };
+    case "month":
+      return {
+        start: ymd(new Date(today.getFullYear(), today.getMonth(), 1)),
+        end: ymd(today),
+      };
+  }
+}
+
+const DATE_PRESETS: { value: Exclude<DatePreset, "custom">; label: string }[] = [
+  { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "month", label: "This month" },
+];
+
+/** "Nov 16" or "Nov 1 – Nov 16". */
+const rangeLabel = (start: string, end: string) =>
+  start === end ? formatShortDate(start) : `${formatShortDate(start)} – ${formatShortDate(end)}`;
 
 const UNCATEGORIZED = "Uncategorized";
 
@@ -94,7 +121,13 @@ function groupItemsByLabel(items: AccountingCategoryItem[]): LabelGroup[] {
 }
 
 /** One expandable category (Parties / Attractions / Events / Add-ons). */
-function CategoryRow({ category }: { category: AccountingCategory }) {
+function CategoryRow({
+  category,
+  first,
+}: {
+  category: AccountingCategory;
+  first: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const labelGroups = useMemo(
     () => groupItemsByLabel(category.items),
@@ -105,82 +138,70 @@ function CategoryRow({ category }: { category: AccountingCategory }) {
   // row is dropped, since it would only restate the section subtotal.
   const showLabelTotals = labelGroups.length > 1;
   return (
-    <View className="border-t border-gray-100 dark:border-neutral-800">
+    <View className={first ? "" : "border-t border-gray-100 dark:border-neutral-800"}>
       <Pressable
         onPress={() => setOpen((o) => !o)}
-        className="flex-row items-center justify-between py-3.5"
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        className="flex-row items-center gap-2 py-3.5 active:opacity-70"
       >
-        <View className="flex-row items-center gap-2 flex-1">
-          <Feather
-            name={open ? "chevron-up" : "chevron-down"}
-            size={16}
-            color="#9CA3AF"
-          />
-          <Text className="text-sm font-bold text-gray-900 dark:text-white">
+        <Feather name={open ? "chevron-up" : "chevron-down"} size={16} color="#9CA3AF" />
+        <View className="flex-1 flex-row flex-wrap items-center gap-2">
+          <Text className="text-sm font-semibold text-gray-900 dark:text-white">
             {category.name}
           </Text>
           {category.informational && (
-            <View className="bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
-              <Text className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+            <View className="bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">
+              <Text className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
                 Informational
               </Text>
             </View>
           )}
         </View>
-        <Text className="text-xs text-gray-500 dark:text-gray-400 mr-3">
-          {category.itemCount} items
+        <Text className="text-xs text-gray-500 dark:text-gray-400">
+          {formatNumber(category.itemCount)} items
         </Text>
-        <Text className="text-sm font-semibold text-gray-900 dark:text-white">
-          {money(category.total)}
+        <Text className="w-24 text-right text-sm font-semibold text-gray-900 dark:text-white">
+          {formatMoney(category.total)}
         </Text>
       </Pressable>
 
       {open && (
         <View className="pb-3 pl-6">
           {category.items.length === 0 ? (
-            <Text className="text-sm text-gray-400 dark:text-gray-500 py-2 text-center">
-              No {category.name.toLowerCase()} for this date
-            </Text>
+            <PanelEmpty message={`No ${category.name.toLowerCase()} for these dates.`} />
           ) : (
             labelGroups.map((group) => (
               <View key={group.name}>
-                <Text className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mt-2 mb-1">
+                <Text className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mt-2 mb-1">
                   {group.name}
                 </Text>
                 {group.items.map((it, i) => (
                   <View
                     key={`${it.name}-${i}`}
-                    className="flex-row items-center justify-between py-1.5"
+                    className="flex-row items-start justify-between gap-2 py-1.5"
                   >
-                    <View className="flex-1 mr-2">
-                      <Text
-                        className="text-xs text-gray-700 dark:text-gray-200"
-                        numberOfLines={1}
-                      >
-                        {it.name}
-                      </Text>
-                    </View>
-                    <Text className="text-[11px] text-gray-400 dark:text-gray-500 mr-3">
-                      ×{it.quantity}
+                    <Text className="flex-1 text-sm text-gray-700 dark:text-gray-200">
+                      {it.name}
                     </Text>
-                    <Text className="text-xs font-medium text-gray-900 dark:text-white">
-                      {money(it.grossSales)}
+                    <Text className="text-xs text-gray-400 dark:text-gray-500">
+                      ×{formatNumber(it.quantity)}
+                    </Text>
+                    <Text className="w-24 text-right text-sm font-medium text-gray-900 dark:text-white">
+                      {formatMoney(it.grossSales)}
                     </Text>
                   </View>
                 ))}
                 {showLabelTotals && (
-                  <View className="flex-row items-center justify-between py-1.5 border-t border-gray-100 dark:border-neutral-800">
-                    <Text
-                      className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 flex-1 mr-2"
-                      numberOfLines={1}
-                    >
+                  <View className="flex-row items-center justify-between gap-2 py-1.5 border-t border-gray-100 dark:border-neutral-800">
+                    <Text className="flex-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
                       {group.name} total
                     </Text>
-                    <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mr-3">
-                      ×{group.totals.quantity}
+                    <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                      ×{formatNumber(group.totals.quantity)}
                     </Text>
-                    <Text className="text-xs font-bold text-gray-900 dark:text-white">
-                      {money(group.totals.grossSales)}
+                    <Text className="w-24 text-right text-sm font-semibold text-gray-900 dark:text-white">
+                      {formatMoney(group.totals.grossSales)}
                     </Text>
                   </View>
                 )}
@@ -193,19 +214,29 @@ function CategoryRow({ category }: { category: AccountingCategory }) {
   );
 }
 
+/** What a successful load was for, so the figures are labelled truthfully. */
+type Loaded = { key: string; dates: string; at: Date };
+
 const AccountingAnalytics = () => {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
 
-  const [locations, setLocations] = useState<LocationOption[]>([]);
+  // The report follows the global location, as on the web: a company admin's
+  // workspace selection ("All Locations" -> every location), everyone else
+  // their own location (the server holds them to it either way).
+  const activeLocation = useActiveLocation();
+  const isCompanyAdmin = useCurrentUserRole() === "company_admin";
+  const ownLocationId = getCurrentUser()?.location_id ?? null;
+  const locationId: number | typeof ALL_LOCATIONS = isCompanyAdmin
+    ? activeLocation.id === "all"
+      ? ALL_LOCATIONS
+      : activeLocation.id
+    : (ownLocationId ?? ALL_LOCATIONS);
 
-  const [locationId, setLocationId] = useState<
-    number | typeof ALL_LOCATIONS | null
-  >(getCurrentUser()?.location_id ?? null);
+  // Today, as the web opens.
+  const [preset, setPreset] = useState<DatePreset>("today");
   const [start, setStart] = useState(() => ymd(new Date()));
   const [end, setEnd] = useState(() => ymd(new Date()));
+  const [showDateSheet, setShowDateSheet] = useState(false);
   const [viewMode, setViewMode] = useState<"booked_on" | "booked_for">(
     "booked_on",
   );
@@ -213,21 +244,12 @@ const AccountingAnalytics = () => {
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
 
   const [report, setReport] = useState<AccountingReport | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Load the location options once.
-  useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    fetchLocations(token)
-      .then((locs) => {
-        setLocations(locs);
-        setLocationId((prev) => prev ?? locs[0]?.id ?? null);
-      })
-      .catch(() => setLocations([]));
-  }, []);
+  const currentKey = `${locationId}|${start}|${end}|${viewMode}|${categoryFilter}`;
 
   // Bumped per load, so changing the location/dates/view quickly shows the last
   // choice's report, not whichever reply happened to arrive last.
@@ -237,7 +259,8 @@ const AccountingAnalytics = () => {
     const requestId = ++requestIdRef.current;
     const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
-    if (!token || locationId == null) {
+    if (!token) {
+      setError("Not authenticated");
       setLoading(false);
       return;
     }
@@ -254,6 +277,7 @@ const AccountingAnalytics = () => {
       });
       if (!isCurrent()) return;
       setReport(next);
+      setLoaded({ key: currentKey, dates: rangeLabel(start, end), at: new Date() });
 
       if (!categoryFilter) {
         setAvailableCategories(
@@ -273,10 +297,10 @@ const AccountingAnalytics = () => {
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [locationId, start, end, viewMode, categoryFilter]);
+  }, [locationId, start, end, viewMode, categoryFilter, currentKey]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
@@ -285,79 +309,57 @@ const AccountingAnalytics = () => {
     setRefreshing(false);
   }, [load]);
 
-  const tiles = useMemo(() => {
+  const view = analyticsViewState({
+    loading,
+    error,
+    hasData: !!report,
+    loadedKey: loaded?.key ?? null,
+    currentKey,
+  });
+
+  const pickPreset = (p: Exclude<DatePreset, "custom">) => {
+    const d = presetDates(p);
+    setPreset(p);
+    setStart(d.start);
+    setEnd(d.end);
+  };
+
+  // The scope the server actually ran on, which is not always the one asked
+  // for — a manager picking All Locations still gets their own.
+  const scope = report?.locationName
+    ? `${report.locationName}${report.locationCount > 1 ? ` · ${report.locationCount} locations` : ""}`
+    : undefined;
+
+  const figures: SummaryFigure[] = useMemo(() => {
     const s = report?.summary;
-    const t: {
-      icon: FeatherName;
-      label: string;
-      value: string;
-      negative?: boolean;
-    }[] = [
-      { icon: "hash", label: "Qty Sold", value: String(s?.qtySold ?? 0) },
-      {
-        icon: "dollar-sign",
-        label: "Gross Sales",
-        value: money(s?.grossSales ?? 0),
-      },
-      {
-        icon: "tag",
-        label: "Discounts",
-        value: `-${money(s?.discounts ?? 0)}`,
-        negative: true,
-      },
-      { icon: "file-text", label: "Net Sales", value: money(s?.netSales ?? 0) },
-      { icon: "percent", label: "Fees", value: money(s?.fees ?? 0) },
-      { icon: "briefcase", label: "Tax", value: money(s?.tax ?? 0) },
-      {
-        icon: "file",
-        label: "Total Billed",
-        value: money(s?.totalBilled ?? 0),
-      },
-      {
-        icon: "dollar-sign",
-        label: "Collected",
-        value: money(s?.collected ?? 0),
-      },
-      {
-        icon: "credit-card",
-        label: "Authorize Payment",
-        value: money(s?.authorizePayment ?? 0),
-      },
-      {
-        icon: "credit-card",
-        label: "Gateway Net",
-        value: money(s?.gatewayNet ?? 0),
-      },
+    const money = (n: number | undefined) => formatMoney(n ?? 0);
+    return [
+      { icon: "hash", title: "Qty Sold", value: formatNumber(s?.qtySold ?? 0), hint: "" },
+      { icon: "dollar-sign", title: "Gross Sales", value: money(s?.grossSales), hint: "" },
+      { icon: "tag", title: "Discounts", value: `-${money(s?.discounts)}`, hint: "" },
+      { icon: "file-text", title: "Net Sales", value: money(s?.netSales), hint: "" },
+      { icon: "percent", title: "Fees", value: money(s?.fees), hint: "" },
+      { icon: "briefcase", title: "Tax", value: money(s?.tax), hint: "" },
+      { icon: "file", title: "Total Billed", value: money(s?.totalBilled), hint: "" },
+      { icon: "dollar-sign", title: "Collected", value: money(s?.collected), hint: "" },
+      { icon: "credit-card", title: "Authorize Payment", value: money(s?.authorizePayment), hint: "" },
+      { icon: "credit-card", title: "Gateway Net", value: money(s?.gatewayNet), hint: "" },
     ];
-    return t;
   }, [report]);
+
+  const customLabel = preset === "custom" ? rangeLabel(start, end) : "Custom";
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Accounting & Analytics
-          </Text>
-          <Pressable
-            onPress={onRefresh}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Refresh"
-          >
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Accounting & Analytics"
+        action={{
+          onPress: () => void load(),
+          accessibilityLabel: "Refresh the report",
+          label: "Refresh",
+          icon: "refresh-cw",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
@@ -365,189 +367,150 @@ const AccountingAnalytics = () => {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="px-5 gap-4">
-          {/* Intro */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              Accounting & Analytics
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Purchases made on selected dates
-            </Text>
-            {/* The scope the server actually ran on, which is not always the one
-                asked for — a manager picking All Locations still gets their own. */}
-            {report?.locationName ? (
-              <Text className="text-xs font-medium text-gray-400 dark:text-gray-500 mt-1.5">
-                {report.locationName}
-                {report.locationCount > 1
-                  ? ` · ${report.locationCount} locations`
-                  : ""}
-              </Text>
-            ) : null}
-          </View>
+        <View className="px-4 mt-4 gap-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400">
+            Purchases made on the selected dates
+          </Text>
 
-          {/* Controls */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800 gap-4"
-            style={CARD_SHADOW}
-          >
-            {locations.length > 0 && (
+          {/* Dates, date basis and category. */}
+          <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+              className="-mx-1 px-1"
+            >
+              {DATE_PRESETS.map((p) => (
+                <FilterChip
+                  key={p.value}
+                  label={p.label}
+                  selected={preset === p.value}
+                  onPress={() => pickPreset(p.value)}
+                />
+              ))}
+              <FilterChip
+                label={customLabel}
+                selected={preset === "custom"}
+                onPress={() => setShowDateSheet(true)}
+              />
+            </ScrollView>
+
+            {/* The web's "Created On" / "Booked For" switch. */}
+            <View className="flex-row flex-wrap items-center gap-2 mt-3">
+              <Text className="text-xs font-medium text-gray-500 dark:text-gray-400 mr-1">
+                Date basis
+              </Text>
+              <FilterChip
+                label="Created On"
+                selected={viewMode === "booked_on"}
+                onPress={() => setViewMode("booked_on")}
+              />
+              <FilterChip
+                label="Booked For"
+                selected={viewMode === "booked_for"}
+                onPress={() => setViewMode("booked_for")}
+              />
+            </View>
+
+            {/* Narrows Parties and Attractions server-side. Events and Add-ons
+                are reported whole whatever is picked here — the backend does
+                not filter those two sections. */}
+            <View className="mt-3">
               <SheetSelect
-                icon="map-pin"
-                title="Select Location"
-                value={locationId}
+                icon="tag"
+                title="Category"
+                value={categoryFilter}
                 options={[
-                  // Only worth offering where there is more than one venue to
-                  // total up — a single-location account already sees it all.
-                  ...(locations.length > 1
-                    ? [{ label: "All Locations", value: ALL_LOCATIONS }]
-                    : []),
-                  ...locations.map((l) => ({ label: l.name, value: l.id })),
+                  { label: "All categories", value: "" },
+                  ...availableCategories.map((name) => ({ label: name, value: name })),
                 ]}
-                onSelect={(v) =>
-                  setLocationId(v === ALL_LOCATIONS ? ALL_LOCATIONS : Number(v))
-                }
+                onSelect={(v) => setCategoryFilter(String(v))}
+              />
+            </View>
+
+            {view.body === "content" && loaded && (
+              <PeriodCaption
+                stale={view.stale}
+                updating={view.updating && !refreshing}
+                shownPeriod={loaded.dates}
+                requestedPeriod={rangeLabel(start, end)}
+                location={scope}
+                updatedAt={formatClockTime(loaded.at)}
               />
             )}
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  Start Date
-                </Text>
-                <TextInput
-                  value={start}
-                  onChangeText={setStart}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
-                  className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white"
-                />
-              </View>
-              <View className="flex-1">
-                <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  End Date
-                </Text>
-                <TextInput
-                  value={end}
-                  onChangeText={setEnd}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
-                  className="bg-white dark:bg-neutral-900 rounded-xl px-3.5 py-3 border border-gray-200 dark:border-neutral-800 text-sm text-gray-900 dark:text-white"
-                />
-              </View>
-            </View>
-            <View className="flex-row gap-3">
-              <View className="flex-1">
-                <SheetSelect
-                  icon="clock"
-                  title="Date basis"
-                  value={viewMode}
-                  options={[
-                    { label: "Created On", value: "booked_on" },
-                    { label: "Booked For", value: "booked_for" },
-                  ]}
-                  onSelect={(v) => setViewMode(v as "booked_on" | "booked_for")}
-                />
-              </View>
-              {/* Narrows Parties and Attractions server-side. Events and
-                  Add-ons are reported whole whatever is picked here — the
-                  backend does not filter those two sections. */}
-              <View className="flex-1">
-                <SheetSelect
-                  icon="tag"
-                  title="Category"
-                  value={categoryFilter}
-                  options={[
-                    { label: "All categories", value: "" },
-                    ...availableCategories.map((name) => ({
-                      label: name,
-                      value: name,
-                    })),
-                  ]}
-                  onSelect={(v) => setCategoryFilter(String(v))}
-                />
-              </View>
-            </View>
           </View>
 
-          {loading && !report && <AnalyticsSkeleton tiles={10} panels={1} />}
-          {error && !report && (
-            <View className="items-center py-14">
-              <Feather name="alert-circle" size={40} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">
-                {error}
-              </Text>
-              <Pressable
-                onPress={load}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]"
-              >
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
-            </View>
+          {view.body === "skeleton" && <AnalyticsSkeleton tiles={10} panels={1} />}
+
+          {view.body === "error" && (
+            <ListErrorBanner
+              title="Couldn't load the accounting report"
+              message={error ?? "Something went wrong."}
+              onRetry={() => void load()}
+            />
           )}
 
-          {report && (
-            <>
-              {/* Summary tiles */}
-              <View className="flex-row flex-wrap gap-3">
-                {tiles.map((t) => (
-                  <View
-                    key={t.label}
-                    className="flex-1 min-w-[45%] bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-                    style={CARD_SHADOW}
-                  >
-                    <View className="flex-row items-center gap-2">
-                      <View className="w-9 h-9 rounded-xl items-center justify-center bg-blue-50 dark:bg-blue-900/30">
-                        <Feather name={t.icon} size={18} color={PRIMARY} />
-                      </View>
-                      <Text
-                        className="text-xs font-medium text-gray-500 dark:text-gray-400 flex-1"
-                        numberOfLines={1}
-                      >
-                        {t.label}
-                      </Text>
-                    </View>
-                    <Text
-                      className={`text-xl font-bold mt-3 ${t.negative ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-white"}`}
-                    >
-                      {t.value}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+          {view.banner && (
+            <ListErrorBanner
+              title={view.stale ? "Couldn't load that selection" : "Couldn't refresh the report"}
+              message={
+                view.stale
+                  ? `${error} The figures below are still for ${loaded?.dates ?? "the earlier selection"}.`
+                  : `${error} Showing the figures from ${loaded ? formatClockTime(loaded.at) : "earlier"}.`
+              }
+              onRetry={() => void load()}
+            />
+          )}
 
-              {/* Sales by category */}
-              <View
-                className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800"
-                style={CARD_SHADOW}
+          {view.body === "content" && report && (
+            // Figures for another selection are dimmed and can't be tapped, so
+            // they can't pass for the one above.
+            <View
+              style={{ opacity: view.stale ? 0.45 : 1 }}
+              pointerEvents={view.stale ? "none" : "auto"}
+              className="gap-4"
+            >
+              <SummaryPanel figures={figures} />
+
+              <AnalyticsPanel
+                icon="layers"
+                title="Sales by Category"
+                subtitle="Breakdown by Parties, Attractions, Events, and Add-ons"
               >
-                <Text className="text-base font-bold text-gray-900 dark:text-white">
-                  Sales by Category
-                </Text>
-                <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-1">
-                  Breakdown by Parties, Attractions, Events, and Add-ons
-                </Text>
                 {report.categories.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">
-                    No sales for this date
-                  </Text>
+                  <PanelEmpty message="No sales for these dates." />
                 ) : (
-                  report.categories.map((c) => (
-                    <CategoryRow key={c.name} category={c} />
+                  report.categories.map((c, i) => (
+                    <CategoryRow key={c.name} category={c} first={i === 0} />
                   ))
                 )}
-              </View>
-            </>
+              </AnalyticsPanel>
+            </View>
           )}
         </View>
       </ScrollView>
+
+      <DateRangeSheet
+        visible={showDateSheet}
+        initialStart={start}
+        initialEnd={end}
+        onClose={() => setShowDateSheet(false)}
+        onApply={(s, e) => {
+          setPreset("custom");
+          setStart(s);
+          setEnd(e);
+          setShowDateSheet(false);
+        }}
+      />
     </View>
   );
 };

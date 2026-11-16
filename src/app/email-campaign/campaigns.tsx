@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -36,6 +36,7 @@ import { ViewToggle, type ViewMode } from "../../components/ui/ViewToggle";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { campaignDisplayStatus, isScheduledCampaign } from "../../lib/email/campaignSchedule";
 import { consumeEmailCampaignsStale } from "../../lib/emailStale";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
 import {
   cancelEmailCampaign,
@@ -136,7 +137,17 @@ const EmailCampaigns = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
+  // Scoped to the global workspace location, as on the web.
+  const activeLocation = useActiveLocation();
+  const activeLocationId = activeLocation.id === "all" ? undefined : activeLocation.id;
+
+  // Bumped per load, so switching location quickly shows the last choice's
+  // campaigns, not whichever reply arrived last.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
     if (!token) {
       setError("Not authenticated");
@@ -146,17 +157,20 @@ const EmailCampaigns = () => {
     setError(null);
     try {
       const [list, s] = await Promise.all([
-        fetchEmailCampaigns(token),
-        fetchEmailCampaignStats(token).catch(() => null),
+        fetchEmailCampaigns(token, activeLocationId),
+        fetchEmailCampaignStats(token, activeLocationId).catch(() => null),
       ]);
+      if (!isCurrent()) return;
       setCampaigns(list.rows);
       setStats(s);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load campaigns");
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "Failed to load campaigns");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, []);
+  }, [activeLocationId]);
 
   useEffect(() => {
     load();

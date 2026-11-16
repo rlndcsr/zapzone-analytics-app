@@ -95,11 +95,14 @@ function mapGiftCardRow(g: RawGiftCard): GiftCardRow {
 export async function fetchGiftCardList(
   token: string,
   signal?: AbortSignal,
+  /** The global workspace location; omitted for "All Locations". */
+  locationId?: number,
 ): Promise<GiftCardRow[]> {
+  const loc = locationId != null ? `&location_id=${locationId}` : "";
   const rows = await fetchAllPages<GiftCardRow>(
     async (page) => {
       const res = await apiRequest<GiftCardsResponse>(
-        `/api/gift-cards?status=all&include_expired=1&sort_by=created_at&sort_order=desc&per_page=${PER_PAGE}&page=${page}`,
+        `/api/gift-cards?status=all&include_expired=1&sort_by=created_at&sort_order=desc&per_page=${PER_PAGE}&page=${page}${loc}`,
         { token, signal },
       );
       return {

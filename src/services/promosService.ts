@@ -155,7 +155,10 @@ function mapPromoRow(p: RawPromo): PromoRow {
 export async function fetchPromoList(
   token: string,
   signal?: AbortSignal,
+  /** The global workspace location; omitted for "All Locations". */
+  locationId?: number,
 ): Promise<PromoRow[]> {
+  const loc = locationId != null ? `&location_id=${locationId}` : "";
   const rows = await fetchAllPages<PromoRow>(
     async (page) => {
       // status=all: every status but deleted. With no status the API returns
@@ -163,7 +166,7 @@ export async function fetchPromoList(
       // and a deactivated code blocking a new one stayed invisible.
       // exclude_batches: bulk batch codes belong to the Bulk Codes tab (web parity).
       const res = await apiRequest<PromosResponse>(
-        `/api/promos?status=all&exclude_batches=1&sort_by=created_at&sort_order=desc&per_page=${PER_PAGE}&page=${page}`,
+        `/api/promos?status=all&exclude_batches=1&sort_by=created_at&sort_order=desc&per_page=${PER_PAGE}&page=${page}${loc}`,
         { token, signal },
       );
       return {

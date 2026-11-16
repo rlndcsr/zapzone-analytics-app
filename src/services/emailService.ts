@@ -61,11 +61,13 @@ const MAX_PAGES = 50;
 async function fetchEveryPage<T extends { id: number }>(
   token: string,
   path: string,
+  /** Extra query, e.g. "&location_id=3". */
+  extraQuery = "",
 ): Promise<{ rows: T[]; total: number }> {
   let total = 0;
   const rows = await fetchAllPages<T>(
     async (page) => {
-      const res = await apiRequest<unknown>(`${path}?per_page=${PER_PAGE}&page=${page}`, {
+      const res = await apiRequest<unknown>(`${path}?per_page=${PER_PAGE}&page=${page}${extraQuery}`, {
         token,
       });
       const parsed = extractPaginated<T>(res);
@@ -391,8 +393,14 @@ const campaignStatusLabel = (status: string | null | undefined, scheduledAt: str
 /** GET /api/email-campaigns — bulk email sends. */
 export async function fetchEmailCampaigns(
   token: string,
+  /** The global workspace location; omitted for "All Locations". */
+  locationId?: number,
 ): Promise<{ rows: EmailCampaignRow[]; total: number }> {
-  const { rows, total } = await fetchEveryPage<RawCampaign>(token, "/api/email-campaigns");
+  const { rows, total } = await fetchEveryPage<RawCampaign>(
+    token,
+    "/api/email-campaigns",
+    locationId != null ? `&location_id=${locationId}` : "",
+  );
   return {
     total,
     rows: rows.map((c) => ({
@@ -545,9 +553,11 @@ type RawCampaignStats = {
 /** GET /api/email-campaigns/statistics — the four campaign stat cards. */
 export async function fetchEmailCampaignStats(
   token: string,
+  /** The global workspace location; omitted for "All Locations". */
+  locationId?: number,
 ): Promise<EmailCampaignStats> {
   const res = await apiRequest<RawCampaignStats>(
-    "/api/email-campaigns/statistics",
+    `/api/email-campaigns/statistics${locationId != null ? `?location_id=${locationId}` : ""}`,
     { token },
   );
   const d = res.data ?? {};

@@ -39,6 +39,7 @@ import {
   onlineToggleQuestion,
 } from "../../lib/packages/onlineAvailability";
 import { requestErrorMessage } from "../../lib/requestError";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import {
@@ -128,9 +129,24 @@ const CustomPackages = () => {
   const user = getCurrentUser();
   // Everything with a package_type other than "regular" — the inverse of the
   // /packages catalog, from the same endpoint.
-  const { packages, loading, error, refetch, applyStatus, applyOnline } = usePackages({
-    kind: "custom",
-  });
+  const {
+    packages: allPackages,
+    loading,
+    error,
+    refetch,
+    applyStatus,
+    applyOnline,
+  } = usePackages({ kind: "custom" });
+  // Only the global workspace location's packages, as on the web (and as
+  // Manage Packages does); "All Locations" shows every one.
+  const activeLocation = useActiveLocation();
+  const packages = useMemo(
+    () =>
+      activeLocation.id === "all"
+        ? allPackages
+        : allPackages.filter((p) => p.locationId === activeLocation.id),
+    [allPackages, activeLocation.id],
+  );
   const canChangeOnline = canChangeOnlineAvailability(user?.role);
   const [onlineTogglingId, setOnlineTogglingId] = useState<number | null>(null);
 

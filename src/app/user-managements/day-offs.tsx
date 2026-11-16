@@ -34,6 +34,7 @@ import {
 } from "../../lib/dayOffs/blockForm";
 import { useDayOffs } from "../../lib/hooks/useDayOffs";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { fetchAttractions } from "../../services/attractionsService";
 import { fetchRooms } from "../../services/bookingsService";
@@ -858,8 +859,18 @@ const DayOffs = () => {
   const canManage = isCompanyAdmin || role === "location_manager";
   const ownLocationId = currentUser?.location_id ?? null;
 
-  // Filters
-  const [locationFilter, setLocationFilter] = useState<number | null>(null);
+  // Filters. The location filter starts on, and follows, the global workspace
+  // location (the web sends it with the list); the Filters sheet can still
+  // change it. It is the default, so it isn't counted as an applied filter.
+  const activeLocation = useActiveLocation();
+  const defaultLocationFilter: number | null =
+    isCompanyAdmin && activeLocation.id !== "all" ? activeLocation.id : null;
+  const [locationFilter, setLocationFilter] = useState<number | null>(
+    defaultLocationFilter,
+  );
+  useEffect(() => {
+    setLocationFilter(defaultLocationFilter);
+  }, [defaultLocationFilter]);
   const [dateRange, setDateRange] = useState<DateRange>("upcoming");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [sortBy, setSortBy] = useState<SortBy>("date");
@@ -1138,9 +1149,13 @@ const DayOffs = () => {
     setBulkClosesAt("");
     setBulkScope("location");
     setBulkSelection(emptySelection());
-    setBulkLocationId(isCompanyAdmin ? (locations[0]?.id ?? null) : ownLocationId);
+    // Admins start on the list's location (the global one by default), as the
+    // single-day form does.
+    setBulkLocationId(
+      isCompanyAdmin ? (locationFilter ?? locations[0]?.id ?? null) : ownLocationId,
+    );
     setSheet("bulk");
-  }, [isCompanyAdmin, ownLocationId, locations]);
+  }, [isCompanyAdmin, ownLocationId, locations, locationFilter]);
 
   // Load packages, spaces, attractions and events for the "What should be
   // blocked?" scope selector whenever the create/edit form OR the bulk sheet is
@@ -1326,18 +1341,18 @@ const DayOffs = () => {
     setTypeFilter("all");
     setSortBy("date");
     setSortOrder("asc");
-    setLocationFilter(null);
+    setLocationFilter(defaultLocationFilter);
     setSearch("");
     setDebouncedSearch("");
     setPage(1);
-  }, []);
+  }, [defaultLocationFilter]);
 
   const hasActiveFilters =
     dateRange !== "upcoming" ||
     typeFilter !== "all" ||
     sortBy !== "date" ||
     sortOrder !== "asc" ||
-    locationFilter != null ||
+    locationFilter !== defaultLocationFilter ||
     search.trim() !== "";
 
   /** Non-default filters — drives the "Filters (N)" pill badge. Search isn't
@@ -1347,7 +1362,7 @@ const DayOffs = () => {
     (typeFilter !== "all" ? 1 : 0) +
     (sortBy !== "date" ? 1 : 0) +
     (sortOrder !== "asc" ? 1 : 0) +
-    (locationFilter != null ? 1 : 0);
+    (locationFilter !== defaultLocationFilter ? 1 : 0);
 
   /** Location options for the filter panel ("All Locations" + each location). */
   const locationFilterOptions: SelectOption[] = [

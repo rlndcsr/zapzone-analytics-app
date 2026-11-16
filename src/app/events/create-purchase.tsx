@@ -77,6 +77,7 @@ import {
   buildAppliedFees,
   resolveFreshPricing,
 } from "../../services/pricingService";
+import { getActiveLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   clampToRemaining,
@@ -312,10 +313,10 @@ const CreateEventPurchaseScreen = () => {
   const isCompanyAdmin = user?.role === "company_admin";
 
   // Location (company admins) — options from dashboard metrics locationStats.
-  // Default to "All Locations" (null), like the web, so every location's
-  // events are available until one is chosen.
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
-    null,
+  // Starts on the global workspace location, like the web; "All Locations"
+  // (null) there makes every location's events available until one is chosen.
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(() =>
+    getActiveLocationId() ?? null,
   );
   const { data: metrics } = useDashboardMetrics({ timeframe: "all_time" });
   const locationOptions = useMemo(() => {

@@ -99,6 +99,7 @@ import { useNotifications } from "../../lib/hooks/useNotifications";
 import { useScheduleDayWindow } from "../../lib/hooks/useScheduleDayWindow";
 import { useTabSettled } from "../../lib/hooks/useTabSettled";
 import { useSpaces } from "../../lib/hooks/useSpaceSchedule";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import type { CalendarBooking } from "../../services/bookingsService";
 import type { PurchaseRow } from "../../services/attractionPurchasesService";
 import {
@@ -1003,23 +1004,39 @@ const Calendar = () => {
     return { startDate: dateKey(anchor), endDate: dateKey(anchor) };
   }, [viewMode, anchor]);
 
+  // Everything on the calendar follows the global workspace location, as the
+  // Bookings calendar and the web's CalendarView do.
+  const activeLocation = useActiveLocation();
+  const activeLocationId =
+    activeLocation.id === "all" ? undefined : activeLocation.id;
+
   const {
     bookings,
     loading: bookingsLoading,
     error,
     refetch: refetchBookings,
-  } = useCalendarBookings({ startDate, endDate });
+  } = useCalendarBookings({ startDate, endDate, locationId: activeLocationId });
 
   // The tap paints the skeleton; the grid — the heaviest render in the app —
   // draws once the tab settles, even when the bookings are already held.
   const settled = useTabSettled();
   const loading = bookingsLoading || !settled;
 
-  const { purchases, refetch: refetchPurchases } = useAttractionPurchases();
+  const { purchases, refetch: refetchPurchases } = useAttractionPurchases({
+    locationId: activeLocationId,
+  });
 
   // Spaces are the day grid's columns; a space carries only a location id, so
-  // the locations list supplies the label under each column head.
-  const { spaces, refetch: refetchSpaces } = useSpaces();
+  // the locations list supplies the label under each column head. Only the
+  // global location's spaces are columns when one is selected.
+  const { spaces: allSpaces, refetch: refetchSpaces } = useSpaces();
+  const spaces = useMemo(
+    () =>
+      activeLocationId == null
+        ? allSpaces
+        : allSpaces.filter((s) => s.locationId === activeLocationId),
+    [allSpaces, activeLocationId],
+  );
   const { locations } = useLocationOptions();
 
   const onRefresh = useCallback(async () => {
@@ -1179,6 +1196,7 @@ const Calendar = () => {
   // guessed — a failed request can make the grid inert, never wrong.
   const { dayWindow: scheduleWindow } = useScheduleDayWindow(
     viewMode === "day" ? startDate : null,
+    activeLocationId,
   );
 
   /** The venue a column belongs to — a virtual column's comes from its package. */

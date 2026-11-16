@@ -54,6 +54,7 @@ import {
   MONTHLY_OCCURRENCES,
   monthlyPatternLabel,
 } from "../../lib/packages/scheduleDays";
+import { getActiveLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { formatDuration } from "../../lib/time";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
@@ -221,8 +222,10 @@ const CreatePackage = () => {
   // --- Location + categories (loaded on mount) ---
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [locationId, setLocationId] = useState<number | null>(
-    isCompanyAdmin ? null : (user?.location_id ?? null),
+  // Admins start on the global workspace location (as the web does), others
+  // on their own.
+  const [locationId, setLocationId] = useState<number | null>(() =>
+    isCompanyAdmin ? (getActiveLocationId() ?? null) : (user?.location_id ?? null),
   );
 
   const initialType =

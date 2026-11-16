@@ -39,6 +39,17 @@ export function getActiveLocationId(): number | undefined {
   return state.id === "all" ? undefined : state.id;
 }
 
+/**
+ * The location a new record or on-site sale starts on: the global workspace
+ * location when one is selected, else the signed-in user's own (null when
+ * neither — the form then asks). Read once when a form opens.
+ */
+export function defaultFormLocationId(
+  ownLocationId: number | null | undefined,
+): number | null {
+  return getActiveLocationId() ?? ownLocationId ?? null;
+}
+
 /** Update the active location, notify subscribers, and persist (best-effort). */
 export function setActiveLocation(next: ActiveLocation): void {
   // Skip no-op writes so subscribers don't re-render/refetch needlessly.

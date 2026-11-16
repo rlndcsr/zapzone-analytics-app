@@ -105,6 +105,7 @@ import {
   isStaffLoginRefusal,
   STAFF_LOGIN_REFUSED,
 } from "../../lib/packages/onlineAvailability";
+import { getActiveLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { isLowRemaining, isSoldOut } from "../../lib/ticketLimits";
 import { formatDuration } from "../../lib/time";
@@ -648,8 +649,10 @@ const CreateBookingScreen = () => {
 
   const [step, setStep] = useState(1);
 
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
-    isCompanyAdmin ? (slotPrefill.locationId ?? null) : null,
+  // A slot tapped on the calendar wins; otherwise the global workspace
+  // location, as the web's OnsiteBooking does.
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(() =>
+    isCompanyAdmin ? (slotPrefill.locationId ?? getActiveLocationId() ?? null) : null,
   );
   // The light locations endpoint (as edit-booking uses), not the all-time
   // dashboard metrics — the heaviest call in the app — just for names.

@@ -38,6 +38,7 @@ import { InputField } from "../../components/ui/InputField";
 import { TimePickerSheet } from "../../components/ui/TimePickerSheet";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
 import { markAttractionsStale } from "../../lib/hooks/useAttractions";
+import { defaultFormLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createAttraction,
@@ -81,8 +82,9 @@ const CreateAttractionScreen = () => {
   const [schedules, setSchedules] = useState<AvailabilitySchedule[]>([newSchedule()]);
   const [images, setImages] = useState<string[]>([]);
   const [displayOrder, setDisplayOrder] = useState("0");
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
-    user?.location_id ?? null,
+  // Starts on the global workspace location, as the web does.
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(() =>
+    defaultFormLocationId(user?.location_id),
   );
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
 

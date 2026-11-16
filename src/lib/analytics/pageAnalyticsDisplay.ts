@@ -65,6 +65,48 @@ export function formatWhen(raw: string | null, now: Date = new Date()): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}${year} at ${clock(d)}`;
 }
 
+type Touch = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  revenue: number;
+};
+
+export type AttributionRow = {
+  key: string;
+  /** "google/cpc", "direct/—" — the web's axis label, plus the campaign when set. */
+  label: string;
+  firstTouch: number;
+  lastTouch: number;
+};
+
+/**
+ * First- and last-touch revenue side by side, one row per source / medium /
+ * campaign, largest combined revenue first — the web's merge. Top `limit` rows.
+ */
+export function mergeAttribution(
+  firstTouch: Touch[],
+  lastTouch: Touch[],
+  limit = 10,
+): AttributionRow[] {
+  const rows = new Map<string, AttributionRow>();
+  const row = (t: Touch) => {
+    const key = `${t.source ?? ""}|${t.medium ?? ""}|${t.campaign ?? ""}`;
+    let r = rows.get(key);
+    if (!r) {
+      const base = `${t.source || "direct"}/${t.medium || "—"}`;
+      r = { key, label: t.campaign ? `${base} · ${t.campaign}` : base, firstTouch: 0, lastTouch: 0 };
+      rows.set(key, r);
+    }
+    return r;
+  };
+  for (const t of firstTouch) row(t).firstTouch = t.revenue;
+  for (const t of lastTouch) row(t).lastTouch = t.revenue;
+  return [...rows.values()]
+    .sort((a, b) => b.firstTouch + b.lastTouch - (a.firstTouch + a.lastTouch))
+    .slice(0, limit);
+}
+
 /** "2026-07-09" / ISO -> "Jul 9"; anything else (e.g. an hour bucket) as sent. */
 export function shortDay(raw: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);

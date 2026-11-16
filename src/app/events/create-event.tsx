@@ -30,6 +30,7 @@ import { firstFieldError } from "../../lib/api";
 import { eventIsCallToBook } from "../../lib/callToBook";
 import { useDashboardMetrics } from "../../lib/hooks/useDashboardMetrics";
 import { markEventsStale } from "../../lib/hooks/useEvents";
+import { defaultFormLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { scheduleWindowMinutes } from "../../lib/time";
 import { fetchAddOns, type AddOnOption } from "../../services/addOnsService";
@@ -75,8 +76,9 @@ const CreateEventScreen = () => {
   const [price, setPrice] = useState("0");
   const [features, setFeatures] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(
-    user?.location_id ?? null,
+  // Starts on the global workspace location, as the web does.
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(() =>
+    defaultFormLocationId(user?.location_id),
   );
   const [selectedAddOnIds, setSelectedAddOnIds] = useState<number[]>([]);
 

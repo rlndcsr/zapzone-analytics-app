@@ -108,6 +108,7 @@ import {
   ticketOrderQrValue,
   useQrDataUri,
 } from "../../lib/payments/useQrDataUri";
+import { getActiveLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   buildSlotRemainingMap,
@@ -501,9 +502,20 @@ const CreatePurchaseScreen = () => {
     if (!token || !user?.id) return;
     let active = true;
     setLoadingAttractions(true);
+    // Only the global workspace location's attractions, as the web does
+    // ("All Locations" lists every one).
+    const scopeId = getActiveLocationId();
     fetchAttractions({ token, userId: user.id })
       .then((rows) => {
-        if (active) setAttractions(rows.filter((a) => a.status === "active"));
+        if (active) {
+          setAttractions(
+            rows.filter(
+              (a) =>
+                a.status === "active" &&
+                (scopeId == null || a.locationId === scopeId),
+            ),
+          );
+        }
       })
       .catch(() => {})
       .finally(() => {

@@ -53,6 +53,7 @@ import {
   markSpecialPricingsStale,
   useSpecialPricings,
 } from "../../lib/hooks/useSpecialPricings";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
 import {
   fetchLocations,
@@ -277,8 +278,26 @@ const Pricing = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const { specialPricings, loading, error, refetch, applyStatus, remove } =
-    useSpecialPricings();
+  const {
+    specialPricings: allSpecialPricings,
+    loading,
+    error,
+    refetch,
+    applyStatus,
+    remove,
+  } = useSpecialPricings();
+  // Scoped to the global workspace location: its own rules plus the
+  // company-wide ones that also apply there. "All Locations" shows every rule.
+  const activeLocation = useActiveLocation();
+  const specialPricings = useMemo(
+    () =>
+      activeLocation.id === "all"
+        ? allSpecialPricings
+        : allSpecialPricings.filter(
+            (p) => p.locationId === null || p.locationId === activeLocation.id,
+          ),
+    [allSpecialPricings, activeLocation.id],
+  );
 
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);

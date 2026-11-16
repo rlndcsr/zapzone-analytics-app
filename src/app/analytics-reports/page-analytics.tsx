@@ -1,7 +1,5 @@
-import { Feather } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Pressable,
   RefreshControl,
   ScrollView,
   Text,
@@ -18,7 +16,6 @@ import {
 } from "../../components/analytics/CustomerAnalyticsBlocks";
 import { BreakdownList, DataTable } from "../../components/ui/AnalyticsCards";
 import { AreaChart } from "../../components/ui/AreaChart";
-import { BottomSheet } from "../../components/ui/BottomSheet";
 import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
 import { FunnelChart } from "../../components/ui/FunnelChart";
 import { ModuleHeader } from "../../components/ui/ModuleHeader";
@@ -33,8 +30,10 @@ import {
   formatDuration,
   formatPercent,
   formatWhen,
+  mergeAttribution,
   pageRange,
   shortDay,
+  type AttributionRow,
 } from "../../lib/analytics/pageAnalyticsDisplay";
 import {
   analyticsViewState,
@@ -46,8 +45,10 @@ import {
   queryKey,
   type PeriodRange,
 } from "../../lib/customers/customerAnalyticsDisplay";
-import { getToken } from "../../lib/session";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
+import { getCurrentUser, getToken, useCurrentUserRole } from "../../lib/session";
 import {
+  fetchAttribution,
   fetchDevices,
   fetchFunnel,
   fetchLandingPages,
@@ -69,7 +70,6 @@ import {
   type TopPage,
   type TrafficSources,
 } from "../../services/analyticsService";
-import { fetchLocations, type LocationOption } from "../../services/locationsService";
 
 const PRIMARY = "#0644C7";
 const AMBER = "#F59E0B";
@@ -96,10 +96,11 @@ type PageReport = {
   funnel: FunnelStep[];
   landing: LandingPage[];
   conversions: ConversionRow[];
+  attribution: AttributionRow[];
 };
 
 /** What a successful load was for, so the figures are labelled truthfully. */
-type Loaded = { key: string; period: string; locationId: number | null; at: Date };
+type Loaded = { key: string; period: string; scope: string; at: Date };
 
 // The web's ⓘ tooltips for each figure.
 const INFO = {
@@ -126,10 +127,17 @@ const PageAnalytics = () => {
   const [customEnd, setCustomEnd] = useState<string | undefined>();
   const [showCustomRange, setShowCustomRange] = useState(false);
 
-  // This page's own location filter (single location, or all).
-  const [locationId, setLocationId] = useState<number | null>(null);
-  const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [showLocations, setShowLocations] = useState(false);
+  // Follows the global location, as the web page does: a company admin's
+  // workspace selection, everyone else their own location.
+  const activeLocation = useActiveLocation();
+  const isCompanyAdmin = useCurrentUserRole() === "company_admin";
+  const ownLocationId = getCurrentUser()?.location_id ?? null;
+  const locationId: number | null = isCompanyAdmin
+    ? activeLocation.id === "all"
+      ? null
+      : activeLocation.id
+    : ownLocationId;
+  const requestedScope = isCompanyAdmin ? activeLocation.name : "Your location";
 
   const [report, setReport] = useState<PageReport | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -138,24 +146,11 @@ const PageAnalytics = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [deviceTab, setDeviceTab] = useState<DeviceTab>("devices");
 
-  // Location options for the location filter.
-  useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    fetchLocations(token).then(setLocations).catch(() => setLocations([]));
-  }, []);
-
   const query = useMemo(
     () => ({ dateRange: range, start: customStart, end: customEnd }),
     [range, customStart, customEnd],
   );
   const currentKey = queryKey({ ...query, locationId: locationId ?? undefined });
-
-  const locationName = (id: number | null) =>
-    id == null
-      ? "All Locations"
-      : (locations.find((l) => l.id === id)?.name ?? `Location #${id}`);
-  const requestedScope = locationName(locationId);
 
   // Bumped per load, so switching period/location quickly shows the last
   // choice's figures, not whichever batch of replies arrived last.
@@ -182,7 +177,7 @@ const PageAnalytics = () => {
     try {
       // The overview is required; every other block falls back to empty, so
       // one failing panel never blanks the page.
-      const [ov, lv, ts, tp, te, src, dev, fn, lp, cv] = await Promise.all([
+      const [ov, lv, ts, tp, te, src, dev, fn, lp, cv, attr] = await Promise.all([
         fetchPageOverview(p),
         fetchPageLive({ token, locationId: loc }).catch(() => null),
         fetchPageTimeseries(p).catch(() => ({ bucket: "day", series: [] })),
@@ -193,6 +188,7 @@ const PageAnalytics = () => {
         fetchFunnel(p).catch(() => []),
         fetchLandingPages(p).catch(() => []),
         fetchRecentConversions(p).catch(() => []),
+        fetchAttribution(p).catch(() => ({ firstTouch: [], lastTouch: [] })),
       ]);
       if (!isCurrent()) return;
       setReport({
@@ -207,11 +203,12 @@ const PageAnalytics = () => {
         funnel: fn,
         landing: lp,
         conversions: cv,
+        attribution: mergeAttribution(attr.firstTouch, attr.lastTouch),
       });
       setLoaded({
         key: currentKey,
         period: periodLabel(query),
-        locationId,
+        scope: requestedScope,
         at: new Date(),
       });
     } catch (err) {
@@ -221,7 +218,7 @@ const PageAnalytics = () => {
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [query, locationId, currentKey]);
+  }, [query, locationId, currentKey, requestedScope]);
 
   useEffect(() => {
     void load();
@@ -242,7 +239,7 @@ const PageAnalytics = () => {
   });
 
   const shownPeriod = loaded?.period ?? periodLabel(query);
-  const shownScope = loaded ? locationName(loaded.locationId) : requestedScope;
+  const shownScope = loaded?.scope ?? requestedScope;
   const customChipLabel =
     customStart && customEnd
       ? `${formatShortDate(customStart)} – ${formatShortDate(customEnd)}`
@@ -322,19 +319,6 @@ const PageAnalytics = () => {
                 onPress={() => setShowCustomRange(true)}
               />
             </ScrollView>
-
-            <Pressable
-              onPress={() => setShowLocations(true)}
-              className="mt-3 h-11 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 active:opacity-70 dark:border-neutral-800 dark:bg-neutral-900"
-              accessibilityRole="button"
-              accessibilityLabel={`Location, ${requestedScope}`}
-            >
-              <Feather name="map-pin" size={16} color="#9CA3AF" />
-              <Text numberOfLines={1} className="flex-1 text-sm text-gray-900 dark:text-white">
-                {requestedScope}
-              </Text>
-              <Feather name="chevron-down" size={16} color="#9CA3AF" />
-            </Pressable>
 
             {view.body === "content" && loaded && (
               <PeriodCaption
@@ -556,6 +540,18 @@ const PageAnalytics = () => {
               </AnalyticsPanel>
 
               <SectionLabel title="Conversions" detail={shownPeriod} />
+              {/* Only when there is any, as on the web. */}
+              {report.attribution.length > 0 && (
+                <AnalyticsPanel
+                  icon="star"
+                  title="Attribution"
+                  subtitle="First-touch vs last-touch revenue"
+                  info="Revenue from conversions, credited to the source a visitor first came from (first touch) and to the source of the visit they converted on (last touch)."
+                >
+                  <AttributionBars rows={report.attribution} />
+                </AnalyticsPanel>
+              )}
+
               <AnalyticsPanel icon="check-circle" title="Recent Conversions">
                 {report.conversions.length === 0 ? (
                   <PanelEmpty message="No conversions in this period." />
@@ -591,39 +587,6 @@ const PageAnalytics = () => {
         </View>
       </ScrollView>
 
-      {/* Location — all, or one. */}
-      <BottomSheet
-        visible={showLocations}
-        onClose={() => setShowLocations(false)}
-        title="Select Location"
-      >
-        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
-          {[{ id: null as number | null, name: "All Locations" }, ...locations].map((loc) => {
-            const on = loc.id === locationId;
-            return (
-              <Pressable
-                key={loc.id ?? "all"}
-                onPress={() => {
-                  setLocationId(loc.id);
-                  setShowLocations(false);
-                }}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: on }}
-                className="flex-row items-center gap-3 px-2 py-3.5 active:opacity-70"
-              >
-                <Text
-                  numberOfLines={1}
-                  className="flex-1 text-base font-medium text-gray-800 dark:text-gray-100"
-                >
-                  {loc.name}
-                </Text>
-                {on && <Feather name="check" size={18} color={PRIMARY} />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
-
       {/* Custom period calendar, for the "Custom" chip. */}
       <DateRangeSheet
         visible={showCustomRange}
@@ -640,5 +603,54 @@ const PageAnalytics = () => {
     </View>
   );
 };
+
+/**
+ * First- and last-touch revenue per source: a legend, then each source with
+ * its two bars, scaled to the largest figure, and the exact amounts.
+ */
+function AttributionBars({ rows }: { rows: AttributionRow[] }) {
+  const max = Math.max(...rows.flatMap((r) => [r.firstTouch, r.lastTouch]), 0) || 1;
+  const bar = (value: number, color: string, label: string) => (
+    <View className="flex-row items-center gap-2 mt-1.5" accessibilityLabel={`${label} ${formatMoney(value)}`}>
+      <View className="flex-1 h-2.5 rounded-full bg-gray-100 dark:bg-neutral-800 overflow-hidden">
+        <View
+          style={{
+            width: `${value > 0 ? Math.max(2, (value / max) * 100) : 0}%`,
+            height: "100%",
+            backgroundColor: color,
+          }}
+        />
+      </View>
+      <Text className="w-20 text-right text-xs font-semibold text-gray-900 dark:text-white">
+        {formatMoney(value)}
+      </Text>
+    </View>
+  );
+  return (
+    <View>
+      <View className="flex-row flex-wrap gap-x-4 gap-y-1 mb-1">
+        {[
+          { color: PRIMARY, label: "First-touch $" },
+          { color: GREEN, label: "Last-touch $" },
+        ].map((l) => (
+          <View key={l.label} className="flex-row items-center gap-1.5">
+            <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: l.color }} />
+            <Text className="text-xs text-gray-600 dark:text-gray-300">{l.label}</Text>
+          </View>
+        ))}
+      </View>
+      {rows.map((r, i) => (
+        <View
+          key={r.key}
+          className={`py-2.5 ${i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
+        >
+          <Text className="text-sm font-medium text-gray-900 dark:text-white">{r.label}</Text>
+          {bar(r.firstTouch, PRIMARY, "First touch")}
+          {bar(r.lastTouch, GREEN, "Last touch")}
+        </View>
+      ))}
+    </View>
+  );
+}
 
 export default PageAnalytics;

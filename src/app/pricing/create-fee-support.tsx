@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { markFeeSupportsStale } from "../../lib/hooks/useFeeSupports";
+import { getActiveLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createFeeSupport,
@@ -199,7 +200,10 @@ const CreateFeeSupport = () => {
     const user = getCurrentUser();
     if (!token || !user) return;
     setEntitiesLoading(true);
-    const loc = locationId ?? undefined;
+    // A company-wide new rule lists the global workspace location's items, as
+    // the web does. Never when editing: a saved rule may target items at
+    // other locations, and a narrower list would drop them on save.
+    const loc = locationId ?? (editId ? undefined : getActiveLocationId());
     try {
       let list: EntityOption[] = [];
       if (entityType === "package") {
@@ -234,7 +238,7 @@ const CreateFeeSupport = () => {
     } finally {
       setEntitiesLoading(false);
     }
-  }, [entityType, locationId]);
+  }, [entityType, locationId, editId]);
 
   useEffect(() => {
     if (ready) loadEntities();

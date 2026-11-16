@@ -43,6 +43,7 @@ import {
   type LocationOption,
 } from "../../services/locationsService";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { areaGroupValue, turnaroundUpdate } from "../../lib/rooms";
 import { getCurrentUser, getToken } from "../../lib/session";
 
@@ -425,7 +426,15 @@ const Space = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortBy, setSortBy] = useState<SortBy>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
-  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
+  // The location filter starts on, and follows, the global workspace location
+  // (the web's Rooms page shows that location's rooms); the Filters sheet can
+  // still widen or change it.
+  const activeLocation = useActiveLocation();
+  const defaultLocationFilter: number | "all" = activeLocation.id;
+  const [locationFilter, setLocationFilter] = useState<number | "all">(defaultLocationFilter);
+  useEffect(() => {
+    setLocationFilter(defaultLocationFilter);
+  }, [defaultLocationFilter]);
 
   // Edit form
   const [editTarget, setEditTarget] = useState<SpaceRow | null>(null);
@@ -537,15 +546,16 @@ const Space = () => {
     setPage(1);
   }, [search, statusFilter, locationFilter, sortBy, sortOrder, perPage]);
 
+  // The global location is the default, not an applied filter.
   const filtersActive =
     statusFilter !== "all" ||
     sortBy !== "name" ||
     sortOrder !== "asc" ||
-    locationFilter !== "all";
+    locationFilter !== defaultLocationFilter;
 
   // What the Filters sheet holds (status has its own chips on the page).
   const sheetFiltersActive =
-    sortBy !== "name" || sortOrder !== "asc" || locationFilter !== "all";
+    sortBy !== "name" || sortOrder !== "asc" || locationFilter !== defaultLocationFilter;
 
   // Per-status chip counts over every loaded space.
   const availableCount = useMemo(
@@ -566,7 +576,7 @@ const Space = () => {
     setStatusFilter("all");
     setSortBy("name");
     setSortOrder("asc");
-    setLocationFilter("all");
+    setLocationFilter(defaultLocationFilter);
   };
 
   const loadLocations = useCallback(async () => {
@@ -590,7 +600,12 @@ const Space = () => {
 
   const openCreate = () => {
     setCreateMode("single");
-    setCLocationId(getCurrentUser()?.location_id ?? null);
+    // A new space defaults to the global workspace location, else the user's own.
+    setCLocationId(
+      (activeLocation.id === "all" ? null : activeLocation.id) ??
+        getCurrentUser()?.location_id ??
+        null,
+    );
     setCName("");
     setCCapacity("");
     setCAvailable(true);

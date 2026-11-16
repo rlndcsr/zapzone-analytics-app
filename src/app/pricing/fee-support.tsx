@@ -52,6 +52,7 @@ import {
   markFeeSupportsStale,
   useFeeSupports,
 } from "../../lib/hooks/useFeeSupports";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getToken } from "../../lib/session";
 import {
   deleteFeeSupport,
@@ -296,8 +297,26 @@ const FeeSupport = () => {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const headerIcon = colorScheme === "dark" ? "#FFFFFF" : "#111827";
-  const { feeSupports, loading, error, refetch, applyStatus, remove } =
-    useFeeSupports();
+  const {
+    feeSupports: allFeeSupports,
+    loading,
+    error,
+    refetch,
+    applyStatus,
+    remove,
+  } = useFeeSupports();
+  // Scoped to the global workspace location: its own rules plus the
+  // company-wide ones that also apply there. "All Locations" shows every rule.
+  const activeLocation = useActiveLocation();
+  const feeSupports = useMemo(
+    () =>
+      activeLocation.id === "all"
+        ? allFeeSupports
+        : allFeeSupports.filter(
+            (f) => f.locationId === null || f.locationId === activeLocation.id,
+          ),
+    [allFeeSupports, activeLocation.id],
+  );
 
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);

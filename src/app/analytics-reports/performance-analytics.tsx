@@ -54,6 +54,7 @@ import {
   queryKey,
   type PeriodRange,
 } from "../../lib/customers/customerAnalyticsDisplay";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   fetchCompanyAnalytics,
@@ -113,7 +114,20 @@ const CompanyPerformanceAnalytics = () => {
    * on its own, and an empty selection means every location.
    */
   const [showLocations, setShowLocations] = useState(false);
-  const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
+  // Starts from, and follows, the global workspace location: a selected
+  // location is pre-ticked, "All Locations" means none ticked (every location).
+  // The page's own filter can still add or remove locations from there.
+  const activeLocation = useActiveLocation();
+  const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>(() =>
+    activeLocation.id === "all" ? [] : [activeLocation.id],
+  );
+  useEffect(() => {
+    const next = activeLocation.id === "all" ? [] : [activeLocation.id];
+    // Keep the same array when nothing changed, so it doesn't refetch.
+    setSelectedLocationIds((prev) =>
+      prev.length === next.length && prev.every((id, i) => id === next[i]) ? prev : next,
+    );
+  }, [activeLocation.id]);
 
   // Export sheet — its own copy of the filters, seeded from the screen's when
   // opened, so ticking boxes there doesn't reload the figures behind it.

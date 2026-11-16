@@ -72,6 +72,7 @@ import {
   STAFF_LOGIN_REFUSED,
 } from "../../lib/packages/onlineAvailability";
 import { requestErrorMessage } from "../../lib/requestError";
+import { getActiveLocationId } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import { normalizeCategory } from "../../lib/venueCategories";
 import { ApiError } from "../../lib/api";
@@ -373,8 +374,11 @@ const ManualBookingScreen = () => {
 
   const [bookingMode, setBookingMode] = useState<BookingMode>("standard");
 
-  // Location filter (company admin). Managers are auth-scoped server-side.
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
+  // Location filter (company admin), starting on the global workspace
+  // location as the web does. Managers are auth-scoped server-side.
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(() =>
+    isCompanyAdmin ? (getActiveLocationId() ?? null) : null,
+  );
   // The light locations endpoint (as edit-booking uses), not the all-time
   // dashboard metrics — the heaviest call in the app — just for names.
   const { locations } = useLocationOptions();

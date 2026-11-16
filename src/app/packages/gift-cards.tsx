@@ -46,6 +46,7 @@ import {
 } from "../../lib/giftCards/sellGiftCard";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
 import { useLocationOptions } from "../../lib/hooks/useLocationOptions";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 import {
   createGiftCard,
@@ -237,9 +238,13 @@ const GiftCards = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
 
+  // Scoped to the global workspace location, as on the web.
+  const activeLocation = useActiveLocation();
+  const activeLocationId = activeLocation.id === "all" ? undefined : activeLocation.id;
   const loader = useCallback(
-    ({ token }: { token: string }) => fetchGiftCardList(token),
-    [],
+    ({ token }: { token: string }) =>
+      fetchGiftCardList(token, undefined, activeLocationId),
+    [activeLocationId],
   );
   const { data: cards, loading, error, refetch } = useAsyncList(loader);
 
@@ -413,8 +418,11 @@ const GiftCards = () => {
     setSPurchaserEmail("");
     setSPurchaserPhone("");
     // Non-admins are scoped to their own venue, same as Create — only company
-    // admins pick from the location list below.
-    setSLocationId(isCompanyAdmin ? null : (currentUser?.location_id ?? null));
+    // admins pick from the location list below, starting on the global
+    // workspace location when one is selected (as the web does).
+    setSLocationId(
+      isCompanyAdmin ? (activeLocationId ?? null) : (currentUser?.location_id ?? null),
+    );
     setSPaymentMethod("cash");
     setSelling(false);
     setSoldCard(null);

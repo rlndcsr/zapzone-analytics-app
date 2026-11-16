@@ -46,6 +46,7 @@ import {
 } from "../../services/promosService";
 import { ApiError, firstFieldError } from "../../lib/api";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
+import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
@@ -345,9 +346,13 @@ const Promos = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
 
+  // Single codes follow the global workspace location, as on the web (bulk
+  // batches have no location filter there either).
+  const activeLocation = useActiveLocation();
+  const activeLocationId = activeLocation.id === "all" ? undefined : activeLocation.id;
   const promoLoader = useCallback(
-    ({ token }: { token: string }) => fetchPromoList(token),
-    [],
+    ({ token }: { token: string }) => fetchPromoList(token, undefined, activeLocationId),
+    [activeLocationId],
   );
   const batchLoader = useCallback(
     ({ token }: { token: string }) => fetchPromoBatches(token),
