@@ -1,16 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import {
-  Activity,
-  CalendarDays,
-  Clock,
-  DollarSign,
-  Package,
-  Ticket,
-  TrendingUp,
-  Users,
-} from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -22,37 +11,44 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AreaChart, type AreaSeries } from "../ui/AreaChart";
-import {
-  CARD_SHADOW,
-  MetricCard,
-  Panel,
-  PRIMARY,
-  TableCard,
-  count,
-  money,
-} from "../ui/AnalyticsCards";
-import { BarChart } from "../ui/BarChart";
-import { BottomSheet } from "../ui/BottomSheet";
-import { DateRangeSheet, formatShortDate } from "../ui/DateRangeSheet";
-import { SheetSelect } from "../ui/SheetSelect";
-import { PerformanceAnalyticsSkeleton } from "../ui/skeleton/PerformanceAnalyticsSkeleton";
 import { getCurrentUser, getToken } from "../../lib/session";
+import {
+  analyticsViewState,
+  formatClockTime,
+  formatMoney,
+  formatNumber,
+  PERIOD_PRESETS,
+  periodLabel,
+  queryKey,
+  type PeriodRange,
+} from "../../lib/customers/customerAnalyticsDisplay";
 import {
   exportLocationAnalytics,
   fetchLocationAnalytics,
   type LocationExportSection,
   type LocationReport,
 } from "../../services/analyticsService";
+import { DataTable, metricFigure } from "../ui/AnalyticsCards";
+import { AreaChart, type AreaSeries } from "../ui/AreaChart";
+import { BarChart } from "../ui/BarChart";
+import { BottomSheet } from "../ui/BottomSheet";
+import { DateRangeSheet, formatShortDate } from "../ui/DateRangeSheet";
+import { ModuleHeader } from "../ui/ModuleHeader";
+import {
+  FilterChip,
+  ListErrorBanner,
+  SummaryPanel,
+  type SummaryFigure,
+} from "../ui/SummaryPanel";
+import { AnalyticsSkeleton } from "../ui/skeleton/AnalyticsSkeleton";
+import {
+  AnalyticsPanel,
+  PanelEmpty,
+  PeriodCaption,
+  SectionLabel,
+} from "./CustomerAnalyticsBlocks";
 
-// Same options and wording as the web page's period <select>.
-const RANGES = [
-  { label: "Last 7 days", value: "7d" },
-  { label: "Last 30 days", value: "30d" },
-  { label: "Last 90 days", value: "90d" },
-  { label: "Last year", value: "1y" },
-  { label: "Custom Range", value: "custom" },
-];
+const PRIMARY = "#0644C7";
 
 /** The web export modal's "Include in Export" list, same ids, labels and order. */
 const EXPORT_SECTIONS: { id: LocationExportSection; label: string }[] = [
@@ -69,11 +65,18 @@ const EXPORT_FORMATS = [
   { label: "CSV (.csv)", value: "csv" },
 ];
 
-/** Series colors, matching the web chart legends. */
-const C_REVENUE = "#2563EB";
+/** Series colors, matching the web chart legends (revenue in the app's blue). */
+const C_REVENUE = PRIMARY;
 const C_BOOKINGS = "#10B981";
 const C_ATTRACTIONS = "#F59E0B";
 const C_EVENTS = "#8B5CF6";
+
+/** What a successful load was for, so the figures are labelled truthfully. */
+type Loaded = { key: string; period: string; at: Date };
+
+/** Money on the revenue (left) axis, plain counts on the right. */
+const moneyLeft = (v: number, s: { axis?: "left" | "right" }) =>
+  s.axis === "right" ? formatNumber(v) : formatMoney(v);
 
 /**
  * The location manager's Performance Analytics — a port of the web's
@@ -82,16 +85,16 @@ const C_EVENTS = "#8B5CF6";
  * its own metric cards, charts and tables.
  */
 export default function LocationManagerAnalytics() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
+  const dark = useColorScheme() === "dark";
 
-  const [range, setRange] = useState("30d");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
+  const [range, setRange] = useState<PeriodRange>("30d");
+  const [customStart, setCustomStart] = useState<string | undefined>();
+  const [customEnd, setCustomEnd] = useState<string | undefined>();
   const [showCustomRange, setShowCustomRange] = useState(false);
+
   const [report, setReport] = useState<LocationReport | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -106,9 +109,25 @@ export default function LocationManagerAnalytics() {
 
   const locationId = getCurrentUser()?.location_id ?? null;
 
+  const query = useMemo(
+    () => ({ dateRange: range, start: customStart, end: customEnd }),
+    [range, customStart, customEnd],
+  );
+  const currentKey = queryKey(query);
+
+  // Bumped per load, so changing the period quickly shows the last choice's
+  // figures, not whichever reply arrived last.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     const token = getToken();
-    if (!token) return;
+    if (!token) {
+      setError("Not authenticated");
+      setLoading(false);
+      return;
+    }
     if (locationId == null) {
       setError(
         "Your account is not assigned to a location. Please contact your company administrator.",
@@ -117,32 +136,39 @@ export default function LocationManagerAnalytics() {
       return;
     }
     // A custom range only makes a request once both ends are picked, as on web.
-    if (range === "custom" && (!customStart || !customEnd)) return;
+    if (query.dateRange === "custom" && (!query.start || !query.end)) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      setReport(
-        await fetchLocationAnalytics({
-          token,
-          locationId,
-          dateRange: range,
-          startDate: customStart || undefined,
-          endDate: customEnd || undefined,
-        }),
-      );
+      const next = await fetchLocationAnalytics({
+        token,
+        locationId,
+        dateRange: query.dateRange,
+        startDate: query.start,
+        endDate: query.end,
+      });
+      if (isCurrent()) {
+        setReport(next);
+        setLoaded({ key: currentKey, period: periodLabel(query), at: new Date() });
+      }
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load analytics. Please try again.",
-      );
+      if (isCurrent()) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load analytics. Please try again.",
+        );
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [locationId, range, customStart, customEnd]);
+  }, [locationId, query, currentKey]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
@@ -150,6 +176,14 @@ export default function LocationManagerAnalytics() {
     await load();
     setRefreshing(false);
   }, [load]);
+
+  const view = analyticsViewState({
+    loading,
+    error,
+    hasData: !!report,
+    loadedKey: loaded?.key ?? null,
+    currentKey,
+  });
 
   const toggleSection = (id: LocationExportSection) =>
     setSections((prev) =>
@@ -174,8 +208,8 @@ export default function LocationManagerAnalytics() {
         dateRange: range,
         format: exportFormat,
         sections,
-        startDate: customStart || undefined,
-        endDate: customEnd || undefined,
+        startDate: customStart,
+        endDate: customEnd,
       });
       // Lazy-loaded so these native modules never run at app startup.
       const FileSystem = await import("expo-file-system/legacy");
@@ -212,10 +246,11 @@ export default function LocationManagerAnalytics() {
     sections,
   ]);
 
-  const rangeLabel =
-    range === "custom" && customStart && customEnd
+  const customChipLabel =
+    customStart && customEnd
       ? `${formatShortDate(customStart)} – ${formatShortDate(customEnd)}`
-      : (RANGES.find((r) => r.value === range)?.label ?? "");
+      : "Custom";
+  const shownPeriod = loaded?.period ?? periodLabel(query);
 
   // Only hours with activity, exactly as the web filters both hourly panels.
   const hourly = useMemo(
@@ -237,204 +272,152 @@ export default function LocationManagerAnalytics() {
   const withEvents = (base: AreaSeries[], extra: AreaSeries, show: boolean) =>
     show ? [...base, extra] : base;
 
+  const figures: SummaryFigure[] = report
+    ? ((): SummaryFigure[] => {
+        const k = report.keyMetrics;
+        return [
+          metricFigure("dollar-sign", "Location Revenue", formatMoney(k.locationRevenue.value), k.locationRevenue),
+          metricFigure("package", "Package Bookings", formatNumber(k.packageBookings.value), k.packageBookings),
+          metricFigure("tag", "Ticket Sales", formatNumber(k.ticketSales.value), k.ticketSales),
+          metricFigure("users", "Total Visitors", formatNumber(k.totalVisitors.value), k.totalVisitors),
+          metricFigure("layers", "Active Packages", formatNumber(k.activePackages.value), k.activePackages),
+          metricFigure("activity", "Active Attractions", formatNumber(k.activeAttractions.value), k.activeAttractions),
+          // Only when the backend sends them, exactly as the web conditions
+          // those cards.
+          ...(k.eventTicketSales
+            ? [metricFigure("calendar", "Event Ticket Sales", formatNumber(k.eventTicketSales.value), k.eventTicketSales)]
+            : []),
+          ...(k.activeEvents
+            ? [metricFigure("calendar", "Active Events", formatNumber(k.activeEvents.value), k.activeEvents)]
+            : []),
+        ];
+      })()
+    : [];
+
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable
-            onPress={() => router.back()}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">
-            Performance Analytics
-          </Text>
-          <Pressable
-            onPress={onRefresh}
-            className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full"
-            accessibilityRole="button"
-            accessibilityLabel="Refresh"
-          >
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Performance Analytics"
+        action={{
+          onPress: () => {
+            if (report && !exporting) setShowExport(true);
+          },
+          accessibilityLabel: "Export analytics",
+          label: "Export",
+          icon: "download",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
         }
       >
-        <View className="px-5 gap-4">
-          {/* Intro — the web's "Location Analytics - {name}" heading and the
+        <View className="px-4 mt-4 gap-4">
+          {/* The web's "Location Analytics - {name}" heading, with the
               location's full address beneath it. */}
-          <View
-            className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6"
-            style={CARD_SHADOW}
-          >
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">
-              {report
+          <View>
+            <Text className="text-base font-semibold text-gray-900 dark:text-white">
+              {report?.location.name
                 ? `Location Analytics - ${report.location.name}`
                 : "Location Analytics"}
             </Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
               {report?.location.fullAddress ||
                 "Revenue, bookings and attraction performance"}
             </Text>
           </View>
 
-          {/* Period select + Export — the web header's controls */}
-          <SheetSelect
-            icon="calendar"
-            title="Select Period"
-            value={range}
-            options={RANGES}
-            onSelect={(v) => {
-              const next = String(v);
-              setRange(next);
-              // Picking "Custom Range" goes straight to the calendar, like the
-              // web revealing its DateRangeCalendar beside the select.
-              if (next === "custom") setShowCustomRange(true);
-            }}
-          />
-
-          {range === "custom" && (
-            <Pressable
-              onPress={() => setShowCustomRange(true)}
-              className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-800"
+          {/* Period — the web's period select as chips; Custom opens the
+              calendar and only takes effect once both dates are picked. */}
+          <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+              className="-mx-1 px-1"
             >
-              <Feather name="calendar" size={16} color="#6B7280" />
-              <Text
-                className={`flex-1 text-sm ${
-                  customStart && customEnd
-                    ? "text-gray-900 dark:text-white"
-                    : "text-gray-400 dark:text-gray-500"
-                }`}
-                numberOfLines={1}
-              >
-                {customStart && customEnd ? rangeLabel : "Pick a date range"}
-              </Text>
-              <Feather name="chevron-right" size={16} color="#9CA3AF" />
-            </Pressable>
+              {PERIOD_PRESETS.map((p) => (
+                <FilterChip
+                  key={p.value}
+                  label={p.label}
+                  selected={range === p.value}
+                  onPress={() => setRange(p.value)}
+                />
+              ))}
+              <FilterChip
+                label={customChipLabel}
+                selected={range === "custom"}
+                onPress={() => setShowCustomRange(true)}
+              />
+            </ScrollView>
+
+            {view.body === "content" && loaded && (
+              <PeriodCaption
+                stale={view.stale}
+                updating={view.updating && !refreshing}
+                shownPeriod={shownPeriod}
+                requestedPeriod={periodLabel(query)}
+                updatedAt={formatClockTime(loaded.at)}
+              />
+            )}
+          </View>
+
+          {view.body === "skeleton" && <AnalyticsSkeleton tiles={6} panels={4} />}
+
+          {view.body === "error" && (
+            <ListErrorBanner
+              title="Analytics unavailable"
+              message={error ?? "Something went wrong."}
+              onRetry={() => void load()}
+            />
           )}
 
-          <Pressable
-            onPress={() => setShowExport(true)}
-            disabled={!report}
-            className={`flex-row items-center justify-center gap-2 px-4 py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 ${
-              report ? "active:opacity-70" : "opacity-50"
-            }`}
-            accessibilityRole="button"
-            accessibilityLabel="Export"
-          >
-            <Feather name="download" size={16} color={PRIMARY} />
-            <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Export
-            </Text>
-          </Pressable>
-
-          {loading && !report && (
-            <PerformanceAnalyticsSkeleton metrics={6} panels={6} tables={2} />
-          )}
-          {error && !report && (
-            <View className="items-center py-14">
-              <Feather name="alert-circle" size={40} color="#F59E0B" />
-              <Text className="text-base font-semibold text-gray-900 dark:text-white mt-3">
-                Analytics unavailable
-              </Text>
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-1 text-center">
-                {error}
-              </Text>
-              <Pressable
-                onPress={load}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]"
-              >
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
-            </View>
+          {view.banner && (
+            <ListErrorBanner
+              title={view.stale ? `Couldn't load ${periodLabel(query)}` : "Couldn't refresh analytics"}
+              message={
+                view.stale
+                  ? `${error} The figures below are still for ${shownPeriod}.`
+                  : `${error} Showing the figures from ${loaded ? formatClockTime(loaded.at) : "earlier"}.`
+              }
+              onRetry={() => void load()}
+            />
           )}
 
-          {report && (
-            <>
-              {/* Key metrics — the web's card grid, same order, labels + icons.
-                  The last two only render when the backend sends them, exactly
-                  as the web conditions those cards. */}
-              <View className="flex-row flex-wrap items-stretch -mx-1.5">
-                <MetricCard
-                  icon={DollarSign}
-                  label="Location Revenue"
-                  value={money(report.keyMetrics.locationRevenue.value)}
-                  metric={report.keyMetrics.locationRevenue}
-                />
-                <MetricCard
-                  icon={Package}
-                  label="Package Bookings"
-                  value={count(report.keyMetrics.packageBookings.value)}
-                  metric={report.keyMetrics.packageBookings}
-                />
-                <MetricCard
-                  icon={Ticket}
-                  label="Ticket Sales"
-                  value={count(report.keyMetrics.ticketSales.value)}
-                  metric={report.keyMetrics.ticketSales}
-                />
-                <MetricCard
-                  icon={Users}
-                  label="Total Visitors"
-                  value={count(report.keyMetrics.totalVisitors.value)}
-                  metric={report.keyMetrics.totalVisitors}
-                />
-                <MetricCard
-                  icon={Package}
-                  label="Active Packages"
-                  value={count(report.keyMetrics.activePackages.value)}
-                  metric={report.keyMetrics.activePackages}
-                />
-                <MetricCard
-                  icon={Activity}
-                  label="Active Attractions"
-                  value={count(report.keyMetrics.activeAttractions.value)}
-                  metric={report.keyMetrics.activeAttractions}
-                />
-                {!!report.keyMetrics.eventTicketSales && (
-                  <MetricCard
-                    icon={CalendarDays}
-                    label="Event Ticket Sales"
-                    value={count(report.keyMetrics.eventTicketSales.value)}
-                    metric={report.keyMetrics.eventTicketSales}
-                  />
-                )}
-                {!!report.keyMetrics.activeEvents && (
-                  <MetricCard
-                    icon={CalendarDays}
-                    label="Active Events"
-                    value={count(report.keyMetrics.activeEvents.value)}
-                    metric={report.keyMetrics.activeEvents}
-                  />
-                )}
-              </View>
+          {view.body === "content" && report && (
+            // Figures for another period are dimmed and can't be tapped, so
+            // they can't pass for the selection above.
+            <View
+              style={{ opacity: view.stale ? 0.45 : 1 }}
+              pointerEvents={view.stale ? "none" : "auto"}
+              className="gap-4"
+            >
+              <SummaryPanel figures={figures} />
 
-              {/* Hourly Revenue Pattern */}
-              <Panel
-                icon={Clock}
+              <SectionLabel title="Revenue & bookings" />
+              <AnalyticsPanel
+                icon="clock"
                 title="Hourly Revenue Pattern"
                 info="Revenue and booking patterns throughout the day (only hours with activity)"
               >
                 {hourly.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">
-                    No data.
-                  </Text>
+                  <PanelEmpty message="No activity in this period." />
                 ) : (
                   <AreaChart
-                    height={220}
-                    dark={scheme === "dark"}
+                    dark={dark}
+                    interactive
+                    xLabelMode="spaced"
+                    formatValue={moneyLeft}
                     labels={hourly.map((h) => h.label)}
                     series={withEvents(
                       [
@@ -471,22 +454,21 @@ export default function LocationManagerAnalytics() {
                     )}
                   />
                 )}
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Daily Performance */}
-              <Panel
-                icon={Activity}
+              <AnalyticsPanel
+                icon="activity"
                 title="Daily Performance"
                 info="Revenue, bookings, and attraction purchase trends per day"
               >
                 {report.dailyRevenue.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">
-                    No data.
-                  </Text>
+                  <PanelEmpty message="No activity in this period." />
                 ) : (
                   <AreaChart
-                    height={220}
-                    dark={scheme === "dark"}
+                    dark={dark}
+                    interactive
+                    xLabelMode="spaced"
+                    formatValue={moneyLeft}
                     labels={report.dailyRevenue.map((d) => d.label)}
                     series={withEvents(
                       [
@@ -525,62 +507,21 @@ export default function LocationManagerAnalytics() {
                     )}
                   />
                 )}
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Package Bookings */}
-              <Panel
-                icon={Package}
-                title="Package Bookings"
-                info="Reserved package bookings by type. Packages are group experiences scheduled in advance."
-              >
-                {report.packagePerformance.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">
-                    No data.
-                  </Text>
-                ) : (
-                  <BarChart
-                    data={report.packagePerformance.map((p) => ({
-                      label: p.name,
-                      value: p.bookings,
-                    }))}
-                  />
-                )}
-              </Panel>
-
-              {/* Attraction Ticket Sales */}
-              <Panel
-                icon={Ticket}
-                title="Attraction Ticket Sales"
-                info="Tickets sold and revenue per attraction"
-              >
-                {report.attractionPerformance.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">
-                    No data.
-                  </Text>
-                ) : (
-                  <BarChart
-                    data={report.attractionPerformance.map((a) => ({
-                      label: a.name,
-                      value: a.ticketsSold,
-                    }))}
-                  />
-                )}
-              </Panel>
-
-              {/* 5-Week Trend */}
-              <Panel
-                icon={TrendingUp}
+              <AnalyticsPanel
+                icon="trending-up"
                 title="5-Week Trend"
                 info="Revenue and booking trends over the last 5 weeks"
               >
                 {report.weeklyTrend.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">
-                    No data.
-                  </Text>
+                  <PanelEmpty message="No activity in the last 5 weeks." />
                 ) : (
                   <AreaChart
-                    height={220}
-                    dark={scheme === "dark"}
+                    dark={dark}
+                    interactive
+                    xLabelMode="spaced"
+                    formatValue={moneyLeft}
                     labels={report.weeklyTrend.map((w) => w.week)}
                     series={withEvents(
                       [
@@ -617,85 +558,132 @@ export default function LocationManagerAnalytics() {
                     )}
                   />
                 )}
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Time Slot Performance */}
-              <Panel
-                icon={Clock}
+              <AnalyticsPanel
+                icon="bar-chart-2"
                 title="Time Slot Performance"
                 info="Revenue, bookings, and ticket sales by hour (only hours with activity)"
               >
                 {timeSlots.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">
-                    No data.
-                  </Text>
+                  <PanelEmpty message="No activity in this period." />
                 ) : (
                   <BarChart
-                    height={200}
+                    interactive
+                    maxXLabels={6}
+                    color={PRIMARY}
+                    formatValue={formatMoney}
                     data={timeSlots.map((s) => ({
                       label: s.label,
                       value: s.totalRevenue,
                     }))}
                   />
                 )}
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Package Bookings table */}
-              <TableCard
-                icon={Package}
+              {/* Packages — the web's chart and table, in one panel. */}
+              <SectionLabel title="Packages" detail={shownPeriod} />
+              <AnalyticsPanel
+                icon="package"
                 title="Package Bookings"
-                columns={[
-                  ["Package", 0],
-                  ["Bookings", 72],
-                  ["Participants", 88],
-                ]}
-                rows={report.packagePerformance.map((p) => [
-                  p.name,
-                  count(p.bookings),
-                  count(p.avgPartySize),
-                ])}
-                empty="No data."
-              />
+                info="Reserved package bookings by type. Packages are group experiences scheduled in advance."
+              >
+                {report.packagePerformance.length === 0 ? (
+                  <PanelEmpty message="No package bookings in this period." />
+                ) : (
+                  <>
+                    <BarChart
+                      interactive
+                      color={PRIMARY}
+                      formatValue={(v) => `${formatNumber(v)} ${v === 1 ? "booking" : "bookings"}`}
+                      data={report.packagePerformance.map((p) => ({
+                        label: p.name,
+                        value: p.bookings,
+                      }))}
+                    />
+                    <View className="mt-4">
+                      <DataTable
+                        columns={[
+                          ["Package", 0],
+                          ["Bookings", 72],
+                          ["Participants", 88],
+                        ]}
+                        rows={report.packagePerformance.map((p) => [
+                          p.name,
+                          formatNumber(p.bookings),
+                          formatNumber(p.avgPartySize),
+                        ])}
+                        emptyMessage="No package bookings in this period."
+                      />
+                    </View>
+                  </>
+                )}
+              </AnalyticsPanel>
 
-              {/* Attraction Ticket Sales table */}
-              <TableCard
-                icon={Ticket}
+              {/* Attractions — the web's chart and table, in one panel. */}
+              <SectionLabel title="Attractions" detail={shownPeriod} />
+              <AnalyticsPanel
+                icon="tag"
                 title="Attraction Ticket Sales"
-                columns={[
-                  ["Attraction", 0],
-                  ["Tickets Sold", 80],
-                  ["Revenue", 96],
-                ]}
-                rows={report.attractionPerformance.map((a) => [
-                  a.name,
-                  count(a.ticketsSold),
-                  money(a.revenue),
-                ])}
-                empty="No data."
-              />
+                info="Tickets sold and revenue per attraction"
+              >
+                {report.attractionPerformance.length === 0 ? (
+                  <PanelEmpty message="No ticket sales in this period." />
+                ) : (
+                  <>
+                    <BarChart
+                      interactive
+                      color={C_ATTRACTIONS}
+                      formatValue={(v) => `${formatNumber(v)} ${v === 1 ? "ticket" : "tickets"}`}
+                      data={report.attractionPerformance.map((a) => ({
+                        label: a.name,
+                        value: a.ticketsSold,
+                      }))}
+                    />
+                    <View className="mt-4">
+                      <DataTable
+                        columns={[
+                          ["Attraction", 0],
+                          ["Tickets Sold", 84],
+                          ["Revenue", 100],
+                        ]}
+                        rows={report.attractionPerformance.map((a) => [
+                          a.name,
+                          formatNumber(a.ticketsSold),
+                          formatMoney(a.revenue),
+                        ])}
+                        emptyMessage="No ticket sales in this period."
+                      />
+                    </View>
+                  </>
+                )}
+              </AnalyticsPanel>
 
               {/* Event Performance — only rendered when the backend returns
                   any, the same condition the web card uses. */}
               {report.eventPerformance.length > 0 && (
-                <TableCard
-                  icon={CalendarDays}
-                  title="Event Performance"
-                  columns={[
-                    ["Event", 0],
-                    ["Purchases", 68],
-                    ["Tickets", 60],
-                    ["Revenue", 84],
-                  ]}
-                  rows={report.eventPerformance.map((e) => [
-                    e.name,
-                    count(e.purchases),
-                    count(e.ticketsSold),
-                    money(e.revenue),
-                  ])}
-                  empty="No data."
-                />
+                <>
+                  <SectionLabel title="Events" detail={shownPeriod} />
+                  <AnalyticsPanel icon="calendar" title="Event Performance">
+                    <DataTable
+                      columns={[
+                        ["Event", 0],
+                        ["Purchases", 70],
+                        ["Tickets", 58],
+                        ["Revenue", 96],
+                      ]}
+                      rows={report.eventPerformance.map((e) => [
+                        e.name,
+                        formatNumber(e.purchases),
+                        formatNumber(e.ticketsSold),
+                        formatMoney(e.revenue),
+                      ])}
+                      emptyMessage="No event sales in this period."
+                    />
+                  </AnalyticsPanel>
+                </>
               )}
-            </>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -707,7 +695,7 @@ export default function LocationManagerAnalytics() {
         title={
           report ? `Export Analytics - ${report.location.name}` : "Export Analytics"
         }
-        subtitle={rangeLabel}
+        subtitle={periodLabel(query)}
       >
         <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
           <Text className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
@@ -798,15 +786,16 @@ export default function LocationManagerAnalytics() {
         </ScrollView>
       </BottomSheet>
 
-      {/* Custom period calendar, for the range select's "Custom Range". */}
+      {/* Custom period calendar, for the "Custom" chip. */}
       <DateRangeSheet
         visible={showCustomRange}
-        initialStart={customStart || undefined}
-        initialEnd={customEnd || undefined}
+        initialStart={customStart}
+        initialEnd={customEnd}
         onClose={() => setShowCustomRange(false)}
         onApply={(start, end) => {
           setCustomStart(start);
           setCustomEnd(end);
+          setRange("custom");
           setShowCustomRange(false);
         }}
       />

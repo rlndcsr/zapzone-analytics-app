@@ -1,11 +1,8 @@
-import { Feather } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   RefreshControl,
   ScrollView,
-  Text,
   useColorScheme,
   View,
 } from "react-native";
@@ -14,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   AnalyticsPanel,
   PanelEmpty,
+  PeriodCaption,
   RankedList,
   RecentCustomerList,
   SectionLabel,
@@ -582,63 +580,5 @@ const CustomersAnalytics = () => {
     </View>
   );
 };
-
-/**
- * Under the period chips: which period (and, for admins, location) the figures
- * below really cover, and when they loaded. While another period loads, or if
- * it failed, it says the figures are still the old ones.
- */
-function PeriodCaption({
-  stale,
-  updating,
-  shownPeriod,
-  requestedPeriod,
-  location,
-  updatedAt,
-}: {
-  stale: boolean;
-  updating: boolean;
-  shownPeriod: string;
-  requestedPeriod: string;
-  location?: string;
-  updatedAt: string;
-}) {
-  if (stale) {
-    return (
-      // Its own element (not a restyled caption), so no classes change after mount.
-      <View
-        key="stale"
-        className="flex-row items-center gap-2 mt-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2"
-        accessibilityLiveRegion="polite"
-      >
-        {updating ? (
-          <ActivityIndicator size="small" color="#D97706" />
-        ) : (
-          <Feather name="clock" size={14} color="#D97706" />
-        )}
-        <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
-          {updating ? `Loading ${requestedPeriod}… ` : ""}
-          Still showing {shownPeriod}
-          {location ? ` · ${location}` : ""}.
-        </Text>
-      </View>
-    );
-  }
-  return (
-    <View key="current" className="flex-row items-center gap-2 mt-3">
-      <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
-        {shownPeriod}
-        {location ? ` · ${location}` : ""}
-        {` · Updated ${updatedAt}`}
-      </Text>
-      {updating && (
-        <View className="flex-row items-center gap-1.5">
-          <ActivityIndicator size="small" color={PRIMARY} />
-          <Text className="text-xs text-gray-500 dark:text-gray-400">Updating</Text>
-        </View>
-      )}
-    </View>
-  );
-}
 
 export default CustomersAnalytics;

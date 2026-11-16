@@ -30,6 +30,10 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/** The backend's chart colour for a row, or null when it sends none. */
+const colorOf = (v: unknown): string | null =>
+  typeof v === "string" && v.trim() ? v.trim() : null;
+
 /* ================================================================== */
 /* Page Analytics                                                      */
 /* ================================================================== */
@@ -122,7 +126,10 @@ export async function fetchPageTimeseries({
 export type TopPage = {
   path: string;
   views: number;
+  uniqueVisitors: number;
   conversions: number;
+  /** Conversions ÷ unique visitors × 100, as the backend computes it. */
+  conversionRate: number;
   revenue: number;
 };
 
@@ -134,15 +141,42 @@ export async function fetchTopPages(p: RangeParams): Promise<TopPage[]> {
   return (res.data ?? []).map((r) => ({
     path: String(r.page_path ?? ""),
     views: num(r.views),
+    uniqueVisitors: num(r.unique_visitors),
     conversions: num(r.conversions),
+    conversionRate: num(r.conversion_rate),
     revenue: num(r.revenue),
   }));
 }
 
+/** The web's names for tracked entity types ("attraction_purchase" -> "Attraction Ticket"). */
+const ENTITY_LABELS: Record<string, string> = {
+  package: "Package",
+  attraction: "Attraction",
+  event: "Event",
+  booking: "Booking",
+  attraction_purchase: "Attraction Ticket",
+  event_purchase: "Event Ticket",
+  gift_card: "Gift Card",
+  promo: "Promo Code",
+};
+
+/** snake_case -> "Title Case". */
+const titleWords = (s: string) =>
+  s
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+
+export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? titleWords(type);
+
+/** "Package #12" for an entity whose name the backend couldn't resolve. */
+const unnamedEntity = (type: unknown, id: unknown) =>
+  type ? `${entityLabel(String(type))} #${id ?? "—"}` : "—";
+
 export type TopEntity = {
   name: string;
   views: number;
-  formStarts: number;
+  uniqueVisitors: number;
   conversions: number;
   rate: number;
 };
@@ -157,23 +191,41 @@ export async function fetchTopEntities(
     `/api/page-analytics/top-entities${qs}${typeParam}`,
     { token: p.token },
   );
-  return (res.data ?? []).map((r) => ({
-    name: String(r.name ?? r.entity_name ?? "—"),
-    views: num(r.views),
-    formStarts: num(r.form_starts),
-    conversions: num(r.conversions),
-    rate: num(r.rate ?? r.conversion_rate),
-  }));
+  return (res.data ?? []).map((r) => {
+    const views = num(r.views);
+    const uniqueVisitors = num(r.unique_visitors);
+    const conversions = num(r.conversions);
+    const name = r.name ?? r.entity_name;
+    return {
+      name: name ? String(name) : unnamedEntity(r.entity_type, r.entity_id),
+      views,
+      uniqueVisitors,
+      conversions,
+      // top-entities sends no rate, so compute the backend's own formula
+      // (conversions ÷ unique visitors × 100, two decimals) from its counts.
+      rate:
+        r.conversion_rate != null
+          ? num(r.conversion_rate)
+          : uniqueVisitors > 0
+            ? Math.round((conversions / uniqueVisitors) * 10000) / 100
+            : 0,
+    };
+  });
 }
 
 export type TrafficSources = {
-  direct: { visits: number; conversions: number; revenue: number };
-  referrers: {
-    referrer: string;
-    visits: number;
+  /** Tagged campaigns, one row per source / medium / campaign. */
+  utm: {
+    source: string;
+    medium: string;
+    campaign: string;
+    views: number;
     conversions: number;
     revenue: number;
   }[];
+  direct: { visits: number; conversions: number; revenue: number };
+  /** The backend only counts views per referrer. */
+  referrers: { referrer: string; visits: number }[];
 };
 
 export async function fetchTrafficSources(
@@ -185,8 +237,18 @@ export async function fetchTrafficSources(
   );
   const d = res.data ?? {};
   const direct = (d.direct ?? {}) as Record<string, unknown>;
+  const utm = (Array.isArray(d.utm) ? d.utm : []) as Record<string, unknown>[];
   const referrers = (d.referrers ?? []) as Record<string, unknown>[];
+  const text = (v: unknown) => (v == null || v === "" ? "—" : String(v));
   return {
+    utm: utm.map((r) => ({
+      source: text(r.utm_source),
+      medium: text(r.utm_medium),
+      campaign: text(r.utm_campaign),
+      views: num(r.views),
+      conversions: num(r.conversions),
+      revenue: num(r.revenue),
+    })),
     direct: {
       visits: num(direct.views ?? direct.visits ?? direct.events),
       conversions: num(direct.conversions),
@@ -195,8 +257,6 @@ export async function fetchTrafficSources(
     referrers: referrers.map((r) => ({
       referrer: String(r.referrer ?? ""),
       visits: num(r.views ?? r.visits ?? r.events),
-      conversions: num(r.conversions),
-      revenue: num(r.revenue),
     })),
   };
 }
@@ -243,6 +303,7 @@ export async function fetchFunnel(p: RangeParams): Promise<FunnelStep[]> {
 export type LandingPage = {
   path: string;
   sessions: number;
+  bounceRate: number;
   conversions: number;
   revenue: number;
 };
@@ -257,6 +318,7 @@ export async function fetchLandingPages(
   return (res.data ?? []).map((r) => ({
     path: String(r.page_path ?? ""),
     sessions: num(r.sessions),
+    bounceRate: num(r.bounce_rate),
     conversions: num(r.conversions),
     revenue: num(r.revenue),
   }));
@@ -278,13 +340,17 @@ export async function fetchRecentConversions(
     `/api/page-analytics/conversions${rangeQuery(p)}`,
     { token: p.token },
   );
+  // Every row's event_type is "conversion"; what happened is in event_name
+  // ("booking_completed" -> "Booking Completed"), as the web shows it.
   return (res.data ?? []).map((r) => ({
-    when: (r.occurred_at ?? r.created_at ?? r.when ?? null) as string | null,
-    event: String(r.event_type ?? r.event ?? "—"),
-    entity: String(r.entity_name ?? r.entity ?? r.page_path ?? "—"),
+    when: (r.created_at ?? r.occurred_at ?? null) as string | null,
+    event: r.event_name ? titleWords(String(r.event_name)) : "—",
+    entity: r.entity_name
+      ? String(r.entity_name)
+      : unnamedEntity(r.entity_type, r.entity_id),
     value: num(r.conversion_value ?? r.value),
-    utmSource: String(r.utm_source ?? "—") || "—",
-    utmCampaign: String(r.utm_campaign ?? "—") || "—",
+    utmSource: r.utm_source ? String(r.utm_source) : "—",
+    utmCampaign: r.utm_campaign ? String(r.utm_campaign) : "—",
   }));
 }
 
@@ -446,7 +512,7 @@ export type WaiverAnalytics = {
   ageBrackets: { bracket: string; count: number }[];
 
   minorAgeBrackets: { bracket: string; count: number }[];
-  bySource: { source: string; count: number }[];
+  bySource: { source: string; count: number; color: string | null }[];
 };
 
 export type WaiverSummary = {
@@ -475,10 +541,15 @@ export type PerformanceReport = {
     revenue: number;
     packages: number;
   }[];
-  packageDistribution: { name: string; value: number; count: number }[];
+  packageDistribution: {
+    name: string;
+    value: number;
+    count: number;
+    color: string | null;
+  }[];
   peakHours: { hour: string; count: number }[];
   dailyPerformance: { day: string; revenue: number; participants: number }[];
-  bookingStatus: { status: string; count: number }[];
+  bookingStatus: { status: string; count: number; color: string | null }[];
   topAttractions: { name: string; ticketsSold: number; revenue: number }[];
   /** Only present once the company has event sales. */
   topEvents: { name: string; ticketsSold: number; revenue: number }[];
@@ -509,14 +580,7 @@ const EMPTY_METRIC: KeyMetric = {
   trend: null,
 };
 
-export async function fetchCompanyAnalytics({
-  token,
-  companyId,
-  dateRange = "30d",
-  locationIds = [],
-  startDate,
-  endDate,
-}: {
+export type CompanyAnalyticsParams = {
   token: string;
   companyId: number;
   dateRange?: string;
@@ -524,7 +588,22 @@ export async function fetchCompanyAnalytics({
   /** Only sent for dateRange "custom", matching the web request. */
   startDate?: string;
   endDate?: string;
-}): Promise<PerformanceReport> {
+};
+
+/**
+ * GET /api/analytics/company, as the backend sends it. The company export is
+ * built from this: the backend's POST /analytics/company/export is routed to
+ * the location export, which requires a location_id, so it cannot export a
+ * company.
+ */
+export async function fetchCompanyAnalyticsRaw({
+  token,
+  companyId,
+  dateRange = "30d",
+  locationIds = [],
+  startDate,
+  endDate,
+}: CompanyAnalyticsParams): Promise<Record<string, unknown>> {
   const qs = new URLSearchParams({
     company_id: String(companyId),
     date_range: dateRange,
@@ -533,10 +612,16 @@ export async function fetchCompanyAnalytics({
   if (dateRange === "custom" && startDate) qs.append("start_date", startDate);
   if (dateRange === "custom" && endDate) qs.append("end_date", endDate);
 
-  const res = await apiRequest<Record<string, unknown>>(
+  return apiRequest<Record<string, unknown>>(
     `/api/analytics/company?${qs.toString()}`,
     { token },
   );
+}
+
+export async function fetchCompanyAnalytics(
+  params: CompanyAnalyticsParams,
+): Promise<PerformanceReport> {
+  const res = await fetchCompanyAnalyticsRaw(params);
   const rows = (key: string): Record<string, unknown>[] =>
     ((res[key] ?? []) as Record<string, unknown>[]) ?? [];
 
@@ -579,6 +664,7 @@ export async function fetchCompanyAnalytics({
       name: String(r.name ?? "—"),
       value: num(r.value),
       count: num(r.count),
+      color: colorOf(r.color),
     })),
     peakHours: rows("peak_hours").map((r) => ({
       hour: String(r.hour ?? ""),
@@ -592,6 +678,7 @@ export async function fetchCompanyAnalytics({
     bookingStatus: rows("booking_status").map((r) => ({
       status: String(r.status ?? "—"),
       count: num(r.count),
+      color: colorOf(r.color),
     })),
     topAttractions: rows("top_attractions").map((r) => ({
       name: String(r.name ?? "—"),
@@ -918,6 +1005,7 @@ function mapWaivers(raw: unknown): WaiverAnalytics | null {
     bySource: list("by_source").map((r) => ({
       source: String(r.source ?? "—"),
       count: num(r.count),
+      color: colorOf(r.color),
     })),
   };
 }

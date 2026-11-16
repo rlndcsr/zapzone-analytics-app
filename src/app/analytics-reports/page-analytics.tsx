@@ -1,12 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Pressable,
   RefreshControl,
@@ -17,14 +10,43 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import {
+  AnalyticsPanel,
+  PanelEmpty,
+  PeriodCaption,
+  SectionLabel,
+} from "../../components/analytics/CustomerAnalyticsBlocks";
+import { BreakdownList, DataTable } from "../../components/ui/AnalyticsCards";
 import { AreaChart } from "../../components/ui/AreaChart";
+import { BottomSheet } from "../../components/ui/BottomSheet";
+import { DateRangeSheet, formatShortDate } from "../../components/ui/DateRangeSheet";
 import { FunnelChart } from "../../components/ui/FunnelChart";
-import { PieChart } from "../../components/ui/PieChart";
-import { SheetSelect } from "../../components/ui/SheetSelect";
-import { StatTile } from "../../components/ui/StatTile";
+import { ModuleHeader } from "../../components/ui/ModuleHeader";
+import {
+  FilterChip,
+  ListErrorBanner,
+  SummaryPanel,
+  type SummaryFigure,
+} from "../../components/ui/SummaryPanel";
 import { AnalyticsSkeleton } from "../../components/ui/skeleton/AnalyticsSkeleton";
+import {
+  formatDuration,
+  formatPercent,
+  formatWhen,
+  pageRange,
+  shortDay,
+} from "../../lib/analytics/pageAnalyticsDisplay";
+import {
+  analyticsViewState,
+  formatClockTime,
+  formatMoney,
+  formatNumber,
+  PERIOD_PRESETS,
+  periodLabel,
+  queryKey,
+  type PeriodRange,
+} from "../../lib/customers/customerAnalyticsDisplay";
 import { getToken } from "../../lib/session";
-import { fetchLocations, type LocationOption } from "../../services/locationsService";
 import {
   fetchDevices,
   fetchFunnel,
@@ -47,84 +69,93 @@ import {
   type TopPage,
   type TrafficSources,
 } from "../../services/analyticsService";
-
-const CARD_SHADOW = {
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
-  shadowRadius: 8,
-  elevation: 2,
-} as const;
+import { fetchLocations, type LocationOption } from "../../services/locationsService";
 
 const PRIMARY = "#0644C7";
-type FeatherName = ComponentProps<typeof Feather>["name"];
-
-const money = (n: number) => `$${n.toFixed(2)}`;
-
-/** ms -> "6m 15s". */
-function fmtDuration(ms: number): string {
-  const total = Math.round(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
-/** "2026-07-09" / ISO -> "Jul 9". */
-function shortDay(raw: string): string {
-  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
-  if (Number.isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function Panel({ icon, title, children }: { icon: FeatherName; title: string; children: React.ReactNode }) {
-  return (
-    <View className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-gray-100 dark:border-neutral-800" style={CARD_SHADOW}>
-      <View className="flex-row items-center gap-2 mb-3">
-        <Feather name={icon} size={16} color={PRIMARY} />
-        <Text className="text-base font-bold text-gray-900 dark:text-white">{title}</Text>
-      </View>
-      {children}
-    </View>
-  );
-}
+const AMBER = "#F59E0B";
+const GREEN = "#16A34A";
 
 type DeviceTab = "devices" | "browsers" | "oses";
 
-const PageAnalytics = () => {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const headerIcon = scheme === "dark" ? "#fff" : "#111";
+const DEVICE_TABS: { key: DeviceTab; label: string }[] = [
+  { key: "devices", label: "Devices" },
+  { key: "browsers", label: "Browsers" },
+  { key: "oses", label: "OS" },
+];
 
-  const [overview, setOverview] = useState<PageOverview | null>(null);
-  const [live, setLive] = useState<PageLive | null>(null);
-  const [series, setSeries] = useState<TimeseriesPoint[]>([]);
-  const [topPages, setTopPages] = useState<TopPage[]>([]);
-  const [topEntities, setTopEntities] = useState<TopEntity[]>([]);
-  const [sources, setSources] = useState<TrafficSources | null>(null);
-  const [deviceData, setDeviceData] = useState<{
-    devices: DeviceSlice[];
-    browsers: DeviceSlice[];
-    oses: DeviceSlice[];
-  }>({ devices: [], browsers: [], oses: [] });
-  const [deviceTab, setDeviceTab] = useState<DeviceTab>("devices");
-  const [funnel, setFunnel] = useState<FunnelStep[]>([]);
-  const [landing, setLanding] = useState<LandingPage[]>([]);
-  const [conversions, setConversions] = useState<ConversionRow[]>([]);
+/** Everything one load brings back, so a period's figures are swapped in together. */
+type PageReport = {
+  overview: PageOverview;
+  live: PageLive | null;
+  bucket: string;
+  series: TimeseriesPoint[];
+  topPages: TopPage[];
+  topEntities: TopEntity[];
+  sources: TrafficSources | null;
+  devices: Record<DeviceTab, DeviceSlice[]>;
+  funnel: FunnelStep[];
+  landing: LandingPage[];
+  conversions: ConversionRow[];
+};
+
+/** What a successful load was for, so the figures are labelled truthfully. */
+type Loaded = { key: string; period: string; locationId: number | null; at: Date };
+
+// The web's ⓘ tooltips for each figure.
+const INFO = {
+  pageViews: "Total number of page loads across all tracked booking pages in the selected period.",
+  uniqueVisitors: "Count of distinct visitors identified by browser session or tracking cookie.",
+  sessions: "Total visit sessions started. A single visitor can start multiple sessions across different times or devices.",
+  conversions: "Number of completed booking events (e.g. form submissions or purchases) recorded in the period.",
+  conversionRate: "Conversions ÷ unique visitors × 100. Shows what share of visitors completed a booking.",
+  revenue: "Total dollar value attributed to conversion events tracked on your booking pages.",
+  bounceRate: "Percentage of visitors who viewed only one page and left without any further interaction.",
+  avgDuration: "Average time visitors spent on your pages per session, measured from first to last tracked event.",
+  newVisitors: "Visitors seen for the first time in this period — no prior tracking record found.",
+  returning: "Visitors who had a tracked session on your pages before the selected date range.",
+};
+
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+
+const PageAnalytics = () => {
+  const insets = useSafeAreaInsets();
+  const dark = useColorScheme() === "dark";
+
+  const [range, setRange] = useState<PeriodRange>("30d");
+  const [customStart, setCustomStart] = useState<string | undefined>();
+  const [customEnd, setCustomEnd] = useState<string | undefined>();
+  const [showCustomRange, setShowCustomRange] = useState(false);
+
+  // This page's own location filter (single location, or all).
+  const [locationId, setLocationId] = useState<number | null>(null);
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [showLocations, setShowLocations] = useState(false);
+
+  const [report, setReport] = useState<PageReport | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [deviceTab, setDeviceTab] = useState<DeviceTab>("devices");
 
-  const [days, setDays] = useState(30);
-  const [locationId, setLocationId] = useState<number | null>(null);
-  const [locations, setLocations] = useState<LocationOption[]>([]);
-
-  // Location options for the "All Locations" filter.
+  // Location options for the location filter.
   useEffect(() => {
     const token = getToken();
     if (!token) return;
     fetchLocations(token).then(setLocations).catch(() => setLocations([]));
   }, []);
+
+  const query = useMemo(
+    () => ({ dateRange: range, start: customStart, end: customEnd }),
+    [range, customStart, customEnd],
+  );
+  const currentKey = queryKey({ ...query, locationId: locationId ?? undefined });
+
+  const locationName = (id: number | null) =>
+    id == null
+      ? "All Locations"
+      : (locations.find((l) => l.id === id)?.name ?? `Location #${id}`);
+  const requestedScope = locationName(locationId);
 
   // Bumped per load, so switching period/location quickly shows the last
   // choice's figures, not whichever batch of replies arrived last.
@@ -139,18 +170,18 @@ const PageAnalytics = () => {
       setLoading(false);
       return;
     }
+    // A custom range only makes a request once both ends are picked.
+    if (query.dateRange === "custom" && (!query.start || !query.end)) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     setError(null);
-    const to = new Date();
-    const from = new Date();
-    from.setDate(from.getDate() - days);
     const loc = locationId ?? undefined;
-    const p = {
-      token,
-      from: from.toISOString().slice(0, 10),
-      to: to.toISOString().slice(0, 10),
-      locationId: loc,
-    };
+    const p = { token, ...pageRange(query), locationId: loc };
     try {
+      // The overview is required; every other block falls back to empty, so
+      // one failing panel never blanks the page.
       const [ov, lv, ts, tp, te, src, dev, fn, lp, cv] = await Promise.all([
         fetchPageOverview(p),
         fetchPageLive({ token, locationId: loc }).catch(() => null),
@@ -164,16 +195,25 @@ const PageAnalytics = () => {
         fetchRecentConversions(p).catch(() => []),
       ]);
       if (!isCurrent()) return;
-      setOverview(ov);
-      setLive(lv);
-      setSeries(ts.series);
-      setTopPages(tp);
-      setTopEntities(te);
-      setSources(src);
-      setDeviceData(dev);
-      setFunnel(fn);
-      setLanding(lp);
-      setConversions(cv);
+      setReport({
+        overview: ov,
+        live: lv,
+        bucket: ts.bucket,
+        series: ts.series,
+        topPages: tp,
+        topEntities: te,
+        sources: src,
+        devices: dev,
+        funnel: fn,
+        landing: lp,
+        conversions: cv,
+      });
+      setLoaded({
+        key: currentKey,
+        period: periodLabel(query),
+        locationId,
+        at: new Date(),
+      });
     } catch (err) {
       if (isCurrent()) {
         setError(err instanceof Error ? err.message : "Failed to load analytics");
@@ -181,10 +221,10 @@ const PageAnalytics = () => {
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [days, locationId]);
+  }, [query, locationId, currentKey]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
@@ -193,262 +233,410 @@ const PageAnalytics = () => {
     setRefreshing(false);
   }, [load]);
 
-  const deviceSlices = deviceData[deviceTab] ?? [];
+  const view = analyticsViewState({
+    loading,
+    error,
+    hasData: !!report,
+    loadedKey: loaded?.key ?? null,
+    currentKey,
+  });
+
+  const shownPeriod = loaded?.period ?? periodLabel(query);
+  const shownScope = loaded ? locationName(loaded.locationId) : requestedScope;
+  const customChipLabel =
+    customStart && customEnd
+      ? `${formatShortDate(customStart)} – ${formatShortDate(customEnd)}`
+      : "Custom";
+
+  const figures: SummaryFigure[] = report
+    ? ((): SummaryFigure[] => {
+        const o = report.overview;
+        return [
+          { icon: "eye", title: "Page views", value: formatNumber(o.pageViews), hint: "", info: INFO.pageViews },
+          { icon: "users", title: "Unique visitors", value: formatNumber(o.uniqueVisitors), hint: "", info: INFO.uniqueVisitors },
+          { icon: "repeat", title: "Sessions", value: formatNumber(o.sessions), hint: "", info: INFO.sessions },
+          { icon: "mouse-pointer", title: "Conversions", value: formatNumber(o.conversions), hint: "", info: INFO.conversions },
+          { icon: "trending-up", title: "Conv. rate", value: `${formatNumber(o.conversionRate)}%`, hint: "", info: INFO.conversionRate },
+          { icon: "dollar-sign", title: "Revenue", value: formatMoney(o.conversionValue), hint: "", info: INFO.revenue },
+          { icon: "corner-up-right", title: "Bounce rate", value: `${formatNumber(o.bounceRate)}%`, hint: "", info: INFO.bounceRate },
+          { icon: "clock", title: "Avg duration", value: formatDuration(o.avgDurationMs), hint: "", info: INFO.avgDuration },
+          { icon: "user-plus", title: "New visitors", value: formatNumber(o.newVisitors), hint: "", info: INFO.newVisitors },
+          { icon: "user-check", title: "Returning", value: formatNumber(o.returningVisitors), hint: "", info: INFO.returning },
+        ];
+      })()
+    : [];
+
+  const liveVisitors = report?.live?.activeVisitors ?? 0;
+  const liveSessions = report?.live?.activeSessions ?? 0;
 
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
-      {/* Header */}
-      <View className="bg-white dark:bg-neutral-900 pt-12 pb-5 px-5 w-full border-b border-gray-100 dark:border-neutral-800">
-        <View className="flex-row items-center justify-between">
-          <Pressable onPress={() => router.back()} className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full" accessibilityRole="button" accessibilityLabel="Go back">
-            <Feather name="chevron-left" size={20} color={headerIcon} />
-          </Pressable>
-          <Text className="text-gray-900 dark:text-white text-lg font-bold">Page Analytics</Text>
-          <Pressable onPress={onRefresh} className="bg-gray-100 dark:bg-neutral-800 p-2 rounded-full" accessibilityRole="button" accessibilityLabel="Refresh">
-            <Feather name="refresh-cw" size={18} color={headerIcon} />
-          </Pressable>
-        </View>
-      </View>
+      <ModuleHeader
+        title="Page Analytics"
+        action={{
+          onPress: () => void load(),
+          accessibilityLabel: "Refresh page analytics",
+          label: "Refresh",
+          icon: "refresh-cw",
+        }}
+      />
 
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={PRIMARY}
+            colors={[PRIMARY]}
+            progressBackgroundColor="#FFFFFF"
+          />
+        }
       >
-        <View className="px-5 gap-4">
-          {/* Intro */}
-          <View className="bg-white dark:bg-neutral-900 rounded-2xl p-5 mt-6" style={CARD_SHADOW}>
-            <Text className="text-lg font-bold text-gray-900 dark:text-white">Page Analytics</Text>
-            <Text className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Visitors, engagement and conversions across your booking pages
-            </Text>
+        <View className="px-4 mt-4 gap-4">
+          <Text className="text-sm text-gray-500 dark:text-gray-400">
+            Visitors, engagement and conversions across your booking pages
+          </Text>
+
+          {/* Period chips (the web's period select) + location. */}
+          <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingRight: 4, gap: 8 }}
+              className="-mx-1 px-1"
+            >
+              {PERIOD_PRESETS.map((p) => (
+                <FilterChip
+                  key={p.value}
+                  label={p.label}
+                  selected={range === p.value}
+                  onPress={() => setRange(p.value)}
+                />
+              ))}
+              <FilterChip
+                label={customChipLabel}
+                selected={range === "custom"}
+                onPress={() => setShowCustomRange(true)}
+              />
+            </ScrollView>
+
+            <Pressable
+              onPress={() => setShowLocations(true)}
+              className="mt-3 h-11 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 active:opacity-70 dark:border-neutral-800 dark:bg-neutral-900"
+              accessibilityRole="button"
+              accessibilityLabel={`Location, ${requestedScope}`}
+            >
+              <Feather name="map-pin" size={16} color="#9CA3AF" />
+              <Text numberOfLines={1} className="flex-1 text-sm text-gray-900 dark:text-white">
+                {requestedScope}
+              </Text>
+              <Feather name="chevron-down" size={16} color="#9CA3AF" />
+            </Pressable>
+
+            {view.body === "content" && loaded && (
+              <PeriodCaption
+                stale={view.stale}
+                updating={view.updating && !refreshing}
+                shownPeriod={shownPeriod}
+                requestedPeriod={`${periodLabel(query)} · ${requestedScope}`}
+                location={shownScope}
+                updatedAt={formatClockTime(loaded.at)}
+              />
+            )}
           </View>
 
-          {/* Filters: period + location */}
-          <View className="flex-row gap-3">
-            <View className="flex-1">
-              <SheetSelect
-                icon="calendar"
-                title="Select Period"
-                value={days}
-                options={[
-                  { label: "Last 7 days", value: 7 },
-                  { label: "Last 30 days", value: 30 },
-                  { label: "Last 90 days", value: 90 },
-                ]}
-                onSelect={(v) => setDays(Number(v))}
-              />
-            </View>
-            <View className="flex-1">
-              <SheetSelect
-                icon="map-pin"
-                title="Select Location"
-                value={locationId ?? "all"}
-                options={[
-                  { label: "All Locations", value: "all" },
-                  ...locations.map((l) => ({ label: l.name, value: l.id })),
-                ]}
-                onSelect={(v) => setLocationId(v === "all" ? null : Number(v))}
-              />
-            </View>
-          </View>
+          {view.body === "skeleton" && <AnalyticsSkeleton tiles={10} panels={3} />}
 
-          {loading && !overview && <AnalyticsSkeleton tiles={10} panels={3} />}
-          {error && !overview && (
-            <View className="items-center py-14">
-              <Feather name="alert-circle" size={40} color="#EF4444" />
-              <Text className="text-sm text-gray-600 dark:text-gray-300 mt-3 text-center">{error}</Text>
-              <Pressable onPress={load} className="mt-4 px-5 py-2.5 rounded-xl bg-[#0644C7]">
-                <Text className="text-sm font-semibold text-white">Retry</Text>
-              </Pressable>
-            </View>
+          {view.body === "error" && (
+            <ListErrorBanner
+              title="Page Analytics unavailable"
+              message={error ?? "Something went wrong."}
+              onRetry={() => void load()}
+            />
           )}
 
-          {overview && (
-            <>
+          {view.banner && (
+            <ListErrorBanner
+              title={view.stale ? "Couldn't load that selection" : "Couldn't refresh analytics"}
+              message={
+                view.stale
+                  ? `${error} The figures below are still for ${shownPeriod} · ${shownScope}.`
+                  : `${error} Showing the figures from ${loaded ? formatClockTime(loaded.at) : "earlier"}.`
+              }
+              onRetry={() => void load()}
+            />
+          )}
+
+          {view.body === "content" && report && (
+            // Figures for another period or location are dimmed and can't be
+            // tapped, so they can't pass for the selection above.
+            <View
+              style={{ opacity: view.stale ? 0.45 : 1 }}
+              pointerEvents={view.stale ? "none" : "auto"}
+              className="gap-4"
+            >
               {/* Right now */}
-              <View className="flex-row items-center gap-2 bg-white dark:bg-neutral-900 rounded-2xl px-4 py-3 border border-gray-100 dark:border-neutral-800" style={CARD_SHADOW}>
+              <View className="flex-row items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
                 <View className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                <Text className="text-sm font-bold text-gray-900 dark:text-white">
-                  {live?.activeVisitors ?? 0}
+                <Text className="text-sm font-medium text-gray-900 dark:text-white">
+                  Right now
                 </Text>
-                <Text className="text-sm text-gray-500 dark:text-gray-400">
-                  visitors right now · {live?.activeSessions ?? 0} sessions
+                <Text className="text-2xl font-semibold text-gray-900 dark:text-white">
+                  {formatNumber(liveVisitors)}
+                </Text>
+                <Text numberOfLines={1} className="flex-1 text-sm text-gray-500 dark:text-gray-400">
+                  {plural(liveVisitors, "visitor", "visitors")} · {formatNumber(liveSessions)}{" "}
+                  {plural(liveSessions, "session", "sessions")}
                 </Text>
               </View>
 
-              {/* KPI tiles */}
-              <View className="flex-row flex-wrap gap-3">
-                <StatTile icon="eye" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Page views" value={String(overview.pageViews)} info="Total number of page loads across all tracked booking pages in the selected period." />
-                <StatTile icon="users" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Unique visitors" value={String(overview.uniqueVisitors)} info="Distinct visitors who viewed a tracked page during the period." />
-                <StatTile icon="repeat" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Sessions" value={String(overview.sessions)} info="Total browsing sessions. A session groups a visitor's activity until they're inactive." />
-                <StatTile icon="navigation" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Conversions" value={String(overview.conversions)} info="Completed conversion events (e.g. a purchase) attributed to tracked pages." />
-                <StatTile icon="trending-up" iconBg="bg-green-50 dark:bg-green-900/30" iconColor="#16A34A" label="Conv. rate" value={`${overview.conversionRate}%`} info="Conversions divided by sessions, as a percentage." />
-                <StatTile icon="dollar-sign" iconBg="bg-green-50 dark:bg-green-900/30" iconColor="#16A34A" label="Revenue" value={money(overview.conversionValue)} info="Total revenue value attributed to tracked conversions in the period." />
-                <StatTile icon="corner-up-right" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Bounce rate" value={`${overview.bounceRate}%`} info="Share of sessions that viewed a single page and left without engaging." />
-                <StatTile icon="clock" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Avg duration" value={fmtDuration(overview.avgDurationMs)} info="Average time a visitor spends per page view." />
-                <StatTile icon="user-plus" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="New visitors" value={String(overview.newVisitors)} info="Visitors seen for the first time during the period." />
-                <StatTile icon="user-check" iconBg="bg-blue-50 dark:bg-blue-900/30" iconColor={PRIMARY} label="Returning" value={String(overview.returningVisitors)} info="Visitors who had already visited before this period." />
-              </View>
+              <SummaryPanel figures={figures} />
 
-              {/* Traffic & conversions */}
-              <Panel icon="activity" title="Traffic & conversions">
-                <Text className="text-[11px] text-gray-400 dark:text-gray-500 -mt-2 mb-2">
-                  Bucket: day
-                </Text>
-                <AreaChart
-                  height={220}
-                  dark={scheme === "dark"}
-                  labels={series.map((s) => shortDay(s.bucket))}
-                  series={[
-                    { label: "Page views", color: "#0644C7", data: series.map((s) => s.views), axis: "left" },
-                    { label: "Conversions", color: "#F59E0B", data: series.map((s) => s.conversions), axis: "left", area: false },
-                    { label: "Revenue ($)", color: "#16A34A", data: series.map((s) => s.revenue), axis: "right" },
+              <SectionLabel title="Traffic" />
+              <AnalyticsPanel
+                icon="activity"
+                title="Traffic & conversions"
+                subtitle={`Bucket: ${report.bucket}`}
+              >
+                {report.series.length === 0 ? (
+                  <PanelEmpty message="No traffic in this period." />
+                ) : (
+                  <AreaChart
+                    dark={dark}
+                    interactive
+                    xLabelMode="spaced"
+                    formatValue={(v, s) => (s.axis === "right" ? formatMoney(v) : formatNumber(v))}
+                    labels={report.series.map((s) => shortDay(s.bucket))}
+                    series={[
+                      { label: "Page views", color: PRIMARY, data: report.series.map((s) => s.views), axis: "left" },
+                      { label: "Conversions", color: AMBER, data: report.series.map((s) => s.conversions), axis: "left", area: false },
+                      { label: "Revenue ($)", color: GREEN, data: report.series.map((s) => s.revenue), axis: "right" },
+                    ]}
+                  />
+                )}
+              </AnalyticsPanel>
+
+              <AnalyticsPanel icon="filter" title="Funnel" subtitle="View → engage → convert">
+                {report.funnel.length === 0 ? (
+                  <PanelEmpty message="No funnel data in this period." />
+                ) : (
+                  <FunnelChart
+                    color={PRIMARY}
+                    data={report.funnel.map((f) => ({ label: f.label, value: f.visitors }))}
+                  />
+                )}
+              </AnalyticsPanel>
+
+              <SectionLabel title="Pages" detail={shownPeriod} />
+              <AnalyticsPanel icon="file-text" title="Top pages">
+                <DataTable
+                  columns={[
+                    ["Path", 0],
+                    ["Views", 56],
+                    ["Conv.", 48],
+                    ["Revenue", 84],
                   ]}
+                  rows={report.topPages.slice(0, 10).map((p) => [
+                    p.path || "—",
+                    formatNumber(p.views),
+                    formatNumber(p.conversions),
+                    formatMoney(p.revenue),
+                  ])}
+                  emptyMessage="No page views in this period."
                 />
-              </Panel>
+              </AnalyticsPanel>
 
-              {/* Top pages */}
-              <Panel icon="file-text" title="Top pages">
-                {topPages.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">No data.</Text>
-                ) : (
-                  topPages.slice(0, 10).map((p, i) => (
-                    <View key={`${p.path}-${i}`} className={`flex-row items-center justify-between py-2 ${i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}>
-                      <Text className="text-xs text-gray-600 dark:text-gray-300 flex-1 mr-2" numberOfLines={1}>{p.path}</Text>
-                      <Text className="text-xs font-semibold text-gray-900 dark:text-white">{p.views}</Text>
-                    </View>
-                  ))
-                )}
-              </Panel>
+              <AnalyticsPanel icon="grid" title="Top entities">
+                <DataTable
+                  columns={[
+                    ["Name", 0],
+                    ["Views", 56],
+                    ["Conv.", 48],
+                    ["Rate", 60],
+                  ]}
+                  rows={report.topEntities.slice(0, 10).map((e) => [
+                    e.name,
+                    formatNumber(e.views),
+                    formatNumber(e.conversions),
+                    formatPercent(e.rate),
+                  ])}
+                  emptyMessage="No entity views in this period."
+                />
+              </AnalyticsPanel>
 
-              {/* Top entities */}
-              <Panel icon="grid" title="Top entities">
-                {topEntities.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">No data.</Text>
-                ) : (
-                  <>
-                    <View className="flex-row pb-2 border-b border-gray-100 dark:border-neutral-800">
-                      <Text className="flex-1 text-[10px] font-semibold uppercase text-gray-400">Name</Text>
-                      <Text className="w-12 text-right text-[10px] font-semibold uppercase text-gray-400">Views</Text>
-                      <Text className="w-12 text-right text-[10px] font-semibold uppercase text-gray-400">Conv</Text>
-                      <Text className="w-14 text-right text-[10px] font-semibold uppercase text-gray-400">Rate</Text>
-                    </View>
-                    {topEntities.slice(0, 10).map((e, i) => (
-                      <View key={`${e.name}-${i}`} className="flex-row items-center py-2 border-b border-gray-50 dark:border-neutral-800/50">
-                        <Text className="flex-1 text-xs text-gray-700 dark:text-gray-200 mr-2" numberOfLines={1}>{e.name}</Text>
-                        <Text className="w-12 text-right text-xs text-gray-600 dark:text-gray-300">{e.views}</Text>
-                        <Text className="w-12 text-right text-xs text-gray-600 dark:text-gray-300">{e.conversions}</Text>
-                        <Text className="w-14 text-right text-xs font-semibold text-gray-900 dark:text-white">{e.rate}%</Text>
-                      </View>
-                    ))}
-                  </>
-                )}
-              </Panel>
+              <AnalyticsPanel icon="log-in" title="Top landing pages">
+                <DataTable
+                  columns={[
+                    ["Path", 0],
+                    ["Entries", 60],
+                    ["Bounce", 60],
+                    ["Conv.", 48],
+                  ]}
+                  rows={report.landing.slice(0, 10).map((l) => [
+                    l.path || "—",
+                    formatNumber(l.sessions),
+                    formatPercent(l.bounceRate),
+                    formatNumber(l.conversions),
+                  ])}
+                  emptyMessage="No landing pages in this period."
+                />
+              </AnalyticsPanel>
 
-              {/* Funnel */}
-              <Panel icon="filter" title="Funnel">
-                <Text className="text-[11px] text-gray-400 dark:text-gray-500 -mt-2 mb-3">
-                  View → engage → convert
-                </Text>
-                {funnel.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">No data.</Text>
-                ) : (
-                  <FunnelChart data={funnel.map((f) => ({ label: f.label, value: f.visitors }))} />
-                )}
-              </Panel>
-
-              {/* Devices */}
-              <Panel icon="smartphone" title="Devices">
-                {/* Devices / Browsers / OS toggle */}
-                <View className="flex-row gap-1.5 mb-4 self-start bg-gray-100 dark:bg-neutral-800 rounded-lg p-1">
-                  {(
-                    [
-                      { key: "devices", label: "Devices" },
-                      { key: "browsers", label: "Browsers" },
-                      { key: "oses", label: "OS" },
-                    ] as { key: DeviceTab; label: string }[]
-                  ).map((t) => {
-                    const active = deviceTab === t.key;
-                    return (
-                      <Pressable
-                        key={t.key}
-                        onPress={() => setDeviceTab(t.key)}
-                        className={`px-3 py-1.5 rounded-md ${active ? "bg-[#0644C7]" : ""}`}
-                      >
-                        <Text
-                          className={`text-xs font-medium ${active ? "text-white" : "text-gray-600 dark:text-gray-300"}`}
-                        >
-                          {t.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+              <SectionLabel title="Audience" detail={shownPeriod} />
+              <AnalyticsPanel icon="smartphone" title="Devices">
+                <View className="flex-row flex-wrap gap-2 mb-4">
+                  {DEVICE_TABS.map((t) => (
+                    <FilterChip
+                      key={t.key}
+                      label={t.label}
+                      selected={deviceTab === t.key}
+                      onPress={() => setDeviceTab(t.key)}
+                    />
+                  ))}
                 </View>
-                <PieChart data={deviceSlices.map((d) => ({ label: d.label, value: d.views }))} />
-              </Panel>
+                <BreakdownList
+                  emptyMessage="No visits in this period."
+                  parts={(report.devices[deviceTab] ?? []).map((d) => ({
+                    label: d.label,
+                    value: d.views,
+                  }))}
+                />
+              </AnalyticsPanel>
 
-              {/* Traffic sources */}
-              <Panel icon="globe" title="Traffic sources">
-                {sources ? (
+              <AnalyticsPanel icon="globe" title="Traffic sources">
+                {!report.sources ? (
+                  <PanelEmpty message="No traffic source data." />
+                ) : (
                   <>
-                    <View className="flex-row items-center justify-between py-2">
-                      <Text className="text-xs text-gray-600 dark:text-gray-300">Direct</Text>
-                      <Text className="text-xs text-gray-500 dark:text-gray-400">
-                        {sources.direct.visits} visits · {sources.direct.conversions} conv · {money(sources.direct.revenue)}
-                      </Text>
-                    </View>
-                    {sources.referrers.length > 0 && (
-                      <Text className="text-[10px] font-semibold uppercase text-gray-400 mt-2 mb-1">Referrers</Text>
-                    )}
-                    {sources.referrers.slice(0, 12).map((r, i) => (
-                      <Text key={`${r.referrer}-${i}`} className="text-xs text-gray-500 dark:text-gray-400 py-1" numberOfLines={1}>
-                        {r.referrer}
-                      </Text>
-                    ))}
-                  </>
-                ) : (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">No data.</Text>
-                )}
-              </Panel>
-
-              {/* Top landing pages */}
-              <Panel icon="log-in" title="Top landing pages">
-                {landing.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500">No data.</Text>
-                ) : (
-                  landing.slice(0, 10).map((l, i) => (
-                    <View key={`${l.path}-${i}`} className={`flex-row items-center justify-between py-2 ${i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}>
-                      <Text className="text-xs text-gray-600 dark:text-gray-300 flex-1 mr-2" numberOfLines={1}>{l.path}</Text>
-                      <Text className="text-xs font-semibold text-gray-900 dark:text-white">{l.sessions}</Text>
-                    </View>
-                  ))
-                )}
-              </Panel>
-
-              {/* Recent conversions */}
-              <Panel icon="check-circle" title="Recent Conversions">
-                {conversions.length === 0 ? (
-                  <Text className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">No data</Text>
-                ) : (
-                  conversions.slice(0, 15).map((c, i) => (
-                    <View key={i} className={`py-2 ${i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}>
-                      <View className="flex-row items-center justify-between">
-                        <Text className="text-xs font-medium text-gray-900 dark:text-white flex-1 mr-2" numberOfLines={1}>{c.entity}</Text>
-                        <Text className="text-xs font-semibold text-green-600 dark:text-green-400">{money(c.value)}</Text>
+                    <DataTable
+                      columns={[
+                        ["Source", 0],
+                        ["Visits", 56],
+                        ["Conv.", 48],
+                        ["Revenue", 84],
+                      ]}
+                      rows={[
+                        ...report.sources.utm.map((s) => [
+                          [s.source, s.medium, s.campaign].filter((x) => x !== "—").join(" / ") || "—",
+                          formatNumber(s.views),
+                          formatNumber(s.conversions),
+                          formatMoney(s.revenue),
+                        ]),
+                        [
+                          "Direct",
+                          formatNumber(report.sources.direct.visits),
+                          formatNumber(report.sources.direct.conversions),
+                          formatMoney(report.sources.direct.revenue),
+                        ],
+                      ]}
+                      emptyMessage="No traffic source data."
+                    />
+                    {report.sources.referrers.length > 0 && (
+                      <View className="mt-4">
+                        <Text className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                          Referrers
+                        </Text>
+                        <DataTable
+                          columns={[
+                            ["Referrer", 0],
+                            ["Visits", 56],
+                          ]}
+                          rows={report.sources.referrers
+                            .slice(0, 12)
+                            .map((r) => [r.referrer || "—", formatNumber(r.visits)])}
+                          emptyMessage="No referrers."
+                        />
                       </View>
-                      <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-                        {c.event} · {c.utmSource}
+                    )}
+                  </>
+                )}
+              </AnalyticsPanel>
+
+              <SectionLabel title="Conversions" detail={shownPeriod} />
+              <AnalyticsPanel icon="check-circle" title="Recent Conversions">
+                {report.conversions.length === 0 ? (
+                  <PanelEmpty message="No conversions in this period." />
+                ) : (
+                  report.conversions.slice(0, 15).map((c, i) => (
+                    <View
+                      key={i}
+                      className={`py-3 ${i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""}`}
+                    >
+                      <View className="flex-row items-start justify-between gap-2">
+                        <Text className="flex-1 text-sm font-semibold text-gray-900 dark:text-white">
+                          {c.entity}
+                        </Text>
+                        <Text className="text-sm font-semibold text-green-600 dark:text-green-400">
+                          {formatMoney(c.value)}
+                        </Text>
+                      </View>
+                      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {c.event} · {formatWhen(c.when)}
                       </Text>
+                      {(c.utmSource !== "—" || c.utmCampaign !== "—") && (
+                        <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                          UTM {c.utmSource}
+                          {c.utmCampaign !== "—" ? ` · ${c.utmCampaign}` : ""}
+                        </Text>
+                      )}
                     </View>
                   ))
                 )}
-              </Panel>
-            </>
+              </AnalyticsPanel>
+            </View>
           )}
         </View>
       </ScrollView>
+
+      {/* Location — all, or one. */}
+      <BottomSheet
+        visible={showLocations}
+        onClose={() => setShowLocations(false)}
+        title="Select Location"
+      >
+        <ScrollView className="px-4 pb-6" showsVerticalScrollIndicator={false}>
+          {[{ id: null as number | null, name: "All Locations" }, ...locations].map((loc) => {
+            const on = loc.id === locationId;
+            return (
+              <Pressable
+                key={loc.id ?? "all"}
+                onPress={() => {
+                  setLocationId(loc.id);
+                  setShowLocations(false);
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on }}
+                className="flex-row items-center gap-3 px-2 py-3.5 active:opacity-70"
+              >
+                <Text
+                  numberOfLines={1}
+                  className="flex-1 text-base font-medium text-gray-800 dark:text-gray-100"
+                >
+                  {loc.name}
+                </Text>
+                {on && <Feather name="check" size={18} color={PRIMARY} />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
+      {/* Custom period calendar, for the "Custom" chip. */}
+      <DateRangeSheet
+        visible={showCustomRange}
+        initialStart={customStart}
+        initialEnd={customEnd}
+        onClose={() => setShowCustomRange(false)}
+        onApply={(start, end) => {
+          setCustomStart(start);
+          setCustomEnd(end);
+          setRange("custom");
+          setShowCustomRange(false);
+        }}
+      />
     </View>
   );
 };

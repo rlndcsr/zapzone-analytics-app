@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import type { ComponentProps, ReactNode } from "react";
-import { Alert, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
 import {
   formatNumber,
@@ -87,6 +87,64 @@ export function AnalyticsPanel({
         )}
       </View>
       {children}
+    </View>
+  );
+}
+
+/**
+ * Under the period chips: which period (and location scope) the figures below
+ * really cover, and when they loaded. While another selection loads, or if it
+ * failed, it says the figures are still the old ones.
+ */
+export function PeriodCaption({
+  stale,
+  updating,
+  shownPeriod,
+  requestedPeriod,
+  location,
+  updatedAt,
+}: {
+  stale: boolean;
+  updating: boolean;
+  shownPeriod: string;
+  requestedPeriod: string;
+  location?: string;
+  updatedAt: string;
+}) {
+  if (stale) {
+    return (
+      // Its own element (not a restyled caption), so no classes change after mount.
+      <View
+        key="stale"
+        className="flex-row items-center gap-2 mt-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2"
+        accessibilityLiveRegion="polite"
+      >
+        {updating ? (
+          <ActivityIndicator size="small" color="#D97706" />
+        ) : (
+          <Feather name="clock" size={14} color="#D97706" />
+        )}
+        <Text className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+          {updating ? `Loading ${requestedPeriod}… ` : ""}
+          Still showing {shownPeriod}
+          {location ? ` · ${location}` : ""}.
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View key="current" className="flex-row items-center gap-2 mt-3">
+      <Text className="flex-1 text-xs text-gray-500 dark:text-gray-400">
+        {shownPeriod}
+        {location ? ` · ${location}` : ""}
+        {` · Updated ${updatedAt}`}
+      </Text>
+      {updating && (
+        <View className="flex-row items-center gap-1.5">
+          <ActivityIndicator size="small" color="#0644C7" />
+          <Text className="text-xs text-gray-500 dark:text-gray-400">Updating</Text>
+        </View>
+      )}
     </View>
   );
 }
