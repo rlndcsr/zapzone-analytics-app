@@ -347,8 +347,6 @@ const AccountingAnalytics = () => {
     ];
   }, [report]);
 
-  const customLabel = preset === "custom" ? rangeLabel(start, end) : "Custom";
-
   return (
     <View className="flex-1 bg-gray-50 dark:bg-black">
       <ModuleHeader
@@ -383,12 +381,27 @@ const AccountingAnalytics = () => {
 
           {/* Dates, date basis and category. */}
           <View>
+            {/* The web's date-range calendar: shows the range, tap to pick. */}
+            <Pressable
+              onPress={() => setShowDateSheet(true)}
+              className="mb-3 h-11 flex-row items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 active:opacity-70 dark:border-neutral-800 dark:bg-neutral-900"
+              accessibilityRole="button"
+              accessibilityLabel={`Dates, ${rangeLabel(start, end)}. Change dates`}
+            >
+              <Feather name="calendar" size={16} color="#9CA3AF" />
+              <Text numberOfLines={1} className="flex-1 text-sm text-gray-900 dark:text-white">
+                {rangeLabel(start, end)}
+              </Text>
+              <Feather name="chevron-down" size={16} color="#9CA3AF" />
+            </Pressable>
+
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingRight: 4, gap: 8 }}
               className="-mx-1 px-1"
             >
+              {/* Quick picks; any other range comes from the calendar above. */}
               {DATE_PRESETS.map((p) => (
                 <FilterChip
                   key={p.value}
@@ -397,11 +410,6 @@ const AccountingAnalytics = () => {
                   onPress={() => pickPreset(p.value)}
                 />
               ))}
-              <FilterChip
-                label={customLabel}
-                selected={preset === "custom"}
-                onPress={() => setShowDateSheet(true)}
-              />
             </ScrollView>
 
             {/* The web's "Created On" / "Booked For" switch. */}
@@ -480,6 +488,34 @@ const AccountingAnalytics = () => {
               className="gap-4"
             >
               <SummaryPanel figures={figures} />
+
+              {/* Where the Discounts figure came from — the web's "Discounts by
+                  source" strip, from the report's discount_by_source. */}
+              {!!report.summary.discountBySource && (
+                <AnalyticsPanel icon="tag" title="Discounts by source">
+                  {(
+                    [
+                      ["Special Pricing", report.summary.discountBySource.specialPricing],
+                      ["Membership", report.summary.discountBySource.membership],
+                      ["Promo", report.summary.discountBySource.promo],
+                      ["Gift Card", report.summary.discountBySource.giftCard],
+                      ["Other", report.summary.discountBySource.other],
+                    ] as [string, number][]
+                  ).map(([label, value], i) => (
+                    <View
+                      key={label}
+                      className={`flex-row items-center justify-between py-2.5 ${
+                        i > 0 ? "border-t border-gray-100 dark:border-neutral-800" : ""
+                      }`}
+                    >
+                      <Text className="text-sm text-gray-700 dark:text-gray-200">{label}</Text>
+                      <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
+                        -{formatMoney(value)}
+                      </Text>
+                    </View>
+                  ))}
+                </AnalyticsPanel>
+              )}
 
               <AnalyticsPanel
                 icon="layers"

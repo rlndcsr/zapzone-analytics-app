@@ -402,6 +402,14 @@ export type AccountingSummary = {
   collected: number;
   authorizePayment: number;
   gatewayNet: number;
+  /** Where the discounts came from; null when the backend omits the block. */
+  discountBySource: {
+    specialPricing: number;
+    membership: number;
+    promo: number;
+    giftCard: number;
+    other: number;
+  } | null;
 };
 
 export type AccountingCategoryItem = {
@@ -435,7 +443,21 @@ export type AccountingReport = {
 type RawCatSummary = Record<string, unknown>;
 
 function mapSummary(s: RawCatSummary): AccountingSummary {
+  const d = s.discount_by_source;
+  const bySource =
+    d && typeof d === "object" && !Array.isArray(d)
+      ? (d as Record<string, unknown>)
+      : null;
   return {
+    discountBySource: bySource
+      ? {
+          specialPricing: num(bySource.special_pricing),
+          membership: num(bySource.membership),
+          promo: num(bySource.promo),
+          giftCard: num(bySource.gift_card),
+          other: num(bySource.other),
+        }
+      : null,
     qtySold: num(s.quantity_sold),
     grossSales: num(s.gross_sales),
     discounts: num(s.discount_amount),
