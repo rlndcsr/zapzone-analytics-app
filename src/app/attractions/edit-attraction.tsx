@@ -873,7 +873,7 @@ const EditAttractionScreen = () => {
                 keyboardType="number-pad"
               />
               <Text className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                Lower numbers appear first on the store page.
+                Lower numbers appear first on the booking site.
               </Text>
             </Section>
 

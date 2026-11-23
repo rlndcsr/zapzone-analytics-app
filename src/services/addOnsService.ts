@@ -20,6 +20,7 @@ type RawAddOn = {
   location?: { id?: number | null; name?: string | null } | null;
   location_name?: string | null;
   image?: string | string[] | null;
+  is_active?: boolean | number | null;
 };
 
 /** Flattened add-on row backing the Add-ons management list. */
@@ -190,6 +191,58 @@ type AddOnsResponse = {
     pagination?: { last_page?: number };
   };
 };
+
+/** An add-on a custom package booking can carry (web usableCustomAddOns). */
+export type CustomCatalogAddOn = {
+  id: number;
+  name: string;
+  price: number;
+  minQuantity: number | null;
+  maxQuantity: number | null;
+  image: string | null;
+};
+
+/**
+ * GET /api/addons for one location, kept to the add-ons the server will price
+ * on a custom package: at this location, switched on, and with a price
+ * (CustomPackagePricer::catalogLines refuses any other).
+ */
+export async function fetchCustomPackageAddOns({
+  token,
+  userId,
+  locationId,
+  signal,
+}: {
+  token: string;
+  userId: number;
+  locationId: number;
+  signal?: AbortSignal;
+}): Promise<CustomCatalogAddOn[]> {
+  const rows = await fetchAllAddOns({ token, userId, locationId, signal });
+  return rows
+    .filter((a) => {
+      const location =
+        a.location_id != null ? Number(a.location_id) : (a.location?.id ?? null);
+      const price = a.price;
+      return (
+        Number(location) === locationId &&
+        a.is_active !== false &&
+        a.is_active !== 0 &&
+        price !== null &&
+        price !== undefined &&
+        String(price).trim() !== "" &&
+        Number.isFinite(Number(price))
+      );
+    })
+    .map((a) => ({
+      id: a.id,
+      name: a.name?.trim() || "Add-on",
+      price: Number(a.price),
+      minQuantity: a.min_quantity != null ? Number(a.min_quantity) : null,
+      maxQuantity: a.max_quantity != null ? Number(a.max_quantity) : null,
+      image: toImages(a.image)[0] ?? null,
+    }));
+}
 
 type FetchAddOnsParams = {
   token: string;

@@ -62,6 +62,7 @@ import { consumeBookingsStale, useBookings } from "../../lib/hooks/useBookings";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import { cardLabelFromPayments, type CardBearingPayment } from "../../lib/payments/cardLabel";
 import { getCurrentUser, getToken } from "../../lib/session";
+import { bookingDisplayName } from "../../lib/bookings/customBooking";
 import {
   bulkCompleteBookingsNotice,
   bulkCompleteConfirmMessage,
@@ -129,6 +130,8 @@ type ExportRow = {
   guest_email?: string | null;
   guest_phone?: string | null;
   package?: { name?: string | null } | null;
+  is_custom_package?: boolean | number | null;
+  custom_package_name?: string | null;
   room?: { name?: string | null } | null;
   location?: { name?: string | null } | null;
   booking_date?: string | null;
@@ -190,7 +193,7 @@ function buildBookingsCsv(rows: ExportRow[]): string {
         : (b.guest_name ?? ""),
       b.customer?.email ?? b.guest_email ?? "",
       b.customer?.phone ?? b.guest_phone ?? "",
-      b.package?.name ?? "",
+      bookingDisplayName(b, ""),
       b.room?.name ?? "",
       b.location?.name ?? "",
       b.booking_date ?? "",

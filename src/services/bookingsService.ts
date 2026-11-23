@@ -13,6 +13,12 @@ import { checkoutTokenBody, rememberCheckoutToken } from "../lib/payments/checko
 import { roomIsAvailable } from "../lib/rooms";
 import { normalizeCategory } from "../lib/venueCategories";
 import {
+  bookingDisplayName,
+  customBookingCategory,
+  isCustomBooking,
+  type CustomPackagePayload,
+} from "../lib/bookings/customBooking";
+import {
   followUpOf,
   type VisitFollowUpSummary,
 } from "../lib/visitFollowUp/visitFollowUp";
@@ -177,7 +183,14 @@ export type BookingDetail = {
 };
 
 /** Raw shape of a booking in the list response (index select set). */
-type RawBooking = {
+/** A custom package booking carries its own name and category (backend ae877e2). */
+type RawCustomPackageFields = {
+  is_custom_package?: boolean | number | null;
+  custom_package_name?: string | null;
+  custom_package_category?: string | null;
+};
+
+type RawBooking = RawCustomPackageFields & {
   id: number;
   reference_number?: string | null;
   status?: string;
@@ -407,10 +420,13 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     participants: Number(raw.participants ?? 0),
     totalAmount: Number(raw.total_amount ?? 0),
     amountPaid: Number(raw.amount_paid ?? 0),
-    packageName: raw.package?.name?.trim() || "Booking",
-    packageCategory:
-      raw.package?.display_label?.trim() || raw.package?.category?.trim() || "",
-    packageCategoryRaw: raw.package?.category?.trim() || "",
+    packageName: bookingDisplayName(raw, "Booking"),
+    packageCategory: isCustomBooking(raw)
+      ? customBookingCategory(raw)
+      : raw.package?.display_label?.trim() || raw.package?.category?.trim() || "",
+    packageCategoryRaw: isCustomBooking(raw)
+      ? raw.custom_package_category?.trim() || ""
+      : raw.package?.category?.trim() || "",
     packageIsEscapeRoom:
       raw.package?.is_escape_room === true || raw.package?.is_escape_room === 1,
     customerName: customerName(raw.customer, raw.guest_name),
@@ -421,7 +437,9 @@ function mapBooking(raw: RawBooking, date: string): CalendarBooking {
     guestName: raw.guest_name?.trim() || null,
     guestEmail: raw.guest_email?.trim() || null,
     guestPhone: raw.guest_phone?.trim() || null,
-    packageNameRaw: raw.package?.name?.trim() || null,
+    packageNameRaw: isCustomBooking(raw)
+      ? bookingDisplayName(raw, "")
+      : raw.package?.name?.trim() || null,
     roomName: raw.room?.name?.trim() || "",
     roomId: raw.room_id ?? raw.room?.id ?? null,
     packageId: raw.package_id ?? raw.package?.id ?? null,
@@ -828,10 +846,12 @@ export function mapBookingDetail(b: RawBookingDetail): BookingDetail {
     duration: Number(b.duration ?? 0),
     durationUnit: b.duration_unit ?? "hours",
     participants: Number(b.participants ?? 0),
-    packageName: b.package?.name?.trim() || "—",
+    packageName: bookingDisplayName(b, "—"),
     packageId: b.package_id ?? b.package?.id ?? null,
     packagePrice: b.package?.price != null ? Number(b.package.price) : null,
-    packageCategory: normalizeCategory(b.package?.category) || null,
+    packageCategory: isCustomBooking(b)
+      ? customBookingCategory(b) || null
+      : normalizeCategory(b.package?.category) || null,
     locationId: b.location_id ?? null,
     locationName: b.location?.name?.trim() || "",
     locationAddress: locationAddressLine(b.location),
@@ -1103,7 +1123,7 @@ export type ScanBooking = {
   locationName: string;
 };
 
-type RawScanBooking = {
+type RawScanBooking = RawCustomPackageFields & {
   id: number;
   reference_number?: string | null;
   status?: string | null;
@@ -1124,7 +1144,7 @@ function mapScanBooking(raw: RawScanBooking): ScanBooking {
     id: raw.id,
     referenceNumber: raw.reference_number ?? "",
     status: raw.status ?? "pending",
-    packageName: raw.package?.name?.trim() || "Booking",
+    packageName: bookingDisplayName(raw, "Booking"),
     customerName: customerName(raw.customer, raw.guest_name),
     date: toDateKey(raw.booking_date) ?? "",
     time: toTime(raw.booking_time),
@@ -1652,6 +1672,29 @@ export class SpaceNotLinkedError extends Error {
   }
 }
 
+/**
+ * POST /api/rooms — a new space at a location, not linked to any package: a
+ * custom package booking picks its space from the whole location (web
+ * ManualBooking handleCreateRoom, custom branch).
+ */
+export async function createLocationSpace(
+  token: string,
+  input: { name: string; locationId: number },
+): Promise<{ id: number; name: string }> {
+  const res = await apiRequest<RoomMutationResponse>("/api/rooms", {
+    method: "POST",
+    token,
+    body: {
+      location_id: input.locationId,
+      name: input.name,
+      is_available: true,
+    },
+  });
+  const created = res?.data;
+  if (!created?.id) throw new Error("Space was not created");
+  return { id: Number(created.id), name: created.name?.trim() || input.name };
+}
+
 /** POST /api/rooms then /api/packages/room/create; throws SpaceNotLinkedError when only the first worked. */
 export async function createPackageSpace(
   token: string,
@@ -1754,7 +1797,7 @@ export type ScheduleBooking = {
   locationName?: string | null;
 };
 
-type RawScheduleBooking = {
+type RawScheduleBooking = RawCustomPackageFields & {
   id: number;
   reference_number?: string | null;
   status?: string | null;
@@ -1821,7 +1864,7 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
     totalAmount: Number(raw.total_amount ?? 0),
     amountPaid: Number(raw.amount_paid ?? 0),
     paymentStatus: raw.payment_status ?? "pending",
-    packageName: raw.package?.name?.trim() || "Booking",
+    packageName: bookingDisplayName(raw, "Booking"),
     customerName: customerName(raw.customer, raw.guest_name),
     guestOfHonorName: raw.guest_of_honor_name?.trim() || null,
     guestOfHonorAge: Number(raw.guest_of_honor_age) || null,
@@ -1833,7 +1876,9 @@ function mapScheduleBooking(raw: RawScheduleBooking): ScheduleBooking {
     guestPhone: raw.guest_phone?.trim() || null,
     customerEmail: raw.customer?.email?.trim() || null,
     customerPhone: raw.customer?.phone?.trim() || null,
-    packageNameRaw: raw.package?.name?.trim() || null,
+    packageNameRaw: isCustomBooking(raw)
+      ? bookingDisplayName(raw, "")
+      : raw.package?.name?.trim() || null,
     locationName: raw.location?.name?.trim() || null,
   };
 }
@@ -2704,6 +2749,8 @@ export type PackageListItem = {
   locationName: string;
   /** False for a backend-only package; staff still book it (web 4d165ce). */
   availableOnline: boolean | null;
+  /** "per_person" prices each guest; null when the list endpoint leaves it out. */
+  pricingType?: string | null;
 };
 
 function mapPackageListItem(raw: RawPackage): PackageListItem {
@@ -2723,6 +2770,7 @@ function mapPackageListItem(raw: RawPackage): PackageListItem {
     locationId: raw.location?.id ?? raw.location_id ?? null,
     locationName: raw.location?.name?.trim() || "",
     availableOnline: typeof raw.available_online === "boolean" ? raw.available_online : null,
+    pricingType: raw.pricing_type?.trim() || null,
   };
 }
 
@@ -2790,7 +2838,10 @@ export type CreateBookingInput = {
   guest_email?: string;
   guest_phone?: string;
   location_id: number;
-  package_id: number;
+  /** Null for a custom package booking, which sends `custom_package` instead. */
+  package_id: number | null;
+  /** The staff-filled terms of a custom package (backend CustomPackagePricer). */
+  custom_package?: CustomPackagePayload;
   room_id?: number;
   type: "package";
   booking_date: string;

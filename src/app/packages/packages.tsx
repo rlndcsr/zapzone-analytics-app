@@ -356,7 +356,7 @@ const Packages = () => {
     Alert.alert(question.title, question.message, [
       { text: "Cancel", style: "cancel" },
       {
-        text: makeBackendOnly ? "Make backend only" : "Show online",
+        text: makeBackendOnly ? "Hide from booking site" : "Show online",
         onPress: async () => {
           const token = getToken();
           if (!token) {
@@ -376,7 +376,7 @@ const Packages = () => {
               "Update failed",
               err instanceof Error && err.message
                 ? err.message
-                : "Failed to update Front-End Availability. Please try again.",
+                : "Failed to update the Online Booking setting. Please try again.",
             );
           } finally {
             setOnlineTogglingId(null);
@@ -801,9 +801,9 @@ const Packages = () => {
                     divideTop
                     divideLeft
                     icon="eye-off"
-                    title="Backend Only"
+                    title="Hidden"
                     value={String(backendOnlyCount)}
-                    hint="Hidden from the booking site"
+                    hint="From the booking site"
                   />
                 </View>
               </View>
@@ -931,7 +931,7 @@ const Packages = () => {
                       : "text-gray-700 dark:text-gray-200"
                   }`}
                 >
-                  Backend only
+                  Hidden from booking site
                 </Text>
                 <Text
                   className={`text-sm ${
@@ -1201,7 +1201,7 @@ const Packages = () => {
                           accessibilityLabel={
                             pkg.availableOnline === false
                               ? `Show ${pkg.name} on the booking site`
-                              : `Make ${pkg.name} backend only`
+                              : `Hide ${pkg.name} from the booking site`
                           }
                         >
                           {onlineTogglingId === pkg.id ? (
@@ -1271,7 +1271,7 @@ const Packages = () => {
                 {packages.length === 0
                   ? "There are no packages for this account yet."
                   : backendOnlyFilterOn
-                    ? "No backend-only packages match your filters."
+                    ? "No packages hidden from the booking site match your filters."
                     : "No packages match your filters."}
               </Text>
               {packages.length === 0 ? (

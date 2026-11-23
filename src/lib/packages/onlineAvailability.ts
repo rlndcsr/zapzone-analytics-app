@@ -27,7 +27,7 @@ export function onlineToggleQuestion(
 ): { title: string; message: string } {
   if (makeBackendOnly) {
     return {
-      title: `Make "${name}" backend only?`,
+      title: `Hide "${name}" from the booking site?`,
       message: isActive
         ? "Customers will no longer see it or book it online. Staff can still book it here, and existing bookings are not affected."
         : "It is switched off right now, so nobody can book it yet. Once it is switched on, customers will not see it or book it online, and staff can book it here.",
@@ -47,26 +47,26 @@ export function onlineToggleQuestion(
 /** The line after the switch saved. */
 export const onlineToggleDone = (name: string, online: boolean, isActive: boolean): string =>
   !online
-    ? `"${name}" is now backend only.`
+    ? `"${name}" is now hidden from the booking site.`
     : isActive
       ? `"${name}" is on the booking site again.`
       : `"${name}" can be booked online once it is switched on.`;
 
 /** The server answered without the new value: it predates Front-End Availability. */
 export const ONLINE_NOT_APPLIED =
-  "Front-End Availability could not be changed yet because the server has not been updated for it. Please try again later.";
+  "The Online Booking setting could not be changed yet because the server has not been updated for it. Please try again later.";
 
 export const CREATE_STAYED_ONLINE =
-  "The package was created, but it is on the booking site: the server has not been updated for Front-End Availability yet, so it could not be made backend only.";
+  "The package was created, but it could not be hidden from the booking site because the server has not been updated yet.";
 
 export const EDIT_NOT_APPLIED =
-  "The package was saved, but Front-End Availability could not be changed yet because the server has not been updated for it.";
+  "The package was saved, but the Online Booking setting could not be changed yet because the server has not been updated for it.";
 
 export const DUPLICATE_STAYED_ONLINE =
-  "The copy could not be made backend only because the server has not been updated for Front-End Availability yet.";
+  "The copy could not be hidden from the booking site because the server has not been updated yet.";
 
 export const importStayedOnlineNote = (count: number): string =>
-  `${count} imported package(s) meant to be backend only are on the booking site, because the server has not been updated for Front-End Availability yet.`;
+  `${count} imported package(s) could not be hidden from the booking site because the server has not been updated yet.`;
 
 /** The Front-End Availability box's explanation, by setting and active state. */
 export function onlineFieldHelp(checked: boolean, isActive: boolean): string {
@@ -76,8 +76,8 @@ export function onlineFieldHelp(checked: boolean, isActive: boolean): string {
       : "On: once the package is switched on, it shows on the booking site and customers can book it there.";
   }
   return isActive
-    ? "Off (backend only): the package is hidden from the booking site and cannot be booked online, even from a saved link. Staff can still book it here, and its schedule and existing bookings stay as they are."
-    : "Off (backend only): the package is hidden from the booking site and cannot be booked online, even from a saved link. Staff can book it here once it is switched on. Its schedule and existing bookings stay as they are.";
+    ? "Off: the package is hidden from the booking site and cannot be booked online, even from a saved link. Staff can still book it here, and its schedule and existing bookings stay as they are."
+    : "Off: the package is hidden from the booking site and cannot be booked online, even from a saved link. Staff can book it here once it is switched on. Its schedule and existing bookings stay as they are.";
 }
 
 export const ONLINE_FIELD_LOCKED = "Only a location manager or an admin can change this.";
@@ -85,8 +85,8 @@ export const ONLINE_FIELD_LOCKED = "Only a location manager or an admin can chan
 /** The duplicate sheet's note when the source package is backend only. */
 export const duplicateBackendOnlyNote = (canChange: boolean): string =>
   canChange
-    ? "This package is backend only, so the copy will be backend only too."
-    : "This package is backend only. The copy will be on the booking site once it is switched on. Only a location manager or an admin can make it backend only.";
+    ? "This package is hidden from the booking site, so the copy will be hidden too."
+    : "This package is hidden from the booking site. The copy will be on the booking site once it is switched on. Only a location manager or an admin can hide it from the booking site.";
 
 /**
  * A staff booking refused as if it came from a guest: the server did not

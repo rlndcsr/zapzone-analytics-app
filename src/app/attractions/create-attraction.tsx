@@ -827,7 +827,7 @@ const CreateAttractionScreen = () => {
               keyboardType="number-pad"
             />
             <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Lower numbers appear first on the store page.
+              Lower numbers appear first on the booking site.
             </Text>
           </Section>
 

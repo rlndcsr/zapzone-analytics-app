@@ -25,6 +25,47 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BackendOnlyBadge } from "../../components/ui/BackendOnly";
+import {
+  CustomPackageSummaryCard,
+  CustomPackageTermsFields,
+  CustomPricingFields,
+  CustomSpacePicker,
+  OneTimeAddOnRows,
+  SMALL_BUTTON,
+  type CustomFeeRow,
+  type CustomLoadStatus,
+  type CustomTermsDraft,
+  type OneTimeAddOnRow,
+} from "../../components/bookings/CustomPackageFields";
+import {
+  CUSTOM_PACKAGE_LABEL,
+  CUSTOM_PACKAGE_LIMITS,
+  CUSTOM_PACKAGE_MESSAGES,
+  CUSTOM_PACKAGE_STAFF_ONLY_CODE,
+  CUSTOM_PRICE_MISMATCH_CODE,
+  capacityText,
+  catalogErrorKey,
+  centsToDollars,
+  customGuestRange,
+  customPackagePayload,
+  customQuoteFromInput,
+  durationText,
+  emptyCustomFeeInput,
+  emptyCustomTermsInput,
+  emptyOneTimeAddOnInput,
+  endTimeText,
+  isCustomSlotClosed,
+  participantsHint,
+  toAppliedFees,
+  validateCustomTerms,
+  type CustomFeeInput,
+  type OneTimeAddOnInput,
+} from "../../lib/bookings/customBooking";
+import { fetchCategories } from "../../services/categoriesService";
+import {
+  fetchCustomPackageAddOns,
+  type CustomCatalogAddOn,
+} from "../../services/addOnsService";
 import { CallToBookCard } from "../../components/ui/CallToBookCard";
 import { CallToBookSheet } from "../../components/ui/CallToBookSheet";
 import { EmailSuggestions } from "../../components/ui/EmailSuggestions";
@@ -113,8 +154,10 @@ import {
 } from "../../components/pricing/SpecialPricingNotes";
 import {
   createBooking,
+  createLocationSpace,
   createPackageSpace,
   fetchAvailableTimeSlots,
+  fetchRoomOptions,
   fetchBookablePackageDetail,
   fetchPackageAvailabilitySchedules,
   fetchPackageList,
@@ -124,6 +167,7 @@ import {
   type AvailableSlot,
   type BookablePackage,
   type BookingStatus,
+  type CreateBookingInput,
   type PackageAddOn,
   type PackageAttraction,
   type PackageAvailabilitySchedule,
@@ -234,8 +278,12 @@ const FieldLabel = ({ children }: { children: React.ReactNode }) => (
   </Text>
 );
 
+/** Single-line fields, pickers and option buttons share one height (h-11, like the card fields). */
 const inputClass =
-  "border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-neutral-900";
+  "h-11 border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-0 text-sm text-gray-900 dark:text-white bg-white dark:bg-neutral-900";
+
+const textAreaClass =
+  "min-h-[64px] border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-neutral-900";
 
 const Stepper = ({
   value,
@@ -486,6 +534,297 @@ const ManualBookingScreen = () => {
     overrideTokenRef.current = null;
   }, [pkg?.id, scheduledDate, scheduledTime, selectedRoomId]);
 
+  // ---- Custom Package (web ManualBooking, zappoint 5de9d9e) ----------------
+  // One built-in package staff fill in for this booking only. The server works
+  // the total out again and refuses any other, so the app prices it the same
+  // way (lib/bookings/customBooking).
+  const [isCustom, setIsCustom] = useState(false);
+  /** Company admins choose the location; everyone else books at their own. */
+  const canPickCustomLocation = isCompanyAdmin;
+  const [customLocationId, setCustomLocationId] = useState<number | null>(null);
+  const [customTerms, setCustomTerms] = useState<CustomTermsDraft>(() => ({
+    ...emptyCustomTermsInput(),
+    fees: [],
+    oneTimeAddOns: [],
+  }));
+  const [customParticipants, setCustomParticipants] = useState("");
+  const [customAddOnQty, setCustomAddOnQty] = useState<Record<number, number>>({});
+  /** Errors show as fields are filled, and all of them after a refused save. */
+  const [customShowErrors, setCustomShowErrors] = useState(false);
+  const [customRooms, setCustomRooms] = useState<{ id: number; name: string }[]>([]);
+  const [customRoomsStatus, setCustomRoomsStatus] = useState<CustomLoadStatus>("idle");
+  const [customRoomsAttempt, setCustomRoomsAttempt] = useState(0);
+  const [customAddOns, setCustomAddOns] = useState<CustomCatalogAddOn[]>([]);
+  const [customAddOnsStatus, setCustomAddOnsStatus] = useState<CustomLoadStatus>("idle");
+  const [customAddOnsAttempt, setCustomAddOnsAttempt] = useState(0);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [categoriesStatus, setCategoriesStatus] = useState<CustomLoadStatus>("idle");
+  const [categoriesAttempt, setCategoriesAttempt] = useState(0);
+  const customRowKeyRef = useRef(0);
+  /** The location the custom form is on now, so a late answer for another is dropped. */
+  const customLocationRef = useRef<number | null>(null);
+
+  const customBookingLocationId: number | null = canPickCustomLocation
+    ? customLocationId
+    : (user?.location_id ?? null);
+  const customLocationName = (id: number | null): string => {
+    if (id == null) return "";
+    const listed = locationOptions.find((l) => l.id === id);
+    if (listed) return listed.name;
+    if (user?.location?.name && user.location_id === id) return String(user.location.name);
+    return `Location #${id}`;
+  };
+
+  const emptyCustomDraft = (): CustomTermsDraft => ({
+    ...emptyCustomTermsInput(),
+    fees: [],
+    oneTimeAddOns: [],
+  });
+
+  const nextCustomRowKey = () => {
+    customRowKeyRef.current += 1;
+    return customRowKeyRef.current;
+  };
+
+  const updateCustomTerms = (patch: Partial<CustomTermsDraft>) =>
+    setCustomTerms((prev) => ({ ...prev, ...patch }));
+
+  const addCustomFee = () => {
+    const rowKey = nextCustomRowKey();
+    setCustomTerms((prev) =>
+      prev.fees.length >= CUSTOM_PACKAGE_LIMITS.feesMax
+        ? prev
+        : { ...prev, fees: [...prev.fees, { ...emptyCustomFeeInput(), rowKey } as CustomFeeRow] },
+    );
+  };
+  const updateCustomFee = (rowKey: number, patch: Partial<CustomFeeInput>) =>
+    setCustomTerms((prev) => ({
+      ...prev,
+      fees: prev.fees.map((fee) => (fee.rowKey === rowKey ? { ...fee, ...patch } : fee)),
+    }));
+  const removeCustomFee = (rowKey: number) =>
+    setCustomTerms((prev) => ({ ...prev, fees: prev.fees.filter((fee) => fee.rowKey !== rowKey) }));
+
+  const addOneTimeAddOn = () => {
+    const rowKey = nextCustomRowKey();
+    setCustomTerms((prev) =>
+      prev.oneTimeAddOns.length >= CUSTOM_PACKAGE_LIMITS.oneTimeAddOnsMax
+        ? prev
+        : {
+            ...prev,
+            oneTimeAddOns: [
+              ...prev.oneTimeAddOns,
+              { ...emptyOneTimeAddOnInput(), rowKey } as OneTimeAddOnRow,
+            ],
+          },
+    );
+  };
+  const updateOneTimeAddOn = (rowKey: number, patch: Partial<OneTimeAddOnInput>) =>
+    setCustomTerms((prev) => ({
+      ...prev,
+      oneTimeAddOns: prev.oneTimeAddOns.map((line) =>
+        line.rowKey === rowKey ? { ...line, ...patch } : line,
+      ),
+    }));
+  const removeOneTimeAddOn = (rowKey: number) =>
+    setCustomTerms((prev) => ({
+      ...prev,
+      oneTimeAddOns: prev.oneTimeAddOns.filter((line) => line.rowKey !== rowKey),
+    }));
+
+  /** A catalog add-on's quantity on a custom package, within its own min/max. */
+  const setCustomAddOnQtyFor = (addOn: CustomCatalogAddOn, next: number) => {
+    setCustomAddOnQty((prev) => {
+      const current = prev[addOn.id] ?? 0;
+      const qty = clampAddOnQuantity(addOn, null, current, next);
+      if (qty <= 0) {
+        if (!(addOn.id in prev)) return prev;
+        const { [addOn.id]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return qty === current ? prev : { ...prev, [addOn.id]: qty };
+    });
+  };
+
+  /** Moving a custom booking to another location drops its space and add-ons there. */
+  const pickCustomLocation = (id: number) => {
+    setCustomLocationId(id);
+    setSelectedRoomId(null);
+    setCustomAddOnQty({});
+  };
+
+  const startCustomPackage = () => {
+    setPkg(null);
+    setAddonQty({});
+    setAttractionQty({});
+    setGohName("");
+    setGohAge("");
+    setGohGender("");
+    resetSchedule();
+    setAnchor(new Date());
+    setTotalAmountOverride("");
+    setCustomTerms(emptyCustomDraft());
+    setCustomParticipants("");
+    setCustomAddOnQty({});
+    setCustomShowErrors(false);
+    setCustomLocationId(
+      canPickCustomLocation
+        ? (selectedLocationId ??
+            getActiveLocationId() ??
+            (locationOptions.length === 1 ? locationOptions[0].id : null))
+        : null,
+    );
+    setIsCustom(true);
+  };
+
+  const leaveCustomPackage = () => {
+    setIsCustom(false);
+    setCustomLocationId(null);
+    setCustomTerms(emptyCustomDraft());
+    setCustomParticipants("");
+    setCustomAddOnQty({});
+    setCustomShowErrors(false);
+    resetSchedule();
+  };
+
+  // The custom form's spaces: every available space at its location.
+  useEffect(() => {
+    customLocationRef.current = isCustom ? customBookingLocationId : null;
+    if (!isCustom || customBookingLocationId == null) {
+      setCustomRooms([]);
+      setCustomRoomsStatus("idle");
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    let alive = true;
+    const locationId = customBookingLocationId;
+    setCustomRooms([]);
+    setCustomRoomsStatus("loading");
+    fetchRoomOptions(token, locationId, true)
+      .then(({ rooms }) => {
+        if (!alive) return;
+        setCustomRooms(rooms.map((r) => ({ id: r.id, name: r.name })));
+        setCustomRoomsStatus("ready");
+      })
+      .catch(() => alive && setCustomRoomsStatus("error"));
+    return () => {
+      alive = false;
+    };
+  }, [isCustom, customBookingLocationId, customRoomsAttempt]);
+
+  // The custom form's catalog add-ons: active, priced, at its location.
+  useEffect(() => {
+    if (!isCustom || customBookingLocationId == null || !user?.id) {
+      setCustomAddOns([]);
+      setCustomAddOnsStatus("idle");
+      return;
+    }
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    setCustomAddOns([]);
+    setCustomAddOnsStatus("loading");
+    fetchCustomPackageAddOns({
+      token,
+      userId: user.id,
+      locationId: customBookingLocationId,
+      signal: controller.signal,
+    })
+      .then((list) => {
+        if (controller.signal.aborted) return;
+        setCustomAddOns(list);
+        setCustomAddOnsStatus("ready");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCustomAddOnsStatus("error");
+      });
+    return () => controller.abort();
+  }, [isCustom, customBookingLocationId, customAddOnsAttempt, user?.id]);
+
+  /** Reload add-on prices after the server said the total changed. */
+  const refreshCustomAddOns = async (): Promise<boolean> => {
+    const locationId = customBookingLocationId;
+    const token = getToken();
+    if (!isCustom || locationId == null || !token || !user?.id) return false;
+    try {
+      const fresh = await fetchCustomPackageAddOns({ token, userId: user.id, locationId });
+      if (customLocationRef.current !== locationId) return false;
+      setCustomAddOns(fresh);
+      setCustomAddOnsStatus("ready");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Categories for the custom package (the same list Create Package uses).
+  useEffect(() => {
+    if (!isCustom) return;
+    const token = getToken();
+    if (!token) return;
+    let alive = true;
+    setCategoriesStatus("loading");
+    fetchCategories(token)
+      .then((list) => {
+        if (!alive) return;
+        setCategories(list.map((c) => c.name));
+        setCategoriesStatus("ready");
+      })
+      .catch(() => alive && setCategoriesStatus("error"));
+    return () => {
+      alive = false;
+    };
+  }, [isCustom, categoriesAttempt]);
+
+  const customCatalogLines = customAddOns
+    .filter((a) => (customAddOnQty[a.id] ?? 0) > 0)
+    .map((addOn) => ({ addOn, quantity: customAddOnQty[addOn.id] }));
+  const customQuote = customQuoteFromInput(
+    customTerms,
+    customParticipants,
+    customCatalogLines.map((l) => ({ unitPrice: l.addOn.price, quantity: l.quantity })),
+  );
+  const customTotal = centsToDollars(customQuote.totalCents);
+  const customErrors: Record<string, string> = isCustom
+    ? validateCustomTerms(customTerms, {
+        participants: customParticipants,
+        locationId: customBookingLocationId,
+        roomId: selectedRoomId,
+        catalog: customCatalogLines.map((l) => ({
+          id: l.addOn.id,
+          name: l.addOn.name,
+          quantity: l.quantity,
+          minQuantity: l.addOn.minQuantity,
+          maxQuantity: l.addOn.maxQuantity,
+        })),
+        amountPaid: paymentMethod === "paylater" ? null : amountPaidOverride,
+        totalCents: customQuote.totalCents,
+      })
+    : {};
+  const customDateError =
+    isCustom && bookingMode === "standard" && !!scheduledDate && scheduledDate < todayKey()
+      ? CUSTOM_PACKAGE_MESSAGES.pastDate
+      : null;
+  const customErrorFor = (key: string, value?: string): string | undefined => {
+    const message = customErrors[key];
+    if (!message) return undefined;
+    return customShowErrors || (value !== undefined && value.trim() !== "") ? message : undefined;
+  };
+  const customRange = customGuestRange(customTerms.minGuests, customTerms.maxGuests);
+  const customParticipantCount = Number(customParticipants);
+  const customHasPackagePrice =
+    customTerms.price.trim() !== "" &&
+    Number.isFinite(Number(customTerms.price)) &&
+    (customTerms.pricingType !== "per_guest" ||
+      (customParticipants.trim() !== "" &&
+        Number.isInteger(customParticipantCount) &&
+        customParticipantCount > 0));
+  const customHasAddOnLines =
+    customCatalogLines.length > 0 || customTerms.oneTimeAddOns.length > 0;
+  const customHasEstimate =
+    customHasPackagePrice || customHasAddOnLines || customTerms.fees.length > 0;
+
   // ---- Package list -------------------------------------------------------
   useEffect(() => {
     const token = getToken();
@@ -499,7 +838,13 @@ const ManualBookingScreen = () => {
         userId: user?.id,
         search: packageSearch,
       })
-        .then((res) => active && setPackageItems(res.items))
+        // Newest first, as the web Manual Booking lists them (getAllPackages:
+        // sort_by=id, sort_order=desc) — the mobile endpoint sorts by
+        // display order and name instead.
+        .then(
+          (res) =>
+            active && setPackageItems([...res.items].sort((a, b) => b.id - a.id)),
+        )
         .catch(() => active && setPackageItems([]))
         .finally(() => active && setLoadingPackages(false));
     }, delay);
@@ -516,6 +861,34 @@ const ManualBookingScreen = () => {
   const addSpace = async () => {
     const name = newSpaceName.trim();
     const token = getToken();
+    if (isCustom) {
+      // A custom package's space belongs to the location, not to a package.
+      if (!name || !token || creatingSpace) return;
+      const listed = customRooms.find((r) => r.name.trim().toLowerCase() === name.toLowerCase());
+      if (listed) {
+        setSelectedRoomId(listed.id);
+        setNewSpaceName("");
+        return;
+      }
+      const locationAtStart = customBookingLocationId;
+      if (locationAtStart == null) {
+        Alert.alert("Can't add space", CUSTOM_PACKAGE_MESSAGES.locationRequired);
+        return;
+      }
+      setCreatingSpace(true);
+      try {
+        const room = await createLocationSpace(token, { name, locationId: locationAtStart });
+        if (customLocationRef.current !== locationAtStart) return;
+        setCustomRooms((prev) => (prev.some((r) => r.id === room.id) ? prev : [...prev, room]));
+        setSelectedRoomId(room.id);
+        setNewSpaceName("");
+      } catch (err) {
+        Alert.alert("Couldn't add space", requestErrorMessage(err, "Please try again."));
+      } finally {
+        setCreatingSpace(false);
+      }
+      return;
+    }
     if (!name || !pkg || !token || creatingSpace) return;
 
     const locationId = pkg.locationId ?? selectedLocationId ?? user?.location_id;
@@ -682,14 +1055,21 @@ const ManualBookingScreen = () => {
     return Math.max(0, total);
   }, [pkg, participants, attractionQty, addonQty]);
 
-  const effectiveLocationId =
-    pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null;
+  const effectiveLocationId = isCustom
+    ? customBookingLocationId
+    : (pkg?.locationId ?? selectedLocationId ?? user?.location_id ?? null);
+
+  // a manager's approval was for one location and one kind of booking
+  useEffect(() => {
+    overrideTokenRef.current = null;
+  }, [effectiveLocationId, isCustom]);
 
   // Flexible mode takes any typed time, so the venue's timed closures are
-  // loaded to warn when that time would be refused (web ManualBooking).
+  // loaded to warn when that time would be refused (web ManualBooking). A
+  // custom package always picks its time by hand, so it loads them too.
   const [flexibleDayOffs, setFlexibleDayOffs] = useState<DayOff[]>([]);
   useEffect(() => {
-    if (bookingMode !== "flexible" || effectiveLocationId == null) {
+    if ((bookingMode !== "flexible" && !isCustom) || effectiveLocationId == null) {
       setFlexibleDayOffs([]);
       return;
     }
@@ -702,7 +1082,26 @@ const ManualBookingScreen = () => {
         if (!controller.signal.aborted) setFlexibleDayOffs([]);
       });
     return () => controller.abort();
-  }, [bookingMode, effectiveLocationId]);
+  }, [bookingMode, effectiveLocationId, isCustom]);
+
+  // A custom booking has no package: only location-wide closures and ones on
+  // its space reach it (web customClosureWarning). Staff confirm on save.
+  const customClosureWarning = useMemo(() => {
+    if (!isCustom || !scheduledDate || !scheduledTime) return null;
+    const [h, m] = scheduledTime.split(":").map(Number);
+    if (!Number.isFinite(h)) return null;
+    const start = h * 60 + (Number.isFinite(m) ? m : 0);
+    const minutes = Number(customTerms.durationMinutes);
+    const end =
+      customTerms.durationMinutes.trim() !== "" && Number.isInteger(minutes) && minutes > 0
+        ? start + minutes
+        : start + 1;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (!isCustomSlotClosed(flexibleDayOffs, scheduledDate, start, end, selectedRoomId, today))
+      return null;
+    return "This time is inside a blocked period. Guests cannot book it online; you will be asked to confirm when you save.";
+  }, [isCustom, scheduledDate, scheduledTime, customTerms.durationMinutes, selectedRoomId, flexibleDayOffs]);
 
   const flexibleClosureWarning = useMemo(() => {
     if (bookingMode !== "flexible" || !pkg || !scheduledDate || !scheduledTime)
@@ -833,11 +1232,14 @@ const ManualBookingScreen = () => {
   // also sent on its own as discount_amount.
   const feeTotal = feeBreakdown ? feeBreakdown.total : subtotal;
   const discount = special?.has_special_pricing ? special.total_discount : 0;
-  const displayTotal = Math.max(0, feeTotal - discount);
+  // A custom package's total is the one the server will check — never typed
+  // over, and never discounted (CustomPackagePricer refuses discounts).
+  const displayTotal = isCustom ? customTotal : Math.max(0, feeTotal - discount);
 
-  const finalTotal = totalAmountOverride
-    ? Math.max(0, Number(totalAmountOverride) || 0)
-    : displayTotal;
+  const finalTotal =
+    !isCustom && totalAmountOverride
+      ? Math.max(0, Number(totalAmountOverride) || 0)
+      : displayTotal;
   const finalAmountPaid =
     paymentMethod === "paylater"
       ? 0
@@ -908,16 +1310,20 @@ const ManualBookingScreen = () => {
       const key = `${y}-${pad2(m + 1)}-${pad2(d)}`;
       // Flexible: every date is selectable (past dates allowed). Standard:
       // must satisfy the package's availability rules and not be in the past.
+      // A custom package has no schedule: any day from today (web: "Today or a
+      // future date"), or any day at all in Flexible mode.
       const bookable =
         bookingMode === "flexible"
           ? true
-          : isDateBookable(schedules, new Date(y, m, d)) && key >= today;
+          : isCustom
+            ? key >= today
+            : isDateBookable(schedules, new Date(y, m, d)) && key >= today;
       out.push({ key, day: d, bookable });
     }
     while (out.length % 7 !== 0)
       out.push({ key: null, day: 0, bookable: false });
     return out;
-  }, [anchor, schedules, bookingMode, today]);
+  }, [anchor, schedules, bookingMode, today, isCustom]);
 
   const stepMonth = (dir: number) => {
     const next = new Date(anchor);
@@ -937,32 +1343,46 @@ const ManualBookingScreen = () => {
   // Time is set differently per mode: standard picks a slot (auto-assigns a
   // room), flexible accepts a free HH:MM entry.
   const canSubmit =
-    !!pkg &&
     customerName.trim().length > 0 &&
     email.trim().length > 0 &&
     !!scheduledDate &&
     /^\d{2}:\d{2}$/.test(scheduledTime) &&
-    participants >= 1;
+    (isCustom
+      ? effectiveLocationId != null
+      : !!pkg && participants >= 1);
 
   const handleSubmit = async () => {
-    if (submitLockRef.current || !pkg) return;
+    if (submitLockRef.current || (!pkg && !isCustom)) return;
+    const selectedPackage = pkg;
     if (!canSubmit) {
       Alert.alert(
         "Incomplete booking",
-        "Enter the customer name, email, and a valid date and time.",
+        isCustom && effectiveLocationId == null
+          ? CUSTOM_PACKAGE_MESSAGES.locationRequired
+          : "Enter the customer name, email, and a valid date and time.",
       );
       return;
     }
-    // Backstop for the disabled button: never charge on an unchecked special.
-    if (specialBlocker) {
-      Alert.alert("Special price", specialBlocker);
-      return;
-    }
-    // Only Flexible mode offers a space picker — Standard takes its room from
-    // the chosen slot, so requiring one there would block slots that carry none.
-    if (bookingMode === "flexible" && pkg.rooms.length > 0 && selectedRoomId == null) {
-      Alert.alert("Select a space", "Please select a space for this booking.");
-      return;
+    if (isCustom) {
+      // Every field the server checks, checked here first (web parity).
+      const problem = Object.values(customErrors)[0] ?? customDateError;
+      if (problem) {
+        setCustomShowErrors(true);
+        Alert.alert("Check the custom package", problem);
+        return;
+      }
+    } else {
+      // Backstop for the disabled button: never charge on an unchecked special.
+      if (specialBlocker) {
+        Alert.alert("Special price", specialBlocker);
+        return;
+      }
+      // Only Flexible mode offers a space picker — Standard takes its room from
+      // the chosen slot, so requiring one there would block slots that carry none.
+      if (bookingMode === "flexible" && pkg && pkg.rooms.length > 0 && selectedRoomId == null) {
+        Alert.alert("Select a space", "Please select a space for this booking.");
+        return;
+      }
     }
     if (effectiveLocationId == null) {
       Alert.alert("Missing location", "Could not determine the booking location.");
@@ -991,6 +1411,87 @@ const ManualBookingScreen = () => {
     setSubmitting(true);
     setIsProcessingPayment(chargesCard);
     try {
+      let bookingInput: CreateBookingInput;
+      /** What is collected now: recorded in-store, or charged to the card. */
+      let paidNow: number;
+      let chargeOrderId: string;
+      let chargeDescription: string;
+
+      if (isCustom) {
+        const additionalAddons = customCatalogLines.map((l) => ({
+          addon_id: l.addOn.id,
+          quantity: l.quantity,
+          price_at_booking: l.addOn.price,
+        }));
+        paidNow =
+          paymentMethod === "paylater"
+            ? 0
+            : amountPaidOverride
+              ? Math.max(0, Number(amountPaidOverride) || 0)
+              : customTotal;
+        const customPackage = customPackagePayload(customTerms);
+        const appliedFees = toAppliedFees(customQuote);
+        const participantsCount = Number(customParticipants);
+
+        // a retry with different terms is a new checkout, as for packages
+        const attempt = JSON.stringify([
+          "custom",
+          effectiveLocationId,
+          scheduledDate,
+          scheduledTime,
+          selectedRoomId ?? null,
+          customParticipants,
+          customPackage,
+          additionalAddons,
+        ]);
+        if (checkoutAttemptRef.current !== null && checkoutAttemptRef.current !== attempt) {
+          checkoutKeyRef.current = newCheckoutKey();
+        }
+        checkoutAttemptRef.current = attempt;
+
+        bookingInput = {
+          overlap_override_token: overrideTokenRef.current ?? undefined,
+          checkout_key: checkoutKeyRef.current,
+          guest_name: customerName.trim(),
+          guest_email: email.trim() || undefined,
+          guest_phone: phone.trim() || undefined,
+          guest_address: address.trim() || undefined,
+          guest_city: city.trim() || undefined,
+          guest_state: stateField.trim() || undefined,
+          guest_zip: zip.trim() || undefined,
+          guest_country: country.trim() || undefined,
+          location_id: effectiveLocationId,
+          package_id: null,
+          custom_package: customPackage,
+          room_id: selectedRoomId ?? undefined,
+          type: "package",
+          booking_date: scheduledDate,
+          booking_time: scheduledTime,
+          participants: participantsCount,
+          duration: customPackage.duration_minutes,
+          duration_unit: "minutes",
+          total_amount: customTotal,
+          amount_paid: paidNow,
+          payment_method: paymentMethod,
+          status,
+          payment_status:
+            paymentMethod === "paylater" ? "pending" : derivePaymentStatus(paidNow, customTotal),
+          is_manual_entry: true,
+          skip_date_validation: bookingMode === "flexible",
+          notes: notes.trim() || undefined,
+          additional_addons: additionalAddons.length ? additionalAddons : undefined,
+          created_by: user?.id,
+          guest_of_honor_name: gohName.trim() || undefined,
+          guest_of_honor_age: gohAge.trim() ? Number(gohAge) : undefined,
+          guest_of_honor_gender: gohGender || undefined,
+          sent_email_to_staff: sendEmailToStaff,
+          applied_fees: appliedFees.length ? appliedFees : null,
+          send_email: sendEmail,
+        };
+        chargeOrderId = `C${effectiveLocationId}-${String(Date.now()).slice(-8)}`;
+        chargeDescription = `Manual Booking: ${customTerms.name.trim()}`;
+      } else {
+      const pkg = selectedPackage!;
       const additionalAddons = pkg.addOns
         .filter((a) => (addonQty[a.id] ?? 0) > 0)
         .map((a) => ({
@@ -1050,7 +1551,7 @@ const ManualBookingScreen = () => {
       }
       checkoutAttemptRef.current = attempt;
 
-      const { id, referenceNumber, customerId } = await createBooking(token, {
+      bookingInput = {
         overlap_override_token: overrideTokenRef.current ?? undefined,
         checkout_key: checkoutKeyRef.current,
         guest_name: customerName.trim(),
@@ -1098,14 +1599,20 @@ const ManualBookingScreen = () => {
           ? buildAppliedDiscounts(freshSpecial)
           : null,
         send_email: sendEmail,
-      });
+      };
+      paidNow = freshFinalAmountPaid;
+      chargeOrderId = `P${pkg.id}-${String(Date.now()).slice(-8)}`;
+      chargeDescription = `Manual Booking: ${pkg.name}`;
+      }
+
+      const { id, referenceNumber, customerId } = await createBooking(token, bookingInput);
 
       // Record the collected amount as an in-store payment (matches the web).
-      if (freshFinalAmountPaid > 0 && paymentMethod === "in-store") {
+      if (paidNow > 0 && paymentMethod === "in-store") {
         try {
           await recordBookingPayment(token, {
             bookingId: id,
-            amount: freshFinalAmountPaid,
+            amount: paidNow,
             locationId: effectiveLocationId,
             customerId: customerId ?? null,
           });
@@ -1132,9 +1639,9 @@ const ManualBookingScreen = () => {
             authorizeCredentials!,
             {
               location_id: effectiveLocationId,
-              amount: freshFinalAmountPaid,
-              order_id: `P${pkg.id}-${String(Date.now()).slice(-8)}`,
-              description: `Manual Booking: ${pkg.name}`,
+              amount: paidNow,
+              order_id: chargeOrderId,
+              description: chargeDescription,
               customer_id: customerId ?? undefined,
               payable_id: id,
               payable_type: PAYMENT_TYPE.BOOKING,
@@ -1211,6 +1718,26 @@ const ManualBookingScreen = () => {
           setOverrideGate({ conflicts, onlineSlotsLost: [] });
           return;
         }
+      }
+      const code =
+        err instanceof ApiError
+          ? (err.body as { code?: unknown; message?: unknown } | undefined)?.code
+          : undefined;
+      if (code === CUSTOM_PACKAGE_STAFF_ONLY_CODE) {
+        Alert.alert("Booking refused", CUSTOM_PACKAGE_MESSAGES.staffOnly);
+        return;
+      }
+      // The server priced it differently — usually an add-on price changed
+      // while the form was open: load the new prices so the total is redone.
+      if (code === CUSTOM_PRICE_MISMATCH_CODE) {
+        const refreshed = await refreshCustomAddOns();
+        Alert.alert(
+          "Price changed",
+          refreshed
+            ? CUSTOM_PACKAGE_MESSAGES.priceChangedRefreshed
+            : CUSTOM_PACKAGE_MESSAGES.priceChanged,
+        );
+        return;
       }
       // The login was not accepted, so the backend-only gate treated this as a guest (web 4d165ce).
       if (isStaffLoginRefusal(err)) {
@@ -1321,7 +1848,7 @@ const ManualBookingScreen = () => {
           }}
         >
           {/* Location filter (company admin) */}
-          {isCompanyAdmin && locationOptions.length > 0 && !pkg && (
+          {isCompanyAdmin && locationOptions.length > 0 && !pkg && !isCustom && (
             <Section title="Location" subtitle="Narrow the packages to one location">
               <View className="flex-row flex-wrap gap-2">
                 {[{ id: "all" as const, name: "All Locations" }, ...locationOptions].map(
@@ -1358,6 +1885,39 @@ const ManualBookingScreen = () => {
           )}
 
           {/* ============================ SELECT PACKAGE ==================== */}
+          {isCustom ? (
+            <Section
+              title={CUSTOM_PACKAGE_LABEL}
+              subtitle="Set up a one-time package for this booking"
+              right={
+                <Pressable
+                  onPress={leaveCustomPackage}
+                  className="flex-row items-center gap-1 active:opacity-70"
+                  accessibilityRole="button"
+                  accessibilityLabel="Change package"
+                >
+                  <Feather name="arrow-left" size={13} color="#6B7280" />
+                  <Text className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Change
+                  </Text>
+                </Pressable>
+              }
+            >
+              <CustomPackageTermsFields
+                terms={customTerms}
+                onChange={updateCustomTerms}
+                errorFor={customErrorFor}
+                canPickLocation={canPickCustomLocation}
+                locationOptions={locationOptions}
+                locationId={customBookingLocationId}
+                locationName={customLocationName(customBookingLocationId)}
+                onPickLocation={pickCustomLocation}
+                categories={categories}
+                categoriesStatus={categoriesStatus}
+                onRetryCategories={() => setCategoriesAttempt((n) => n + 1)}
+              />
+            </Section>
+          ) : (
           <Section
             title={pkg ? "Selected Package" : "Select Package"}
             subtitle={
@@ -1430,6 +1990,22 @@ const ManualBookingScreen = () => {
                   />
                 </View>
 
+                {/* A one-time package staff fill in themselves (web 5de9d9e). */}
+                <Pressable
+                  onPress={startCustomPackage}
+                  disabled={pickingId != null}
+                  className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-3 mb-2 active:opacity-80"
+                  accessibilityRole="button"
+                  accessibilityLabel="Custom package. Create a custom booking package"
+                >
+                  <Text className="text-sm font-semibold uppercase text-gray-900 dark:text-white">
+                    {CUSTOM_PACKAGE_LABEL}
+                  </Text>
+                  <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Create a custom booking package
+                  </Text>
+                </Pressable>
+
                 {loadingPackages ? (
                   <View className="py-8 items-center">
                     <ActivityIndicator color={PRIMARY} />
@@ -1501,7 +2077,7 @@ const ManualBookingScreen = () => {
                                   {money(p.price)}
                                 </Text>
                                 <Text className="text-[10px] text-gray-500">
-                                  /booking
+                                  {p.pricingType === "per_person" ? "/person" : "/booking"}
                                 </Text>
                               </>
                             )}
@@ -1514,8 +2090,9 @@ const ManualBookingScreen = () => {
               </>
             )}
           </Section>
+          )}
 
-          {pkg && (
+          {(pkg || isCustom) && (
             <>
               {/* ==================== CUSTOMER & BOOKING DETAILS =========== */}
               <Section
@@ -1703,12 +2280,20 @@ const ManualBookingScreen = () => {
                       })}
                     </View>
                   ))}
-                  {bookingMode === "flexible" && (
+                  {bookingMode === "flexible" ? (
                     <Text className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 text-center">
                       Past dates allowed
                     </Text>
-                  )}
-                  {!!dealDates && (
+                  ) : isCustom ? (
+                    <Text
+                      className={`text-[10px] mt-1 text-center ${
+                        customDateError ? "text-red-700" : "text-gray-400 dark:text-gray-500"
+                      }`}
+                    >
+                      {customDateError ?? "Today or a future date"}
+                    </Text>
+                  ) : null}
+                  {!isCustom && !!dealDates && (
                     <View className="flex-row items-center justify-center gap-1.5 mt-1">
                       <Text style={{ fontSize: 10, fontWeight: "700", color: "#059669" }}>%</Text>
                       <Text className="text-[10px] text-gray-500 dark:text-gray-400">
@@ -1716,15 +2301,17 @@ const ManualBookingScreen = () => {
                       </Text>
                     </View>
                   )}
-                  <SpecialDealNote
-                    deals={specialDeals}
-                    selectedDate={scheduledDate}
-                    applied={!!special?.has_special_pricing}
-                    unit={pkg?.pricingType === "per_person" ? "person" : "booking"}
-                    checkFailed={specialState === "failed"}
-                    onRetry={retrySpecial}
-                    className="mt-3"
-                  />
+                  {!isCustom && (
+                    <SpecialDealNote
+                      deals={specialDeals}
+                      selectedDate={scheduledDate}
+                      applied={!!special?.has_special_pricing}
+                      unit={pkg?.pricingType === "per_person" ? "person" : "booking"}
+                      checkFailed={specialState === "failed"}
+                      onRetry={retrySpecial}
+                      className="mt-3"
+                    />
+                  )}
                 </View>
 
                 {/* Time — standard: slot grid; flexible: tap-to-pick time.
@@ -1747,9 +2334,10 @@ const ManualBookingScreen = () => {
                   </View>
                 )}
 
-                <View className="mt-4" key={`time-content-${bookingMode}`}>
+                {/* A custom package has no slots: its time is always picked by hand. */}
+                <View className="mt-4" key={`time-content-${bookingMode}-${isCustom}`}>
                   <FieldLabel>Time *</FieldLabel>
-                  {bookingMode === "standard" ? (
+                  {bookingMode === "standard" && !isCustom ? (
                     !scheduledDate ? (
                     <Text className="text-sm text-gray-400 py-2">
                       Pick a date to see available times.
@@ -1842,7 +2430,7 @@ const ManualBookingScreen = () => {
                 ) : (
                   <Pressable
                     onPress={() => setTimePickerOpen(true)}
-                    className="flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-3 active:opacity-80"
+                    className="h-11 flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-3 active:opacity-80"
                   >
                     <View className="flex-row items-center gap-2">
                       <Feather name="clock" size={16} color="#9CA3AF" />
@@ -1864,29 +2452,61 @@ const ManualBookingScreen = () => {
                       {flexibleClosureWarning}
                     </Text>
                   )}
+                  {!!customClosureWarning && (
+                    <Text className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">
+                      {customClosureWarning}
+                    </Text>
+                  )}
+                  {isCustom &&
+                    !!endTimeText(scheduledDate, scheduledTime, customTerms.durationMinutes) && (
+                      <Text className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                        {endTimeText(scheduledDate, scheduledTime, customTerms.durationMinutes)}
+                      </Text>
+                    )}
                 </View>
 
                 {/* Participants + Status */}
-                <View className="flex-row gap-3 mt-4 items-end">
+                <View className="flex-row gap-3 mt-4 items-start">
                   <View className="flex-1">
                     <FieldLabel>Participants *</FieldLabel>
-                    <View className="flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-1.5">
-                      <Stepper
-                        value={participants}
-                        onChange={(n) => setParticipants(clampParticipants(n, pkg))}
-                        min={participantMin(pkg)}
-                        max={participantMax(pkg) ?? 99}
-                      />
-                    </View>
-                    <Text className="text-[10px] text-gray-500 mt-1">
-                      {participantLimitsLabel(pkg)}
-                    </Text>
+                    {isCustom ? (
+                      <>
+                        <TextInput
+                          value={customParticipants}
+                          onChangeText={setCustomParticipants}
+                          placeholder={customRange ? String(customRange.min) : ""}
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="number-pad"
+                          accessibilityLabel="Participants"
+                          className={`${inputClass} ${
+                            customErrorFor("participants", customParticipants) ? "border-red-500" : ""
+                          }`}
+                        />
+                        <Text className="text-[10px] text-gray-500 mt-1">
+                          {participantsHint(customTerms.minGuests, customTerms.maxGuests)}
+                        </Text>
+                      </>
+                    ) : pkg ? (
+                      <>
+                        <View className="h-11 flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-3">
+                          <Stepper
+                            value={participants}
+                            onChange={(n) => setParticipants(clampParticipants(n, pkg))}
+                            min={participantMin(pkg)}
+                            max={participantMax(pkg) ?? 99}
+                          />
+                        </View>
+                        <Text className="text-[10px] text-gray-500 mt-1">
+                          {participantLimitsLabel(pkg)}
+                        </Text>
+                      </>
+                    ) : null}
                   </View>
                   <View className="flex-1">
                     <FieldLabel>Status *</FieldLabel>
                     <Pressable
                       onPress={() => setStatusPickerOpen(true)}
-                      className="flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-3 py-2.5 active:opacity-80"
+                      className="h-11 flex-row items-center justify-between border border-gray-200 dark:border-neutral-700 rounded-xl px-3 active:opacity-80"
                     >
                       <Text className="text-sm text-gray-900 dark:text-white">
                         {STATUS_OPTIONS.find((o) => o.value === status)?.label}
@@ -1895,11 +2515,34 @@ const ManualBookingScreen = () => {
                     </Pressable>
                   </View>
                 </View>
+                {isCustom && !!customErrorFor("participants", customParticipants) && (
+                  <Text className="text-xs text-red-700 dark:text-red-400 mt-1">
+                    {customErrorFor("participants", customParticipants)}
+                  </Text>
+                )}
+
+                {/* Space Selection for a custom package: any space at its
+                    location, in both modes (the server requires one). */}
+                {isCustom && (
+                  <CustomSpacePicker
+                    locationId={customBookingLocationId}
+                    rooms={customRooms}
+                    status={customRoomsStatus}
+                    selectedRoomId={selectedRoomId}
+                    onSelect={setSelectedRoomId}
+                    onRetry={() => setCustomRoomsAttempt((n) => n + 1)}
+                    newSpaceName={newSpaceName}
+                    onNewSpaceName={setNewSpaceName}
+                    onAddSpace={addSpace}
+                    creating={creatingSpace}
+                    error={customErrorFor("room")}
+                  />
+                )}
 
                 {/* Space Selection — Flexible only. Standard mode gets its room
                     from the chosen time slot, so picking one by hand would
                     fight the auto-assignment. */}
-                {bookingMode === "flexible" && pkg.rooms.length > 0 && (
+                {!isCustom && pkg && bookingMode === "flexible" && pkg.rooms.length > 0 && (
                   <View className="mt-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
                     <Text className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-700 dark:text-gray-300">
                       Space Selection *
@@ -1947,7 +2590,7 @@ const ManualBookingScreen = () => {
                       <Pressable
                         onPress={addSpace}
                         disabled={!newSpaceName.trim() || creatingSpace}
-                        className="w-10 h-10 items-center justify-center rounded-xl active:opacity-80"
+                        className="w-11 h-11 items-center justify-center rounded-xl active:opacity-80"
                         accessibilityRole="button"
                         accessibilityLabel="Add space"
                       >
@@ -1967,7 +2610,83 @@ const ManualBookingScreen = () => {
               </Section>
 
               {/* ==================== ADD-ONS & ATTRACTIONS =============== */}
-              {hasExtras && (
+              {isCustom && (
+                <Section
+                  title="Add-ons & Attractions"
+                  subtitle="Optional extras"
+                  right={
+                    <Pressable
+                      onPress={addOneTimeAddOn}
+                      disabled={
+                        customTerms.oneTimeAddOns.length >= CUSTOM_PACKAGE_LIMITS.oneTimeAddOnsMax
+                      }
+                      className={SMALL_BUTTON}
+                      accessibilityRole="button"
+                    >
+                      <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                        + Add One-Time Add-on
+                      </Text>
+                    </Pressable>
+                  }
+                >
+                  <OneTimeAddOnRows
+                    rows={customTerms.oneTimeAddOns}
+                    errorFor={customErrorFor}
+                    onUpdate={updateOneTimeAddOn}
+                    onRemove={removeOneTimeAddOn}
+                  />
+                  {customAddOnsStatus === "loading" && (
+                    <View className="flex-row items-center gap-2">
+                      <ActivityIndicator size="small" color={PRIMARY} />
+                      <Text className="text-xs text-gray-500 dark:text-gray-400">
+                        Loading add-ons...
+                      </Text>
+                    </View>
+                  )}
+                  {customAddOnsStatus === "error" && (
+                    <View className="flex-row flex-wrap items-center gap-2">
+                      <Text className="text-xs text-red-700 dark:text-red-400">
+                        Add-ons could not be loaded.
+                      </Text>
+                      <Pressable
+                        onPress={() => setCustomAddOnsAttempt((n) => n + 1)}
+                        className={SMALL_BUTTON}
+                        accessibilityRole="button"
+                      >
+                        <Text className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                          Retry
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                  {customAddOnsStatus === "ready" && customAddOns.length > 0 && (
+                    <View className="flex-row flex-wrap justify-between">
+                      {customAddOns.map((a) => {
+                        const minQty = getAddOnMinQuantity(a, null);
+                        const quantityError = customErrors[catalogErrorKey(a.id)];
+                        return (
+                          <ExtraCard
+                            key={`custom-addon-${a.id}`}
+                            name={a.name}
+                            image={a.image}
+                            price={a.price}
+                            unitLabel="/unit"
+                            note={quantityError ?? (minQty > 1 ? `Min ${minQty}` : null)}
+                            noteTone={quantityError ? "required" : "muted"}
+                            qty={customAddOnQty[a.id] ?? 0}
+                            min={0}
+                            max={a.maxQuantity ?? CUSTOM_PACKAGE_LIMITS.catalogQuantityMax}
+                            onChange={(n) => setCustomAddOnQtyFor(a, n)}
+                          />
+                        );
+                      })}
+                      {customAddOns.length % 2 === 1 && <View className="w-[48%]" />}
+                    </View>
+                  )}
+                </Section>
+              )}
+
+              {!isCustom && pkg && hasExtras && (
                 <Section title="Add-ons & Attractions" subtitle="Optional extras">
                   <View className="flex-row flex-wrap justify-between">
                     {pkg.addOns.map((a) => {
@@ -2037,7 +2756,33 @@ const ManualBookingScreen = () => {
               )}
 
               {/* ==================== PAYMENT DETAILS ===================== */}
+              {isCustom && (
+                <CustomPackageSummaryCard
+                  name={customTerms.name.trim() || CUSTOM_PACKAGE_LABEL}
+                  category={customTerms.category}
+                  duration={durationText(customTerms.durationMinutes)}
+                  capacity={capacityText(customTerms.minGuests, customTerms.maxGuests)}
+                  endsAt={endTimeText(scheduledDate, scheduledTime, customTerms.durationMinutes)}
+                />
+              )}
               <Section title="Payment Details">
+                {isCustom ? (
+                  <CustomPricingFields
+                    terms={customTerms}
+                    onChange={updateCustomTerms}
+                    errorFor={customErrorFor}
+                    onAddFee={addCustomFee}
+                    onUpdateFee={updateCustomFee}
+                    onRemoveFee={removeCustomFee}
+                    quote={customQuote}
+                    participants={customParticipants}
+                    hasPackagePrice={customHasPackagePrice}
+                    hasAddOnLines={customHasAddOnLines}
+                    hasEstimate={customHasEstimate}
+                    totalError={customErrorFor("total")}
+                  />
+                ) : pkg ? (
+                <>
                 {/* Price breakdown */}
                 <View className="gap-1.5">
                   <View className="flex-row items-center justify-between">
@@ -2141,6 +2886,8 @@ const ManualBookingScreen = () => {
                     {money(displayTotal)}
                   </Text>
                 </View>
+                </>
+                ) : null}
 
                 {/* Method + Status */}
                 <View className="flex-row gap-3 mt-4">
@@ -2162,7 +2909,7 @@ const ManualBookingScreen = () => {
                               setPaymentMethod(m.v);
                               setPaymentError("");
                             }}
-                            className={`flex-1 items-center py-2.5 rounded-xl border ${
+                            className={`h-11 flex-1 items-center justify-center rounded-xl border ${
                               active
                                 ? "bg-[#0644C7] border-[#0644C7]"
                                 : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
@@ -2302,14 +3049,26 @@ const ManualBookingScreen = () => {
                 <View className="flex-row gap-3 mt-3">
                   <View className="flex-1">
                     <FieldLabel>Total Amount</FieldLabel>
-                    <TextInput
-                      value={totalAmountOverride}
-                      onChangeText={setTotalAmountOverride}
-                      placeholder={displayTotal.toFixed(2)}
-                      placeholderTextColor="#9CA3AF"
-                      keyboardType="decimal-pad"
-                      className={inputClass}
-                    />
+                    {isCustom ? (
+                      // Worked out from the package above; the server refuses any other.
+                      <TextInput
+                        value={customHasEstimate ? customTotal.toFixed(2) : ""}
+                        editable={false}
+                        placeholder="0.00"
+                        placeholderTextColor="#9CA3AF"
+                        accessibilityLabel="Total amount"
+                        className={`${inputClass} bg-gray-50 dark:bg-neutral-800`}
+                      />
+                    ) : (
+                      <TextInput
+                        value={totalAmountOverride}
+                        onChangeText={setTotalAmountOverride}
+                        placeholder={displayTotal.toFixed(2)}
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="decimal-pad"
+                        className={inputClass}
+                      />
+                    )}
                   </View>
                   <View className="flex-1">
                     <FieldLabel>Amount Paid</FieldLabel>
@@ -2324,6 +3083,11 @@ const ManualBookingScreen = () => {
                         paymentMethod === "paylater" ? "opacity-50" : ""
                       }`}
                     />
+                    {isCustom && !!customErrorFor("amountPaid", amountPaidOverride) && (
+                      <Text className="text-xs text-red-700 dark:text-red-400 mt-1">
+                        {customErrorFor("amountPaid", amountPaidOverride)}
+                      </Text>
+                    )}
                   </View>
                 </View>
 
@@ -2360,12 +3124,12 @@ const ManualBookingScreen = () => {
                     placeholderTextColor="#9CA3AF"
                     multiline
                     textAlignVertical="top"
-                    className={`${inputClass} min-h-[64px]`}
+                    className={textAreaClass}
                   />
                 </View>
 
-                {/* Guest of honor */}
-                {pkg.hasGuestOfHonor && (
+                {/* Guest of honor — always offered on a custom package (web parity). */}
+                {(isCustom || pkg?.hasGuestOfHonor) && (
                   <View className="mt-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
                     <Text className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
                       Guest of Honor
@@ -2401,7 +3165,7 @@ const ManualBookingScreen = () => {
                                 onPress={() =>
                                   setGohGender(active ? "" : g.value)
                                 }
-                                className={`flex-1 items-center py-2.5 rounded-xl border ${
+                                className={`h-11 flex-1 items-center justify-center rounded-xl border ${
                                   active
                                     ? "bg-[#0644C7] border-[#0644C7]"
                                     : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"
@@ -2459,7 +3223,7 @@ const ManualBookingScreen = () => {
             <SpecialCheckAlert failed onRetry={retrySpecial} />
           </View>
         )}
-        {pkg && (
+        {(pkg || isCustom) && (
           <View
             className="flex-row gap-3 border-t border-gray-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-5 pt-3"
             style={{ paddingBottom: insets.bottom + 12 + updateNoticeInset }}

@@ -1025,7 +1025,7 @@ const CreatePackage = () => {
                 onChangeText={setParticipantLabel}
                 maxLength={50}
                 placeholder="Participant, Player, Guest..."
-                hint="What one person is called on the customer page."
+                hint="What one person is called on the booking site."
               />
               <TextField
                 label="Shown to customers as"
@@ -1033,7 +1033,7 @@ const CreatePackage = () => {
                 onChangeText={setDisplayLabel}
                 maxLength={100}
                 placeholder="Escape Room, Party Package..."
-                hint={'Storefront section and badge. Blank keeps "Package".'}
+                hint={'Booking site section and badge. Blank keeps "Package".'}
               />
               <TextField
                 label="Max tickets per time slot"
@@ -1767,7 +1767,7 @@ const CreatePackage = () => {
                   Set how far in advance customers must book. For example,
                   setting 48 hours means if a customer visits on Monday at 2:00
                   PM, the earliest available time slot would be Wednesday at
-                  2:00 PM. This only affects customer-facing bookings — staff
+                  2:00 PM. This only affects online bookings — staff
                   can still book freely.
                 </Text>
                 <View className="flex-row flex-wrap">

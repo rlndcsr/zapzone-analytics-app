@@ -670,7 +670,7 @@ const EditBookingScreen = () => {
       label:
         (p.price != null ? `${p.name} – $${p.price.toFixed(2)}` : p.name) +
         // A backend-only package is still the staff's to book (web EditBooking, 4d165ce).
-        (p.availableOnline === false ? " · Backend only" : ""),
+        (p.availableOnline === false ? " · Hidden from booking site" : ""),
       value: p.id,
     }));
     if (

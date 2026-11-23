@@ -20,7 +20,7 @@ export function BackendOnlyBadge({
   return (
     <View
       accessible
-      accessibilityLabel={`Backend only. ${backendOnlyHint(isActive)}`}
+      accessibilityLabel={`Hidden from booking site. ${backendOnlyHint(isActive)}`}
       className={`flex-row items-center gap-1 self-start rounded-md bg-amber-100 dark:bg-amber-900/30 ${
         size === "xs" ? "px-1.5 py-0.5" : "px-2.5 py-1"
       }`}
@@ -31,7 +31,7 @@ export function BackendOnlyBadge({
           size === "xs" ? "text-[10px]" : "text-xs"
         }`}
       >
-        Backend only
+        Hidden from booking site
       </Text>
     </View>
   );
@@ -55,7 +55,7 @@ export function OnlineAvailabilityField({
   return (
     <Section
       icon={checked ? "globe" : "eye-off"}
-      title="Front-End Availability"
+      title="Online Booking"
     >
       <View
         className={`flex-row items-start gap-3 rounded-xl border px-4 py-3 ${

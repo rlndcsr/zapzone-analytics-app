@@ -88,7 +88,7 @@ export const isCallToBook = (availability: AvailabilitySchedule[]): boolean =>
   attractionIsCallToBook(availability);
 
 /**
- * What the schedules below mean for the customer site — the mobile twin of the
+ * What the schedules below mean for the booking site — the mobile twin of the
  * web's CallToBookNotice, shown above the Availability Schedules list. Green
  * while the item is bookable online, teal once every schedule is gone and the
  * storefront would show a Call to Book button instead.
@@ -113,10 +113,10 @@ export const CallToBookNotice = ({
         <Feather name="eye-off" size={16} color="#B45309" style={{ marginTop: 2 }} />
         <View className="flex-1">
           <Text className="text-sm font-bold text-amber-900 dark:text-amber-200">
-            Backend only — not on the booking site
+            Hidden from booking site
           </Text>
           <Text className="text-xs leading-5 text-amber-900 dark:text-amber-200 mt-1">
-            Front-End Availability is off, so customers cannot see this {itemLabel} or
+            Online booking is off, so customers cannot see this {itemLabel} or
             book it online.{" "}
             {switchedOff
               ? "It is switched off right now, so staff can book it from the admin booking pages once it is switched on."
@@ -142,7 +142,7 @@ export const CallToBookNotice = ({
           </Text>
           <Text className="text-xs leading-5 text-teal-900 dark:text-teal-200 mt-1">
             Because this {itemLabel} has no availability schedule, customers
-            cannot pick a date or time online. On the customer site the usual
+            cannot pick a date or time online. On the booking site the usual
             booking button is replaced with a{" "}
             <Text className="font-semibold">Call to Book</Text> button that shows
             your venue’s name and phone number, lets guests call with one tap, or
@@ -168,7 +168,7 @@ export const CallToBookNotice = ({
           </Text>
           <Text className="text-xs leading-5 text-emerald-900 dark:text-emerald-200 mt-1">
             This {itemLabel} has a schedule, so customers can pick a date and
-            time and pay online. If you remove every schedule, the customer site
+            time and pay online. If you remove every schedule, the booking site
             shows a <Text className="font-semibold">Call to Book</Text> button
             instead — guests are asked to call the venue or request a call back,
             and nothing can be booked or paid online.

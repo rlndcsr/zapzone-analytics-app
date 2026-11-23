@@ -35,19 +35,19 @@ describe("the wording", () => {
   });
 
   it("asks before each direction of the switch", () => {
-    assert.equal(onlineToggleQuestion("Party", true, true).title, 'Make "Party" backend only?');
+    assert.equal(onlineToggleQuestion("Party", true, true).title, 'Hide "Party" from the booking site?');
     assert.equal(onlineToggleQuestion("Party", false, true).title, 'Show "Party" on the booking site again?');
     assert.equal(onlineToggleQuestion("Party", false, false).title, 'Let customers book "Party" online?');
   });
 
   it("says what was saved", () => {
-    assert.equal(onlineToggleDone("Party", false, true), '"Party" is now backend only.');
+    assert.equal(onlineToggleDone("Party", false, true), '"Party" is now hidden from the booking site.');
     assert.equal(onlineToggleDone("Party", true, true), '"Party" is on the booking site again.');
     assert.equal(onlineToggleDone("Party", true, false), '"Party" can be booked online once it is switched on.');
   });
 
-  it("tells an attendant a copy will not stay backend only", () => {
-    assert.match(duplicateBackendOnlyNote(true), /copy will be backend only too/);
+  it("tells an attendant a copy will not stay hidden from the booking site", () => {
+    assert.match(duplicateBackendOnlyNote(true), /copy will be hidden too/);
     assert.match(duplicateBackendOnlyNote(false), /Only a location manager or an admin/);
   });
 });

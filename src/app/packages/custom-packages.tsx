@@ -268,7 +268,7 @@ const CustomPackages = () => {
       Alert.alert(question.title, question.message, [
         { text: "Cancel", style: "cancel" },
         {
-          text: makeBackendOnly ? "Make backend only" : "Show online",
+          text: makeBackendOnly ? "Hide from booking site" : "Show online",
           onPress: async () => {
             const token = getToken();
             if (!token) {
@@ -289,7 +289,7 @@ const CustomPackages = () => {
                 "Update failed",
                 err instanceof Error && err.message
                   ? err.message
-                  : "Failed to update Front-End Availability. Please try again.",
+                  : "Failed to update the Online Booking setting. Please try again.",
               );
             } finally {
               setOnlineTogglingId(null);
@@ -428,9 +428,9 @@ const CustomPackages = () => {
                   },
                   {
                     icon: "eye-off",
-                    title: "Backend Only",
+                    title: "Hidden",
                     value: String(kpis.backendOnly),
-                    hint: "Hidden from the booking site",
+                    hint: "From the booking site",
                   },
                 ]}
               />
@@ -659,7 +659,7 @@ const CustomPackages = () => {
                         label={
                           pkg.availableOnline === false
                             ? `Show ${pkg.name} on the booking site`
-                            : `Make ${pkg.name} backend only`
+                            : `Hide ${pkg.name} from the booking site`
                         }
                         tint={pkg.availableOnline === false ? "#B45309" : PRIMARY}
                         busy={onlineTogglingId === pkg.id}
