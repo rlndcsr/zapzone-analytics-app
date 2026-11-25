@@ -45,4 +45,7 @@ app-example
 /ios
 /android
 
-.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/speckit-*/
