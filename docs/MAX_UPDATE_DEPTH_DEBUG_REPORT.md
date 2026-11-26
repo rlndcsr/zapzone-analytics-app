@@ -1,5 +1,12 @@
 # Maximum Update Depth Debug Report
 
+> **Document status: HISTORICAL investigation record (2026-08-27, commit `134bdfe`).** It records a past
+> investigation of a "Maximum update depth exceeded" login loop. It does not describe current behaviour, and the
+> code it discusses has changed since. TEMP instrumentation that references this report still exists
+> (`src/lib/debug/authDebug.ts`). For the current authentication and session architecture, see
+> [architecture/startup-auth-and-session.md](architecture/startup-auth-and-session.md) and the
+> [documentation index](README.md).
+
 **Subject:** `Maximum update depth exceeded` thrown when signing in after a fresh app launch
 **Status:** Investigation only — **no application code was changed**
 **Repo state at time of investigation:** branch `main`, commit `134bdfe`, working tree clean

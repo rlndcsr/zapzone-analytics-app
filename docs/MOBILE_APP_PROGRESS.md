@@ -1,5 +1,11 @@
 # ZapZone Admin Mobile Application
 
+> **Document status: HISTORICAL (superseded, 2026-07-04).** This is an early progress snapshot. Many modules it
+> lists as "remaining" or "in progress" have since been implemented. For the current module inventory and status,
+> see [FEATURE_CATALOG.md](FEATURE_CATALOG.md); for the index, see [README.md](README.md). Its note that testing
+> was limited because the app used a live production database is carried forward in
+> [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+
 ## Development Progress Report
 
 **Project:** ZapZone Admin Mobile Application  

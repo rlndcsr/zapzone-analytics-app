@@ -1,5 +1,12 @@
 # Mobile App Overview
 
+> **Document status: SUPERSEDED (historical, 2026-06-25).** This overview was written when the app was planned
+> as a read-only reporting client. It no longer describes the application. The app now also covers bookings,
+> payments, check-in, catalogue management, memberships, waivers, photos, communications and staff management.
+> The current authoritative overview is [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md); start at the
+> [documentation index](README.md). It is kept for historical context only. Do not use it as a scope or
+> requirements source.
+
 > The primary onboarding document for the **Zap Zone Analytics** mobile app — a React Native
 > (Expo) companion to the existing admin analytics dashboard. For the systems it depends on,
 > see [FRONTEND_OVERVIEW.md](reference/FRONTEND_OVERVIEW.md) and
