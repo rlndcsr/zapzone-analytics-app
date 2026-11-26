@@ -2,8 +2,9 @@
 
 > **Purpose:** Records the development conventions **already used** in ZapZone Mobile, so both developers and AI
 > assistants can follow them, and separates them from inconsistencies and from proposals.
-> **Status:** Baseline (descriptive). **Nothing here is a new mandatory policy.** Mandatory principles will come
-> from the Phase 3 constitution.
+> **Status:** Baseline (descriptive). **Nothing here is a new mandatory policy.** Mandatory principles are in the
+> ratified constitution (`.specify/memory/constitution.md`, v1.0.0, 2026-11-26). Items marked **Proposed** stay
+> proposals unless the constitution adopts them.
 > **Last reviewed:** 2026-11-26
 > **Inspected revisions:** Mobile `973d281`
 > **Scope & limitations:** Derived from static inspection, including search-based counts. Lint, type-check and
@@ -19,7 +20,7 @@
 | **Established** | Clearly followed in the code. |
 | **Explicit** | An existing written developer instruction. |
 | **Inconsistent** | Mixed practice; don't assume either variant is the rule. |
-| **Proposed** | A recommendation that **requires approval** (Phase 3 or a separate decision). |
+| **Proposed** | A recommendation that **requires approval** (a constitution amendment or a separate decision). |
 
 ## 1. Development environment
 

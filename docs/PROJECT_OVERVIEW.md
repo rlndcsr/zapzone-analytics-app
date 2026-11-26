@@ -131,8 +131,9 @@ flowchart LR
 - Two developers, both on Windows with VS Code and Claude Code. Code reaches `main` through commits and merges
   (see `git log`). There is no CI configuration in the repository.
 - Spec-Driven Development is being adopted with **GitHub Spec Kit v1.4.3** (`.specify/`, `.claude/skills/speckit-*`).
-  The constitution is still the uncustomised template; Phase 3 will define it.
-- AI instructions: `CLAUDE.md` imports `AGENTS.md` ("read the Expo v55 versioned docs before writing code").
+  The project constitution (`.specify/memory/constitution.md`, v1.0.0) was ratified on 2026-11-26.
+- AI instructions: `CLAUDE.md` imports `AGENTS.md`. It says to read the Expo v55 versioned docs before writing
+  code, follow the constitution, and load `docs/` selectively starting from `docs/README.md`.
 
 ## Current development status
 
@@ -148,4 +149,4 @@ only. See [architecture/testing-and-quality.md](architecture/testing-and-quality
 - Many rules are enforced **only in the Mobile client**, as UI gates or client-side calculations. Examples include
   several role gates and staff-side price totals. Where Mobile, Web Admin and Backend disagree, the
   [business rules register](BUSINESS_RULES.md#cross-repository-discrepancies-requiring-decisions) records it.
-- iOS support, the project constitution and future feature specifications are later SDD phases.
+- iOS support and future feature specifications are later SDD phases.

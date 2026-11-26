@@ -34,7 +34,7 @@ requirement.
 | Check a business rule before changing behaviour | [BUSINESS_RULES.md](BUSINESS_RULES.md) → `business-rules/*` |
 | Follow the existing coding conventions | [DEVELOPMENT_GUIDELINES.md](DEVELOPMENT_GUIDELINES.md) |
 | Check known gaps, technical debt and risks | [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) |
-| Write a new feature spec | Read the catalog entry, business rules and limitations for the affected modules first. Then follow the constitution in `.specify/memory/constitution.md` (still the uncustomised template until Phase 3). |
+| Write a new feature spec | Read the catalog entry, business rules and limitations for the affected modules first. Then follow the constitution in `.specify/memory/constitution.md` (v1.0.0, ratified 2026-11-26). |
 
 ### Reading guide by task
 
@@ -132,10 +132,10 @@ Implementation status and verification status are **separate**. A module can be 
 - **Other repositories:** `zappoint@<sha>:<path>` (`Symbol`) and `zapzone-backend@<sha>:<path>` (`Class::method`).
 - Line numbers are supplementary only, because they drift.
 
-## Proposed source-of-truth model (for Phase 3 review — not yet approved)
+## Source-of-truth model
 
-This model is **proposed** and comes from the project's stated SDD methodology. It becomes binding only if the
-Phase 3 constitution adopts it.
+The ratified constitution adopts this model, refined in its "Source-of-Truth Model and Reserved Decisions" section.
+That section is authoritative; this table is a summary.
 
 | Question | Proposed authority |
 |---|---|
@@ -155,18 +155,18 @@ functionality. This baseline documents discrepancies; it does not resolve them.
 | Location | Role |
 |---|---|
 | `docs/` | Existing project knowledge (descriptive). |
-| `.specify/memory/constitution.md` | Shared development principles. Still the uncustomised template; to be written in Phase 3. |
+| `.specify/memory/constitution.md` | Mandatory development principles, workflow tracks and governance (v1.0.0, ratified 2026-11-26). |
 | `specs/` | Future feature specifications, plans, tasks and acceptance criteria. Not created yet. Existing features are not specified retroactively. |
-| `CLAUDE.md` → `AGENTS.md` | Concise AI entry instructions. Currently only "read the Expo v55 versioned docs before writing code". |
+| `CLAUDE.md` → `AGENTS.md` | Concise AI entry instructions: read the Expo v55 versioned docs before writing code, follow the constitution, and use this index to load documentation selectively. |
 | `.claude/skills/speckit-*` | Spec Kit workflows. They run only when invoked explicitly (`disable-model-invocation: true`). |
 
 **For AI assistants:** treat `docs/` as a map, not as ground truth. Verify any claim you rely on against the
 current source before changing code. If you find a contradiction, report it rather than silently "fixing" the
 documentation or the code.
 
-## Proposed maintenance approach (lightweight; for Phase 3 review)
+## Maintenance approach (lightweight)
 
-These are recommendations, not yet mandatory policy.
+Constitution Principle IX makes the core of items 1 and 3 mandatory. The remaining items are recommendations.
 
 1. **Same pull request, same truth.** When a change alters a module's behaviour, routes, roles or a `BR-*` rule,
    update the matching `features/*`, `business-rules/*` or catalog row in the same commit.
