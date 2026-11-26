@@ -33,6 +33,7 @@ requirement.
 | Understand how the app works technically | [ARCHITECTURE.md](ARCHITECTURE.md) → `architecture/*` |
 | Check a business rule before changing behaviour | [BUSINESS_RULES.md](BUSINESS_RULES.md) → `business-rules/*` |
 | Follow the existing coding conventions | [DEVELOPMENT_GUIDELINES.md](DEVELOPMENT_GUIDELINES.md) |
+| Set up the sibling Web Admin and Backend repositories | [DEVELOPMENT_GUIDELINES.md §1](DEVELOPMENT_GUIDELINES.md#repository-layout-and-cross-repository-references) |
 | Check known gaps, technical debt and risks | [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) |
 | Write a new feature spec | Read the catalog entry, business rules and limitations for the affected modules first. Then follow the constitution in `.specify/memory/constitution.md` (v1.0.0, ratified 2026-11-26). |
 

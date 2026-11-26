@@ -40,6 +40,38 @@
   `babel.config.js`, `metro.config.js`, `eslint.config.js`) run during every bundle or build. Review any diff to them
   before running Metro, Expo or EAS (`KL-SEC-006`).
 
+### Repository layout and cross-repository references
+
+**Shared rules (apply to every developer):**
+
+- Clone the three repositories as siblings under one parent folder of your choice. Use these exact folder names:
+
+  | Repository | Folder | Origin |
+  |---|---|---|
+  | Mobile | `zapzone-analytics-app` | `github.com/rlndcsr/zapzone-analytics-app` |
+  | Web Admin | `zappoint` | `github.com/webmaster-big/zappoint` |
+  | Backend | `zapzone-backend` | `github.com/webmaster-big/zapzone-backend` |
+
+- Shared instructions (`AGENTS.md`) refer to the reference repositories as `../zappoint` and
+  `../zapzone-backend`. These paths are resolved from the **Mobile repository root**, not from the terminal's
+  current directory. Documentation cites them by name and commit (`zappoint@<sha>:<path>`), never by an absolute
+  path.
+- No committed file may contain a developer's absolute path.
+- If your layout differs, don't edit shared files. Do one of the following instead:
+  - tell Claude the location at the start of the session; or
+  - record it in your personal `~/.claude/CLAUDE.md`, which lives outside the repository.
+- To give Claude Code read access to the sibling repositories, use `/add-dir` or
+  `permissions.additionalDirectories` in `.claude/settings.local.json`. That file is git-ignored by the `.claude/*`
+  rule.
+- Don't use `CLAUDE.local.md` for this: this repository's `.gitignore` does not exclude it.
+
+**Developer environments (examples, not configuration):**
+
+| Developer | Parent folder | Status |
+|---|---|---|
+| Orlando | `C:\Users\Orlando\OneDrive\Documents\ZapZone` | All three repositories confirmed at the folder names above (2026-11-26) |
+| Co-developer | `C:\Users\User\Code\zapzone` | Parent folder confirmed by the team; repository folder names **assumed** to match, not verified |
+
 ## 2. Repository organisation
 
 | Location | Convention (Established) |
