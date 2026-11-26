@@ -97,10 +97,13 @@ export function scheduleIntervalMessage({
   interval,
   durationMinutes,
   spaceIntervals,
+  spacesHoldStartsApart = false,
 }: {
   interval: number | null | undefined;
   durationMinutes: number | null | undefined;
   spaceIntervals: SpaceInterval[];
+  /** A picked space is in an area that keeps its starts apart — see `selectedSpacesHoldStartsApart`. */
+  spacesHoldStartsApart?: boolean;
 }): { text: string; overlapWarning: boolean } | null {
   if (!interval || !durationMinutes) return null;
 
@@ -128,8 +131,8 @@ export function scheduleIntervalMessage({
             ? ` of ${longest} min`
             : ` — up to ${longest} min across the spaces you picked`
         } before it can take another.${
-          usable.length > 1
-            ? " Spaces sharing an area also hold their start times that far apart."
+          spacesHoldStartsApart
+            ? " Spaces sharing an area also hold their start times apart by the largest turnaround in that area."
             : ""
         }`;
 

@@ -181,13 +181,13 @@
 - **Verification:** Test-backed (`src/lib/rooms.test.ts`) for the helpers
 - **Open questions:** None
 
-### BR-SPACE-002 — Area-group turnaround
-- **Rule:** One turnaround is applied to every space in an area group; blank or negative input is rejected (never silently 0).
-- **Workflow:** Space → Area group settings.
-- **Enforcement layer:** Mobile client logic; Backend has a dedicated endpoint mobile does not use
-- **Evidence:** `space.tsx` (`saveAreaGroup`); `bookingsService.ts` (`updateAreaGroupInterval`, per-room PUT); `RoomController::updateBookingIntervalByAreaGroup` (used by `zappoint@5de9d9e:src/pages/admin/packages/Rooms.tsx`)
-- **Exceptions:** Mobile is non-atomic (KL-PKG-015).
-- **Verification:** Source-verified
+### BR-SPACE-002 — Area-group settings (turnaround and starting together)
+- **Rule:** Area Group Settings sets, for every space in a group, the turnaround and whether the spaces "can start at the same time". It opens on the group's real state: one shared turnaround fills the field, different ones leave it blank with the range, and the box is mixed when spaces disagree. Only the controls staff change are sent, so ticking the box never rewrites a turnaround, and a blank turnaround keeps each space's own. A negative turnaround is rejected. With starting together on, a booking in one space no longer holds back start times in the others. The save is scoped to the selected location (none = every location in the company for a company admin). A failed save shows the server's reason. Space cards show "Group can start together", and the package schedule note mentions area spacing only when a picked space is in a group that keeps starts apart.
+- **Workflow:** Space → Area group settings; package create/edit schedule interval note.
+- **Enforcement layer:** Backend (server-enforced); Mobile client logic
+- **Evidence:** `space.tsx` (`saveAreaGroup`); `src/lib/rooms.ts` (`summarizeAreaGroup`, `areaGroupChanges`, `selectedSpacesHoldStartsApart`); `bookingsService.ts` (`updateAreaGroupSettings`, PATCH); `RoomController::updateBookingIntervalByAreaGroup`; `Room::areaAllowsSimultaneousStarts`; web parity `zappoint@73818ef:src/pages/admin/packages/Rooms.tsx`, `ScheduleStartTimes.tsx`
+- **Exceptions:** None found.
+- **Verification:** Test-backed (`src/lib/rooms.test.ts`, `src/lib/packages/scheduleSlots.test.ts`) for the helpers
 - **Open questions:** None
 
 ### BR-SPACE-003 — Creating several spaces at once

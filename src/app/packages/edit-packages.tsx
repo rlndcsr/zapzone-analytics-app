@@ -45,6 +45,7 @@ import {
   generateScheduleSlots,
   scheduleIntervalMessage,
 } from "../../lib/packages/scheduleSlots";
+import { selectedSpacesHoldStartsApart } from "../../lib/rooms";
 import {
   packageDurationMinutes,
   validatePackageSetup,
@@ -641,6 +642,12 @@ const EditPackage = () => {
         .map((id) => rooms.find((room) => room.id === id))
         .filter((room): room is RoomOption => room != null)
         .map((room) => room.bookingInterval ?? 0),
+    [roomSel, rooms],
+  );
+
+  /** Whether the note should mention area spacing — only when a picked space's group keeps starts apart. */
+  const spacesHoldStartsApart = useMemo(
+    () => selectedSpacesHoldStartsApart(roomSel, rooms),
     [roomSel, rooms],
   );
 
@@ -1358,6 +1365,7 @@ const EditPackage = () => {
                                   interval: parseIntOrNull(s.interval),
                                   durationMinutes: sessionMinutes,
                                   spaceIntervals: selectedSpaceIntervals,
+                                  spacesHoldStartsApart,
                                 })?.text ?? "Minimum 15 minutes.")
                           }
                         />

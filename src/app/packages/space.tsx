@@ -32,7 +32,7 @@ import {
   createRoom,
   deleteRoom,
   fetchSpaceList,
-  updateAreaGroupInterval,
+  updateAreaGroupSettings,
   updateRoom,
   type RoomInput,
   type SpaceBreak,
@@ -42,9 +42,16 @@ import {
   fetchLocations,
   type LocationOption,
 } from "../../services/locationsService";
+import { Toast, type ToastType } from "../../components/ui/Toast";
 import { useAsyncList } from "../../lib/hooks/useAsyncList";
+import { useTransientAlert } from "../../lib/hooks/useTransientAlert";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
-import { areaGroupValue, turnaroundUpdate } from "../../lib/rooms";
+import {
+  areaGroupChanges,
+  areaGroupValue,
+  summarizeAreaGroup,
+  turnaroundUpdate,
+} from "../../lib/rooms";
 import { getCurrentUser, getToken } from "../../lib/session";
 
 const PRIMARY = "#0644C7";
@@ -375,6 +382,12 @@ const SpaceCard = ({
         />
       </View>
 
+      {!!space.areaGroup && space.areaAllowsSimultaneousStarts && (
+        <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          Group can start together
+        </Text>
+      )}
+
       {/* Created + actions */}
       <View className="flex-row items-center justify-between gap-2 mt-3">
         <Text className="shrink text-xs text-gray-400 dark:text-gray-500">
@@ -469,8 +482,16 @@ const Space = () => {
   // Area group settings
   const [showAreaGroup, setShowAreaGroup] = useState(false);
   const [agGroup, setAgGroup] = useState<string | null>(null);
+  // Only what staff touch is saved; untouched controls show the group's real state.
   const [agInterval, setAgInterval] = useState("");
+  const [agIntervalTouched, setAgIntervalTouched] = useState(false);
+  const [agStartsTogether, setAgStartsTogether] = useState(false);
+  const [agStartsTogetherTouched, setAgStartsTogetherTouched] = useState(false);
   const [agSaving, setAgSaving] = useState(false);
+  const [toast, showToast] = useTransientAlert<{
+    message: string;
+    type: ToastType;
+  }>();
 
   const loader = useCallback(
     ({ token, userId }: { token: string; userId: number }) =>
@@ -488,16 +509,49 @@ const Space = () => {
     }
   }, [refetch]);
 
+  /**
+   * The location an Area Group Settings save is scoped to — web parity: the selected
+   * location for a company admin (none = every location in the company), otherwise the
+   * user's own. The groups listed are the spaces in that same scope, so what the sheet
+   * shows is what gets saved.
+   */
+  const areaGroupLocationId: number | null = isCompanyAdmin
+    ? locationFilter === "all"
+      ? null
+      : locationFilter
+    : (getCurrentUser()?.location_id ?? null);
+
   const areaGroups = useMemo(() => {
     const map = new Map<string, SpaceRow[]>();
     spaces.forEach((s) => {
       if (!s.areaGroup) return;
+      if (areaGroupLocationId != null && s.locationId !== areaGroupLocationId) return;
       const arr = map.get(s.areaGroup) ?? [];
       arr.push(s);
       map.set(s.areaGroup, arr);
     });
-    return map;
-  }, [spaces]);
+    // web parity: groups in name order, each group's spaces in natural name order
+    return new Map(
+      [...map.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([group, rooms]) => [
+          group,
+          [...rooms].sort((a, b) => naturalNameSort(a.name, b.name)),
+        ]),
+    );
+  }, [spaces, areaGroupLocationId]);
+
+  const agRooms = useMemo(
+    () => (agGroup ? (areaGroups.get(agGroup) ?? []) : []),
+    [areaGroups, agGroup],
+  );
+  const agSummary = useMemo(() => summarizeAreaGroup(agRooms), [agRooms]);
+  const shownAgInterval = agIntervalTouched ? agInterval : agSummary.turnaround;
+  const shownAgStartsTogether = agStartsTogetherTouched
+    ? agStartsTogether
+    : agSummary.startsTogether;
+  const agStartsTogetherMixed =
+    !agStartsTogetherTouched && agSummary.startsTogetherMixed;
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -769,41 +823,72 @@ const Space = () => {
     ]);
   };
 
+  const resetAreaGroupForm = () => {
+    setAgInterval("");
+    setAgIntervalTouched(false);
+    setAgStartsTogether(false);
+    setAgStartsTogetherTouched(false);
+  };
+
+  const selectAreaGroup = (group: string | null) => {
+    setAgGroup(group);
+    resetAreaGroupForm();
+  };
+
   const openAreaGroup = () => {
-    const first = Array.from(areaGroups.keys())[0] ?? null;
-    setAgGroup(first);
-    setAgInterval(
-      first
-        ? String(areaGroups.get(first)?.[0]?.bookingInterval ?? 15)
-        : "15",
-    );
+    selectAreaGroup(Array.from(areaGroups.keys())[0] ?? null);
     setShowAreaGroup(true);
+  };
+
+  const closeAreaGroup = () => {
+    setShowAreaGroup(false);
+    resetAreaGroupForm();
   };
 
   const saveAreaGroup = async () => {
     const token = getToken();
-    if (!token || !agGroup) return;
-    const rooms = areaGroups.get(agGroup) ?? [];
-    if (rooms.length === 0) return;
-    // Never guess here: a blank field silently becoming 0 would set the whole
-    // group to no gap at all. Web parity: Rooms.tsx rejects it outright.
-    const minutes = Number.parseInt(agInterval.trim(), 10);
-    if (!Number.isFinite(minutes) || minutes < 0) {
-      Alert.alert(
-        "Invalid turnaround",
-        "Enter the turnaround in minutes — 0 or more.",
-      );
+    if (!token) return;
+    // Errors keep the sheet open, and a toast would sit behind its Modal — so they alert.
+    if (!agGroup) {
+      Alert.alert("Area group required", "Please select an area group");
+      return;
+    }
+    const plan = areaGroupChanges({
+      interval: agInterval,
+      intervalTouched: agIntervalTouched,
+      startsTogether: agStartsTogether,
+      startsTogetherTouched: agStartsTogetherTouched,
+    });
+    if (plan.kind === "nothing") {
+      showToast({ message: "Nothing changed for this area group", type: "info" });
+      closeAreaGroup();
+      return;
+    }
+    if (plan.kind === "invalid") {
+      Alert.alert("Invalid turnaround", "Please enter a valid interval");
       return;
     }
     setAgSaving(true);
     try {
-      await updateAreaGroupInterval(token, rooms, minutes);
-      setShowAreaGroup(false);
+      const message = await updateAreaGroupSettings(
+        token,
+        agGroup,
+        plan.changes,
+        areaGroupLocationId,
+      );
+      showToast({
+        message: message || `Booking interval updated for area group "${agGroup}"`,
+        type: "success",
+      });
+      closeAreaGroup();
       await refetch();
     } catch (err) {
+      // the server's reason (e.g. a validation message), as the web shows it
       Alert.alert(
         "Update failed",
-        err instanceof Error ? err.message : "Could not update the rooms.",
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not save the area group settings",
       );
     } finally {
       setAgSaving(false);
@@ -1231,9 +1316,9 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-3">
-              Spaces in the same area are checked together. Clear this box to
-              ungroup this space, so its times stop being staggered against the
-              others.
+              Spaces in the same area keep their start times apart, unless Area
+              Group Settings lets them start at the same time. Clear this box to
+              ungroup this space.
             </Text>
 
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
@@ -1516,9 +1601,9 @@ const Space = () => {
               className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-3">
-              {createMode === "multiple"
-                ? "Spaces in the same area are checked together, using the largest turnaround set on any of them."
-                : "Spaces in the same area are checked together."}
+              Spaces in the same area start apart by the largest turnaround set
+              on any of them, unless Area Group Settings lets them start at the
+              same time.
             </Text>
             <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
               Turnaround (min)
@@ -1533,7 +1618,7 @@ const Space = () => {
             />
             <Text className="text-[11px] text-gray-400 dark:text-gray-500">
               {createMode === "multiple"
-                ? "How long each space stays closed after a booking ends. If these spaces share an area, it also means bookings across the area must start at least this far apart."
+                ? "How long each space stays closed after a booking ends. If these spaces share an area, it also means bookings across the area must start at least this far apart, unless Area Group Settings lets them start at the same time."
                 : "How long this space stays closed after a booking ends, before the next one can start. It is never added to the length the customer is shown — a 2 hour party is still advertised as 2 hours."}
             </Text>
           </View>
@@ -1579,13 +1664,45 @@ const Space = () => {
       {/* Area Group Settings */}
       <BottomSheet
         visible={showAreaGroup}
-        onClose={() => setShowAreaGroup(false)}
+        onClose={closeAreaGroup}
         title="Area Group Settings"
       >
         <ScrollView className="px-5 pb-6" showsVerticalScrollIndicator={false}>
-          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Set one turnaround for every space in an area group.
+          <Text className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+            Set the turnaround, and whether spaces can start at the same time,
+            for every space in an area group.
           </Text>
+
+          <View
+            className={`flex-row items-start gap-2 rounded-xl border px-3 py-2 mb-4 ${
+              areaGroupLocationId != null
+                ? "border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-900/20"
+                : "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/20"
+            }`}
+          >
+            <Feather
+              name="map-pin"
+              size={14}
+              color={areaGroupLocationId != null ? PRIMARY : "#B45309"}
+              style={{ marginTop: 2 }}
+            />
+            <Text className="flex-1 text-sm text-gray-700 dark:text-gray-300">
+              {areaGroupLocationId == null ? (
+                "Applies to every location in your company - area group names repeat across venues. Pick a location in Filters to narrow it."
+              ) : (
+                <>
+                  Applies to{" "}
+                  <Text className="font-semibold text-gray-900 dark:text-white">
+                    {spaces.find((s) => s.locationId === areaGroupLocationId)
+                      ?.locationName ||
+                      locations.find((l) => l.id === areaGroupLocationId)?.name ||
+                      "this location"}
+                  </Text>{" "}
+                  only.
+                </>
+              )}
+            </Text>
+          </View>
 
           {areaGroups.size === 0 ? (
             <View className="py-10 items-center">
@@ -1605,12 +1722,7 @@ const Space = () => {
                   return (
                     <Pressable
                       key={group}
-                      onPress={() => {
-                        setAgGroup(group);
-                        setAgInterval(
-                          String(rooms[0]?.bookingInterval ?? 15),
-                        );
-                      }}
+                      onPress={() => selectAreaGroup(group)}
                       className={`px-3.5 py-2 rounded-lg border ${
                         active
                           ? "bg-[#0644C7] border-[#0644C7]"
@@ -1635,7 +1747,7 @@ const Space = () => {
                     Rooms in &quot;{agGroup}&quot;
                   </Text>
                   <View className="flex-row flex-wrap gap-1.5">
-                    {(areaGroups.get(agGroup) ?? []).map((r) => (
+                    {agRooms.map((r) => (
                       <View
                         key={r.id}
                         className="bg-[#0644C7] px-2 py-0.5 rounded"
@@ -1649,24 +1761,78 @@ const Space = () => {
                 </View>
               )}
 
-              <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
-                Turnaround for every space in this group (min)
-              </Text>
-              <TextInput
-                value={agInterval}
-                onChangeText={setAgInterval}
-                placeholder="15"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="number-pad"
-                className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
-              />
-              <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-4">
-                Written to every space in this area. It sets how long each space
-                stays closed after a booking, and how far apart bookings across
-                the area must start. Set to 0 to let two spaces in the area start
-                at the same time — two bookings in the SAME space can still never
-                overlap.
-              </Text>
+              {agGroup && (
+                <>
+                  <Text className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+                    Turnaround for every space in this group (min)
+                  </Text>
+                  <TextInput
+                    value={shownAgInterval}
+                    onChangeText={(value) => {
+                      setAgInterval(value);
+                      setAgIntervalTouched(true);
+                    }}
+                    placeholder={
+                      agSummary.turnaroundRange
+                        ? `Mixed: ${agSummary.turnaroundRange}`
+                        : agSummary.turnaround
+                          ? `Keep ${agSummary.turnaround} min`
+                          : "15"
+                    }
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    className="bg-gray-50 dark:bg-neutral-800 rounded-xl px-3.5 py-3 text-sm text-gray-900 dark:text-white border border-gray-200 dark:border-neutral-700 mb-1"
+                  />
+                  <Text className="text-[11px] text-gray-400 dark:text-gray-500 mb-4">
+                    {shownAgInterval.trim() === ""
+                      ? agSummary.turnaroundRange
+                        ? `These spaces have different turnarounds (${agSummary.turnaroundRange}). Leave this blank to keep each space's own, or type a number to set them all.`
+                        : "Leave this blank to keep each space's turnaround as it is, or type a number to set them all."
+                      : "Written to every space in this area. It sets how long each space stays closed after one of its own bookings. Two bookings in the SAME space can never overlap."}
+                  </Text>
+
+                  <Pressable
+                    onPress={() => {
+                      // a native checkbox flips from what it shows; mixed shows unticked
+                      setAgStartsTogether(!shownAgStartsTogether);
+                      setAgStartsTogetherTouched(true);
+                    }}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{
+                      checked: agStartsTogetherMixed ? "mixed" : shownAgStartsTogether,
+                    }}
+                    className="flex-row items-start gap-2.5 mb-4 active:opacity-70"
+                  >
+                    <View
+                      className={`w-5 h-5 mt-0.5 rounded items-center justify-center border ${
+                        shownAgStartsTogether || agStartsTogetherMixed
+                          ? "bg-[#0644C7] border-[#0644C7]"
+                          : "bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-600"
+                      }`}
+                    >
+                      {agStartsTogetherMixed ? (
+                        <Feather name="minus" size={14} color="#FFFFFF" />
+                      ) : shownAgStartsTogether ? (
+                        <Feather name="check" size={14} color="#FFFFFF" />
+                      ) : null}
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-sm text-gray-900 dark:text-white">
+                        Spaces in this group can start at the same time
+                      </Text>
+                      <Text className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                        {agStartsTogetherMixed
+                          ? "Not every space here has this ticked. A group only starts together when all its spaces do, so tick or untick to set them all the same."
+                          : shownAgStartsTogether
+                            ? "A booking in one space no longer holds back start times in the other spaces. Each space only waits out its own turnaround."
+                            : agSummary.largestTurnaround === 0
+                              ? "Every turnaround in this group is 0, so start times are not held apart."
+                              : "Spaces in this group keep their start times apart by the largest turnaround in the group, so a booking in one space removes nearby start times from the others."}
+                      </Text>
+                    </View>
+                  </Pressable>
+                </>
+              )}
 
               <View className="flex-row gap-3">
                 <Pressable
@@ -1683,7 +1849,7 @@ const Space = () => {
                   )}
                 </Pressable>
                 <Pressable
-                  onPress={() => setShowAreaGroup(false)}
+                  onPress={closeAreaGroup}
                   className="flex-1 items-center justify-center py-3.5 rounded-xl border border-gray-200 dark:border-neutral-700"
                 >
                   <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">
@@ -1695,6 +1861,14 @@ const Space = () => {
           )}
         </ScrollView>
       </BottomSheet>
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => showToast(null)}
+        />
+      )}
     </View>
   );
 };

@@ -33,6 +33,106 @@ export function areaGroupValue(value: string): string | null {
   return value.trim() || null;
 }
 
+/**
+ * What Area Group Settings opens with for one group — its real state, not a guess.
+ * One shared turnaround fills the field; different ones leave it blank with the range;
+ * the box is ticked only when every space has it ticked, and mixed when some do.
+ * Web parity: Rooms.tsx `areaGroupSummary`.
+ */
+export function summarizeAreaGroup(
+  rooms: { bookingInterval: number | null; areaAllowsSimultaneousStarts: boolean }[],
+): {
+  turnaround: string;
+  turnaroundRange: string | null;
+  largestTurnaround: number | null;
+  startsTogether: boolean;
+  startsTogetherMixed: boolean;
+} {
+  const turnarounds = [
+    ...new Set(
+      rooms
+        .map((r) => r.bookingInterval)
+        .filter((minutes): minutes is number => minutes != null),
+    ),
+  ].sort((a, b) => a - b);
+  const together = rooms.map((r) => r.areaAllowsSimultaneousStarts === true);
+  return {
+    turnaround: turnarounds.length === 1 ? String(turnarounds[0]) : "",
+    turnaroundRange:
+      turnarounds.length > 1
+        ? `${turnarounds[0]}–${turnarounds[turnarounds.length - 1]} min`
+        : null,
+    largestTurnaround:
+      turnarounds.length > 0 ? turnarounds[turnarounds.length - 1] : null,
+    startsTogether: together.length > 0 && together.every(Boolean),
+    startsTogetherMixed: together.some(Boolean) && !together.every(Boolean),
+  };
+}
+
+/**
+ * What an Area Group Settings save sends: only the controls staff changed. An untouched
+ * or cleared turnaround field is left out, so it never rewrites anyone's turnaround.
+ * `invalid` when the typed turnaround isn't a number of 0 or more.
+ * Web parity: Rooms.tsx `handleAreaGroupIntervalUpdate`.
+ */
+export function areaGroupChanges({
+  interval,
+  intervalTouched,
+  startsTogether,
+  startsTogetherTouched,
+}: {
+  interval: string;
+  intervalTouched: boolean;
+  startsTogether: boolean;
+  startsTogetherTouched: boolean;
+}):
+  | { kind: "nothing" }
+  | { kind: "invalid" }
+  | {
+      kind: "save";
+      changes: { bookingInterval?: number; allowsSimultaneousStarts?: boolean };
+    } {
+  const sendInterval = intervalTouched && interval.trim() !== "";
+  if (!sendInterval && !startsTogetherTouched) return { kind: "nothing" };
+  const minutes = Number.parseInt(interval, 10);
+  if (sendInterval && (Number.isNaN(minutes) || minutes < 0)) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "save",
+    changes: {
+      ...(sendInterval ? { bookingInterval: minutes } : {}),
+      ...(startsTogetherTouched ? { allowsSimultaneousStarts: startsTogether } : {}),
+    },
+  };
+}
+
+/**
+ * Whether any picked space sits in an area that keeps its start times apart: an
+ * available space with an area group shared by another space, where not every space in
+ * that area may start at the same time. Web parity: CreatePackage/EditPackage
+ * `selectedSpacesHoldStartsApart`.
+ */
+export function selectedSpacesHoldStartsApart(
+  selectedIds: number[],
+  rooms: {
+    id: number;
+    areaGroup: string | null;
+    isAvailable: boolean;
+    areaAllowsSimultaneousStarts: boolean;
+  }[],
+): boolean {
+  return selectedIds.some((id) => {
+    const room = rooms.find((candidate) => candidate.id === id);
+    if (!room || room.isAvailable === false || !room.areaGroup) return false;
+    const area = rooms.filter((candidate) => candidate.areaGroup === room.areaGroup);
+    return (
+      area.length > 1 &&
+      !area.every((candidate) => candidate.areaAllowsSimultaneousStarts === true)
+    );
+  });
+}
+
 /** Whether a space is bookable. `is_available` is the column; the others are older shapes. */
 export function roomIsAvailable(raw: {
   is_available?: boolean | number | null;

@@ -168,7 +168,7 @@
 
 - **Purpose:** Maintain bookable spaces/rooms, their capacity, availability, area group, turnaround (`booking_interval`) and break times.
 - **Implementation status:** Implemented · **Verification:** Source-verified
-- **Routes / screens:** `src/app/packages/space.tsx` — search (name/area group), status chips (all/available/inactive), Filters sheet (location, sort by name/capacity/created, order), create sheet (single or multiple with base name + suffix + count + start), edit sheet (name, capacity, available, area group, turnaround, breaks), delete, "Area group settings" (one turnaround for every space in a group).
+- **Routes / screens:** `src/app/packages/space.tsx` — search (name/area group), status chips (all/available/inactive), Filters sheet (location, sort by name/capacity/created, order), create sheet (single or multiple with base name + suffix + count + start), edit sheet (name, capacity, available, area group, turnaround, breaks), delete, "Area group settings" (turnaround and "Spaces in this group can start at the same time" for every space in a group).
 - **Roles:** All staff roles; location picker shown in create. Server: room writes in `staff` group (`routes/api.php` L481–486); `store`/`update` call `scopedLocation`; `show`/`update`/`destroy` call `denyForeignRecord` (`RoomController`).
 - **Location scoping:** Location filter defaults to (and follows) the active workspace location; can be widened in Filters. New spaces default to the active location, else the user's.
 - **Main workflows & operations:** Create one or many (sequential `POST /api/rooms`; partial success closes the sheet and reports "N of M"), edit (`PUT /api/rooms/{id}`), delete (`DELETE /api/rooms/{id}`), area-group turnaround (one `PUT` per room in the group).
@@ -180,7 +180,7 @@
 - **Platform-specific behaviour:** None found.
 - **Tests:** `src/lib/rooms.test.ts` (numeric ordering, turnaround update, area group null, availability reading).
 - **Known limitations:** KL-PKG-014 (inactive spaces likely not returned), KL-PKG-015.
-- **Source references:** `space.tsx` (`saveRoom`, `saveCreate`, `saveAreaGroup`); `src/services/bookingsService.ts` (`fetchSpaceList`, `createRoom`, `updateRoom`, `deleteRoom`, `updateAreaGroupInterval`, `breaksToPayload`); `zapzone-backend@ae877e2:app/Http/Controllers/Api/RoomController.php` (`index`, `store`, `update`).
+- **Source references:** `space.tsx` (`saveRoom`, `saveCreate`, `saveAreaGroup`); `src/services/bookingsService.ts` (`fetchSpaceList`, `createRoom`, `updateRoom`, `deleteRoom`, `updateAreaGroupSettings`, `breaksToPayload`); `zapzone-backend@ae877e2:app/Http/Controllers/Api/RoomController.php` (`index`, `store`, `update`).
 
 ### Global Notes
 

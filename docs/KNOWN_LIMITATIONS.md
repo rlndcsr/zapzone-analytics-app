@@ -172,7 +172,7 @@ KL-PRICE-003, KL-PHOTO-001, KL-ADMIN-005, KL-PLAT-002, KL-PLAT-003, KL-UI-005.
 | KL-PKG-012 | Forced add-ons lack per-package pricing; blank price saves $0 | Parity gap | Web `AddOns.tsx` | Forced flag has no effect | H | SV | Add fields |
 | KL-PKG-013 | No add-on import | Parity gap | Web `AddOns.tsx` | Low | M | SV | — |
 | KL-PKG-014 | Space list never sends `include_unavailable` | Suspected | `fetchSpaceList`; `RoomController::index` | Inactive filter empty; disabled spaces vanish | M | SV, DVR | Verify |
-| KL-PKG-015 | Area-group update is per-room PUTs; no bulk space delete | Debt / Parity gap | `updateAreaGroupInterval` | Partial updates | H | SV | Use the area-group endpoint |
+| KL-PKG-015 | No bulk space delete (area-group update now uses the area-group endpoint) | Parity gap | Web `Rooms.tsx` bulk delete | Spaces deleted one by one | H | SV | Add bulk delete |
 | KL-PKG-016 | No gift-card edit/deactivate/reactivate; Balance field ignored by server | Parity gap | Web `GiftCard.tsx`; `GiftCardController::store` | Must use Web | H | SV | Add actions |
 | KL-PKG-017 | Gift-card sale sends no `checkout_key`; limits 10–500 hard-coded | Limitation | `sellGiftCard.ts`; `config/gift_cards.php` | Config drift; duplicate sale risk | M | SV | — |
 | KL-PKG-018 | Promo batch list reads the wrong fields; no batch actions | Defect / Parity gap | `fetchPromoBatches`; `listBatches` | Always shows "0 used" | H | SV | Fix mapping |

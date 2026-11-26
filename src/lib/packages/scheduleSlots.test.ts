@@ -174,13 +174,34 @@ describe("describing the interval below the schedule field", () => {
     const msg = scheduleIntervalMessage({ interval: 30, durationMinutes: 60, spaceIntervals: [45, 60] });
     assert.equal(
       msg?.text,
-      "A start every 30 min. Once a booking is taken, that space stays closed for its turnaround — up to 60 min across the spaces you picked before it can take another. Spaces sharing an area also hold their start times that far apart.",
+      "A start every 30 min. Once a booking is taken, that space stays closed for its turnaround — up to 60 min across the spaces you picked before it can take another.",
     );
   });
 
   it("names one figure when every picked space has the same turnaround", () => {
     const msg = scheduleIntervalMessage({ interval: 30, durationMinutes: 60, spaceIntervals: [15, 15] });
-    assert.match(msg?.text ?? "", /turnaround of 15 min before it can take another\. Spaces sharing an area/);
+    assert.match(msg?.text ?? "", /turnaround of 15 min before it can take another\.$/);
+  });
+
+  it("mentions area spacing only when a picked space is in a group that keeps starts apart", () => {
+    const apart = scheduleIntervalMessage({
+      interval: 30,
+      durationMinutes: 60,
+      spaceIntervals: [45, 60],
+      spacesHoldStartsApart: true,
+    });
+    assert.equal(
+      apart?.text,
+      "A start every 30 min. Once a booking is taken, that space stays closed for its turnaround — up to 60 min across the spaces you picked before it can take another. Spaces sharing an area also hold their start times apart by the largest turnaround in that area.",
+    );
+    // a lone space in a group that keeps starts apart still gets the note
+    const single = scheduleIntervalMessage({
+      interval: 30,
+      durationMinutes: 60,
+      spaceIntervals: [45],
+      spacesHoldStartsApart: true,
+    });
+    assert.match(single?.text ?? "", /Spaces sharing an area also hold their start times apart/);
   });
 
   it("ignores a space with no turnaround of its own", () => {

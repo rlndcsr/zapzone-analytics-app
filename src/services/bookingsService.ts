@@ -1356,6 +1356,10 @@ export type RoomOption = {
   id: number;
   name: string;
   bookingInterval: number | null;
+  areaGroup: string | null;
+  isAvailable: boolean;
+  /** This space's "Spaces in this group can start at the same time" flag. */
+  areaAllowsSimultaneousStarts: boolean;
 };
 
 /** Loosely pull an array out of the common `{data:{key:[]}}` / `{data:[]}` shapes. */
@@ -1430,6 +1434,9 @@ export async function fetchRoomOptions(
             Number.isFinite(Number(r.booking_interval))
               ? Number(r.booking_interval)
               : null,
+          areaGroup: rawAreaGroup(r),
+          isAvailable: roomIsAvailable(r),
+          areaAllowsSimultaneousStarts: r.area_allows_simultaneous_starts === true,
         })),
         lastPage: res?.data?.pagination?.last_page ?? page,
       };
@@ -1472,6 +1479,7 @@ type RawRoom = {
   capacity?: number | string | null;
   area_group?: string | { name?: string | null } | null;
   booking_interval?: number | string | null;
+  area_allows_simultaneous_starts?: boolean | null;
   is_active?: boolean | number | null;
   is_available?: boolean | number | null;
   status?: string | null;
@@ -1547,6 +1555,8 @@ export type SpaceRow = {
   capacity: number | null;
   areaGroup: string | null;
   bookingInterval: number | null;
+  /** This space's "Spaces in this group can start at the same time" flag. */
+  areaAllowsSimultaneousStarts: boolean;
   isActive: boolean;
   locationId: number | null;
   locationName: string;
@@ -1576,11 +1586,14 @@ function rawRoomToBreaks(r: RawRoom): SpaceBreak[] {
   }));
 }
 
+function rawAreaGroup(r: Pick<RawRoom, "area_group">): string | null {
+  return typeof r.area_group === "string"
+    ? r.area_group.trim() || null
+    : r.area_group?.name?.trim() || null;
+}
+
 function mapSpaceRow(r: RawRoom): SpaceRow {
-  const areaGroup =
-    typeof r.area_group === "string"
-      ? r.area_group.trim() || null
-      : r.area_group?.name?.trim() || null;
+  const areaGroup = rawAreaGroup(r);
   return {
     id: Number(r.id),
     name: (r.name ?? "").toString().trim() || `Space #${r.id}`,
@@ -1588,6 +1601,7 @@ function mapSpaceRow(r: RawRoom): SpaceRow {
     areaGroup,
     bookingInterval:
       r.booking_interval != null ? Number(r.booking_interval) : null,
+    areaAllowsSimultaneousStarts: r.area_allows_simultaneous_starts === true,
     isActive: roomIsAvailable(r),
     locationId:
       r.location_id != null
@@ -1746,22 +1760,35 @@ export async function deleteRoom(token: string, id: number): Promise<void> {
   await apiRequest(`/api/rooms/${id}`, { method: "DELETE", token });
 }
 
-export async function updateAreaGroupInterval(
+/**
+ * PATCH /api/rooms/area-group/{group}/update-booking-interval — the web's Area Group
+ * Settings save. Only the fields given are written, so ticking "can start at the same
+ * time" never rewrites anyone's turnaround. Without a location it applies to every
+ * location in the company. Resolves to the server's message.
+ */
+export async function updateAreaGroupSettings(
   token: string,
-  rooms: SpaceRow[],
-  bookingInterval: number,
-): Promise<void> {
-  for (const room of rooms) {
-    await updateRoom(token, room.id, {
-      name: room.name,
-      capacity: room.capacity,
-      is_available: room.isActive,
-      area_group: room.areaGroup,
-      booking_interval: bookingInterval,
-      location_id: room.locationId ?? undefined,
-      break_time: breaksToPayload(room.breaks),
-    });
-  }
+  areaGroup: string,
+  changes: { bookingInterval?: number; allowsSimultaneousStarts?: boolean },
+  locationId?: number | null,
+): Promise<string | null> {
+  const res = await apiRequest<{ message?: string }>(
+    `/api/rooms/area-group/${encodeURIComponent(areaGroup)}/update-booking-interval`,
+    {
+      method: "PATCH",
+      token,
+      body: {
+        ...(changes.bookingInterval !== undefined
+          ? { booking_interval: changes.bookingInterval }
+          : {}),
+        ...(changes.allowsSimultaneousStarts !== undefined
+          ? { area_allows_simultaneous_starts: changes.allowsSimultaneousStarts }
+          : {}),
+        ...(locationId ? { location_id: locationId } : {}),
+      },
+    },
+  );
+  return typeof res?.message === "string" && res.message ? res.message : null;
 }
 
 /** One booking on the day schedule — carries room + duration for placement. */
