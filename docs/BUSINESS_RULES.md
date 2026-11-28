@@ -50,8 +50,8 @@ Every rule in the domain files records:
 | Packages, add-ons, spaces, gift cards, promos, pricing, fees | `BR-PKG` (14), `BR-ADDON` (3), `BR-SPACE` (3), `BR-GIFT` (4), `BR-PROMO` (4), `BR-PRICE` (6), `BR-FEE` (2) | 36 | [business-rules/packages-and-pricing.md](business-rules/packages-and-pricing.md) |
 | Customers, waivers, memberships | `BR-CUST` (10), `BR-WAIVER` (15), `BR-MEMBER` (8) | 33 | [business-rules/customers-waivers-and-memberships.md](business-rules/customers-waivers-and-memberships.md) |
 | Photos, escape rooms, email, SMS, notifications, custom fields | `BR-PHOTO` (14), `BR-ESCAPE` (7), `BR-EMAIL` (8), `BR-SMS` (3), `BR-NOTIF` (4), `BR-FIELD` (2) | 38 | [business-rules/photos-communications-and-notifications.md](business-rules/photos-communications-and-notifications.md) |
-| Dashboard, profile, staff, analytics, payments, app update | `BR-DASH` (7), `BR-PROFILE` (4), `BR-STAFF` (9), `BR-ANALYTICS` (5), `BR-PAYMENT` (9), `BR-UPDATE` (5) | 39 | [business-rules/dashboard-administration-analytics-and-payments.md](business-rules/dashboard-administration-analytics-and-payments.md) |
-| **Total** | | **237** | |
+| Dashboard, profile, staff, analytics, payments, app update | `BR-DASH` (7), `BR-PROFILE` (4), `BR-STAFF` (9), `BR-ANALYTICS` (5), `BR-PAYMENT` (10), `BR-UPDATE` (5) | 40 | [business-rules/dashboard-administration-analytics-and-payments.md](business-rules/dashboard-administration-analytics-and-payments.md) |
+| **Total** | | **238** | |
 
 ## Foundational rules most specifications will touch
 

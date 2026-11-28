@@ -46,6 +46,12 @@ Backend paths below are in `zapzone-backend@ae877e2`; `BookingController` = `app
 - **Exceptions:** `force-delete` permanently deletes (payments baseline).
 - **Verification:** Source-verified
 - **Open questions:** None
+- **Restore outcome (spec 002, 2026-11-28; `zapzone-backend@2bbd0fa`):**
+  - **Overlap allowed:** a restore whose released slots were taken while it was deleted still **succeeds**. The server re-books the slots, permitting the overlap, and returns `space_warning` naming the clashing bookings. This is test-backed by `tests/Feature/AreaSimultaneousStartsTest.php`. Mobile shows the warning in full.
+  - **Confirmed rejections** are only the pre-change shapes: 403 `success:false` (staff middleware), 422 `success:false` (gift card reversed, capacity, blocked for a non-staff caller), 422 `errors.change_reason`, and 409 `code:"BLOCKED_PERIOD"`.
+  - **Unknown:** any 404 (pre-change, but usually an earlier attempt already restored the booking), 5xx (one can follow a committed restore), malformed answers and no answer. Confirmed and unknown outcomes refresh the Deleted list and sync the active list.
+  - **Authorized continuation vs unsafe retry:** the shared client's single change-reason or blocked-period follow-up after a pre-change refusal is preserved. A remembered blocked-period confirmation is scoped to the account, booking and block ids for 5 minutes, and the server re-authorizes it. The feature itself never retries after an outcome.
+  - **Evidence:** `src/lib/bookings/restoreOutcome.ts`, `src/lib/bookings/restoreFlow.ts`, `src/components/ui/BookingActionsSheet.tsx`; test-backed (`restoreOutcome.test.ts`, `restoreFlow.test.ts`).
 
 ### BR-BOOKING-005 — Bulk delete records one reason per booking
 - **Rule:** Mobile bulk delete asks for one reason, then deletes each selected id with that `change_reason` (not `/bookings/bulk-delete`), so each booking's history records why; partial failures are reported.

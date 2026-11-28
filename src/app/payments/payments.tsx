@@ -50,8 +50,17 @@ import {
 import { mediaUrl } from "../../lib/api";
 import { formatDateTimeET } from "../../lib/date/venueTime";
 import { payableRoute } from "../../lib/payments/payableRoute";
+import {
+  hasRetryWarning,
+  nextRetryWarnings,
+  refundConfirmMessage,
+  runRefundFlow,
+} from "../../lib/payments/refundFlow";
+import { refundOutcomeNotice } from "../../lib/payments/refundOutcome";
 import { consumePaymentsStale } from "../../lib/paymentsStale";
-import { getToken } from "../../lib/session";
+import { getCurrentUser, getToken } from "../../lib/session";
+import { createSingleFlight, type SingleFlight } from "../../lib/singleFlight";
+import { isStaleSessionReply } from "../../lib/staleSessionReply";
 import { useActiveLocation } from "../../lib/location/activeLocationStore";
 import {
   bulkInvoicesUrl,
@@ -284,6 +293,11 @@ const Payments = () => {
   const [signaturePayment, setSignaturePayment] = useState<PaymentRow | null>(null);
   const [actionsPayment, setActionsPayment] = useState<PaymentRow | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  // Refund only (spec 002): payments whose last refund attempt had an unknown
+  // outcome, keyed "<userId>:<paymentId>" — memory only, gone on unmount — and
+  // the guard that keeps one refund per payment in flight per session.
+  const [retryWarnings, setRetryWarnings] = useState<ReadonlySet<string>>(() => new Set());
+  const [refundGuard] = useState<SingleFlight>(createSingleFlight);
   const [invoiceBusyId, setInvoiceBusyId] = useState<number | null>(null);
   /** Which bulk-invoice button is running, so only it shows a spinner. */
   const [bulkBusy, setBulkBusy] = useState<"view" | "download" | null>(null);
@@ -703,6 +717,45 @@ const Payments = () => {
     [runAction],
   );
 
+  /**
+   * Refund: today's confirmation (plus the advisory warning after an unknown
+   * outcome for this payment), then one refund request and outcome-specific
+   * feedback — see lib/payments/refundFlow. The session and account are taken
+   * when staff confirm, so a late answer can't reach another account.
+   */
+  const confirmRefund = useCallback(
+    (p: PaymentRow) => {
+      const base = `Refund ${money(p.amount)} to the original card via Authorize.Net? This cannot be undone.`;
+      const showWarning = hasRetryWarning(retryWarnings, getCurrentUser()?.id ?? null, p.id);
+      Alert.alert("Refund", refundConfirmMessage(base, showWarning), [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Refund",
+          style: "destructive",
+          onPress: () => {
+            const startToken = getToken();
+            const startUserId = getCurrentUser()?.id ?? null;
+            void runRefundFlow({
+              key: String(p.id),
+              owner: startToken,
+              guard: refundGuard,
+              refund: () => refundPayment(startToken ?? "", p.id),
+              isSessionCurrent: () => !isStaleSessionReply(startToken ?? undefined, getToken()),
+              setBusy: setActionBusy,
+              closeSheet: () => setActionsPayment(null),
+              notify: (title, message) => Alert.alert(title, message),
+              noticeFor: (o) => refundOutcomeNotice(o, { payableType: p.payableType }),
+              applyWarning: (o) =>
+                setRetryWarnings((s) => nextRetryWarnings(s, o, startUserId, p.id)),
+              reload: load,
+            });
+          },
+        },
+      ]);
+    },
+    [retryWarnings, refundGuard, load],
+  );
+
   const tableActions = useMemo(
     () => ({
       onSignature: (p: PaymentRow) => setSignaturePayment(p),
@@ -1097,14 +1150,7 @@ const Payments = () => {
         payment={actionsPayment}
         busy={actionBusy}
         onClose={() => (actionBusy ? undefined : setActionsPayment(null))}
-        onRefund={(p) =>
-          confirmAction(
-            "Refund",
-            `Refund ${money(p.amount)} to the original card via Authorize.Net? This cannot be undone.`,
-            "Refund",
-            () => refundPayment(getToken() ?? "", p.id),
-          )
-        }
+        onRefund={confirmRefund}
         onManualRefund={(p) =>
           confirmAction(
             "Manual refund",

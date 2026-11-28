@@ -2,7 +2,11 @@ import { CheckCircle2, Eye, RotateCcw, Trash2 } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
+import { runRestoreFlow } from "../../lib/bookings/restoreFlow";
+import { restoreOutcomeNotice } from "../../lib/bookings/restoreOutcome";
 import { getToken } from "../../lib/session";
+import { createSingleFlight, type SingleFlight } from "../../lib/singleFlight";
+import { isStaleSessionReply } from "../../lib/staleSessionReply";
 import {
   checkInBooking,
   deleteBooking,
@@ -20,8 +24,12 @@ type Props = {
   /** Open the full Booking Details sheet (the hub for View / Edit / Process
    *  Payment / Internal Notes — actions that require the fetched detail). */
   onViewDetails: () => void;
-  /** Refetch the list after a mutation so the row reflects the new state. */
-  onChanged: () => void;
+  /**
+   * Refetch after a mutation so the row reflects the new state. In the Deleted
+   * view this reloads the Deleted list and syncs the active list; a restore
+   * awaits it (and ignores its failure) after showing its alert.
+   */
+  onChanged: () => void | Promise<unknown>;
 };
 
 type Tone = "default" | "success" | "danger";
@@ -94,6 +102,8 @@ export function BookingActionsSheet({
   onChanged,
 }: Props) {
   const [busy, setBusy] = useState<null | "checkin" | "delete" | "restore">(null);
+  // One restore per booking in flight per session (spec 002, FR-023).
+  const [restoreGuard] = useState<SingleFlight>(createSingleFlight);
 
   if (!booking) {
     return (
@@ -191,20 +201,22 @@ export function BookingActionsSheet({
             Alert.alert("Not authenticated");
             return;
           }
-          setBusy("restore");
-          try {
-            await restoreBooking(token, booking.id);
-            onChanged();
-            onClose();
-            Alert.alert("Booking restored", `${ref} was restored.`);
-          } catch (err) {
-            Alert.alert(
-              "Restore failed",
-              err instanceof Error ? err.message : "Could not restore this booking.",
-            );
-          } finally {
-            setBusy(null);
-          }
+          // Restored (with or without a clash warning), a confirmed rejection,
+          // or unknown — each with its own alert; see lib/bookings/restoreFlow.
+          await runRestoreFlow({
+            key: String(booking.id),
+            owner: token,
+            guard: restoreGuard,
+            restore: () => restoreBooking(token, booking.id),
+            isSessionCurrent: () => !isStaleSessionReply(token, getToken()),
+            setBusy: (b) => setBusy(b ? "restore" : null),
+            closeSheet: onClose,
+            notify: (title, message) => Alert.alert(title, message),
+            noticeFor: (o) => restoreOutcomeNotice(o, ref),
+            refresh: async () => {
+              await onChanged();
+            },
+          });
         },
       },
     ]);

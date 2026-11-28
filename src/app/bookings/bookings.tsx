@@ -1740,7 +1740,12 @@ const Bookings = () => {
             setSelectedBookingId(actionsBooking.id);
           }
         }}
-        onChanged={showDeleted ? loadDeleted : refetch}
+        // In the Deleted view a restore must also reach the active list, which
+        // doesn't re-sync on its own when View Deleted closes: reload the trash
+        // and run the existing incremental sync (spec 002, FR-013).
+        onChanged={
+          showDeleted ? () => Promise.allSettled([loadDeleted(), refetch()]) : refetch
+        }
       />
 
       <BookingsReportSheet

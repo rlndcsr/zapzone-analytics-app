@@ -67,6 +67,14 @@
   - **Generate Report:** `BookingsReportSheet` builds a `GET /api/bookings/details-report` URL (today/monthly/custom, individual/list, include cancelled).
   - **Bulk Import:** `BookingsImportSheet` uploads CSV via multipart `POST /api/bookings/bulk-import-csv` (requires a `location_id`).
   - **Deleted view:** `GET /api/bookings/trashed`; restore via `POST /api/bookings/{id}/restore`.
+    - **Restore outcome (spec 002, 2026-11-28):** `restoreBooking` → `executeRestore`, classified only from the server's answer (`classifyRestoreOutcome`, `src/lib/bookings/restoreOutcome.ts`):
+      - **Restored:** "Booking restored".
+      - **Restored with a clash** (`space_warning`; the server permits the overlap and re-books the slots): "Booking restored — time clash" with the server's full warning.
+      - **Confirmed rejection:** only the pre-change shapes (403 `success:false`; 422 `success:false`; 422 `errors.change_reason`; 409 `code:"BLOCKED_PERIOD"`). Shows "Restore failed" (today's text) and does not refresh.
+      - **Unknown:** no answer, 5xx, any 404, a malformed 2xx, or other shapes. Shows "The booking restoration could not be confirmed. Please check the booking status before attempting to restore it again."
+      - **Refresh:** confirmed and unknown outcomes reload the Deleted list **and** run the incremental active-list sync (`refetch`), because the active list does not re-sync when View Deleted closes. A failed refresh never changes the alert.
+      - **Prompts:** the shared client's change-reason and blocked-period prompts and their single authorized continuation are unchanged.
+      - **No retry and no stale feedback:** the feature never retries after an outcome. A session-owned single-flight guard stops duplicate confirmations.
 - **Data sources:** `useBookings` → `syncBookingList` (see data layer) → `GET /api/bookings` (`sync=1`, `updated_since`); `PATCH /api/bookings/{id}/status`; `POST /api/bookings/check-in`; `DELETE /api/bookings/{id}`; `GET /api/bookings/trashed`; `POST /api/bookings/{id}/restore`; `GET /api/bookings/export`; `GET /api/bookings/details-report`; `POST /api/bookings/bulk-import-csv`; `GET /api/bookings/{id}` (payment sheet amounts); `GET /api/mobile/locations` (Change Location, lazily on first open).
 - **Validation & business rules:** BR-BOOKING-001, BR-BOOKING-002, BR-BOOKING-003, BR-BOOKING-004, BR-BOOKING-005, BR-BOOKING-006, BR-BOOKING-007.
 - **Web Admin counterpart:** `zappoint@5de9d9e:src/pages/admin/bookings/Bookings.tsx` (`Bookings`). Parity: **Partial** — check-in gate (`paymentStatus === 'paid'` && not checked-in), default sort, CSV columns and per-id bulk delete with reason (`handleBulkDelete`) verified as matching; web keeps its list in `BookingCacheService` (persistent, 30-min full re-sync with jitter, `FULL_MAX_PAGES` 5000) while mobile's cache is in-memory with a 100-page cap (mobile adaptation; see KL-BOOK-002). Remaining web filters not compared (Not assessed).
@@ -74,7 +82,7 @@
 - **Loading / empty / error / refresh:** skeletons while loading; stale cached list painted instantly and refreshed quietly; red error card with "Try again"; distinct empty states (no bookings → Manual Booking CTA; filtered empty → "Clear search & filters"); pull-to-refresh forces a sync; `useFocusEffect` refetches once after any screen called `markBookingsStale()`.
 - **Platform-specific behaviour:** No `Platform.OS` branches in the screen. Export passes both `mimeType` (Android) and `UTI` (iOS) to `Sharing.shareAsync`. Sheets are RN `Modal`s without keyboard avoidance (see KL-BOOK-010).
 - **Tests:** `src/lib/bookings/bookingSearch.test.ts` (search helper), `src/lib/bookings/bookingCheckIn.test.ts` (`isCheckInEligible`, `outstandingBalanceOf`), `src/lib/bookings/importSummary.test.ts` (CSV import result summary), `src/lib/bookings/patchBooking.test.ts`, `src/lib/calendar/categoryFilter.test.ts`. The screen itself has no tests.
-- **Known limitations:** KL-BOOK-001 (three different check-in gates), KL-BOOK-002 (10,000-booking cap), KL-BOOK-003 (Set Status can force `checked-in` on any status), KL-BOOK-004 (reasons requested reactively after a 422), KL-BOOK-006 (export/report/import/deleted ignore active location), KL-BOOK-007 (Package Bookings KPI duplicates Total), KL-BOOK-010 (sheet keyboard / iOS stacking).
+- **Known limitations:** KL-BOOK-001 (three different check-in gates), KL-BOOK-002 (10,000-booking cap), KL-BOOK-003 (Set Status can force `checked-in` on any status), KL-BOOK-004 (reasons requested reactively after a 422), KL-BOOK-006 (export/report/import/deleted ignore active location), KL-BOOK-007 (Package Bookings KPI duplicates Total), KL-BOOK-010 (sheet keyboard / iOS stacking), KL-BOOK-018 (remembered blocked-period confirmations not cleared on sign-out).
 - **Source references:** `src/app/bookings/bookings.tsx` (`Bookings`, `compareBookingsDefault`, `buildBookingsCsv`, `runBulkStatus`, `confirmBulkDelete`, `rowHandlers`), `src/components/ui/BookingsTable.tsx` (actions column `canCheckIn`), `src/components/ui/BookingActionsSheet.tsx` (`canCheckIn`), `src/services/bookingsService.ts` (`bulkSetBookingStatus`, `exportBookings`, `buildBookingsReportUrl`, `bulkImportBookingsCsv`, `fetchTrashedBookings`, `restoreBooking`).
 
 ## Booking details (quick view and full view)
@@ -311,4 +319,5 @@ Full register: [Known limitations](../KNOWN_LIMITATIONS.md).
 | KL-BOOK-014 | Day-offs: backend `admin` role can manage blocks; mobile hides management from it. |
 | KL-BOOK-015 | Stale comment in `bookingsService.ts` says the index has no date-range filter. |
 | KL-BOOK-016 | No tests for screens, `bookingListCache.ts` or `apiRequest` prompt/retry paths. |
+| KL-BOOK-018 | Remembered blocked-period confirmations not cleared on sign-out (same account only; server re-authorizes). |
 | KL-BOOK-017 | Staff-submitted totals are not server-enforced under default config. |

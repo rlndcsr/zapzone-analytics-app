@@ -357,12 +357,21 @@ Backend authorization for every `/api/users*` route (verified): route group `aut
 - **Roles:** Quick Nav shows Payments to every role; no role checks found in the payments screens. Backend (verified from routes): list/show/store/destroy/refund/manual-refund/void/invoices are `staff`; `restore` and `force-delete` are `staff:company_admin|admin|location_manager`; `PaymentController` limits managers/attendants to their own location in listing (around line 417) and checks the payable's location on create (`denyForeignRecord`).
 - **Location scoping:** company admin → global active location.
 - **Main workflows:** action eligibility is computed client-side (`canRefund`: completed Authorize.Net charge; `canVoid`: completed/pending Authorize.Net within 2 days; `canManualRefund`: completed cash/in-store/card) — all require a linked payable. Refund/void bookkeeping rows are recognised by their notes. PDFs are fetched outside the JSON client and shared.
+  - **Gateway refund outcome (spec 002, 2026-11-28):** Refund sends one full-refund request (`refundPayment` → `executeRefund`, 60 s budget `REFUND_TIMEOUT_MS`; every other request keeps the 15 s default) and shows what actually happened, classified only from the server's answer (`classifyRefundOutcome`, `src/lib/payments/refundOutcome.ts`):
+    - **Refunded:** "Refund of $X processed successfully. Refund Payment #N".
+    - **Voided instead** (`was_void_fallback: true`; an unsettled charge, which any full Mobile refund can become): "…voided instead of refunded…". The cancelled booking or purchase is mentioned only when `payable_cancelled === true`.
+    - **Amounts:** only a valid server amount (`void_amount`/`refund_amount`) is ever shown, never the payment's own amount; otherwise the neutral "Payment refunded successfully." / "Payment voided instead of refunded[, and the associated booking was cancelled]."
+    - **Confirmed failure:** recognised pre-gateway shapes or a gateway refusal; shows "Refund failed: <server message>", and the sheet stays open.
+    - **Unknown:** no answer, 502/504, a generic 500, 400 "Unknown error", 400 `is_unsettled: true`, or anything unrecognised. Shows "The refund result could not be confirmed… Please verify the payment status before attempting another refund." and reloads the list; it is never reported as success or failure.
+    - **Advisory retry warning:** after an unknown outcome, that payment's next Refund confirmation adds a warning, keyed by account and payment, held in memory for the screen session, and cleared only by a later confirmed refund or void. It never blocks.
+    - **Duplicate confirmations and stale sessions:** a session-owned single-flight guard (`src/lib/singleFlight.ts`) stops duplicate confirmations. A late answer for a session that has ended shows nothing.
+    - **Unchanged:** Void, Manual refund and Delete (`runAction`) are unchanged.
 - **Data sources:** `src/services/paymentsService.ts` — GET `/api/payments`, GET `/api/payments/trashed`, PATCH `/api/payments/{id}/refund|manual-refund|void|restore`, DELETE `/api/payments/{id}`, DELETE `/api/payments/{id}/force-delete`, GET `/api/payments/{id}/invoice`, GET `/api/payments/invoices/export`, GET `/api/payments/package-invoices/export`, POST `/api/payments` (record a non-gateway payment).
-- **Validation & business rules:** BR-PAYMENT-006 … BR-PAYMENT-008.
+- **Validation & business rules:** BR-PAYMENT-006 … BR-PAYMENT-008, BR-PAYMENT-010.
 - **Web Admin counterpart:** `zappoint@5de9d9e:src/pages/admin/payments/Payments.tsx`, `ViewPayment.tsx` — **Partial / Not assessed** (eligibility functions are documented as web ports).
 - **Platform-specific behaviour:** PDFs/CSV written to `cacheDirectory` and shared via `expo-sharing`.
-- **Tests:** `src/lib/payments/payableRoute.test.ts`, `cardLabel.test.ts`, `paymentState.test.ts` (display/state helpers). `canRefund`/`canVoid`/`canManualRefund` live in a service and are untested.
-- **Known limitations:** KL-PAYMENT-003, KL-PAYMENT-005.
+- **Tests:** `src/lib/payments/payableRoute.test.ts`, `cardLabel.test.ts`, `paymentState.test.ts` (display/state helpers); `refundOutcome.test.ts`, `refundFlow.test.ts`, `src/lib/singleFlight.test.ts` (refund outcome, request, feedback order, retry warning, duplicate guard). `canRefund`/`canVoid`/`canManualRefund` live in a service and are untested.
+- **Known limitations:** KL-PAYMENT-003, KL-PAYMENT-005, KL-PAYMENT-007 to KL-PAYMENT-010.
 - **Source references:** `src/app/payments/*.tsx`; `src/services/paymentsService.ts` (`canRefund`, `canVoid`, `canManualRefund`, `invoiceUrl`, `packageInvoicesUrl`); `src/components/ui/{PaymentFiltersSheet,PaymentsTable,PaymentStatusBadge}.tsx`; `src/lib/paymentsStale.ts`.
 
 ---
@@ -405,6 +414,10 @@ Backend authorization for every `/api/users*` route (verified): route group `aut
 | KL-PAYMENT-004 | Backend public-key error log records part of the application key |
 | KL-PAYMENT-005 | Void eligibility uses a device-clock "2 days = settled" heuristic |
 | KL-PAYMENT-006 | Charge handler internals (idempotency, rollback, merchant resolution) not assessed |
+| KL-PAYMENT-007 | Refund requests not serialized server-side (suspected; exploitability not confirmed) |
+| KL-PAYMENT-008 | Refund handler can error after money moved, or when it cannot know (Mobile reports unknown) |
+| KL-PAYMENT-009 | Mobile manual refund omits the required `notes` (likely always 422) |
+| KL-PAYMENT-010 | Void / Manual refund / Delete lack the duplicate-confirmation guard |
 | KL-UPDATE-001 | iOS would be offered/forced to download an APK it cannot install if an active iOS record exists |
 | KL-UPDATE-002 | `evaluateUpdateStatus` (block/prompt verdict) has no unit test |
 | KL-UPDATE-003 | APK integrity checks are HTTPS + size + ZIP header; no checksum |

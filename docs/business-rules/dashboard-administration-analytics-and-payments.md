@@ -295,6 +295,7 @@
 - **Exceptions:** None found.
 - **Verification:** Source-verified (no test)
 - **Open questions:** Does the backend enforce the same eligibility?
+- **Note (spec 002, 2026-11-28):** the backend's refund handler checks `completed` + `authorize.net` and the refundable balance (`zapzone-backend@2bbd0fa` `PaymentController::refund`). When Authorize.Net rejects a **full, first** refund as unsettled (`E00027`), the server voids the charge instead and still answers 200 with `was_void_fallback: true`. That fallback **ignores `cancel`**: it cancels a booking or event purchase, and marks an attraction purchase `refunded`. Mobile always sends full refunds, so any Mobile refund can become a void. See BR-PAYMENT-010.
 
 ### BR-PAYMENT-007 — Restoring and purging payments is manager-level
 - **Rule:** Soft delete, refunds, voids and invoices are available to any staff role; restore and permanent delete require company_admin, admin or location_manager.
@@ -322,6 +323,21 @@
 - **Exceptions:** Mobile disconnects only the caller's own location (KL-PAYMENT-001).
 - **Verification:** Source-verified
 - **Open questions:** None.
+
+### BR-PAYMENT-010 — A refund's outcome is reported only as the server confirmed it
+- **Rule:** The gateway refund's result is classified only from the server's answer, or its absence, never from message text:
+  - **refunded** (`success: true`, no void marker);
+  - **voided instead** (`was_void_fallback: true`), with the booking or purchase named as cancelled only when `payable_cancelled === true`;
+  - **confirmed failure:** pre-gateway shapes (400 without `is_unsettled`; 403 `success:false`; 404 route binding; 422 `success:false` or `errors`; 503 `success:false`; 500 `DECRYPTION_FAILED`), or a gateway refusal with an error code;
+  - **unknown:** everything else, including no answer, 502/504, a generic 500 (it can follow an approved refund), 400 "Unknown error" (the gateway never answered), and 400 `is_unsettled: true`.
+
+  An unknown outcome is never shown as success or failure, and staff are told to verify the payment. Only a valid server amount is displayed, never the payment's own amount. One request per confirmed tap, with a 60 s budget and no automatic retry. After an unknown outcome, an in-memory warning keyed by account and payment is added to that payment's next confirmation.
+- **Workflow:** Payments list → More → Refund (Authorize.Net).
+- **Enforcement layer:** Mobile UI (presentation of a Backend-decided outcome). The refund and void themselves are Backend and Authorize.Net.
+- **Evidence:** `src/lib/payments/refundOutcome.ts` (`classifyRefundOutcome`, `refundOutcomeNotice`); `src/lib/payments/refundFlow.ts` (`executeRefund`, `runRefundFlow`, retry-warning helpers); `src/app/payments/payments.tsx` (`confirmRefund`); `zapzone-backend@2bbd0fa:app/Http/Controllers/Api/PaymentController.php` (`refund`); Web Admin `zappoint@701e09c` (`RefundModal.tsx`).
+- **Exceptions:** Approved divergences from the Web Admin: unknown outcomes, no amount fallback, and the advisory warning (specs/002).
+- **Verification:** Test-backed (`src/lib/payments/refundOutcome.test.ts`, `refundFlow.test.ts`). Device verification required.
+- **Open questions:** None. Backend concerns: KL-PAYMENT-007 and KL-PAYMENT-008.
 
 ## App update
 

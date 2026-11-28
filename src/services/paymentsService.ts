@@ -9,6 +9,8 @@ import {
 } from "../lib/payments/chargeOutcome";
 import { tokenizeCardWithAccept } from "../lib/payments/acceptTokenize";
 import { checkoutTokenFor } from "../lib/payments/checkoutTokens";
+import { executeRefund } from "../lib/payments/refundFlow";
+import type { RefundOutcome } from "../lib/payments/refundOutcome";
 
 /** Payment lifecycle status (backend `status` column). */
 export type PaymentStatus =
@@ -439,17 +441,14 @@ export async function fetchTrashedPayments(token: string): Promise<PaymentList> 
 
 /* ------------------------------------------------------------ row actions -- */
 
-/** PATCH /api/payments/{id}/refund — gateway refund via Authorize.Net. */
-export async function refundPayment(
-  token: string,
-  id: number,
-  amount?: number,
-): Promise<void> {
-  await apiRequest(`/api/payments/${id}/refund`, {
-    method: "PATCH",
-    token,
-    body: amount != null ? { amount } : {},
-  });
+/**
+ * PATCH /api/payments/{id}/refund — full gateway refund via Authorize.Net.
+ * Resolves what actually happened: refunded, voided instead (an unsettled
+ * charge), a confirmed failure, or unknown. One request, a 60s budget, and it
+ * never throws for an HTTP or transport failure — see lib/payments/refundFlow.
+ */
+export function refundPayment(token: string, id: number): Promise<RefundOutcome> {
+  return executeRefund(apiRequest, token, id);
 }
 
 /** PATCH /api/payments/{id}/manual-refund — record a cash / in-store refund. */

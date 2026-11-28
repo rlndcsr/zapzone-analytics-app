@@ -6,6 +6,8 @@ import {
 import { compareCheckInRows } from "../lib/checkin/checkInOrder";
 import { GUEST_NAME_FALLBACK } from "../lib/bookings/bookingSearch";
 import { newestFirst } from "../lib/bookings/bookingSync";
+import { executeRestore } from "../lib/bookings/restoreFlow";
+import type { RestoreOutcome } from "../lib/bookings/restoreOutcome";
 import { fetchAllPages, uniqueById } from "../lib/fetchAllPages";
 import { scheduleCoversDate, scheduleDayEntries } from "../lib/packages/scheduleDays";
 import { cardLabelFromPayments } from "../lib/payments/cardLabel";
@@ -2461,9 +2463,15 @@ export async function fetchTrashedBookings({
   );
 }
 
-/** POST /api/bookings/{id}/restore — restore a soft-deleted booking. */
-export async function restoreBooking(token: string, id: number): Promise<void> {
-  await apiRequest(`/api/bookings/${id}/restore`, { method: "POST", token });
+/**
+ * POST /api/bookings/{id}/restore — restore a soft-deleted booking. Resolves
+ * what happened: restored, restored with a clash warning, a confirmed
+ * rejection, or unknown. One request; the shared client's change-reason and
+ * blocked-period prompts still run inside it. Never throws for an HTTP or
+ * transport failure — see lib/bookings/restoreFlow.
+ */
+export function restoreBooking(token: string, id: number): Promise<RestoreOutcome> {
+  return executeRestore(apiRequest, token, id);
 }
 
 /** Result of a CSV bulk import (mirrors the web bulkImportCsv response). */
